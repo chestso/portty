@@ -72,7 +72,9 @@ static bool is_ambiguous_emoji(uint32_t cp)
 {
     // Characters that MIGHT be emoji with U+FE0F (text vs. emoji presentation)
     return (cp >= 0x2600 && cp <= 0x27BF) ||
-           (cp >= 0x231A && cp <= 0x231B) ||   // Clock faces
+           (cp >= 0x231A && cp <= 0x231B) ||   // Watch, Clock
+           (cp == 0x2328) ||                   // Keyboard
+           (cp >= 0x23E9 && cp <= 0x23FA) ||   // Media controls
            (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
            (cp >= 0x1F300 && cp <= 0x1F5FF) || // Miscellaneous Symbols and Pictographs
            (cp >= 0x1F680 && cp <= 0x1F6FF);   // Transport and Map Symbols
@@ -670,7 +672,17 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                 }
                 if (cp_count > 0) {
                     uint32_t first_cp = cps[0];
-                    if ((first_cp >= 0x1F000 && first_cp <= 0x1F9FF) && font_has_style(rend->font, FONT_STYLE_EMOJI)) {
+                    bool use_emoji = is_emoji_presentation(first_cp);
+                    // VS16 (U+FE0F) forces emoji presentation for any base character
+                    if (!use_emoji) {
+                        for (int i = 1; i < cp_count; i++) {
+                            if (cps[i] == 0xFE0F) {
+                                use_emoji = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (use_emoji && font_has_style(rend->font, FONT_STYLE_EMOJI)) {
                         style = FONT_STYLE_EMOJI;
                         font_type = "emoji";
                     }
@@ -704,7 +716,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             if (tex) {
                                 SDL_FRect dst;
                                 if (style == FONT_STYLE_EMOJI) {
-                                    // Scale and center emoji within allocated cell space
+                                    // Scale emoji to fit cell height, left-aligned
                                     float avail_w = (float)(columns_to_consume * rend->cell_width);
                                     float avail_h = (float)rend->cell_height;
                                     float glyph_w = (float)gb->width;
@@ -713,7 +725,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                                     float scaled_w = glyph_w * scale;
                                     float scaled_h = glyph_h * scale;
                                     dst = (SDL_FRect){
-                                        (float)cell_x + (avail_w - scaled_w) * 0.5f,
+                                        (float)cell_x,
                                         (float)cell_y + (avail_h - scaled_h) * 0.5f,
                                         scaled_w, scaled_h
                                     };
@@ -761,7 +773,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                         int cell_y = row * rend->cell_height;
                         SDL_FRect dest_rect;
                         if (style == FONT_STYLE_EMOJI) {
-                            // Scale and center emoji within allocated cell space
+                            // Scale emoji to fit cell height, left-aligned
                             float avail_w = (float)(columns_to_consume * rend->cell_width);
                             float avail_h = (float)rend->cell_height;
                             float glyph_w = (float)glyph_bitmap->width;
@@ -770,7 +782,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             float scaled_w = glyph_w * scale;
                             float scaled_h = glyph_h * scale;
                             dest_rect = (SDL_FRect){
-                                (float)cell_x + (avail_w - scaled_w) * 0.5f,
+                                (float)cell_x,
                                 (float)cell_y + (avail_h - scaled_h) * 0.5f,
                                 scaled_w, scaled_h
                             };
