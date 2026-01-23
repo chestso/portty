@@ -1,10 +1,10 @@
 /* Custom COLR v1 paint tree traversal code.
  *
- * This file is compiled but currently DISABLED at the call site in font_ft.c.
- * FreeType's native FT_LOAD_COLOR + FT_Render_Glyph path handles COLR v1
- * rendering with correct composite/blend modes.
- *
- * Retained for reference and potential future use.
+ * FreeType exposes COLR v1 paint data via FT_Get_Color_Glyph_Paint and
+ * related APIs, but does not render COLR v1 paint graphs automatically
+ * through FT_LOAD_COLOR (which only handles COLR v0 layers and bitmap
+ * color fonts like sbix/CBDT). This file implements the recursive paint
+ * tree evaluation with affine transforms and Porter-Duff compositing.
  */
 
 #include <ft2build.h>

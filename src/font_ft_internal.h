@@ -11,7 +11,7 @@
 
 #include "font.h"
 
-// Internal structure for FreeType/Cairo font data
+// Internal structure for FreeType font data
 typedef struct
 {
     FT_Face ft_face;          // FreeType face

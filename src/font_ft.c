@@ -535,13 +535,13 @@ void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uin
     *out_a = (uint8_t)round(pa * a_scale);
 }
 
-// Initialize FreeType/Cairo font
+// Initialize FreeType font
 static void *ft_init_font(Font *font, const char *font_path,
                           float font_size, FontStyle style, const FontOptions *options)
 {
     (void)font; // Unused
 
-    vlog("Initializing FreeType/Cairo font from %s, size %.1f, style %d\n", font_path, font_size, style);
+    vlog("Initializing FreeType font from %s, size %.1f, style %d\n", font_path, font_size, style);
 
     // Load font file
     unsigned char *font_data = NULL;
@@ -647,7 +647,7 @@ static void *ft_init_font(Font *font, const char *font_path,
     return ft_data;
 }
 
-// Destroy FreeType/Cairo font
+// Destroy FreeType font
 static void ft_destroy_font(Font *font, void *font_data)
 {
     (void)font; // Unused
@@ -721,7 +721,7 @@ m_done:;
     metrics->glyph_width = metrics->cell_width;   // Approximation for now
     metrics->glyph_height = metrics->cell_height; // Approximation for now
 
-    vlog("FreeType/Cairo metrics (26.6 fixed-point): asc=%d, des=%d, line_gap=%d, glyph=%dx%d, cell=%dx%d\n",
+    vlog("FreeType metrics (26.6 fixed-point): asc=%d, des=%d, line_gap=%d, glyph=%dx%d, cell=%dx%d\n",
          metrics->ascent, metrics->descent, metrics->line_gap,
          metrics->glyph_width, metrics->glyph_height,
          metrics->cell_width, metrics->cell_height);
