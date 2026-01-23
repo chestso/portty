@@ -31,6 +31,7 @@ PKG_CHECK_MODULES([SDL3], [sdl3])
 PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
+PKG_CHECK_MODULES([LIBPNG], [libpng])
 
 # Check for header files
 AC_CHECK_HEADERS([stdio.h stdlib.h string.h])

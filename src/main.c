@@ -1,10 +1,14 @@
 #include "common.h"
+#include "font.h"
+#include "font_resolver.h"
+#include "png_writer.h"
 #include "renderer.h"
 #include "terminal.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,6 +24,7 @@ int verbose = 0;
 // Function prototypes
 static void print_usage(const char *progname);
 static void process_input_from_source(Terminal *term, const char *source);
+static int png_render_text(const char *text, const char *output_path);
 
 int main(int argc, char *argv[])
 {
@@ -34,7 +39,8 @@ int main(int argc, char *argv[])
 
     // Parse command line arguments
     int debug_grid_enabled = 0;
-    while ((opt = getopt(argc, argv, "hved")) != -1) {
+    char *png_text = NULL;
+    while ((opt = getopt(argc, argv, "hvedP:")) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -50,6 +56,9 @@ int main(int argc, char *argv[])
             debug_grid_enabled = 1;
             fprintf(stderr, "STATUS: debug grid enabled via CLI flag\n");
             break;
+        case 'P':
+            png_text = optarg;
+            break;
         case '?':
             fprintf(stderr, "ERROR: Unknown option: -%c\n", optopt);
             print_usage(argv[0]);
@@ -60,6 +69,16 @@ int main(int argc, char *argv[])
     // Check for input source argument
     if (optind < argc) {
         input_source = argv[optind];
+    }
+
+    // PNG render mode: skip SDL entirely, render text to PNG and exit
+    if (png_text) {
+        if (!input_source) {
+            fprintf(stderr, "ERROR: -P requires output PNG path as positional argument\n");
+            fprintf(stderr, "Usage: %s -P \"text\" output.png\n", argv[0]);
+            return 1;
+        }
+        return png_render_text(png_text, input_source);
     }
 
     // Set app metadata before SDL initialization as recommended by SDL3
@@ -348,6 +367,7 @@ static void print_usage(const char *progname)
     printf("  -v          Verbose output (debug information)\n");
     printf("  -e          Exit immediately (for testing)\n");
     printf("  -d          Enable debug grid (for testing)\n");
+    printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("\n");
     printf("Input:\n");
     printf("  INPUT_FILE  File containing terminal input to process\n");
@@ -398,4 +418,202 @@ static void process_input_from_source(Terminal *term, const char *source)
     if (terminal_get_dimensions(term, &rows, &cols) == 0) {
         fprintf(stderr, "STATUS: terminal_dimensions=%dx%d\n", cols, rows);
     }
+}
+
+/* Convert UTF-8 string to an array of Unicode codepoints.
+ * Returns number of codepoints written, or -1 on error. */
+static int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out)
+{
+    int count = 0;
+    const uint8_t *s = (const uint8_t *)utf8;
+
+    while (*s && count < max_out) {
+        uint32_t cp;
+        int len;
+
+        if (s[0] < 0x80) {
+            cp = s[0];
+            len = 1;
+        } else if ((s[0] & 0xE0) == 0xC0) {
+            cp = s[0] & 0x1F;
+            len = 2;
+        } else if ((s[0] & 0xF0) == 0xE0) {
+            cp = s[0] & 0x0F;
+            len = 3;
+        } else if ((s[0] & 0xF8) == 0xF0) {
+            cp = s[0] & 0x07;
+            len = 4;
+        } else {
+            return -1; /* invalid UTF-8 */
+        }
+
+        for (int i = 1; i < len; i++) {
+            if ((s[i] & 0xC0) != 0x80)
+                return -1;
+            cp = (cp << 6) | (s[i] & 0x3F);
+        }
+
+        out[count++] = cp;
+        s += len;
+    }
+    return count;
+}
+
+static int png_render_text(const char *text, const char *output_path)
+{
+    const float font_size = 128.0f;
+
+    /* Convert UTF-8 text to codepoints */
+    uint32_t codepoints[256];
+    int cp_count = utf8_to_codepoints(text, codepoints, 256);
+    if (cp_count <= 0) {
+        fprintf(stderr, "ERROR: Failed to decode UTF-8 text\n");
+        return 1;
+    }
+
+    vlog("PNG mode: %d codepoints, output=%s\n", cp_count, output_path);
+
+    /* Initialize font backend */
+    if (!font_init(&font)) {
+        fprintf(stderr, "ERROR: Failed to initialize font backend\n");
+        return 1;
+    }
+
+    /* Initialize font resolver (fontconfig) */
+    if (font_resolver_init() != 0) {
+        fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
+        font_destroy(&font);
+        return 1;
+    }
+
+    /* Setup font options (72 DPI matches hb-view default) */
+    FontOptions options = { 0 };
+    options.antialias = true;
+    options.hinting = 1;
+    options.hint_style = 1;
+    options.dpi_x = 72;
+    options.dpi_y = 72;
+
+    /* Load emoji font */
+    FontResolutionResult result;
+    if (font_resolver_find_font(FONT_TYPE_EMOJI, &result) != 0) {
+        fprintf(stderr, "ERROR: Failed to find emoji font\n");
+        font_resolver_cleanup();
+        font_destroy(&font);
+        return 1;
+    }
+
+    if (!font_load_font(&font, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
+        fprintf(stderr, "ERROR: Failed to load emoji font from %s\n", result.font_path);
+        font_resolver_free_result(&result);
+        font_resolver_cleanup();
+        font_destroy(&font);
+        return 1;
+    }
+
+    vlog("Loaded emoji font: %s\n", result.font_path);
+    font_resolver_free_result(&result);
+    font_resolver_cleanup();
+
+    /* Shape and render */
+    ShapedGlyphs *shaped = font_render_shaped_text(&font, FONT_STYLE_EMOJI,
+                                                   codepoints, cp_count,
+                                                   255, 255, 255);
+    if (!shaped || shaped->num_glyphs == 0) {
+        fprintf(stderr, "ERROR: font_render_shaped_text returned no glyphs\n");
+        font_destroy(&font);
+        return 1;
+    }
+
+    vlog("Shaped %d glyphs, total_advance=%d\n", shaped->num_glyphs, shaped->total_advance);
+
+    /* Use font metrics to determine image size (matches hb-view behavior) */
+    const FontMetrics *metrics = font_get_metrics(&font, FONT_STYLE_EMOJI);
+    if (!metrics) {
+        fprintf(stderr, "ERROR: Failed to get font metrics\n");
+        font_destroy(&font);
+        return 1;
+    }
+
+    int baseline = metrics->ascent;
+    int img_w = shaped->total_advance;
+    int img_h = metrics->ascent + metrics->descent;
+
+    if (img_w <= 0 || img_h <= 0) {
+        fprintf(stderr, "ERROR: Computed image has zero size (%dx%d)\n", img_w, img_h);
+        font_destroy(&font);
+        return 1;
+    }
+
+    vlog("Output image: %dx%d (advance=%d, ascent=%d, descent=%d)\n",
+         img_w, img_h, shaped->total_advance, metrics->ascent, metrics->descent);
+
+    /* Allocate output buffer (transparent black) */
+    uint8_t *pixels = calloc(img_w * img_h * 4, 1);
+    if (!pixels) {
+        fprintf(stderr, "ERROR: Failed to allocate %dx%d pixel buffer\n", img_w, img_h);
+        font_destroy(&font);
+        return 1;
+    }
+
+    /* Composite each glyph bitmap into the output */
+    for (int i = 0; i < shaped->num_glyphs; i++) {
+        GlyphBitmap *gb = shaped->bitmaps[i];
+        if (!gb || !gb->pixels)
+            continue;
+
+        int dst_x = shaped->x_positions[i] + gb->x_offset;
+        int dst_y = baseline - gb->y_offset;
+
+        for (int row = 0; row < gb->height; row++) {
+            int dy = dst_y + row;
+            if (dy < 0 || dy >= img_h)
+                continue;
+            for (int col = 0; col < gb->width; col++) {
+                int dx = dst_x + col;
+                if (dx < 0 || dx >= img_w)
+                    continue;
+
+                int src_idx = (row * gb->width + col) * 4;
+                int dst_idx = (dy * img_w + dx) * 4;
+
+                uint8_t sr = gb->pixels[src_idx + 0];
+                uint8_t sg = gb->pixels[src_idx + 1];
+                uint8_t sb = gb->pixels[src_idx + 2];
+                uint8_t sa = gb->pixels[src_idx + 3];
+
+                if (sa == 0)
+                    continue;
+
+                /* Alpha-over compositing (source over destination) */
+                uint8_t da = pixels[dst_idx + 3];
+                if (da == 0 || sa == 255) {
+                    pixels[dst_idx + 0] = sr;
+                    pixels[dst_idx + 1] = sg;
+                    pixels[dst_idx + 2] = sb;
+                    pixels[dst_idx + 3] = sa;
+                } else {
+                    uint16_t out_a = sa + da * (255 - sa) / 255;
+                    if (out_a > 0) {
+                        pixels[dst_idx + 0] = (uint8_t)((sr * sa + pixels[dst_idx + 0] * da * (255 - sa) / 255) / out_a);
+                        pixels[dst_idx + 1] = (uint8_t)((sg * sa + pixels[dst_idx + 1] * da * (255 - sa) / 255) / out_a);
+                        pixels[dst_idx + 2] = (uint8_t)((sb * sa + pixels[dst_idx + 2] * da * (255 - sa) / 255) / out_a);
+                        pixels[dst_idx + 3] = (uint8_t)out_a;
+                    }
+                }
+            }
+        }
+    }
+
+    /* Write PNG */
+    int rc = png_write_rgba(output_path, pixels, img_w, img_h);
+    if (rc == 0) {
+        fprintf(stderr, "STATUS: png_output=%s (%dx%d)\n", output_path, img_w, img_h);
+    } else {
+        fprintf(stderr, "ERROR: Failed to write PNG to %s\n", output_path);
+    }
+
+    free(pixels);
+    font_destroy(&font);
+    return rc == 0 ? 0 : 1;
 }

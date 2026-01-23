@@ -238,6 +238,40 @@ main() {
                 format_sources
                 exit 0
                 ;;
+            --ref-png)
+                # Usage: --ref-png "emoji" output.png
+                if [[ $# -lt 3 ]]; then
+                    log_error "--ref-png requires TEXT and OUTPUT_PATH arguments"
+                    echo "Usage: $0 --ref-png \"emoji_text\" output.png"
+                    exit 1
+                fi
+                REF_TEXT="$2"
+                REF_OUTPUT="$3"
+                REF_FONT="/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf"
+                if [ ! -f "$REF_FONT" ]; then
+                    log_error "Reference font not found: $REF_FONT"
+                    exit 1
+                fi
+                if ! command -v hb-view &> /dev/null; then
+                    log_error "hb-view not found. Install harfbuzz-utils."
+                    exit 1
+                fi
+                log_info "Generating reference PNG for \"$REF_TEXT\" -> $REF_OUTPUT"
+                hb-view --font-file="$REF_FONT" \
+                    --font-size=128 \
+                    --output-format=png \
+                    --background=00000000 \
+                    --margin=0 \
+                    --output-file="$REF_OUTPUT" \
+                    "$REF_TEXT"
+                if [ $? -eq 0 ]; then
+                    log_info "Reference PNG written to $REF_OUTPUT"
+                else
+                    log_error "hb-view failed"
+                    exit 1
+                fi
+                exit 0
+                ;;
             --help)
                 echo "Usage: $0 [options]"
                 echo "Options:"
@@ -245,6 +279,7 @@ main() {
                 echo "  --bear            Generate compile_commands.json using bear"
                 echo "  --no-debug        Disable debug build"
                 echo "  --format          Format source files with clang-format, shfmt, and prettier"
+                echo "  --ref-png T OUT   Generate reference PNG of text T using hb-view"
                 echo "  --prefix=PATH     Set installation prefix (default: $HOME/.local)"
                 echo "  --help            Show this help message"
                 exit 0
