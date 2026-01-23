@@ -6,6 +6,7 @@
 #include <limits.h>
 #include <stdint.h>
 
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -690,9 +691,6 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             if (!gb)
                                 continue;
 
-                            int x = cell_x + shaped->x_positions[gi] + gb->x_offset;
-                            int y = cell_y + rend->font_ascent - gb->y_offset;
-
                             // Try cache first
                             void *font_data = rend->font ? rend->font->font_data[style] : NULL;
                             uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
@@ -704,7 +702,27 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             }
 
                             if (tex) {
-                                SDL_FRect dst = { (float)x, (float)y, (float)gb->width, (float)gb->height };
+                                SDL_FRect dst;
+                                if (style == FONT_STYLE_EMOJI) {
+                                    // Scale and center emoji within allocated cell space
+                                    float avail_w = (float)(columns_to_consume * rend->cell_width);
+                                    float avail_h = (float)rend->cell_height;
+                                    float glyph_w = (float)gb->width;
+                                    float glyph_h = (float)gb->height;
+                                    float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
+                                    float scaled_w = glyph_w * scale;
+                                    float scaled_h = glyph_h * scale;
+                                    dst = (SDL_FRect){
+                                        (float)cell_x + (avail_w - scaled_w) * 0.5f,
+                                        (float)cell_y + (avail_h - scaled_h) * 0.5f,
+                                        scaled_w, scaled_h
+                                    };
+                                    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+                                } else {
+                                    int x = cell_x + shaped->x_positions[gi] + gb->x_offset;
+                                    int y = cell_y + rend->font_ascent - gb->y_offset;
+                                    dst = (SDL_FRect){ (float)x, (float)y, (float)gb->width, (float)gb->height };
+                                }
                                 SDL_RenderTexture(rend->renderer, tex, NULL, &dst);
                             }
 
@@ -739,19 +757,30 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             renderer_cache_texture(rend, font_data_single, glyph_bitmap->glyph_id, color_key_single, texture, glyph_bitmap);
                     }
                     if (texture) {
-                        const FontMetrics *metrics = font_get_metrics(rend->font, style);
-                        if (!metrics) {
-                            metrics = font_get_metrics(rend->font, FONT_STYLE_NORMAL);
-                        }
-
-                        if (metrics) {
-                            int cell_x = col * rend->cell_width;
-                            int cell_y = row * rend->cell_height;
+                        int cell_x = col * rend->cell_width;
+                        int cell_y = row * rend->cell_height;
+                        SDL_FRect dest_rect;
+                        if (style == FONT_STYLE_EMOJI) {
+                            // Scale and center emoji within allocated cell space
+                            float avail_w = (float)(columns_to_consume * rend->cell_width);
+                            float avail_h = (float)rend->cell_height;
+                            float glyph_w = (float)glyph_bitmap->width;
+                            float glyph_h = (float)glyph_bitmap->height;
+                            float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
+                            float scaled_w = glyph_w * scale;
+                            float scaled_h = glyph_h * scale;
+                            dest_rect = (SDL_FRect){
+                                (float)cell_x + (avail_w - scaled_w) * 0.5f,
+                                (float)cell_y + (avail_h - scaled_h) * 0.5f,
+                                scaled_w, scaled_h
+                            };
+                            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+                        } else {
                             float text_x = (float)cell_x + glyph_bitmap->x_offset;
                             float text_y = (float)cell_y + rend->font_ascent - glyph_bitmap->y_offset;
-                            SDL_FRect dest_rect = { text_x, text_y, (float)glyph_bitmap->width, (float)glyph_bitmap->height };
-                            SDL_RenderTexture(rend->renderer, texture, NULL, &dest_rect);
+                            dest_rect = (SDL_FRect){ text_x, text_y, (float)glyph_bitmap->width, (float)glyph_bitmap->height };
                         }
+                        SDL_RenderTexture(rend->renderer, texture, NULL, &dest_rect);
                     }
                     rend->font->free_glyph_bitmap(rend->font, glyph_bitmap);
                 }

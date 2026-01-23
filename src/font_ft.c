@@ -1185,6 +1185,210 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
             }
             break;
         }
+        case FT_COLR_COMPOSITE_CLEAR:
+        {
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                dst[0] = dst[1] = dst[2] = dst[3] = 0;
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_SRC:
+        {
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+                dst[3] = src[3];
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_DEST:
+        {
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                dst[0] = back[0];
+                dst[1] = back[1];
+                dst[2] = back[2];
+                dst[3] = back[3];
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_DEST_OVER:
+        {
+            // DEST_OVER: Fs = (1-backA), Fd = 1
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = (1.0f - ba) * sa + ba;
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
+                float sr = src[0] / 255.0f, sg = src[1] / 255.0f, sb = src[2] / 255.0f;
+                float br = back[0] / 255.0f, bg = back[1] / 255.0f, bb = back[2] / 255.0f;
+                float rr = (sr * sa * (1.0f - ba) + br * ba) / outa;
+                float rg = (sg * sa * (1.0f - ba) + bg * ba) / outa;
+                float rb = (sb * sa * (1.0f - ba) + bb * ba) / outa;
+                dst[0] = (uint8_t)round(rr * 255.0f);
+                dst[1] = (uint8_t)round(rg * 255.0f);
+                dst[2] = (uint8_t)round(rb * 255.0f);
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_SRC_IN:
+        {
+            // SRC_IN: outA = srcA * backA; outRGB = srcRGB
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = sa * ba;
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_DEST_IN:
+        {
+            // DEST_IN: outA = backA * srcA; outRGB = backRGB
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = ba * sa;
+                dst[0] = back[0];
+                dst[1] = back[1];
+                dst[2] = back[2];
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_SRC_OUT:
+        {
+            // SRC_OUT: outA = srcA * (1-backA); outRGB = srcRGB
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = sa * (1.0f - ba);
+                dst[0] = src[0];
+                dst[1] = src[1];
+                dst[2] = src[2];
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_DEST_OUT:
+        {
+            // DEST_OUT: outA = backA * (1-srcA); outRGB = backRGB
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = ba * (1.0f - sa);
+                dst[0] = back[0];
+                dst[1] = back[1];
+                dst[2] = back[2];
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_SRC_ATOP:
+        {
+            // SRC_ATOP: Fs = backA, Fd = (1-srcA); outA = backA
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = ba;
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
+                float sr = src[0] / 255.0f, sg = src[1] / 255.0f, sb = src[2] / 255.0f;
+                float br = back[0] / 255.0f, bg = back[1] / 255.0f, bb = back[2] / 255.0f;
+                float rr = (sr * sa * ba + br * ba * (1.0f - sa)) / outa;
+                float rg = (sg * sa * ba + bg * ba * (1.0f - sa)) / outa;
+                float rb = (sb * sa * ba + bb * ba * (1.0f - sa)) / outa;
+                dst[0] = (uint8_t)round(rr * 255.0f);
+                dst[1] = (uint8_t)round(rg * 255.0f);
+                dst[2] = (uint8_t)round(rb * 255.0f);
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_DEST_ATOP:
+        {
+            // DEST_ATOP: Fs = (1-backA), Fd = srcA; outA = srcA
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = sa;
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
+                float sr = src[0] / 255.0f, sg = src[1] / 255.0f, sb = src[2] / 255.0f;
+                float br = back[0] / 255.0f, bg = back[1] / 255.0f, bb = back[2] / 255.0f;
+                float rr = (sr * sa * (1.0f - ba) + br * ba * sa) / outa;
+                float rg = (sg * sa * (1.0f - ba) + bg * ba * sa) / outa;
+                float rb = (sb * sa * (1.0f - ba) + bb * ba * sa) / outa;
+                dst[0] = (uint8_t)round(rr * 255.0f);
+                dst[1] = (uint8_t)round(rg * 255.0f);
+                dst[2] = (uint8_t)round(rb * 255.0f);
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_XOR:
+        {
+            // XOR: Fs = (1-backA), Fd = (1-srcA)
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *src = &tmp_src[i * 4];
+                uint8_t *back = &tmp_back[i * 4];
+                float sa = src[3] / 255.0f;
+                float ba = back[3] / 255.0f;
+                float outa = sa * (1.0f - ba) + ba * (1.0f - sa);
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
+                float sr = src[0] / 255.0f, sg = src[1] / 255.0f, sb = src[2] / 255.0f;
+                float br = back[0] / 255.0f, bg = back[1] / 255.0f, bb = back[2] / 255.0f;
+                float rr = (sr * sa * (1.0f - ba) + br * ba * (1.0f - sa)) / outa;
+                float rg = (sg * sa * (1.0f - ba) + bg * ba * (1.0f - sa)) / outa;
+                float rb = (sb * sa * (1.0f - ba) + bb * ba * (1.0f - sa)) / outa;
+                dst[0] = (uint8_t)round(rr * 255.0f);
+                dst[1] = (uint8_t)round(rg * 255.0f);
+                dst[2] = (uint8_t)round(rb * 255.0f);
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
         default:
         {
             // Fallback for unimplemented composite modes: use SRC_OVER
@@ -1316,20 +1520,27 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
 
         // Apply accumulated transform (relative to root scale) via FT_Set_Transform
         // so that the glyph outline is rendered at the correct transformed position.
+        // Only apply when there's a non-trivial transform (translation or non-identity matrix).
         double div = matrix_maps_font_units ? ft_data->scale : 1.0;
-        FT_Matrix ft_matrix;
-        ft_matrix.xx = (FT_Fixed)((matrix->xx / div) * 0x10000);
-        ft_matrix.xy = (FT_Fixed)((matrix->xy / div) * 0x10000);
-        ft_matrix.yx = (FT_Fixed)((matrix->yx / div) * 0x10000);
-        ft_matrix.yy = (FT_Fixed)((matrix->yy / div) * 0x10000);
-        FT_Vector ft_delta;
-        ft_delta.x = (FT_Pos)round(matrix->dx * 64.0);
-        ft_delta.y = (FT_Pos)round(matrix->dy * 64.0);
-        FT_Set_Transform(face, &ft_matrix, &ft_delta);
+        bool need_transform = (fabs(matrix->dx) > 1e-6 || fabs(matrix->dy) > 1e-6 ||
+                               fabs(matrix->xx / div - 1.0) > 1e-6 || fabs(matrix->xy / div) > 1e-6 ||
+                               fabs(matrix->yx / div) > 1e-6 || fabs(matrix->yy / div - 1.0) > 1e-6);
+        if (need_transform) {
+            FT_Matrix ft_matrix;
+            ft_matrix.xx = (FT_Fixed)((matrix->xx / div) * 0x10000);
+            ft_matrix.xy = (FT_Fixed)((matrix->xy / div) * 0x10000);
+            ft_matrix.yx = (FT_Fixed)((matrix->yx / div) * 0x10000);
+            ft_matrix.yy = (FT_Fixed)((matrix->yy / div) * 0x10000);
+            FT_Vector ft_delta;
+            ft_delta.x = (FT_Pos)round(matrix->dx * 64.0);
+            ft_delta.y = (FT_Pos)round(matrix->dy * 64.0);
+            FT_Set_Transform(face, &ft_matrix, &ft_delta);
+        }
 
         int mw = 0, mh = 0, left = 0, top = 0;
         unsigned char *mask = rasterize_glyph_mask(ft_data, (FT_UInt)pg->glyphID, &mw, &mh, &left, &top);
-        FT_Set_Transform(face, NULL, NULL);
+        if (need_transform)
+            FT_Set_Transform(face, NULL, NULL);
         if (!mask)
             return false;
 
@@ -1570,9 +1781,12 @@ static void *ft_init_font(Font *font, const char *font_path,
         return NULL;
     }
 
-    // Calculate scale for pixel height
-    ft_data->scale = (float)font_size / (float)ft_data->ft_face->units_per_EM;
-    vlog("Font scale factor: %f for size %.1f\n", ft_data->scale, font_size);
+    // Calculate scale: pixels-per-em / units-per-em
+    // FT_Set_Char_Size with DPI means actual ppem = font_size * dpi / 72
+    float ppem = font_size * ft_data->dpi_x / 72.0f;
+    ft_data->scale = ppem / (float)ft_data->ft_face->units_per_EM;
+    vlog("Font scale factor: %f (ppem=%.1f, upem=%d, dpi=%d)\n",
+         ft_data->scale, ppem, ft_data->ft_face->units_per_EM, ft_data->dpi_x);
 
     // Initialize HarfBuzz font from FreeType face
     ft_data->hb_font = hb_ft_font_create_referenced(ft_data->ft_face);
