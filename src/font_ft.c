@@ -1084,34 +1084,45 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
                 uint8_t *dst = &buf[i * 4];
                 uint8_t *s = &tmp_src[i * 4];
                 uint8_t *b = &tmp_back[i * 4];
+                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
+                float outa = sa + ba * (1.0f - sa);
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
                 float sr = s[0] / 255.0f, sg = s[1] / 255.0f, sb = s[2] / 255.0f;
                 float br = b[0] / 255.0f, bg = b[1] / 255.0f, bb = b[2] / 255.0f;
-                float rr = sr * br;
-                float rg = sg * bg;
-                float rb = sb * bb;
-                float a = s[3] / 255.0f + b[3] / 255.0f * (1.0f - s[3] / 255.0f);
+                float rr = (sa * (1.0f - ba) * sr + sa * ba * (sr * br) + (1.0f - sa) * ba * br) / outa;
+                float rg = (sa * (1.0f - ba) * sg + sa * ba * (sg * bg) + (1.0f - sa) * ba * bg) / outa;
+                float rb = (sa * (1.0f - ba) * sb + sa * ba * (sb * bb) + (1.0f - sa) * ba * bb) / outa;
                 dst[0] = (uint8_t)round(rr * 255.0f);
                 dst[1] = (uint8_t)round(rg * 255.0f);
                 dst[2] = (uint8_t)round(rb * 255.0f);
-                dst[3] = (uint8_t)round(a * 255.0f);
+                dst[3] = (uint8_t)round(outa * 255.0f);
             }
             break;
         }
         case FT_COLR_COMPOSITE_SCREEN:
         {
-            // Screen: 1 - (1-src) * (1-back)
             for (int i = 0; i < w * h; i++) {
                 uint8_t *dst = &buf[i * 4];
                 uint8_t *s = &tmp_src[i * 4];
                 uint8_t *b = &tmp_back[i * 4];
+                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
+                float outa = sa + ba * (1.0f - sa);
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
                 float sr = s[0] / 255.0f, sg = s[1] / 255.0f, sb = s[2] / 255.0f;
                 float br = b[0] / 255.0f, bg = b[1] / 255.0f, bb = b[2] / 255.0f;
-                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
-                float rr = 1.0f - (1.0f - sr) * (1.0f - br);
-                float rg = 1.0f - (1.0f - sg) * (1.0f - bg);
-                float rb = 1.0f - (1.0f - sb) * (1.0f - bb);
-                float outa = sa + ba * (1.0f - sa);
-                outa = outa <= 0.0f ? 0.0f : outa;
+                // Screen: B(Cs,Cb) = Cs + Cb - Cs*Cb
+                float Br = sr + br - sr * br;
+                float Bg = sg + bg - sg * bg;
+                float Bb = sb + bb - sb * bb;
+                float rr = (sa * (1.0f - ba) * sr + sa * ba * Br + (1.0f - sa) * ba * br) / outa;
+                float rg = (sa * (1.0f - ba) * sg + sa * ba * Bg + (1.0f - sa) * ba * bg) / outa;
+                float rb = (sa * (1.0f - ba) * sb + sa * ba * Bb + (1.0f - sa) * ba * bb) / outa;
                 dst[0] = (uint8_t)round(rr * 255.0f);
                 dst[1] = (uint8_t)round(rg * 255.0f);
                 dst[2] = (uint8_t)round(rb * 255.0f);
@@ -1121,19 +1132,25 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
         }
         case FT_COLR_COMPOSITE_OVERLAY:
         {
-            // Overlay: darken if back < 0.5, else lighten
             for (int i = 0; i < w * h; i++) {
                 uint8_t *dst = &buf[i * 4];
                 uint8_t *s = &tmp_src[i * 4];
                 uint8_t *b = &tmp_back[i * 4];
+                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
+                float outa = sa + ba * (1.0f - sa);
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
                 float sr = s[0] / 255.0f, sg = s[1] / 255.0f, sb = s[2] / 255.0f;
                 float br = b[0] / 255.0f, bg = b[1] / 255.0f, bb = b[2] / 255.0f;
-                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
-                float rr = br < 0.5f ? 2.0f * sr * br : 1.0f - 2.0f * (1.0f - sr) * (1.0f - br);
-                float rg = bg < 0.5f ? 2.0f * sg * bg : 1.0f - 2.0f * (1.0f - sg) * (1.0f - bg);
-                float rb = bb < 0.5f ? 2.0f * sb * bb : 1.0f - 2.0f * (1.0f - sb) * (1.0f - bb);
-                float outa = sa + ba * (1.0f - sa);
-                outa = outa <= 0.0f ? 0.0f : outa;
+                // Overlay: B(Cs,Cb) = HardLight(Cb,Cs)
+                float Br = br < 0.5f ? 2.0f * sr * br : 1.0f - 2.0f * (1.0f - sr) * (1.0f - br);
+                float Bg = bg < 0.5f ? 2.0f * sg * bg : 1.0f - 2.0f * (1.0f - sg) * (1.0f - bg);
+                float Bb = bb < 0.5f ? 2.0f * sb * bb : 1.0f - 2.0f * (1.0f - sb) * (1.0f - bb);
+                float rr = (sa * (1.0f - ba) * sr + sa * ba * Br + (1.0f - sa) * ba * br) / outa;
+                float rg = (sa * (1.0f - ba) * sg + sa * ba * Bg + (1.0f - sa) * ba * bg) / outa;
+                float rb = (sa * (1.0f - ba) * sb + sa * ba * Bb + (1.0f - sa) * ba * bb) / outa;
                 dst[0] = (uint8_t)round(rr * 255.0f);
                 dst[1] = (uint8_t)round(rg * 255.0f);
                 dst[2] = (uint8_t)round(rb * 255.0f);
@@ -1143,19 +1160,24 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
         }
         case FT_COLR_COMPOSITE_DARKEN:
         {
-            // Darken: min(src, back)
             for (int i = 0; i < w * h; i++) {
                 uint8_t *dst = &buf[i * 4];
                 uint8_t *s = &tmp_src[i * 4];
                 uint8_t *b = &tmp_back[i * 4];
+                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
+                float outa = sa + ba * (1.0f - sa);
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
                 float sr = s[0] / 255.0f, sg = s[1] / 255.0f, sb = s[2] / 255.0f;
                 float br = b[0] / 255.0f, bg = b[1] / 255.0f, bb = b[2] / 255.0f;
-                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
-                float rr = sr < br ? sr : br;
-                float rg = sg < bg ? sg : bg;
-                float rb = sb < bb ? sb : bb;
-                float outa = sa + ba * (1.0f - sa);
-                outa = outa <= 0.0f ? 0.0f : outa;
+                float Br = sr < br ? sr : br;
+                float Bg = sg < bg ? sg : bg;
+                float Bb = sb < bb ? sb : bb;
+                float rr = (sa * (1.0f - ba) * sr + sa * ba * Br + (1.0f - sa) * ba * br) / outa;
+                float rg = (sa * (1.0f - ba) * sg + sa * ba * Bg + (1.0f - sa) * ba * bg) / outa;
+                float rb = (sa * (1.0f - ba) * sb + sa * ba * Bb + (1.0f - sa) * ba * bb) / outa;
                 dst[0] = (uint8_t)round(rr * 255.0f);
                 dst[1] = (uint8_t)round(rg * 255.0f);
                 dst[2] = (uint8_t)round(rb * 255.0f);
@@ -1165,19 +1187,62 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
         }
         case FT_COLR_COMPOSITE_LIGHTEN:
         {
-            // Lighten: max(src, back)
             for (int i = 0; i < w * h; i++) {
                 uint8_t *dst = &buf[i * 4];
                 uint8_t *s = &tmp_src[i * 4];
                 uint8_t *b = &tmp_back[i * 4];
+                float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
+                float outa = sa + ba * (1.0f - sa);
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
                 float sr = s[0] / 255.0f, sg = s[1] / 255.0f, sb = s[2] / 255.0f;
                 float br = b[0] / 255.0f, bg = b[1] / 255.0f, bb = b[2] / 255.0f;
+                float Br = sr > br ? sr : br;
+                float Bg = sg > bg ? sg : bg;
+                float Bb = sb > bb ? sb : bb;
+                float rr = (sa * (1.0f - ba) * sr + sa * ba * Br + (1.0f - sa) * ba * br) / outa;
+                float rg = (sa * (1.0f - ba) * sg + sa * ba * Bg + (1.0f - sa) * ba * bg) / outa;
+                float rb = (sa * (1.0f - ba) * sb + sa * ba * Bb + (1.0f - sa) * ba * bb) / outa;
+                dst[0] = (uint8_t)round(rr * 255.0f);
+                dst[1] = (uint8_t)round(rg * 255.0f);
+                dst[2] = (uint8_t)round(rb * 255.0f);
+                dst[3] = (uint8_t)round(outa * 255.0f);
+            }
+            break;
+        }
+        case FT_COLR_COMPOSITE_SOFT_LIGHT:
+        {
+            for (int i = 0; i < w * h; i++) {
+                uint8_t *dst = &buf[i * 4];
+                uint8_t *s = &tmp_src[i * 4];
+                uint8_t *b = &tmp_back[i * 4];
                 float sa = s[3] / 255.0f, ba = b[3] / 255.0f;
-                float rr = sr > br ? sr : br;
-                float rg = sg > bg ? sg : bg;
-                float rb = sb > bb ? sb : bb;
                 float outa = sa + ba * (1.0f - sa);
-                outa = outa <= 0.0f ? 0.0f : outa;
+                if (outa <= 0.0f) {
+                    dst[0] = dst[1] = dst[2] = dst[3] = 0;
+                    continue;
+                }
+                float sr = s[0] / 255.0f, sg = s[1] / 255.0f, sb = s[2] / 255.0f;
+                float br = b[0] / 255.0f, bg = b[1] / 255.0f, bb = b[2] / 255.0f;
+                // SoftLight: if Cs <= 0.5: B = Cb - (1-2*Cs)*Cb*(1-Cb)
+                //            else: B = Cb + (2*Cs-1)*(D(Cb)-Cb)
+                //   where D(Cb) = sqrt(Cb) if Cb > 0.25
+                //                  ((16*Cb-12)*Cb+4)*Cb otherwise
+                float Dr, Dg, Db;
+                Dr = br > 0.25f ? sqrtf(br) : ((16.0f * br - 12.0f) * br + 4.0f) * br;
+                Dg = bg > 0.25f ? sqrtf(bg) : ((16.0f * bg - 12.0f) * bg + 4.0f) * bg;
+                Db = bb > 0.25f ? sqrtf(bb) : ((16.0f * bb - 12.0f) * bb + 4.0f) * bb;
+                float Br = sr <= 0.5f ? br - (1.0f - 2.0f * sr) * br * (1.0f - br)
+                                      : br + (2.0f * sr - 1.0f) * (Dr - br);
+                float Bg = sg <= 0.5f ? bg - (1.0f - 2.0f * sg) * bg * (1.0f - bg)
+                                      : bg + (2.0f * sg - 1.0f) * (Dg - bg);
+                float Bb = sb <= 0.5f ? bb - (1.0f - 2.0f * sb) * bb * (1.0f - bb)
+                                      : bb + (2.0f * sb - 1.0f) * (Db - bb);
+                float rr = (sa * (1.0f - ba) * sr + sa * ba * Br + (1.0f - sa) * ba * br) / outa;
+                float rg = (sa * (1.0f - ba) * sg + sa * ba * Bg + (1.0f - sa) * ba * bg) / outa;
+                float rb = (sa * (1.0f - ba) * sb + sa * ba * Bb + (1.0f - sa) * ba * bb) / outa;
                 dst[0] = (uint8_t)round(rr * 255.0f);
                 dst[1] = (uint8_t)round(rg * 255.0f);
                 dst[2] = (uint8_t)round(rb * 255.0f);
