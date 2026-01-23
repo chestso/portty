@@ -11,52 +11,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Helper function to convert VTermColor to SDL color values
-static void convert_vterm_color_to_sdl(const VTermColor *vcol, Uint8 *r, Uint8 *g, Uint8 *b)
-{
-    if (VTERM_COLOR_IS_RGB(vcol)) {
-        *r = vcol->rgb.red;
-        *g = vcol->rgb.green;
-        *b = vcol->rgb.blue;
-    } else if (VTERM_COLOR_IS_INDEXED(vcol)) {
-        // Standard 256-color palette
-        static const Uint8 indexed_colors[16][3] = {
-            // Standard colors (0-7)
-            { 0, 0, 0 },       // black
-            { 255, 0, 0 },     // red
-            { 0, 255, 0 },     // green
-            { 255, 255, 0 },   // yellow
-            { 0, 0, 255 },     // blue
-            { 255, 0, 255 },   // magenta
-            { 0, 255, 255 },   // cyan
-            { 255, 255, 255 }, // white
-            // Bright colors (8-15)
-            { 128, 128, 128 }, // bright black (dark gray)
-            { 255, 128, 128 }, // bright red
-            { 128, 255, 128 }, // bright green
-            { 255, 255, 128 }, // bright yellow
-            { 128, 128, 255 }, // bright blue
-            { 255, 128, 255 }, // bright magenta
-            { 128, 255, 255 }, // bright cyan
-            { 255, 255, 255 }  // bright white
-        };
-
-        Uint8 idx = vcol->indexed.idx;
-        if (idx < 16) {
-            *r = indexed_colors[idx][0];
-            *g = indexed_colors[idx][1];
-            *b = indexed_colors[idx][2];
-        } else {
-            // For colors 16-255, use a simple mapping
-            // This is a simplified approach - a full implementation would use the xterm 256-color palette
-            *r = *g = *b = (idx - 16) * 255 / 240;
-        }
-    } else {
-        // Default to white for unknown color types
-        *r = *g = *b = 255;
-    }
-}
-
 // Emoji helper functions
 static bool is_emoji_base_range(uint32_t cp)
 {
@@ -114,7 +68,7 @@ static int combine_cells_for_emoji(Terminal *term, int row, int col,
     terminal_get_dimensions(term, &term_rows, &term_cols);
 
     // Read the first cell
-    VTermScreenCell cell;
+    TerminalCell cell;
     if (terminal_get_cell(term, row, col, &cell) < 0 || cell.chars[0] == 0) {
         *columns_consumed = 0;
         return 0;
@@ -125,7 +79,7 @@ static int combine_cells_for_emoji(Terminal *term, int row, int col,
 
     // Collect first cell's codepoints
     int cp_count = 0;
-    for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
+    for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
         if (cp_count >= max_combined - 1) {
             break;
         }
@@ -143,7 +97,7 @@ static int combine_cells_for_emoji(Terminal *term, int row, int col,
     vlog("  Looking ahead starting from column %d\n", lookahead_col);
 
     while (lookahead_col < term_cols && cells_checked < MAX_LOOKAHEAD) {
-        VTermScreenCell next_cell;
+        TerminalCell next_cell;
         if (terminal_get_cell(term, row, lookahead_col, &next_cell) < 0) {
             vlog("  Can't read cell at column %d\n", lookahead_col);
             break; // Can't read cell
@@ -201,7 +155,7 @@ static int combine_cells_for_emoji(Terminal *term, int row, int col,
         vlog("  Combining with U+%04X at col %d (width=%d)\n", first_cp, lookahead_col, next_cell.width);
 
         // Add this cell's codepoints
-        for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && next_cell.chars[i] != 0; i++) {
+        for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && next_cell.chars[i] != 0; i++) {
             if (cp_count >= max_combined - 1) {
                 break;
             }
@@ -538,8 +492,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
         display_cols = term_cols;
 
     // Get cursor position for rendering
-    VTermPos cursor_pos = { 0, 0 };
-    // Note: In a full implementation, we would get the actual cursor position from the terminal
+    TerminalPos cursor_pos = terminal_get_cursor_pos(term);
 
     // Render each cell
     for (int row = 0; row < display_rows; row++) {
@@ -556,7 +509,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                 continue;
             }
 
-            VTermScreenCell cell;
+            TerminalCell cell;
             if (terminal_get_cell(term, row, col, &cell) < 0) {
                 continue;
             }
@@ -568,17 +521,11 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                      row, col, cell.attrs.bold, cell.attrs.italic);
             }
 
-            // Set foreground and background colors using vterm's color conversion
-            Uint8 r = 255, g = 255, b = 255;    // default white
-            Uint8 bg_r = 0, bg_g = 0, bg_b = 0; // default black (will be transparent)
+            // Colors are already resolved to RGB by terminal_get_cell
+            Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
+            Uint8 bg_r = cell.bg.r, bg_g = cell.bg.g, bg_b = cell.bg.b;
 
-            // Convert foreground color
-            convert_vterm_color_to_sdl(&cell.fg, &r, &g, &b);
-
-            // Convert background color
-            convert_vterm_color_to_sdl(&cell.bg, &bg_r, &bg_g, &bg_b);
-
-            if (!VTERM_COLOR_IS_DEFAULT_BG(&cell.bg)) {
+            if (!cell.bg.is_default) {
                 SDL_FRect bg_rect = {
                     col * rend->cell_width,
                     row * rend->cell_height,
@@ -597,7 +544,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
             // Convert character to UTF-8 string for rendering
             char text[32] = { 0 };
             int pos = 0;
-            for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0 && pos < (int)(sizeof(text) - 3); i++) {
+            for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0 && pos < (int)(sizeof(text) - 3); i++) {
                 uint32_t ch = cell.chars[i];
                 if (ch < 0x80) {
                     text[pos++] = (char)ch;
@@ -619,9 +566,9 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
             // Render character if it's printable
             if (pos > 0) {
                 // Check if we have an emoji that might need combining with subsequent cells
-                uint32_t cps[VTERM_MAX_CHARS_PER_CELL];
+                uint32_t cps[TERM_MAX_CHARS_PER_CELL];
                 int cp_count = 0;
-                uint32_t combined_cps[VTERM_MAX_CHARS_PER_CELL * 2]; // Allow for combining
+                uint32_t combined_cps[TERM_MAX_CHARS_PER_CELL * 2]; // Allow for combining
                 int combined_cp_count = 0;
 
                 // Track how many columns this rendering will consume (for skip tracking)
@@ -652,13 +599,13 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                         }
                     } else {
                         // Fall back to regular single-cell handling (simple emoji)
-                        for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
+                        for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
                             cps[cp_count++] = cell.chars[i];
                         }
                     }
                 } else {
                     // Regular single-cell handling (non-emoji)
-                    for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
+                    for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
                         cps[cp_count++] = cell.chars[i];
                     }
                 }

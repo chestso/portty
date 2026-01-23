@@ -1,9 +1,26 @@
-#include "terminal.h"
 #include "common.h"
+#include "term.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <vterm.h>
+
+#define SCROLLBACK_SIZE 1000
+
+struct Terminal
+{
+    VTerm *vt;
+    VTermState *state;
+    VTermScreen *screen;
+    int width;
+    int height;
+    int need_redraw;
+    VTermPos cursor_pos;
+    char *title;
+    VTermScreenCell **scrollback;
+    int scrollback_lines;
+    int scrollback_capacity;
+};
 
 // Forward declarations for callback functions
 static int term_damage(VTermRect rect, void *user);
@@ -23,6 +40,46 @@ static VTermScreenCallbacks cb = {
     .sb_pushline = term_sb_pushline,
     .sb_popline = term_sb_popline,
 };
+
+// Convert a VTermColor to TerminalColor, resolving indexed colors via VTermState
+static TerminalColor convert_vterm_color(const VTermColor *vcol, VTermState *state, bool is_bg)
+{
+    TerminalColor result = { 0, 0, 0, false };
+
+    if (is_bg ? VTERM_COLOR_IS_DEFAULT_BG(vcol) : VTERM_COLOR_IS_DEFAULT_FG(vcol)) {
+        result.is_default = true;
+        if (is_bg) {
+            result.r = 0;
+            result.g = 0;
+            result.b = 0;
+        } else {
+            result.r = 255;
+            result.g = 255;
+            result.b = 255;
+        }
+        return result;
+    }
+
+    if (VTERM_COLOR_IS_RGB(vcol)) {
+        result.r = vcol->rgb.red;
+        result.g = vcol->rgb.green;
+        result.b = vcol->rgb.blue;
+    } else if (VTERM_COLOR_IS_INDEXED(vcol)) {
+        // Use vterm's state to resolve indexed colors to RGB
+        VTermColor resolved = *vcol;
+        vterm_state_convert_color_to_rgb(state, &resolved);
+        result.r = resolved.rgb.red;
+        result.g = resolved.rgb.green;
+        result.b = resolved.rgb.blue;
+    } else {
+        // Fallback
+        result.r = is_bg ? 0 : 255;
+        result.g = is_bg ? 0 : 255;
+        result.b = is_bg ? 0 : 255;
+    }
+
+    return result;
+}
 
 Terminal *terminal_init(int width, int height)
 {
@@ -50,7 +107,7 @@ Terminal *terminal_init(int width, int height)
     vterm_set_utf8(term->vt, 1);
 
     term->screen = vterm_obtain_screen(term->vt);
-    term->state = vterm_obtain_state(term->vt); // Store VTermState
+    term->state = vterm_obtain_state(term->vt);
     vterm_screen_enable_altscreen(term->screen, 1);
     vterm_screen_set_callbacks(term->screen, &cb, term);
     vterm_screen_set_damage_merge(term->screen, VTERM_DAMAGE_SCROLL);
@@ -97,28 +154,51 @@ int terminal_process_input(Terminal *term, const char *input, size_t len)
     return -1;
 }
 
-void terminal_render(Terminal *term)
-{
-    if (term && term->need_redraw) {
-        term->need_redraw = 0;
-        // Actual rendering would happen here
-    }
-}
-
-int terminal_get_cell(Terminal *term, int row, int col, VTermScreenCell *cell)
+int terminal_get_cell(Terminal *term, int row, int col, TerminalCell *cell)
 {
     if (!term || !term->screen || !cell) {
         return -1;
     }
 
-    // Check bounds
     int rows, cols;
     terminal_get_dimensions(term, &rows, &cols);
     if (row < 0 || row >= rows || col < 0 || col >= cols) {
         return -1;
     }
 
-    return vterm_screen_get_cell(term->screen, (VTermPos){ .row = row, .col = col }, cell);
+    VTermScreenCell vcell;
+    if (vterm_screen_get_cell(term->screen, (VTermPos){ .row = row, .col = col }, &vcell) < 0) {
+        return -1;
+    }
+
+    // Copy character data
+    int i;
+    for (i = 0; i < VTERM_MAX_CHARS_PER_CELL && i < TERM_MAX_CHARS_PER_CELL && vcell.chars[i] != 0; i++) {
+        cell->chars[i] = vcell.chars[i];
+    }
+    if (i < TERM_MAX_CHARS_PER_CELL) {
+        cell->chars[i] = 0;
+    }
+
+    // Copy width
+    cell->width = vcell.width;
+
+    // Copy attributes
+    cell->attrs.bold = vcell.attrs.bold;
+    cell->attrs.underline = vcell.attrs.underline;
+    cell->attrs.italic = vcell.attrs.italic;
+    cell->attrs.blink = vcell.attrs.blink;
+    cell->attrs.reverse = vcell.attrs.reverse;
+    cell->attrs.strikethrough = vcell.attrs.strike;
+    cell->attrs.font = vcell.attrs.font;
+    cell->attrs.dwl = vcell.attrs.dwl;
+    cell->attrs.dhl = vcell.attrs.dhl;
+
+    // Convert colors
+    cell->fg = convert_vterm_color(&vcell.fg, term->state, false);
+    cell->bg = convert_vterm_color(&vcell.bg, term->state, true);
+
+    return 0;
 }
 
 int terminal_get_dimensions(Terminal *term, int *rows, int *cols)
@@ -132,6 +212,14 @@ int terminal_get_dimensions(Terminal *term, int *rows, int *cols)
     return 0;
 }
 
+TerminalPos terminal_get_cursor_pos(Terminal *term)
+{
+    if (!term) {
+        return (TerminalPos){ 0, 0 };
+    }
+    return (TerminalPos){ term->cursor_pos.row, term->cursor_pos.col };
+}
+
 const char *terminal_get_title(Terminal *term)
 {
     if (!term) {
@@ -140,69 +228,19 @@ const char *terminal_get_title(Terminal *term)
     return term->title;
 }
 
-void terminal_convert_color_to_rgb(const Terminal *term, const VTermColor *vcol, uint8_t *r, uint8_t *g, uint8_t *b)
-{
-    if (!term || !term->state)
-        return;
-    VTermColor col = *vcol;
-    vterm_state_convert_color_to_rgb(term->state, &col);
-    *r = col.rgb.red;
-    *g = col.rgb.green;
-    *b = col.rgb.blue;
-}
-
-int terminal_color_is_default_bg(const VTermColor *color)
-{
-    return VTERM_COLOR_IS_DEFAULT_BG(color);
-}
-
-int terminal_get_cell_abstract(Terminal *term, int row, int col, TerminalCell *cell)
-{
-    if (!term || !term->screen || !cell) {
-        return -1;
-    }
-
-    // Check bounds
-    int rows, cols;
-    terminal_get_dimensions(term, &rows, &cols);
-    if (row < 0 || row >= rows || col < 0 || col >= cols) {
-        return -1;
-    }
-
-    VTermScreenCell vcell;
-    if (vterm_screen_get_cell(term->screen, (VTermPos){ .row = row, .col = col }, &vcell) < 0) {
-        return -1;
-    }
-
-    // Copy character data
-    for (int i = 0; i < VTERM_MAX_CHARS_PER_CELL; i++) {
-        cell->chars[i] = vcell.chars[i];
-    }
-
-    // Copy attributes
-    cell->attrs.bold = vcell.attrs.bold;
-    cell->attrs.underline = vcell.attrs.underline;
-    cell->attrs.italic = vcell.attrs.italic;
-    cell->attrs.blink = vcell.attrs.blink;
-    cell->attrs.reverse = vcell.attrs.reverse;
-    cell->attrs.strikethrough = vcell.attrs.strike;
-    cell->attrs.font = vcell.attrs.font;
-    cell->attrs.dwl = vcell.attrs.dwl;
-    cell->attrs.dhl = vcell.attrs.dhl;
-
-    // Copy colors
-    cell->fg = vcell.fg;
-    cell->bg = vcell.bg;
-
-    return 0;
-}
-
-TerminalPos terminal_get_cursor_pos(Terminal *term)
+bool terminal_needs_redraw(Terminal *term)
 {
     if (!term) {
-        return (TerminalPos){ 0, 0 };
+        return false;
     }
-    return (TerminalPos){ term->cursor_pos.row, term->cursor_pos.col };
+    return term->need_redraw != 0;
+}
+
+void terminal_clear_redraw(Terminal *term)
+{
+    if (term) {
+        term->need_redraw = 0;
+    }
 }
 
 // Callback implementations
@@ -221,8 +259,6 @@ static int term_moverect(VTermRect dest, VTermRect src, void *user)
     vlog("Terminal move rectangle callback: src=(%d,%d)-(%d,%d) dest=(%d,%d)-(%d,%d)\n",
          src.start_row, src.start_col, src.end_row, src.end_col,
          dest.start_row, dest.start_col, dest.end_row, dest.end_col);
-    // In a full implementation, this would move screen content from src to dest
-    // For now, just mark for redraw as the VTerm library handles the actual moving
     term->need_redraw = 1;
     return 1;
 }
@@ -247,40 +283,29 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
         if (term->title) {
             free(term->title);
         }
-        // Allocate space for the string and null terminator
         term->title = malloc(val->string.len + 1);
         if (term->title) {
-            // Copy the string content and null terminate
             memcpy(term->title, val->string.str, val->string.len);
             term->title[val->string.len] = '\0';
         }
         break;
     case VTERM_PROP_ICONNAME:
         vlog("Terminal set property: icon name = %.*s\n", val->string.len, val->string.str);
-        // We don't handle icon names separately
         break;
     case VTERM_PROP_CURSORVISIBLE:
         vlog("Terminal set property: cursor visible = %d\n", val->boolean);
-        // Handle cursor visibility - in a full implementation,
-        // this would affect cursor rendering
         term->need_redraw = 1;
         break;
     case VTERM_PROP_CURSORBLINK:
         vlog("Terminal set property: cursor blink = %d\n", val->boolean);
-        // Handle cursor blinking - in a full implementation,
-        // this would affect cursor rendering behavior
         term->need_redraw = 1;
         break;
     case VTERM_PROP_REVERSE:
         vlog("Terminal set property: reverse video = %d\n", val->boolean);
-        // Handle reverse video - in a full implementation,
-        // this would swap foreground and background colors
         term->need_redraw = 1;
         break;
     case VTERM_PROP_ALTSCREEN:
         vlog("Terminal set property: alt screen = %d\n", val->boolean);
-        // Handle alternate screen - in a full implementation,
-        // this would switch between normal and alternate screen buffers
         term->need_redraw = 1;
         break;
     default:
@@ -295,7 +320,7 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
 static int term_bell(void *user)
 {
     Terminal *term = (Terminal *)user;
-    (void)term; // Suppress unused variable warning
+    (void)term;
     vlog("Terminal bell callback\n");
     fprintf(stderr, "Bell!\n");
     return 1;
@@ -357,7 +382,6 @@ static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
 
     vlog("Terminal scrollback pop line: cols=%d, current_lines=%d\n", cols, term->scrollback_lines);
 
-    // Check if we have lines in scrollback
     if (term->scrollback_lines <= 0) {
         vlog("No lines in scrollback to pop\n");
         return 0;
@@ -373,15 +397,10 @@ static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
 
     // Fill remaining cells with default cells if needed
     if (copy_cols < cols) {
-        // Get a default cell from screen at position (0,0)
         VTermScreenCell default_cell;
         VTermPos pos = { .row = 0, .col = 0 };
         vterm_screen_get_cell(term->screen, pos, &default_cell);
-
-        // Clear the chars in default cell to make it truly empty
         default_cell.chars[0] = 0;
-
-        // Fill remaining positions with this default empty cell
         for (int i = copy_cols; i < cols; i++) {
             cells[i] = default_cell;
         }

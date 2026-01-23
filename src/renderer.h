@@ -2,10 +2,9 @@
 #define RENDERER_H
 
 #include "font.h"
-#include "terminal.h"
+#include "term.h"
 #include <SDL3/SDL.h>
 #include <fontconfig/fontconfig.h>
-#include <vterm.h>
 
 typedef struct
 {
@@ -20,8 +19,7 @@ typedef struct
     int font_descent; // Distance from baseline to bottom
     int width;
     int height;
-    VTermState *state; // VTerm state for color conversion
-    int debug_grid;    // Debug grid toggle flag
+    int debug_grid; // Debug grid toggle flag
 
     // Glyph texture cache (simple LRU)
     struct GlyphCacheEntry *glyph_cache;

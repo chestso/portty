@@ -3,7 +3,7 @@
 #include "font_resolver.h"
 #include "png_writer.h"
 #include "renderer.h"
-#include "terminal.h"
+#include "term.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -197,9 +197,6 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // Set the VTermState for color conversion
-        rend->state = vterm_obtain_state(term->vt);
-
         // Set initial width/height in renderer
         rend->width = WINDOW_WIDTH;
         rend->height = WINDOW_HEIGHT;
@@ -223,10 +220,9 @@ int main(int argc, char *argv[])
         process_input_from_source(term, input_source);
     }
 
-    // Only set initial redraw flag and enter event loop if running
+    // Only enter event loop if running
     if (running) {
-        // Set initial redraw flag to ensure first render
-        term->need_redraw = 1;
+        int force_redraw = 1; // Force initial render
 
         // Enable debug grid if requested via CLI
         if (debug_grid_enabled && rend) {
@@ -289,8 +285,7 @@ int main(int argc, char *argv[])
                                     if (event.key.mod & SDL_KMOD_CTRL) {
                                         if (rend) {
                                             renderer_toggle_debug_grid(rend);
-                                            // Force a redraw when debug grid is toggled
-                                            term->need_redraw = 1;
+                                            force_redraw = 1;
                                         }
                                         // Don't send to terminal
                                         len = 0;
@@ -322,10 +317,11 @@ int main(int argc, char *argv[])
             }
 
             // Render terminal only if needed
-            if (term->need_redraw) {
+            if (terminal_needs_redraw(term) || force_redraw) {
                 renderer_draw_terminal(rend, term);
                 SDL_RenderPresent(sdl_rend);
-                term->need_redraw = 0; // Clear the flag
+                terminal_clear_redraw(term);
+                force_redraw = 0;
             }
 
             // Small delay to prevent excessive CPU usage
