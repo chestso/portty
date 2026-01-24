@@ -576,10 +576,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
 
                 // Select appropriate font style based on first codepoint and attributes
                 FontStyle style = FONT_STYLE_NORMAL;
-                const char *font_type = "normal";
                 if (cell.attrs.bold && font_has_style(data->font, FONT_STYLE_BOLD)) {
                     style = FONT_STYLE_BOLD;
-                    font_type = "bold";
                 }
                 if (cp_count > 0) {
                     uint32_t first_cp = cps[0];
@@ -595,12 +593,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                     }
                     if (use_emoji && font_has_style(data->font, FONT_STYLE_EMOJI)) {
                         style = FONT_STYLE_EMOJI;
-                        font_type = "emoji";
                     }
                 }
-
-                bool selected_has_colr = font_style_has_colr(data->font, style);
-                vlog("  Selected font: %s (style=%d) has_colr=%d\n", font_type, style, selected_has_colr);
 
                 // If multiple codepoints, try shaped rendering (backend must support it)
                 if (cp_count > 1 && data->font && data->font->render_shaped) {
