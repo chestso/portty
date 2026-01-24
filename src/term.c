@@ -74,3 +74,10 @@ void terminal_clear_redraw(TerminalBackend *term)
         return;
     term->clear_redraw(term);
 }
+
+bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect)
+{
+    if (!term || !term->get_damage_rect || !rect)
+        return false;
+    return term->get_damage_rect(term, rect);
+}

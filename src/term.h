@@ -19,6 +19,12 @@ typedef struct
 
 typedef struct
 {
+    int start_row, start_col;
+    int end_row, end_col;
+} TerminalDamageRect;
+
+typedef struct
+{
     uint8_t r, g, b;
     bool is_default;
 } TerminalColor;
@@ -64,6 +70,7 @@ struct TerminalBackend
     const char *(*get_title)(TerminalBackend *term);
     bool (*needs_redraw)(TerminalBackend *term);
     void (*clear_redraw)(TerminalBackend *term);
+    bool (*get_damage_rect)(TerminalBackend *term, TerminalDamageRect *rect);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -76,5 +83,6 @@ TerminalPos terminal_get_cursor_pos(TerminalBackend *term);
 const char *terminal_get_title(TerminalBackend *term);
 bool terminal_needs_redraw(TerminalBackend *term);
 void terminal_clear_redraw(TerminalBackend *term);
+bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 
 #endif /* TERM_H */

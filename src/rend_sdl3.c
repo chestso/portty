@@ -113,7 +113,9 @@ typedef struct RendererSdl3Data
     int width;
     int height;
     int debug_grid;
+    bool full_redraw;
 
+    SDL_Texture *terminal_texture;
     RendSdl3Atlas atlas;
 } RendererSdl3Data;
 
@@ -261,6 +263,8 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->width = 0;
     data->height = 0;
     data->debug_grid = 0;
+    data->full_redraw = true;
+    data->terminal_texture = NULL;
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -290,6 +294,11 @@ static void sdl3_destroy(RendererBackend *backend)
         return;
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
+    if (data->terminal_texture) {
+        SDL_DestroyTexture(data->terminal_texture);
+        data->terminal_texture = NULL;
+    }
 
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
@@ -431,10 +440,6 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
         return;
     }
 
-    // Clear screen
-    SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
-    SDL_RenderClear(data->renderer);
-
     // Begin new atlas frame
     rend_sdl3_atlas_begin_frame(&data->atlas);
 
@@ -451,313 +456,364 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
     if (display_cols > term_cols)
         display_cols = term_cols;
 
-    // Get cursor position for rendering
-    TerminalPos cursor_pos = terminal_get_cursor_pos(term);
+    // Determine damage rect
+    bool has_damage = true;
+    TerminalDamageRect damage = { 0, 0, display_rows, display_cols };
+    if (!data->full_redraw && data->terminal_texture) {
+        TerminalDamageRect term_damage;
+        if (terminal_get_damage_rect(term, &term_damage)) {
+            damage = term_damage;
+            // Clamp to display bounds
+            if (damage.start_row < 0)
+                damage.start_row = 0;
+            if (damage.start_col < 0)
+                damage.start_col = 0;
+            if (damage.end_row > display_rows)
+                damage.end_row = display_rows;
+            if (damage.end_col > display_cols)
+                damage.end_col = display_cols;
+        } else {
+            has_damage = false;
+        }
+    }
+    data->full_redraw = false;
 
-    // Render each cell
-    for (int row = 0; row < display_rows; row++) {
-        int last_combined_col = -1; // Track cells consumed by emoji combining
-        int last_rendered_col = -1; // Track cells that were rendered (for skipping continuation cells)
-        for (int col = 0; col < display_cols; col++) {
-            // Skip cells that were already consumed by emoji combining logic
-            if (col <= last_combined_col) {
-                continue;
-            }
+    // Ensure we have a persistent texture
+    if (!data->terminal_texture) {
+        data->terminal_texture = SDL_CreateTexture(data->renderer,
+                                                   SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET,
+                                                   data->width, data->height);
+        damage = (TerminalDamageRect){ 0, 0, display_rows, display_cols };
+        has_damage = true;
+    }
 
-            // Also skip cells that have already been rendered as part of a multi-cell emoji sequence
-            if (col <= last_rendered_col) {
-                continue;
-            }
+    // Only re-render cells if there's actual damage
+    if (has_damage) {
+        vlog("Damage rect: rows [%d,%d) cols [%d,%d)\n",
+             damage.start_row, damage.end_row, damage.start_col, damage.end_col);
 
-            TerminalCell cell;
-            if (terminal_get_cell(term, row, col, &cell) < 0) {
-                continue;
-            }
+        // Set render target to persistent texture
+        SDL_SetRenderTarget(data->renderer, data->terminal_texture);
 
-            // Font selection is now handled in the rendering code below
-            // Add logging for font attributes
-            if (cell.attrs.bold || cell.attrs.italic) {
-                vlog("Cell (%d,%d) attributes: bold=%d, italic=%d\n",
-                     row, col, cell.attrs.bold, cell.attrs.italic);
-            }
+        // Clear damaged region backgrounds
+        for (int row = damage.start_row; row < damage.end_row; row++) {
+            SDL_FRect row_rect = {
+                (float)(damage.start_col * data->cell_width),
+                (float)(row * data->cell_height),
+                (float)((damage.end_col - damage.start_col) * data->cell_width),
+                (float)data->cell_height
+            };
+            SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
+            SDL_RenderFillRect(data->renderer, &row_rect);
+        }
 
-            // Colors are already resolved to RGB by terminal_get_cell
-            Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
-            Uint8 bg_r = cell.bg.r, bg_g = cell.bg.g, bg_b = cell.bg.b;
+        // Get cursor position for rendering
+        TerminalPos cursor_pos = terminal_get_cursor_pos(term);
 
-            if (!cell.bg.is_default) {
-                SDL_FRect bg_rect = {
-                    col * data->cell_width,
-                    row * data->cell_height,
-                    data->cell_width,
-                    data->cell_height
-                };
-                SDL_SetRenderDrawColor(data->renderer, bg_r, bg_g, bg_b, 255);
-                SDL_RenderFillRect(data->renderer, &bg_rect);
-            }
-
-            // Skip empty cells
-            if (cell.chars[0] == 0) {
-                continue;
-            }
-
-            // Convert character to UTF-8 string for rendering
-            char text[32] = { 0 };
-            int pos = 0;
-            for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0 && pos < (int)(sizeof(text) - 3); i++) {
-                uint32_t ch = cell.chars[i];
-                if (ch < 0x80) {
-                    text[pos++] = (char)ch;
-                } else if (ch < 0x800) {
-                    text[pos++] = (char)(0xC0 | (ch >> 6));
-                    text[pos++] = (char)(0x80 | (ch & 0x3F));
-                } else if (ch < 0x10000) {
-                    text[pos++] = (char)(0xE0 | (ch >> 12));
-                    text[pos++] = (char)(0x80 | ((ch >> 6) & 0x3F));
-                    text[pos++] = (char)(0x80 | (ch & 0x3F));
-                } else if (ch < 0x110000) {
-                    text[pos++] = (char)(0xF0 | (ch >> 18));
-                    text[pos++] = (char)(0x80 | ((ch >> 12) & 0x3F));
-                    text[pos++] = (char)(0x80 | ((ch >> 6) & 0x3F));
-                    text[pos++] = (char)(0x80 | (ch & 0x3F));
+        // Render only cells within the damage rect
+        for (int row = damage.start_row; row < damage.end_row; row++) {
+            int last_combined_col = -1;
+            int last_rendered_col = -1;
+            for (int col = damage.start_col; col < damage.end_col; col++) {
+                // Skip cells that were already consumed by emoji combining logic
+                if (col <= last_combined_col) {
+                    continue;
                 }
-            }
 
-            // Render character if it's printable
-            if (pos > 0) {
-                // Check if we have an emoji that might need combining with subsequent cells
-                uint32_t cps[TERM_MAX_CHARS_PER_CELL];
-                int cp_count = 0;
-                uint32_t combined_cps[TERM_MAX_CHARS_PER_CELL * 2]; // Allow for combining
-                int combined_cp_count = 0;
+                // Also skip cells that have already been rendered as part of a multi-cell emoji sequence
+                if (col <= last_rendered_col) {
+                    continue;
+                }
 
-                // Track how many columns this rendering will consume (for skip tracking)
-                int columns_to_consume = cell.width; // Default: this cell's width
+                TerminalCell cell;
+                if (terminal_get_cell(term, row, col, &cell) < 0) {
+                    continue;
+                }
 
-                // If the first character looks like an emoji, check for combining
-                if (cell.chars[0] != 0 && (is_emoji_presentation(cell.chars[0]) ||
-                                           is_regional_indicator(cell.chars[0]) ||
-                                           is_zwj(cell.chars[0]) ||
-                                           is_skin_tone_modifier(cell.chars[0]))) {
-                    // Try to combine cells for emoji sequences
-                    int columns_consumed = 0;
-                    combined_cp_count = combine_cells_for_emoji(term, row, col, combined_cps,
-                                                                sizeof(combined_cps) / sizeof(combined_cps[0]),
-                                                                &columns_consumed);
+                // Font selection is now handled in the rendering code below
+                // Add logging for font attributes
+                if (cell.attrs.bold || cell.attrs.italic) {
+                    vlog("Cell (%d,%d) attributes: bold=%d, italic=%d\n",
+                         row, col, cell.attrs.bold, cell.attrs.italic);
+                }
 
-                    // If we found multiple codepoints that can be combined, use them
-                    if (combined_cp_count > 1) {
-                        // Update the last_combined_col to skip the cells we consumed
-                        // Use columns_consumed instead of combined_cp_count for correct skip tracking
-                        last_combined_col = col + columns_consumed - 1;
-                        columns_to_consume = columns_consumed;
+                // Colors are already resolved to RGB by terminal_get_cell
+                Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
+                Uint8 bg_r = cell.bg.r, bg_g = cell.bg.g, bg_b = cell.bg.b;
 
-                        // Use the combined codepoints
-                        cp_count = combined_cp_count;
-                        for (int i = 0; i < cp_count; i++) {
-                            cps[i] = combined_cps[i];
+                if (!cell.bg.is_default) {
+                    SDL_FRect bg_rect = {
+                        col * data->cell_width,
+                        row * data->cell_height,
+                        data->cell_width,
+                        data->cell_height
+                    };
+                    SDL_SetRenderDrawColor(data->renderer, bg_r, bg_g, bg_b, 255);
+                    SDL_RenderFillRect(data->renderer, &bg_rect);
+                }
+
+                // Skip empty cells
+                if (cell.chars[0] == 0) {
+                    continue;
+                }
+
+                // Convert character to UTF-8 string for rendering
+                char text[32] = { 0 };
+                int pos = 0;
+                for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0 && pos < (int)(sizeof(text) - 3); i++) {
+                    uint32_t ch = cell.chars[i];
+                    if (ch < 0x80) {
+                        text[pos++] = (char)ch;
+                    } else if (ch < 0x800) {
+                        text[pos++] = (char)(0xC0 | (ch >> 6));
+                        text[pos++] = (char)(0x80 | (ch & 0x3F));
+                    } else if (ch < 0x10000) {
+                        text[pos++] = (char)(0xE0 | (ch >> 12));
+                        text[pos++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+                        text[pos++] = (char)(0x80 | (ch & 0x3F));
+                    } else if (ch < 0x110000) {
+                        text[pos++] = (char)(0xF0 | (ch >> 18));
+                        text[pos++] = (char)(0x80 | ((ch >> 12) & 0x3F));
+                        text[pos++] = (char)(0x80 | ((ch >> 6) & 0x3F));
+                        text[pos++] = (char)(0x80 | (ch & 0x3F));
+                    }
+                }
+
+                // Render character if it's printable
+                if (pos > 0) {
+                    // Check if we have an emoji that might need combining with subsequent cells
+                    uint32_t cps[TERM_MAX_CHARS_PER_CELL];
+                    int cp_count = 0;
+                    uint32_t combined_cps[TERM_MAX_CHARS_PER_CELL * 2]; // Allow for combining
+                    int combined_cp_count = 0;
+
+                    // Track how many columns this rendering will consume (for skip tracking)
+                    int columns_to_consume = cell.width; // Default: this cell's width
+
+                    // If the first character looks like an emoji, check for combining
+                    if (cell.chars[0] != 0 && (is_emoji_presentation(cell.chars[0]) ||
+                                               is_regional_indicator(cell.chars[0]) ||
+                                               is_zwj(cell.chars[0]) ||
+                                               is_skin_tone_modifier(cell.chars[0]))) {
+                        // Try to combine cells for emoji sequences
+                        int columns_consumed = 0;
+                        combined_cp_count = combine_cells_for_emoji(term, row, col, combined_cps,
+                                                                    sizeof(combined_cps) / sizeof(combined_cps[0]),
+                                                                    &columns_consumed);
+
+                        // If we found multiple codepoints that can be combined, use them
+                        if (combined_cp_count > 1) {
+                            // Update the last_combined_col to skip the cells we consumed
+                            // Use columns_consumed instead of combined_cp_count for correct skip tracking
+                            last_combined_col = col + columns_consumed - 1;
+                            columns_to_consume = columns_consumed;
+
+                            // Use the combined codepoints
+                            cp_count = combined_cp_count;
+                            for (int i = 0; i < cp_count; i++) {
+                                cps[i] = combined_cps[i];
+                            }
+                        } else {
+                            // Fall back to regular single-cell handling (simple emoji)
+                            for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
+                                cps[cp_count++] = cell.chars[i];
+                            }
                         }
                     } else {
-                        // Fall back to regular single-cell handling (simple emoji)
+                        // Regular single-cell handling (non-emoji)
                         for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
                             cps[cp_count++] = cell.chars[i];
                         }
                     }
-                } else {
-                    // Regular single-cell handling (non-emoji)
-                    for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
-                        cps[cp_count++] = cell.chars[i];
-                    }
-                }
 
-                // Select appropriate font style based on first codepoint and attributes
-                FontStyle style = FONT_STYLE_NORMAL;
-                if (cell.attrs.bold && font_has_style(data->font, FONT_STYLE_BOLD)) {
-                    style = FONT_STYLE_BOLD;
-                }
-                if (cp_count > 0) {
-                    uint32_t first_cp = cps[0];
-                    bool use_emoji = is_emoji_presentation(first_cp) || is_regional_indicator(first_cp);
-                    // VS16 (U+FE0F) forces emoji presentation for any base character
-                    if (!use_emoji) {
-                        for (int i = 1; i < cp_count; i++) {
-                            if (cps[i] == 0xFE0F) {
-                                use_emoji = true;
-                                break;
+                    // Select appropriate font style based on first codepoint and attributes
+                    FontStyle style = FONT_STYLE_NORMAL;
+                    if (cell.attrs.bold && font_has_style(data->font, FONT_STYLE_BOLD)) {
+                        style = FONT_STYLE_BOLD;
+                    }
+                    if (cp_count > 0) {
+                        uint32_t first_cp = cps[0];
+                        bool use_emoji = is_emoji_presentation(first_cp) || is_regional_indicator(first_cp);
+                        // VS16 (U+FE0F) forces emoji presentation for any base character
+                        if (!use_emoji) {
+                            for (int i = 1; i < cp_count; i++) {
+                                if (cps[i] == 0xFE0F) {
+                                    use_emoji = true;
+                                    break;
+                                }
                             }
                         }
+                        if (use_emoji && font_has_style(data->font, FONT_STYLE_EMOJI)) {
+                            style = FONT_STYLE_EMOJI;
+                        }
                     }
-                    if (use_emoji && font_has_style(data->font, FONT_STYLE_EMOJI)) {
-                        style = FONT_STYLE_EMOJI;
-                    }
-                }
 
-                // If multiple codepoints, try shaped rendering (backend must support it)
-                if (cp_count > 1 && data->font && data->font->render_shaped) {
-                    ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
-                    if (shaped) {
+                    // If multiple codepoints, try shaped rendering (backend must support it)
+                    if (cp_count > 1 && data->font && data->font->render_shaped) {
+                        ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+                        if (shaped) {
+                            int cell_x = col * data->cell_width;
+                            int cell_y = row * data->cell_height;
+
+                            for (int gi = 0; gi < shaped->num_glyphs; gi++) {
+                                GlyphBitmap *gb = shaped->bitmaps[gi];
+                                if (!gb)
+                                    continue;
+
+                                void *font_data = data->font ? data->font->font_data[style] : NULL;
+                                uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+                                RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gb->glyph_id, color_key);
+                                if (!entry) {
+                                    GlyphBitmap *scaled = NULL;
+                                    if (style == FONT_STYLE_EMOJI)
+                                        scaled = downscale_bitmap(gb, columns_to_consume * data->cell_width, data->cell_height);
+                                    entry = rend_sdl3_atlas_insert(&data->atlas, font_data, gb->glyph_id, color_key, scaled ? scaled : gb);
+                                    if (scaled) {
+                                        free(scaled->pixels);
+                                        free(scaled);
+                                    }
+                                }
+
+                                if (entry) {
+                                    SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
+                                                      (float)entry->region.w, (float)entry->region.h };
+                                    SDL_FRect dst;
+                                    if (style == FONT_STYLE_EMOJI) {
+                                        float avail_w = (float)(columns_to_consume * data->cell_width);
+                                        float avail_h = (float)data->cell_height;
+                                        float glyph_w = (float)entry->region.w;
+                                        float glyph_h = (float)entry->region.h;
+                                        float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
+                                        float scaled_w = glyph_w * scale;
+                                        float scaled_h = glyph_h * scale;
+                                        dst = (SDL_FRect){
+                                            (float)cell_x,
+                                            (float)cell_y + (avail_h - scaled_h) * 0.5f,
+                                            scaled_w, scaled_h
+                                        };
+                                    } else {
+                                        int x = cell_x + shaped->x_positions[gi] + entry->x_offset;
+                                        int y = cell_y + data->font_ascent - entry->y_offset;
+                                        dst = (SDL_FRect){ (float)x, (float)y, (float)entry->region.w, (float)entry->region.h };
+                                    }
+                                    SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dst);
+                                }
+
+                                data->font->free_glyph_bitmap(data->font, gb);
+                            }
+
+                            // Free shaped arrays
+                            free(shaped->bitmaps);
+                            free(shaped->x_positions);
+                            free(shaped->y_positions);
+                            free(shaped->x_advances);
+                            free(shaped);
+
+                            // Update skip tracking to prevent re-rendering continuation cells
+                            last_rendered_col = col + columns_to_consume - 1;
+                            continue; // done with this cell
+                        }
+                    }
+
+                    // Fallback: render single glyph (first codepoint)
+                    uint32_t codepoint = cps[0];
+                    void *font_data_single = data->font ? data->font->font_data[style] : NULL;
+                    uint32_t color_key_single = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+
+                    // Look up atlas using glyph index (cheap table lookup, no rasterization)
+                    uint32_t glyph_index = font_get_glyph_index(data->font, style, codepoint);
+                    RendSdl3AtlasEntry *entry = NULL;
+                    if (glyph_index != 0) {
+                        entry = rend_sdl3_atlas_lookup(&data->atlas, font_data_single, glyph_index, color_key_single);
+                    }
+                    // Only rasterize on cache miss
+                    if (!entry) {
+                        GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
+                        if (glyph_bitmap) {
+                            uint32_t insert_id = glyph_index ? glyph_index : (uint32_t)glyph_bitmap->glyph_id;
+                            GlyphBitmap *scaled = NULL;
+                            if (style == FONT_STYLE_EMOJI)
+                                scaled = downscale_bitmap(glyph_bitmap, columns_to_consume * data->cell_width, data->cell_height);
+                            entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, insert_id, color_key_single, scaled ? scaled : glyph_bitmap);
+                            if (scaled) {
+                                free(scaled->pixels);
+                                free(scaled);
+                            }
+                            data->font->free_glyph_bitmap(data->font, glyph_bitmap);
+                        } else if (glyph_index != 0) {
+                            // Cache empty glyph (e.g. space) to avoid repeated FreeType calls
+                            rend_sdl3_atlas_insert_empty(&data->atlas, font_data_single, glyph_index, color_key_single);
+                        }
+                    }
+                    if (entry && entry->region.w > 0) {
                         int cell_x = col * data->cell_width;
                         int cell_y = row * data->cell_height;
-
-                        for (int gi = 0; gi < shaped->num_glyphs; gi++) {
-                            GlyphBitmap *gb = shaped->bitmaps[gi];
-                            if (!gb)
-                                continue;
-
-                            void *font_data = data->font ? data->font->font_data[style] : NULL;
-                            uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-                            RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gb->glyph_id, color_key);
-                            if (!entry) {
-                                GlyphBitmap *scaled = NULL;
-                                if (style == FONT_STYLE_EMOJI)
-                                    scaled = downscale_bitmap(gb, columns_to_consume * data->cell_width, data->cell_height);
-                                entry = rend_sdl3_atlas_insert(&data->atlas, font_data, gb->glyph_id, color_key, scaled ? scaled : gb);
-                                if (scaled) {
-                                    free(scaled->pixels);
-                                    free(scaled);
-                                }
-                            }
-
-                            if (entry) {
-                                SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
-                                                  (float)entry->region.w, (float)entry->region.h };
-                                SDL_FRect dst;
-                                if (style == FONT_STYLE_EMOJI) {
-                                    float avail_w = (float)(columns_to_consume * data->cell_width);
-                                    float avail_h = (float)data->cell_height;
-                                    float glyph_w = (float)entry->region.w;
-                                    float glyph_h = (float)entry->region.h;
-                                    float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
-                                    float scaled_w = glyph_w * scale;
-                                    float scaled_h = glyph_h * scale;
-                                    dst = (SDL_FRect){
-                                        (float)cell_x,
-                                        (float)cell_y + (avail_h - scaled_h) * 0.5f,
-                                        scaled_w, scaled_h
-                                    };
-                                } else {
-                                    int x = cell_x + shaped->x_positions[gi] + entry->x_offset;
-                                    int y = cell_y + data->font_ascent - entry->y_offset;
-                                    dst = (SDL_FRect){ (float)x, (float)y, (float)entry->region.w, (float)entry->region.h };
-                                }
-                                SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dst);
-                            }
-
-                            data->font->free_glyph_bitmap(data->font, gb);
+                        SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
+                                          (float)entry->region.w, (float)entry->region.h };
+                        SDL_FRect dest_rect;
+                        if (style == FONT_STYLE_EMOJI) {
+                            float avail_w = (float)(columns_to_consume * data->cell_width);
+                            float avail_h = (float)data->cell_height;
+                            float glyph_w = (float)entry->region.w;
+                            float glyph_h = (float)entry->region.h;
+                            float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
+                            float scaled_w = glyph_w * scale;
+                            float scaled_h = glyph_h * scale;
+                            dest_rect = (SDL_FRect){
+                                (float)cell_x,
+                                (float)cell_y + (avail_h - scaled_h) * 0.5f,
+                                scaled_w, scaled_h
+                            };
+                        } else {
+                            float text_x = (float)cell_x + entry->x_offset;
+                            float text_y = (float)cell_y + data->font_ascent - entry->y_offset;
+                            dest_rect = (SDL_FRect){ text_x, text_y, (float)entry->region.w, (float)entry->region.h };
                         }
-
-                        // Free shaped arrays
-                        free(shaped->bitmaps);
-                        free(shaped->x_positions);
-                        free(shaped->y_positions);
-                        free(shaped->x_advances);
-                        free(shaped);
-
-                        // Update skip tracking to prevent re-rendering continuation cells
-                        last_rendered_col = col + columns_to_consume - 1;
-                        continue; // done with this cell
+                        SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dest_rect);
                     }
+
+                    // Update skip tracking to prevent re-rendering continuation cells
+                    last_rendered_col = col + columns_to_consume - 1;
                 }
 
-                // Fallback: render single glyph (first codepoint)
-                uint32_t codepoint = cps[0];
-                void *font_data_single = data->font ? data->font->font_data[style] : NULL;
-                uint32_t color_key_single = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-
-                // Look up atlas using glyph index (cheap table lookup, no rasterization)
-                uint32_t glyph_index = font_get_glyph_index(data->font, style, codepoint);
-                RendSdl3AtlasEntry *entry = NULL;
-                if (glyph_index != 0) {
-                    entry = rend_sdl3_atlas_lookup(&data->atlas, font_data_single, glyph_index, color_key_single);
+                // Render cursor if this is the cursor position
+                // Note: This is a simplified cursor implementation
+                // In a full implementation, you'd want to get the actual cursor position from the terminal
+                if (row == cursor_pos.row && col == cursor_pos.col) {
+                    SDL_FRect cursor_rect = {
+                        col * data->cell_width,
+                        row * data->cell_height,
+                        data->cell_width,
+                        data->cell_height
+                    };
+                    SDL_SetRenderDrawColor(data->renderer, r, g, b, 255); // Invert cursor color
+                    SDL_RenderRect(data->renderer, &cursor_rect);
                 }
-                // Only rasterize on cache miss
-                if (!entry) {
-                    GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
-                    if (glyph_bitmap) {
-                        uint32_t insert_id = glyph_index ? glyph_index : (uint32_t)glyph_bitmap->glyph_id;
-                        GlyphBitmap *scaled = NULL;
-                        if (style == FONT_STYLE_EMOJI)
-                            scaled = downscale_bitmap(glyph_bitmap, columns_to_consume * data->cell_width, data->cell_height);
-                        entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, insert_id, color_key_single, scaled ? scaled : glyph_bitmap);
-                        if (scaled) {
-                            free(scaled->pixels);
-                            free(scaled);
-                        }
-                        data->font->free_glyph_bitmap(data->font, glyph_bitmap);
-                    } else if (glyph_index != 0) {
-                        // Cache empty glyph (e.g. space) to avoid repeated FreeType calls
-                        rend_sdl3_atlas_insert_empty(&data->atlas, font_data_single, glyph_index, color_key_single);
-                    }
-                }
-                if (entry && entry->region.w > 0) {
-                    int cell_x = col * data->cell_width;
-                    int cell_y = row * data->cell_height;
-                    SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
-                                      (float)entry->region.w, (float)entry->region.h };
-                    SDL_FRect dest_rect;
-                    if (style == FONT_STYLE_EMOJI) {
-                        float avail_w = (float)(columns_to_consume * data->cell_width);
-                        float avail_h = (float)data->cell_height;
-                        float glyph_w = (float)entry->region.w;
-                        float glyph_h = (float)entry->region.h;
-                        float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
-                        float scaled_w = glyph_w * scale;
-                        float scaled_h = glyph_h * scale;
-                        dest_rect = (SDL_FRect){
-                            (float)cell_x,
-                            (float)cell_y + (avail_h - scaled_h) * 0.5f,
-                            scaled_w, scaled_h
-                        };
-                    } else {
-                        float text_x = (float)cell_x + entry->x_offset;
-                        float text_y = (float)cell_y + data->font_ascent - entry->y_offset;
-                        dest_rect = (SDL_FRect){ text_x, text_y, (float)entry->region.w, (float)entry->region.h };
-                    }
-                    SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dest_rect);
-                }
-
-                // Update skip tracking to prevent re-rendering continuation cells
-                last_rendered_col = col + columns_to_consume - 1;
-            }
-
-            // Render cursor if this is the cursor position
-            // Note: This is a simplified cursor implementation
-            // In a full implementation, you'd want to get the actual cursor position from the terminal
-            if (row == cursor_pos.row && col == cursor_pos.col) {
-                SDL_FRect cursor_rect = {
-                    col * data->cell_width,
-                    row * data->cell_height,
-                    data->cell_width,
-                    data->cell_height
-                };
-                SDL_SetRenderDrawColor(data->renderer, r, g, b, 255); // Invert cursor color
-                SDL_RenderRect(data->renderer, &cursor_rect);
             }
         }
+
+        // Reset render target to screen
+        SDL_SetRenderTarget(data->renderer, NULL);
     }
 
-    // Render debug grid if enabled
+    // Clear screen and blit terminal texture
+    SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
+    SDL_RenderClear(data->renderer);
+    SDL_RenderTexture(data->renderer, data->terminal_texture, NULL, NULL);
+
+    // Render debug grid if enabled (directly to screen, over the blitted texture)
     if (data->debug_grid) {
-        vlog("DEBUG GRID: *** GRID RENDERING STARTED ***\n");
-        vlog("DEBUG GRID: Rendering debug grid with display_cols=%d, display_rows=%d\n", display_cols, display_rows);
-        vlog("DEBUG GRID: Renderer dimensions: %dx%d\n", data->width, data->height);
-        vlog("DEBUG GRID: Cell dimensions: %dx%d\n", data->cell_width, data->cell_height);
-        vlog("DEBUG GRID: debug_grid flag is %d\n", data->debug_grid);
-        // Draw a more visible grid by using a brighter color and slightly thicker lines
-        SDL_SetRenderDrawColor(data->renderer, 255, 255, 255, 200); // Slightly more opaque
+        SDL_SetRenderDrawColor(data->renderer, 255, 255, 255, 200);
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-        // Draw vertical lines
         for (int col = 0; col <= display_cols; col++) {
             SDL_FRect vline = { (float)(col * data->cell_width), 0.0f, 2.0f, (float)data->height };
             SDL_RenderFillRect(data->renderer, &vline);
         }
-        // Draw horizontal lines
         for (int row = 0; row <= display_rows; row++) {
             SDL_FRect hline = { 0.0f, (float)(row * data->cell_height), (float)data->width, 2.0f };
             SDL_RenderFillRect(data->renderer, &hline);
         }
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
-        vlog("DEBUG GRID: *** GRID RENDERING COMPLETED ***\n");
     }
 }
 
@@ -798,6 +854,13 @@ static void sdl3_resize(RendererBackend *backend, int width, int height)
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     data->width = width;
     data->height = height;
+
+    // Recreate persistent render target at new size
+    if (data->terminal_texture)
+        SDL_DestroyTexture(data->terminal_texture);
+    data->terminal_texture = SDL_CreateTexture(data->renderer,
+                                               SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
+    data->full_redraw = true;
 }
 
 static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *cell_height)
