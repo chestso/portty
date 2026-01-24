@@ -260,6 +260,39 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
     return slot;
 }
 
+RendSdl3AtlasEntry *rend_sdl3_atlas_insert_empty(RendSdl3Atlas *atlas, void *font_data,
+                                                 int glyph_id, uint32_t color)
+{
+    uint32_t h = atlas_hash(font_data, glyph_id, color);
+    uint32_t idx = h & (REND_SDL3_ATLAS_HASH_SIZE - 1);
+    RendSdl3AtlasEntry *slot = NULL;
+
+    for (int probe = 0; probe < REND_SDL3_ATLAS_HASH_SIZE; probe++) {
+        uint32_t i = (idx + probe) & (REND_SDL3_ATLAS_HASH_SIZE - 1);
+        RendSdl3AtlasEntry *e = &atlas->entries[i];
+        if (!e->occupied) {
+            slot = e;
+            break;
+        }
+    }
+
+    if (!slot)
+        return NULL;
+
+    slot->font_data = font_data;
+    slot->glyph_id = glyph_id;
+    slot->color = color;
+    slot->page_index = -1;
+    slot->region = (RendSdl3AtlasRegion){ 0, 0, 0, 0 };
+    slot->x_offset = 0;
+    slot->y_offset = 0;
+    slot->last_used_frame = atlas->current_frame;
+    slot->occupied = true;
+    atlas->entry_count++;
+
+    return slot;
+}
+
 void rend_sdl3_atlas_log_stats(RendSdl3Atlas *atlas)
 {
     if (!atlas)

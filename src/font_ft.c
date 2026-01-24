@@ -765,6 +765,9 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
     FT_GlyphSlot slot = face->glyph;
     FT_Bitmap *bitmap = &slot->bitmap;
 
+    if (bitmap->width == 0 || bitmap->rows == 0)
+        return NULL;
+
     // Allocate glyph bitmap
     GlyphBitmap *glyph_bitmap = malloc(sizeof(GlyphBitmap));
     if (!glyph_bitmap) {
@@ -777,13 +780,6 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
     glyph_bitmap->y_offset = slot->bitmap_top;
     glyph_bitmap->advance = (int)(slot->advance.x >> 6); // Convert from 26.6 fixed point
     glyph_bitmap->glyph_id = glyph_index;
-
-    // Handle zero-width or zero-height glyphs (e.g., spaces)
-    if (glyph_bitmap->width <= 0 || glyph_bitmap->height <= 0) {
-        vlog("Glyph has zero dimensions: %dx%d, creating empty bitmap\n", glyph_bitmap->width, glyph_bitmap->height);
-        glyph_bitmap->pixels = NULL; // No pixels for empty glyphs
-        return glyph_bitmap;
-    }
 
     // Allocate RGBA pixels
     glyph_bitmap->pixels = malloc(glyph_bitmap->width * glyph_bitmap->height * 4);
@@ -1005,6 +1001,9 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     FT_GlyphSlot slot = face->glyph;
     FT_Bitmap *bitmap = &slot->bitmap;
 
+    if (bitmap->width == 0 || bitmap->rows == 0)
+        return NULL;
+
     GlyphBitmap *glyph_bitmap = malloc(sizeof(GlyphBitmap));
     if (!glyph_bitmap)
         return NULL;
@@ -1015,11 +1014,6 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     glyph_bitmap->y_offset = slot->bitmap_top;
     glyph_bitmap->advance = (int)(slot->advance.x >> 6);
     glyph_bitmap->glyph_id = glyph_index;
-
-    if (glyph_bitmap->width <= 0 || glyph_bitmap->height <= 0) {
-        glyph_bitmap->pixels = NULL;
-        return glyph_bitmap;
-    }
 
     glyph_bitmap->pixels = malloc(glyph_bitmap->width * glyph_bitmap->height * 4);
     if (!glyph_bitmap->pixels) {

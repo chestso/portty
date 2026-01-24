@@ -694,9 +694,12 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                             free(scaled);
                         }
                         data->font->free_glyph_bitmap(data->font, glyph_bitmap);
+                    } else if (glyph_index != 0) {
+                        // Cache empty glyph (e.g. space) to avoid repeated FreeType calls
+                        rend_sdl3_atlas_insert_empty(&data->atlas, font_data_single, glyph_index, color_key_single);
                     }
                 }
-                if (entry) {
+                if (entry && entry->region.w > 0) {
                     int cell_x = col * data->cell_width;
                     int cell_y = row * data->cell_height;
                     SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
