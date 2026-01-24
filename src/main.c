@@ -3,6 +3,7 @@
 #include "font_resolver.h"
 #include "png_writer.h"
 #include "rend.h"
+#include "rend_sdl3.h"
 #include "term.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
@@ -29,7 +30,7 @@ static int png_render_text(const char *text, const char *output_path);
 int main(int argc, char *argv[])
 {
     Terminal *term;
-    Renderer *rend = NULL;
+    RendererBackend *rend = NULL;
     SDL_Window *window = NULL;
     SDL_Renderer *sdl_rend = NULL;
     int running = 1;
@@ -187,7 +188,7 @@ int main(int argc, char *argv[])
         vlog("Renderer created successfully\n");
 
         // Initialize renderer
-        rend = renderer_init(sdl_rend, window);
+        rend = renderer_init(&renderer_backend_sdl3, window, sdl_rend);
         if (!rend) {
             fprintf(stderr, "Failed to initialize renderer\n");
             terminal_destroy(term);

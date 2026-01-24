@@ -2,16 +2,37 @@
 #define REND_H
 
 #include "term.h"
-#include <SDL3/SDL.h>
+#include <stdbool.h>
 
-typedef struct Renderer Renderer;
+// Forward declarations
+struct RendererBackend;
+typedef struct RendererBackend RendererBackend;
 
-Renderer *renderer_init(SDL_Renderer *sdl_renderer, SDL_Window *window);
-void renderer_destroy(Renderer *rend);
-int renderer_load_fonts(Renderer *rend);
-void renderer_draw_terminal(Renderer *rend, Terminal *term);
-void renderer_present(Renderer *rend);
-void renderer_resize(Renderer *rend, int width, int height);
-void renderer_toggle_debug_grid(Renderer *rend);
+// Backend interface definition
+struct RendererBackend
+{
+    const char *name;
+
+    // Backend-specific data
+    void *backend_data;
+
+    // Backend function pointers
+    bool (*init)(RendererBackend *rend, void *window_handle, void *renderer_handle);
+    void (*destroy)(RendererBackend *rend);
+    int (*load_fonts)(RendererBackend *rend);
+    void (*draw_terminal)(RendererBackend *rend, Terminal *term);
+    void (*present)(RendererBackend *rend);
+    void (*resize)(RendererBackend *rend, int width, int height);
+    void (*toggle_debug_grid)(RendererBackend *rend);
+};
+
+// Renderer API
+RendererBackend *renderer_init(RendererBackend *backend, void *window, void *renderer);
+void renderer_destroy(RendererBackend *rend);
+int renderer_load_fonts(RendererBackend *rend);
+void renderer_draw_terminal(RendererBackend *rend, Terminal *term);
+void renderer_present(RendererBackend *rend);
+void renderer_resize(RendererBackend *rend, int width, int height);
+void renderer_toggle_debug_grid(RendererBackend *rend);
 
 #endif /* REND_H */

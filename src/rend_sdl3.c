@@ -1,3 +1,4 @@
+#include "rend_sdl3.h"
 #include "common.h"
 #include "font.h"
 #include "font_resolver.h"
@@ -13,7 +14,7 @@
 
 struct GlyphCacheEntry;
 
-struct Renderer
+typedef struct RendererSdl3Data
 {
     SDL_Renderer *renderer;
     SDL_Window *window;
@@ -31,7 +32,7 @@ struct Renderer
     struct GlyphCacheEntry *glyph_cache;
     int glyph_cache_size;
     uint64_t cache_tick;
-};
+} RendererSdl3Data;
 
 // Emoji helper functions
 static bool is_emoji_base_range(uint32_t cp)
@@ -215,7 +216,7 @@ struct GlyphCacheEntry
 };
 
 // Helper function to create an SDL_Texture from a GlyphBitmap
-static SDL_Texture *create_texture_from_glyph_bitmap(Renderer *rend, GlyphBitmap *glyph_bitmap)
+static SDL_Texture *create_texture_from_glyph_bitmap(RendererSdl3Data *data, GlyphBitmap *glyph_bitmap)
 {
     // Handle empty glyphs (e.g., spaces)
     if (!glyph_bitmap) {
@@ -245,7 +246,7 @@ static SDL_Texture *create_texture_from_glyph_bitmap(Renderer *rend, GlyphBitmap
 
     memcpy(surface->pixels, glyph_bitmap->pixels, glyph_bitmap->width * glyph_bitmap->height * 4);
 
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(rend->renderer, surface);
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(data->renderer, surface);
     SDL_DestroySurface(surface);
 
     if (texture) {
@@ -259,13 +260,13 @@ static SDL_Texture *create_texture_from_glyph_bitmap(Renderer *rend, GlyphBitmap
 }
 
 // Cache accessors
-static SDL_Texture *renderer_get_cached_texture(Renderer *rend, void *font_data, int glyph_id, uint32_t color)
+static SDL_Texture *renderer_get_cached_texture(RendererSdl3Data *data, void *font_data, int glyph_id, uint32_t color)
 {
-    if (!rend || !rend->glyph_cache)
+    if (!data || !data->glyph_cache)
         return NULL;
-    uint64_t now = ++rend->cache_tick;
-    for (int i = 0; i < rend->glyph_cache_size; i++) {
-        struct GlyphCacheEntry *e = &rend->glyph_cache[i];
+    uint64_t now = ++data->cache_tick;
+    for (int i = 0; i < data->glyph_cache_size; i++) {
+        struct GlyphCacheEntry *e = &data->glyph_cache[i];
         if (e->texture && e->font_data == font_data && e->glyph_id == glyph_id && e->color == color) {
             e->used = now;
             return e->texture;
@@ -274,17 +275,17 @@ static SDL_Texture *renderer_get_cached_texture(Renderer *rend, void *font_data,
     return NULL;
 }
 
-static void renderer_cache_texture(Renderer *rend, void *font_data, int glyph_id, uint32_t color, SDL_Texture *tex, GlyphBitmap *gb)
+static void renderer_cache_texture(RendererSdl3Data *data, void *font_data, int glyph_id, uint32_t color, SDL_Texture *tex, GlyphBitmap *gb)
 {
-    if (!rend || !rend->glyph_cache || !tex)
+    if (!data || !data->glyph_cache || !tex)
         return;
 
     // Find empty slot or LRU
     int empty = -1;
     int lru_idx = -1;
     uint64_t lru_used = UINT64_MAX;
-    for (int i = 0; i < rend->glyph_cache_size; i++) {
-        struct GlyphCacheEntry *e = &rend->glyph_cache[i];
+    for (int i = 0; i < data->glyph_cache_size; i++) {
+        struct GlyphCacheEntry *e = &data->glyph_cache[i];
         if (!e->texture) {
             empty = i;
             break;
@@ -300,7 +301,7 @@ static void renderer_cache_texture(Renderer *rend, void *font_data, int glyph_id
         return; // shouldn't happen
 
     // Evict if needed
-    struct GlyphCacheEntry *e = &rend->glyph_cache[slot];
+    struct GlyphCacheEntry *e = &data->glyph_cache[slot];
     if (e->texture) {
         SDL_DestroyTexture(e->texture);
     }
@@ -313,70 +314,86 @@ static void renderer_cache_texture(Renderer *rend, void *font_data, int glyph_id
     e->h = gb ? gb->height : 0;
     e->x_offset = gb ? gb->x_offset : 0;
     e->y_offset = gb ? gb->y_offset : 0;
-    e->used = ++rend->cache_tick;
+    e->used = ++data->cache_tick;
 }
 
-Renderer *renderer_init(SDL_Renderer *sdl_renderer, SDL_Window *window)
+static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
 {
-    Renderer *rend = malloc(sizeof(Renderer));
-    if (!rend) {
-        return NULL;
-    }
+    // Allocate SDL3-specific data
+    RendererSdl3Data *data = malloc(sizeof(RendererSdl3Data));
+    if (!data)
+        return false;
 
-    rend->renderer = sdl_renderer;
-    rend->window = window;
-    rend->font = NULL;
-    rend->cell_width = 0;
-    rend->cell_height = 0;
-    rend->char_width = 0;
-    rend->char_height = 0;
-    rend->font_ascent = 0;
-    rend->font_descent = 0;
-    rend->width = 0;
-    rend->height = 0;
-    rend->debug_grid = 0; // Initialize debug grid to off
+    // Cast handles back to SDL types
+    data->window = (SDL_Window *)window_handle;
+    data->renderer = (SDL_Renderer *)renderer_handle;
+
+    // Initialize fields
+    data->font = NULL;
+    data->cell_width = 0;
+    data->cell_height = 0;
+    data->char_width = 0;
+    data->char_height = 0;
+    data->font_ascent = 0;
+    data->font_descent = 0;
+    data->width = 0;
+    data->height = 0;
+    data->debug_grid = 0;
 
     // Initialize glyph cache
-    rend->glyph_cache_size = 1024; // reasonable default
-    rend->glyph_cache = calloc(rend->glyph_cache_size, sizeof(*rend->glyph_cache));
-    rend->cache_tick = 0;
+    data->glyph_cache_size = 1024;
+    data->glyph_cache = calloc(data->glyph_cache_size, sizeof(*data->glyph_cache));
+    data->cache_tick = 0;
 
     // Initialize font backend with FreeType backend
-    rend->font = &font;
-    if (!font_init(rend->font)) {
+    data->font = &font;
+    if (!font_init(data->font)) {
         vlog("Failed to initialize font backend\n");
-        if (rend->glyph_cache)
-            free(rend->glyph_cache);
-        free(rend);
-        return NULL;
+        if (data->glyph_cache)
+            free(data->glyph_cache);
+        free(data);
+        return false;
     }
 
-    return rend;
+    // Store in backend
+    backend->backend_data = data;
+
+    return true;
 }
 
-void renderer_destroy(Renderer *rend)
+static void sdl3_destroy(RendererBackend *backend)
 {
-    if (rend) {
-        // Destroy glyph cache textures
-        if (rend->glyph_cache) {
-            for (int i = 0; i < rend->glyph_cache_size; i++) {
-                if (rend->glyph_cache[i].texture) {
-                    SDL_DestroyTexture(rend->glyph_cache[i].texture);
-                }
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
+    // Destroy glyph cache textures
+    if (data->glyph_cache) {
+        for (int i = 0; i < data->glyph_cache_size; i++) {
+            if (data->glyph_cache[i].texture) {
+                SDL_DestroyTexture(data->glyph_cache[i].texture);
             }
-            free(rend->glyph_cache);
-            rend->glyph_cache = NULL;
         }
-
-        if (rend->font) {
-            font_destroy(rend->font);
-        }
-        free(rend);
+        free(data->glyph_cache);
+        data->glyph_cache = NULL;
     }
+
+    if (data->font) {
+        font_destroy(data->font);
+    }
+
+    free(data);
+    backend->backend_data = NULL;
 }
 
-int renderer_load_fonts(Renderer *rend)
+static int sdl3_load_fonts(RendererBackend *backend)
 {
+    if (!backend || !backend->backend_data)
+        return -1;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
     const float font_size = 24.0f; // Default font size in points
 
     vlog("Loading fonts with size %.1f\n", font_size);
@@ -399,8 +416,8 @@ int renderer_load_fonts(Renderer *rend)
     options.dpi_y = 96;
 
     // Get DPI from window if available
-    if (rend->window) {
-        float pixel_density = SDL_GetWindowPixelDensity(rend->window);
+    if (data->window) {
+        float pixel_density = SDL_GetWindowPixelDensity(data->window);
         if (pixel_density > 0.0f) {
             // Calculate DPI based on pixel density (assuming 96 DPI as base)
             // This is a reasonable approximation for HiDPI displays
@@ -417,7 +434,7 @@ int renderer_load_fonts(Renderer *rend)
     // Load normal monospace font
     FontResolutionResult result;
     if (font_resolver_find_font(FONT_TYPE_NORMAL, &result) == 0) {
-        if (font_load_font(rend->font, FONT_STYLE_NORMAL, result.font_path, font_size, &options)) {
+        if (font_load_font(data->font, FONT_STYLE_NORMAL, result.font_path, font_size, &options)) {
             vlog("Normal font loaded successfully from %s\n", result.font_path);
         } else {
             fprintf(stderr, "Failed to load normal font from %s\n", result.font_path);
@@ -434,7 +451,7 @@ int renderer_load_fonts(Renderer *rend)
 
     // Load bold font
     if (font_resolver_find_font(FONT_TYPE_BOLD, &result) == 0) {
-        if (font_load_font(rend->font, FONT_STYLE_BOLD, result.font_path, font_size, &options)) {
+        if (font_load_font(data->font, FONT_STYLE_BOLD, result.font_path, font_size, &options)) {
             vlog("Bold font loaded successfully from %s\n", result.font_path);
         } else {
             vlog("Failed to load bold font from %s\n", result.font_path);
@@ -444,7 +461,7 @@ int renderer_load_fonts(Renderer *rend)
 
     // Load emoji font
     if (font_resolver_find_font(FONT_TYPE_EMOJI, &result) == 0) {
-        if (font_load_font(rend->font, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
+        if (font_load_font(data->font, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
             vlog("Emoji font loaded successfully from %s\n", result.font_path);
         } else {
             vlog("Failed to load emoji font from %s\n", result.font_path);
@@ -456,27 +473,27 @@ int renderer_load_fonts(Renderer *rend)
     font_resolver_cleanup();
 
     // Calculate cell dimensions from font metrics using normal font
-    const FontMetrics *metrics = font_get_metrics(rend->font, FONT_STYLE_NORMAL);
+    const FontMetrics *metrics = font_get_metrics(data->font, FONT_STYLE_NORMAL);
     if (metrics) {
-        rend->font_ascent = metrics->ascent;
-        rend->font_descent = metrics->descent;
-        rend->char_width = metrics->glyph_width;
-        rend->char_height = metrics->glyph_height;
-        rend->cell_width = metrics->cell_width;
-        rend->cell_height = metrics->cell_height;
+        data->font_ascent = metrics->ascent;
+        data->font_descent = metrics->descent;
+        data->char_width = metrics->glyph_width;
+        data->char_height = metrics->glyph_height;
+        data->cell_width = metrics->cell_width;
+        data->cell_height = metrics->cell_height;
 
         vlog("Font metrics - ascent: %d, descent: %d\n",
-             rend->font_ascent, rend->font_descent);
+             data->font_ascent, data->font_descent);
         vlog("Character dimensions - width: %d, height: %d\n",
-             rend->char_width, rend->char_height);
+             data->char_width, data->char_height);
         vlog("Cell dimensions - width: %d, height: %d\n",
-             rend->cell_width, rend->cell_height);
+             data->cell_width, data->cell_height);
 
         // Log which fonts were successfully loaded
         vlog("Font loading summary:\n");
-        vlog("  Normal font: %s\n", font_has_style(rend->font, FONT_STYLE_NORMAL) ? "Loaded" : "Not loaded");
-        vlog("  Bold font: %s\n", font_has_style(rend->font, FONT_STYLE_BOLD) ? "Loaded" : "Not loaded");
-        vlog("  Emoji font: %s\n", font_has_style(rend->font, FONT_STYLE_EMOJI) ? "Loaded" : "Not loaded");
+        vlog("  Normal font: %s\n", font_has_style(data->font, FONT_STYLE_NORMAL) ? "Loaded" : "Not loaded");
+        vlog("  Bold font: %s\n", font_has_style(data->font, FONT_STYLE_BOLD) ? "Loaded" : "Not loaded");
+        vlog("  Emoji font: %s\n", font_has_style(data->font, FONT_STYLE_EMOJI) ? "Loaded" : "Not loaded");
     } else {
         vlog("ERROR: No font available for metrics calculation\n");
         return -1;
@@ -485,27 +502,32 @@ int renderer_load_fonts(Renderer *rend)
     return 0;
 }
 
-void renderer_draw_terminal(Renderer *rend, Terminal *term)
+static void sdl3_draw_terminal(RendererBackend *backend, Terminal *term)
 {
-    if (!rend || !term || !font_has_style(rend->font, FONT_STYLE_NORMAL)) {
+    if (!backend || !backend->backend_data || !term)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
+    if (!font_has_style(data->font, FONT_STYLE_NORMAL)) {
         vlog("Renderer draw terminal failed: invalid parameters\n");
         return;
     }
 
-    vlog("Drawing terminal with dimensions %dx%d\n", rend->width, rend->height);
+    vlog("Drawing terminal with dimensions %dx%d\n", data->width, data->height);
     vlog("Cell dimensions: %dx%d, Font ascent: %d\n",
-         rend->cell_width, rend->cell_height, rend->font_ascent);
+         data->cell_width, data->cell_height, data->font_ascent);
 
     // Clear screen
-    SDL_SetRenderDrawColor(rend->renderer, 0, 0, 0, 255);
-    SDL_RenderClear(rend->renderer);
+    SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
+    SDL_RenderClear(data->renderer);
 
     // Calculate number of rows and columns that fit in the window
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
 
-    int display_rows = rend->height / rend->cell_height;
-    int display_cols = rend->width / rend->cell_width;
+    int display_rows = data->height / data->cell_height;
+    int display_cols = data->width / data->cell_width;
 
     // Limit to actual terminal size
     if (display_rows > term_rows)
@@ -549,13 +571,13 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
 
             if (!cell.bg.is_default) {
                 SDL_FRect bg_rect = {
-                    col * rend->cell_width,
-                    row * rend->cell_height,
-                    rend->cell_width,
-                    rend->cell_height
+                    col * data->cell_width,
+                    row * data->cell_height,
+                    data->cell_width,
+                    data->cell_height
                 };
-                SDL_SetRenderDrawColor(rend->renderer, bg_r, bg_g, bg_b, 255);
-                SDL_RenderFillRect(rend->renderer, &bg_rect);
+                SDL_SetRenderDrawColor(data->renderer, bg_r, bg_g, bg_b, 255);
+                SDL_RenderFillRect(data->renderer, &bg_rect);
             }
 
             // Skip empty cells
@@ -635,7 +657,7 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                 // Select appropriate font style based on first codepoint and attributes
                 FontStyle style = FONT_STYLE_NORMAL;
                 const char *font_type = "normal";
-                if (cell.attrs.bold && font_has_style(rend->font, FONT_STYLE_BOLD)) {
+                if (cell.attrs.bold && font_has_style(data->font, FONT_STYLE_BOLD)) {
                     style = FONT_STYLE_BOLD;
                     font_type = "bold";
                 }
@@ -651,21 +673,21 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             }
                         }
                     }
-                    if (use_emoji && font_has_style(rend->font, FONT_STYLE_EMOJI)) {
+                    if (use_emoji && font_has_style(data->font, FONT_STYLE_EMOJI)) {
                         style = FONT_STYLE_EMOJI;
                         font_type = "emoji";
                     }
                 }
 
-                bool selected_has_colr = font_style_has_colr(rend->font, style);
+                bool selected_has_colr = font_style_has_colr(data->font, style);
                 vlog("  Selected font: %s (style=%d) has_colr=%d\n", font_type, style, selected_has_colr);
 
                 // If multiple codepoints, try shaped rendering (backend must support it)
-                if (cp_count > 1 && rend->font && rend->font->render_shaped) {
-                    ShapedGlyphs *shaped = font_render_shaped_text(rend->font, style, cps, cp_count, r, g, b);
+                if (cp_count > 1 && data->font && data->font->render_shaped) {
+                    ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
                     if (shaped) {
-                        int cell_x = col * rend->cell_width;
-                        int cell_y = row * rend->cell_height;
+                        int cell_x = col * data->cell_width;
+                        int cell_y = row * data->cell_height;
 
                         for (int gi = 0; gi < shaped->num_glyphs; gi++) {
                             GlyphBitmap *gb = shaped->bitmaps[gi];
@@ -673,21 +695,21 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                                 continue;
 
                             // Try cache first
-                            void *font_data = rend->font ? rend->font->font_data[style] : NULL;
+                            void *font_data = data->font ? data->font->font_data[style] : NULL;
                             uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-                            SDL_Texture *tex = renderer_get_cached_texture(rend, font_data, gb->glyph_id, color_key);
+                            SDL_Texture *tex = renderer_get_cached_texture(data, font_data, gb->glyph_id, color_key);
                             if (!tex) {
-                                tex = create_texture_from_glyph_bitmap(rend, gb);
+                                tex = create_texture_from_glyph_bitmap(data, gb);
                                 if (tex)
-                                    renderer_cache_texture(rend, font_data, gb->glyph_id, color_key, tex, gb);
+                                    renderer_cache_texture(data, font_data, gb->glyph_id, color_key, tex, gb);
                             }
 
                             if (tex) {
                                 SDL_FRect dst;
                                 if (style == FONT_STYLE_EMOJI) {
                                     // Scale emoji to fit cell height, left-aligned
-                                    float avail_w = (float)(columns_to_consume * rend->cell_width);
-                                    float avail_h = (float)rend->cell_height;
+                                    float avail_w = (float)(columns_to_consume * data->cell_width);
+                                    float avail_h = (float)data->cell_height;
                                     float glyph_w = (float)gb->width;
                                     float glyph_h = (float)gb->height;
                                     float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
@@ -701,14 +723,14 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                                     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
                                 } else {
                                     int x = cell_x + shaped->x_positions[gi] + gb->x_offset;
-                                    int y = cell_y + rend->font_ascent - gb->y_offset;
+                                    int y = cell_y + data->font_ascent - gb->y_offset;
                                     dst = (SDL_FRect){ (float)x, (float)y, (float)gb->width, (float)gb->height };
                                 }
-                                SDL_RenderTexture(rend->renderer, tex, NULL, &dst);
+                                SDL_RenderTexture(data->renderer, tex, NULL, &dst);
                             }
 
                             // Free glyph bitmap (texture stays cached)
-                            rend->font->free_glyph_bitmap(rend->font, gb);
+                            data->font->free_glyph_bitmap(data->font, gb);
                         }
 
                         // Free shaped arrays
@@ -726,25 +748,25 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
 
                 // Fallback: render single glyph (first codepoint)
                 uint32_t codepoint = cps[0];
-                GlyphBitmap *glyph_bitmap = font_render_glyphs(rend->font, style, &codepoint, 1, r, g, b);
+                GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
                 if (glyph_bitmap) {
                     // Try cache first
-                    void *font_data_single = rend->font ? rend->font->font_data[style] : NULL;
+                    void *font_data_single = data->font ? data->font->font_data[style] : NULL;
                     uint32_t color_key_single = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-                    SDL_Texture *texture = renderer_get_cached_texture(rend, font_data_single, glyph_bitmap->glyph_id, color_key_single);
+                    SDL_Texture *texture = renderer_get_cached_texture(data, font_data_single, glyph_bitmap->glyph_id, color_key_single);
                     if (!texture) {
-                        texture = create_texture_from_glyph_bitmap(rend, glyph_bitmap);
+                        texture = create_texture_from_glyph_bitmap(data, glyph_bitmap);
                         if (texture)
-                            renderer_cache_texture(rend, font_data_single, glyph_bitmap->glyph_id, color_key_single, texture, glyph_bitmap);
+                            renderer_cache_texture(data, font_data_single, glyph_bitmap->glyph_id, color_key_single, texture, glyph_bitmap);
                     }
                     if (texture) {
-                        int cell_x = col * rend->cell_width;
-                        int cell_y = row * rend->cell_height;
+                        int cell_x = col * data->cell_width;
+                        int cell_y = row * data->cell_height;
                         SDL_FRect dest_rect;
                         if (style == FONT_STYLE_EMOJI) {
                             // Scale emoji to fit cell height, left-aligned
-                            float avail_w = (float)(columns_to_consume * rend->cell_width);
-                            float avail_h = (float)rend->cell_height;
+                            float avail_w = (float)(columns_to_consume * data->cell_width);
+                            float avail_h = (float)data->cell_height;
                             float glyph_w = (float)glyph_bitmap->width;
                             float glyph_h = (float)glyph_bitmap->height;
                             float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
@@ -758,12 +780,12 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
                             SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
                         } else {
                             float text_x = (float)cell_x + glyph_bitmap->x_offset;
-                            float text_y = (float)cell_y + rend->font_ascent - glyph_bitmap->y_offset;
+                            float text_y = (float)cell_y + data->font_ascent - glyph_bitmap->y_offset;
                             dest_rect = (SDL_FRect){ text_x, text_y, (float)glyph_bitmap->width, (float)glyph_bitmap->height };
                         }
-                        SDL_RenderTexture(rend->renderer, texture, NULL, &dest_rect);
+                        SDL_RenderTexture(data->renderer, texture, NULL, &dest_rect);
                     }
-                    rend->font->free_glyph_bitmap(rend->font, glyph_bitmap);
+                    data->font->free_glyph_bitmap(data->font, glyph_bitmap);
                 }
 
                 // Update skip tracking to prevent re-rendering continuation cells
@@ -775,58 +797,81 @@ void renderer_draw_terminal(Renderer *rend, Terminal *term)
             // In a full implementation, you'd want to get the actual cursor position from the terminal
             if (row == cursor_pos.row && col == cursor_pos.col) {
                 SDL_FRect cursor_rect = {
-                    col * rend->cell_width,
-                    row * rend->cell_height,
-                    rend->cell_width,
-                    rend->cell_height
+                    col * data->cell_width,
+                    row * data->cell_height,
+                    data->cell_width,
+                    data->cell_height
                 };
-                SDL_SetRenderDrawColor(rend->renderer, r, g, b, 255); // Invert cursor color
-                SDL_RenderRect(rend->renderer, &cursor_rect);
+                SDL_SetRenderDrawColor(data->renderer, r, g, b, 255); // Invert cursor color
+                SDL_RenderRect(data->renderer, &cursor_rect);
             }
         }
     }
 
     // Render debug grid if enabled
-    if (rend->debug_grid) {
+    if (data->debug_grid) {
         vlog("DEBUG GRID: *** GRID RENDERING STARTED ***\n");
         vlog("DEBUG GRID: Rendering debug grid with display_cols=%d, display_rows=%d\n", display_cols, display_rows);
-        vlog("DEBUG GRID: Renderer dimensions: %dx%d\n", rend->width, rend->height);
-        vlog("DEBUG GRID: Cell dimensions: %dx%d\n", rend->cell_width, rend->cell_height);
-        vlog("DEBUG GRID: debug_grid flag is %d\n", rend->debug_grid);
+        vlog("DEBUG GRID: Renderer dimensions: %dx%d\n", data->width, data->height);
+        vlog("DEBUG GRID: Cell dimensions: %dx%d\n", data->cell_width, data->cell_height);
+        vlog("DEBUG GRID: debug_grid flag is %d\n", data->debug_grid);
         // Draw a more visible grid by using a brighter color and slightly thicker lines
-        SDL_SetRenderDrawColor(rend->renderer, 255, 255, 255, 200); // Slightly more opaque
-        SDL_SetRenderDrawBlendMode(rend->renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(data->renderer, 255, 255, 255, 200); // Slightly more opaque
+        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
         // Draw vertical lines
         for (int col = 0; col <= display_cols; col++) {
-            SDL_FRect vline = { (float)(col * rend->cell_width), 0.0f, 2.0f, (float)rend->height };
-            SDL_RenderFillRect(rend->renderer, &vline);
+            SDL_FRect vline = { (float)(col * data->cell_width), 0.0f, 2.0f, (float)data->height };
+            SDL_RenderFillRect(data->renderer, &vline);
         }
         // Draw horizontal lines
         for (int row = 0; row <= display_rows; row++) {
-            SDL_FRect hline = { 0.0f, (float)(row * rend->cell_height), (float)rend->width, 2.0f };
-            SDL_RenderFillRect(rend->renderer, &hline);
+            SDL_FRect hline = { 0.0f, (float)(row * data->cell_height), (float)data->width, 2.0f };
+            SDL_RenderFillRect(data->renderer, &hline);
         }
-        SDL_SetRenderDrawBlendMode(rend->renderer, SDL_BLENDMODE_NONE);
+        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
         vlog("DEBUG GRID: *** GRID RENDERING COMPLETED ***\n");
     }
 }
 
-void renderer_present(Renderer *rend)
+static void sdl3_present(RendererBackend *backend)
 {
-    SDL_RenderPresent(rend->renderer);
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    SDL_RenderPresent(data->renderer);
 }
 
-void renderer_toggle_debug_grid(Renderer *rend)
+static void sdl3_toggle_debug_grid(RendererBackend *backend)
 {
-    if (rend) {
-        rend->debug_grid = !rend->debug_grid;
-        vlog("Debug grid toggled to %s\n", rend->debug_grid ? "ON" : "OFF");
-        vlog("Current debug_grid value: %d\n", rend->debug_grid);
-    }
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    data->debug_grid = !data->debug_grid;
+    vlog("Debug grid toggled to %s\n", data->debug_grid ? "ON" : "OFF");
+    vlog("Current debug_grid value: %d\n", data->debug_grid);
 }
 
-void renderer_resize(Renderer *rend, int width, int height)
+static void sdl3_resize(RendererBackend *backend, int width, int height)
 {
-    rend->width = width;
-    rend->height = height;
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    data->width = width;
+    data->height = height;
 }
+
+// SDL3 renderer backend instance
+RendererBackend renderer_backend_sdl3 = {
+    .name = "sdl3",
+    .backend_data = NULL,
+    .init = sdl3_init,
+    .destroy = sdl3_destroy,
+    .load_fonts = sdl3_load_fonts,
+    .draw_terminal = sdl3_draw_terminal,
+    .present = sdl3_present,
+    .resize = sdl3_resize,
+    .toggle_debug_grid = sdl3_toggle_debug_grid
+};
