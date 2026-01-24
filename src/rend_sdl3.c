@@ -4,17 +4,14 @@
 #include "font_ft.h"
 #include "font_resolver.h"
 #include "rend.h"
+#include "rend_sdl3_atlas.h"
 #include "unicode.h"
 #include <SDL3/SDL.h>
-#include <limits.h>
 #include <stdint.h>
 
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-
-struct GlyphCacheEntry;
 
 typedef struct RendererSdl3Data
 {
@@ -31,9 +28,7 @@ typedef struct RendererSdl3Data
     int height;
     int debug_grid;
 
-    struct GlyphCacheEntry *glyph_cache;
-    int glyph_cache_size;
-    uint64_t cache_tick;
+    RendSdl3Atlas atlas;
 } RendererSdl3Data;
 
 // Function to combine emoji cells for multi-codepoint sequences
@@ -158,120 +153,6 @@ static int combine_cells_for_emoji(TerminalBackend *term, int row, int col,
     return cp_count;
 }
 
-// Glyph cache entry
-struct GlyphCacheEntry
-{
-    void *font_data;
-    int glyph_id;
-    uint32_t color;
-    SDL_Texture *texture;
-    int w, h;
-    int x_offset, y_offset;
-    uint64_t used;
-};
-
-// Helper function to create an SDL_Texture from a GlyphBitmap
-static SDL_Texture *create_texture_from_glyph_bitmap(RendererSdl3Data *data, GlyphBitmap *glyph_bitmap)
-{
-    // Handle empty glyphs (e.g., spaces)
-    if (!glyph_bitmap) {
-        vlog("create_texture_from_glyph_bitmap: null glyph bitmap\n");
-        return NULL;
-    }
-
-    // Allow zero-width or zero-height glyphs (they just won't render anything)
-    if (glyph_bitmap->width <= 0 || glyph_bitmap->height <= 0) {
-        vlog("create_texture_from_glyph_bitmap: empty glyph bitmap (%dx%d)\n",
-             glyph_bitmap->width, glyph_bitmap->height);
-        return NULL; // Not an error, just nothing to render
-    }
-
-    // Handle glyphs with no pixels (e.g., spaces)
-    if (!glyph_bitmap->pixels) {
-        vlog("create_texture_from_glyph_bitmap: glyph with no pixels (%dx%d)\n",
-             glyph_bitmap->width, glyph_bitmap->height);
-        return NULL; // Not an error, just nothing to render
-    }
-
-    SDL_Surface *surface = SDL_CreateSurface(glyph_bitmap->width, glyph_bitmap->height, SDL_PIXELFORMAT_RGBA32);
-    if (!surface) {
-        vlog("create_texture_from_glyph_bitmap: failed to create surface for glyph\n");
-        return NULL;
-    }
-
-    memcpy(surface->pixels, glyph_bitmap->pixels, glyph_bitmap->width * glyph_bitmap->height * 4);
-
-    SDL_Texture *texture = SDL_CreateTextureFromSurface(data->renderer, surface);
-    SDL_DestroySurface(surface);
-
-    if (texture) {
-        // Set texture scale mode to nearest neighbor to prevent glyph blurring
-        SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_NEAREST);
-    } else {
-        vlog("create_texture_from_glyph_bitmap: failed to create texture from surface\n");
-    }
-
-    return texture;
-}
-
-// Cache accessors
-static SDL_Texture *renderer_get_cached_texture(RendererSdl3Data *data, void *font_data, int glyph_id, uint32_t color)
-{
-    if (!data || !data->glyph_cache)
-        return NULL;
-    uint64_t now = ++data->cache_tick;
-    for (int i = 0; i < data->glyph_cache_size; i++) {
-        struct GlyphCacheEntry *e = &data->glyph_cache[i];
-        if (e->texture && e->font_data == font_data && e->glyph_id == glyph_id && e->color == color) {
-            e->used = now;
-            return e->texture;
-        }
-    }
-    return NULL;
-}
-
-static void renderer_cache_texture(RendererSdl3Data *data, void *font_data, int glyph_id, uint32_t color, SDL_Texture *tex, GlyphBitmap *gb)
-{
-    if (!data || !data->glyph_cache || !tex)
-        return;
-
-    // Find empty slot or LRU
-    int empty = -1;
-    int lru_idx = -1;
-    uint64_t lru_used = UINT64_MAX;
-    for (int i = 0; i < data->glyph_cache_size; i++) {
-        struct GlyphCacheEntry *e = &data->glyph_cache[i];
-        if (!e->texture) {
-            empty = i;
-            break;
-        }
-        if (e->used < lru_used) {
-            lru_used = e->used;
-            lru_idx = i;
-        }
-    }
-
-    int slot = (empty >= 0) ? empty : lru_idx;
-    if (slot < 0)
-        return; // shouldn't happen
-
-    // Evict if needed
-    struct GlyphCacheEntry *e = &data->glyph_cache[slot];
-    if (e->texture) {
-        SDL_DestroyTexture(e->texture);
-    }
-
-    e->font_data = font_data;
-    e->glyph_id = glyph_id;
-    e->color = color;
-    e->texture = tex;
-    e->w = gb ? gb->width : 0;
-    e->h = gb ? gb->height : 0;
-    e->x_offset = gb ? gb->x_offset : 0;
-    e->y_offset = gb ? gb->y_offset : 0;
-    e->used = ++data->cache_tick;
-}
-
 static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
 {
     // Allocate SDL3-specific data
@@ -295,17 +176,18 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->height = 0;
     data->debug_grid = 0;
 
-    // Initialize glyph cache
-    data->glyph_cache_size = 1024;
-    data->glyph_cache = calloc(data->glyph_cache_size, sizeof(*data->glyph_cache));
-    data->cache_tick = 0;
+    // Initialize glyph atlas
+    if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
+        vlog("Failed to initialize glyph atlas\n");
+        free(data);
+        return false;
+    }
 
     // Initialize font backend with FreeType backend
     data->font = &font_backend_ft;
     if (!font_init(data->font)) {
         vlog("Failed to initialize font backend\n");
-        if (data->glyph_cache)
-            free(data->glyph_cache);
+        rend_sdl3_atlas_destroy(&data->atlas);
         free(data);
         return false;
     }
@@ -323,16 +205,8 @@ static void sdl3_destroy(RendererBackend *backend)
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
 
-    // Destroy glyph cache textures
-    if (data->glyph_cache) {
-        for (int i = 0; i < data->glyph_cache_size; i++) {
-            if (data->glyph_cache[i].texture) {
-                SDL_DestroyTexture(data->glyph_cache[i].texture);
-            }
-        }
-        free(data->glyph_cache);
-        data->glyph_cache = NULL;
-    }
+    // Destroy glyph atlas
+    rend_sdl3_atlas_destroy(&data->atlas);
 
     if (data->font) {
         font_destroy(data->font);
@@ -477,6 +351,9 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
     SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
     SDL_RenderClear(data->renderer);
 
+    // Begin new atlas frame
+    rend_sdl3_atlas_begin_frame(&data->atlas);
+
     // Calculate number of rows and columns that fit in the window
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
@@ -618,7 +495,7 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                 }
                 if (cp_count > 0) {
                     uint32_t first_cp = cps[0];
-                    bool use_emoji = is_emoji_presentation(first_cp);
+                    bool use_emoji = is_emoji_presentation(first_cp) || is_regional_indicator(first_cp);
                     // VS16 (U+FE0F) forces emoji presentation for any base character
                     if (!use_emoji) {
                         for (int i = 1; i < cp_count; i++) {
@@ -649,24 +526,21 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                             if (!gb)
                                 continue;
 
-                            // Try cache first
                             void *font_data = data->font ? data->font->font_data[style] : NULL;
                             uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-                            SDL_Texture *tex = renderer_get_cached_texture(data, font_data, gb->glyph_id, color_key);
-                            if (!tex) {
-                                tex = create_texture_from_glyph_bitmap(data, gb);
-                                if (tex)
-                                    renderer_cache_texture(data, font_data, gb->glyph_id, color_key, tex, gb);
-                            }
+                            RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gb->glyph_id, color_key);
+                            if (!entry)
+                                entry = rend_sdl3_atlas_insert(&data->atlas, font_data, gb->glyph_id, color_key, gb);
 
-                            if (tex) {
+                            if (entry) {
+                                SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
+                                                  (float)entry->region.w, (float)entry->region.h };
                                 SDL_FRect dst;
                                 if (style == FONT_STYLE_EMOJI) {
-                                    // Scale emoji to fit cell height, left-aligned
                                     float avail_w = (float)(columns_to_consume * data->cell_width);
                                     float avail_h = (float)data->cell_height;
-                                    float glyph_w = (float)gb->width;
-                                    float glyph_h = (float)gb->height;
+                                    float glyph_w = (float)entry->region.w;
+                                    float glyph_h = (float)entry->region.h;
                                     float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
                                     float scaled_w = glyph_w * scale;
                                     float scaled_h = glyph_h * scale;
@@ -675,16 +549,15 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                                         (float)cell_y + (avail_h - scaled_h) * 0.5f,
                                         scaled_w, scaled_h
                                     };
-                                    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+                                    SDL_SetTextureScaleMode(data->atlas.pages[entry->page_index].texture, SDL_SCALEMODE_LINEAR);
                                 } else {
-                                    int x = cell_x + shaped->x_positions[gi] + gb->x_offset;
-                                    int y = cell_y + data->font_ascent - gb->y_offset;
-                                    dst = (SDL_FRect){ (float)x, (float)y, (float)gb->width, (float)gb->height };
+                                    int x = cell_x + shaped->x_positions[gi] + entry->x_offset;
+                                    int y = cell_y + data->font_ascent - entry->y_offset;
+                                    dst = (SDL_FRect){ (float)x, (float)y, (float)entry->region.w, (float)entry->region.h };
                                 }
-                                SDL_RenderTexture(data->renderer, tex, NULL, &dst);
+                                SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dst);
                             }
 
-                            // Free glyph bitmap (texture stays cached)
                             data->font->free_glyph_bitmap(data->font, gb);
                         }
 
@@ -703,27 +576,24 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
 
                 // Fallback: render single glyph (first codepoint)
                 uint32_t codepoint = cps[0];
+                void *font_data_single = data->font ? data->font->font_data[style] : NULL;
+                uint32_t color_key_single = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
                 GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
                 if (glyph_bitmap) {
-                    // Try cache first
-                    void *font_data_single = data->font ? data->font->font_data[style] : NULL;
-                    uint32_t color_key_single = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-                    SDL_Texture *texture = renderer_get_cached_texture(data, font_data_single, glyph_bitmap->glyph_id, color_key_single);
-                    if (!texture) {
-                        texture = create_texture_from_glyph_bitmap(data, glyph_bitmap);
-                        if (texture)
-                            renderer_cache_texture(data, font_data_single, glyph_bitmap->glyph_id, color_key_single, texture, glyph_bitmap);
-                    }
-                    if (texture) {
+                    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single);
+                    if (!entry)
+                        entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single, glyph_bitmap);
+                    if (entry) {
                         int cell_x = col * data->cell_width;
                         int cell_y = row * data->cell_height;
+                        SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
+                                          (float)entry->region.w, (float)entry->region.h };
                         SDL_FRect dest_rect;
                         if (style == FONT_STYLE_EMOJI) {
-                            // Scale emoji to fit cell height, left-aligned
                             float avail_w = (float)(columns_to_consume * data->cell_width);
                             float avail_h = (float)data->cell_height;
-                            float glyph_w = (float)glyph_bitmap->width;
-                            float glyph_h = (float)glyph_bitmap->height;
+                            float glyph_w = (float)entry->region.w;
+                            float glyph_h = (float)entry->region.h;
                             float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
                             float scaled_w = glyph_w * scale;
                             float scaled_h = glyph_h * scale;
@@ -732,13 +602,13 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                                 (float)cell_y + (avail_h - scaled_h) * 0.5f,
                                 scaled_w, scaled_h
                             };
-                            SDL_SetTextureScaleMode(texture, SDL_SCALEMODE_LINEAR);
+                            SDL_SetTextureScaleMode(data->atlas.pages[entry->page_index].texture, SDL_SCALEMODE_LINEAR);
                         } else {
-                            float text_x = (float)cell_x + glyph_bitmap->x_offset;
-                            float text_y = (float)cell_y + data->font_ascent - glyph_bitmap->y_offset;
-                            dest_rect = (SDL_FRect){ text_x, text_y, (float)glyph_bitmap->width, (float)glyph_bitmap->height };
+                            float text_x = (float)cell_x + entry->x_offset;
+                            float text_y = (float)cell_y + data->font_ascent - entry->y_offset;
+                            dest_rect = (SDL_FRect){ text_x, text_y, (float)entry->region.w, (float)entry->region.h };
                         }
-                        SDL_RenderTexture(data->renderer, texture, NULL, &dest_rect);
+                        SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dest_rect);
                     }
                     data->font->free_glyph_bitmap(data->font, glyph_bitmap);
                 }
