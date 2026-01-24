@@ -23,6 +23,18 @@ static uint32_t atlas_hash(void *font_data, int glyph_id, uint32_t color)
     return hash;
 }
 
+static void atlas_page_clear(RendSdl3AtlasPage *page)
+{
+    void *pixels;
+    int pitch;
+    if (SDL_LockTexture(page->texture, NULL, &pixels, &pitch)) {
+        for (int y = 0; y < REND_SDL3_ATLAS_TEXTURE_SIZE; y++) {
+            memset((uint8_t *)pixels + y * pitch, 0, REND_SDL3_ATLAS_TEXTURE_SIZE * 4);
+        }
+        SDL_UnlockTexture(page->texture);
+    }
+}
+
 static bool atlas_page_init(RendSdl3AtlasPage *page, SDL_Renderer *renderer)
 {
     page->texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
@@ -35,6 +47,7 @@ static bool atlas_page_init(RendSdl3AtlasPage *page, SDL_Renderer *renderer)
     }
     SDL_SetTextureBlendMode(page->texture, SDL_BLENDMODE_BLEND);
     SDL_SetTextureScaleMode(page->texture, SDL_SCALEMODE_NEAREST);
+    atlas_page_clear(page);
     page->num_shelves = 0;
     page->next_shelf_y = 0;
     return true;
@@ -42,6 +55,7 @@ static bool atlas_page_init(RendSdl3AtlasPage *page, SDL_Renderer *renderer)
 
 static void atlas_page_reset(RendSdl3AtlasPage *page)
 {
+    atlas_page_clear(page);
     page->num_shelves = 0;
     page->next_shelf_y = 0;
 }
