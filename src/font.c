@@ -143,6 +143,16 @@ bool font_set_variation_axes(FontBackend *font, FontStyle style,
     return font->set_variation_axes(font, font->font_data[style], coords, num_coords);
 }
 
+// Get glyph index for a codepoint without rasterizing
+uint32_t font_get_glyph_index(FontBackend *font, FontStyle style, uint32_t codepoint)
+{
+    if (!font || style >= FONT_STYLE_COUNT ||
+        !(font->loaded_styles & (1u << style)) || !font->get_glyph_index) {
+        return 0;
+    }
+    return font->get_glyph_index(font, font->font_data[style], codepoint);
+}
+
 // Check if a style is loaded
 bool font_has_style(FontBackend *font, FontStyle style)
 {

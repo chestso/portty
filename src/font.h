@@ -126,6 +126,9 @@ struct FontBackend
 
     // Check if a loaded style supports COLR (color glyphs)
     bool (*style_has_colr)(FontBackend *font, void *font_data);
+
+    // Get glyph index for a codepoint without rasterizing
+    uint32_t (*get_glyph_index)(FontBackend *font, void *font_data, uint32_t codepoint);
 };
 
 // Font font API
@@ -152,6 +155,7 @@ bool font_set_variation_axes(FontBackend *font, FontStyle style,
                              float *coords, int num_coords);
 
 bool font_has_style(FontBackend *font, FontStyle style);
+uint32_t font_get_glyph_index(FontBackend *font, FontStyle style, uint32_t codepoint);
 
 // NEW: Check if a loaded style supports COLR (color glyphs)
 bool font_style_has_colr(FontBackend *font, FontStyle style);

@@ -1218,6 +1218,16 @@ static bool ft_set_variation_axes(FontBackend *font, void *font_data, float *coo
     return false;
 }
 
+// Get glyph index for a codepoint (no rasterization)
+static uint32_t ft_get_glyph_index(FontBackend *font, void *font_data, uint32_t codepoint)
+{
+    (void)font;
+    FtFontData *ft_data = (FtFontData *)font_data;
+    if (!ft_data)
+        return 0;
+    return FT_Get_Char_Index(ft_data->ft_face, codepoint);
+}
+
 // Get glyph info without rendering
 static bool ft_get_glyph_info(FontBackend *font, void *font_data, uint32_t codepoint,
                               int *advance, int *left_bearing, int *top_bearing)
@@ -1277,5 +1287,6 @@ FontBackend font_backend_ft = {
     .load_font = font_load_font,
     .get_style_metrics = font_get_metrics,
     .has_style = font_has_style,
-    .style_has_colr = ft_style_has_colr
+    .style_has_colr = ft_style_has_colr,
+    .get_glyph_index = ft_get_glyph_index
 };

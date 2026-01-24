@@ -165,8 +165,11 @@ static int vt_process_input(TerminalBackend *backend, const char *input, size_t 
 
     TerminalVtData *data = (TerminalVtData *)backend->backend_data;
 
-    if (data->vt)
-        return vterm_input_write(data->vt, input, len);
+    if (data->vt) {
+        int written = vterm_input_write(data->vt, input, len);
+        vterm_screen_flush_damage(data->screen);
+        return written;
+    }
 
     return -1;
 }

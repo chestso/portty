@@ -674,46 +674,54 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                 uint32_t codepoint = cps[0];
                 void *font_data_single = data->font ? data->font->font_data[style] : NULL;
                 uint32_t color_key_single = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
-                GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
-                if (glyph_bitmap) {
-                    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single);
-                    if (!entry) {
+
+                // Look up atlas using glyph index (cheap table lookup, no rasterization)
+                uint32_t glyph_index = font_get_glyph_index(data->font, style, codepoint);
+                RendSdl3AtlasEntry *entry = NULL;
+                if (glyph_index != 0) {
+                    entry = rend_sdl3_atlas_lookup(&data->atlas, font_data_single, glyph_index, color_key_single);
+                }
+                // Only rasterize on cache miss
+                if (!entry) {
+                    GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
+                    if (glyph_bitmap) {
+                        uint32_t insert_id = glyph_index ? glyph_index : (uint32_t)glyph_bitmap->glyph_id;
                         GlyphBitmap *scaled = NULL;
                         if (style == FONT_STYLE_EMOJI)
                             scaled = downscale_bitmap(glyph_bitmap, columns_to_consume * data->cell_width, data->cell_height);
-                        entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single, scaled ? scaled : glyph_bitmap);
+                        entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, insert_id, color_key_single, scaled ? scaled : glyph_bitmap);
                         if (scaled) {
                             free(scaled->pixels);
                             free(scaled);
                         }
+                        data->font->free_glyph_bitmap(data->font, glyph_bitmap);
                     }
-                    if (entry) {
-                        int cell_x = col * data->cell_width;
-                        int cell_y = row * data->cell_height;
-                        SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
-                                          (float)entry->region.w, (float)entry->region.h };
-                        SDL_FRect dest_rect;
-                        if (style == FONT_STYLE_EMOJI) {
-                            float avail_w = (float)(columns_to_consume * data->cell_width);
-                            float avail_h = (float)data->cell_height;
-                            float glyph_w = (float)entry->region.w;
-                            float glyph_h = (float)entry->region.h;
-                            float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
-                            float scaled_w = glyph_w * scale;
-                            float scaled_h = glyph_h * scale;
-                            dest_rect = (SDL_FRect){
-                                (float)cell_x,
-                                (float)cell_y + (avail_h - scaled_h) * 0.5f,
-                                scaled_w, scaled_h
-                            };
-                        } else {
-                            float text_x = (float)cell_x + entry->x_offset;
-                            float text_y = (float)cell_y + data->font_ascent - entry->y_offset;
-                            dest_rect = (SDL_FRect){ text_x, text_y, (float)entry->region.w, (float)entry->region.h };
-                        }
-                        SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dest_rect);
+                }
+                if (entry) {
+                    int cell_x = col * data->cell_width;
+                    int cell_y = row * data->cell_height;
+                    SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
+                                      (float)entry->region.w, (float)entry->region.h };
+                    SDL_FRect dest_rect;
+                    if (style == FONT_STYLE_EMOJI) {
+                        float avail_w = (float)(columns_to_consume * data->cell_width);
+                        float avail_h = (float)data->cell_height;
+                        float glyph_w = (float)entry->region.w;
+                        float glyph_h = (float)entry->region.h;
+                        float scale = fminf(avail_w / glyph_w, avail_h / glyph_h);
+                        float scaled_w = glyph_w * scale;
+                        float scaled_h = glyph_h * scale;
+                        dest_rect = (SDL_FRect){
+                            (float)cell_x,
+                            (float)cell_y + (avail_h - scaled_h) * 0.5f,
+                            scaled_w, scaled_h
+                        };
+                    } else {
+                        float text_x = (float)cell_x + entry->x_offset;
+                        float text_y = (float)cell_y + data->font_ascent - entry->y_offset;
+                        dest_rect = (SDL_FRect){ text_x, text_y, (float)entry->region.w, (float)entry->region.h };
                     }
-                    data->font->free_glyph_bitmap(data->font, glyph_bitmap);
+                    SDL_RenderTexture(data->renderer, data->atlas.pages[entry->page_index].texture, &src, &dest_rect);
                 }
 
                 // Update skip tracking to prevent re-rendering continuation cells
