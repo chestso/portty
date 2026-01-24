@@ -44,7 +44,8 @@ int main(int argc, char *argv[])
     // Parse command line arguments
     int debug_grid_enabled = 0;
     char *png_text = NULL;
-    while ((opt = getopt(argc, argv, "hvedP:")) != -1) {
+    float font_size = 12.0f; // Default font size in points
+    while ((opt = getopt(argc, argv, "hveds:P:")) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -59,6 +60,13 @@ int main(int argc, char *argv[])
         case 'd':
             debug_grid_enabled = 1;
             fprintf(stderr, "STATUS: debug grid enabled via CLI flag\n");
+            break;
+        case 's':
+            font_size = atof(optarg);
+            if (font_size <= 0.0f) {
+                fprintf(stderr, "ERROR: Invalid font size: %s\n", optarg);
+                return 1;
+            }
             break;
         case 'P':
             png_text = optarg;
@@ -205,7 +213,7 @@ int main(int argc, char *argv[])
         renderer_resize(rend, WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // Load fonts
-        if (renderer_load_fonts(rend) < 0) {
+        if (renderer_load_fonts(rend, font_size) < 0) {
             fprintf(stderr, "Failed to load fonts\n");
             renderer_destroy(rend);
             terminal_destroy(term);
@@ -325,6 +333,9 @@ int main(int argc, char *argv[])
                 SDL_RenderPresent(sdl_rend);
                 terminal_clear_redraw(term);
                 force_redraw = 0;
+
+                // Log atlas stats after rendering activity
+                renderer_log_stats(rend);
             }
 
             // Small delay to prevent excessive CPU usage
@@ -366,6 +377,7 @@ static void print_usage(const char *progname)
     printf("  -v          Verbose output (debug information)\n");
     printf("  -e          Exit immediately (for testing)\n");
     printf("  -d          Enable debug grid (for testing)\n");
+    printf("  -s SIZE     Font size in points (default: 12.0)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("\n");
     printf("Input:\n");

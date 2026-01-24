@@ -60,5 +60,6 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_lookup(RendSdl3Atlas *atlas, void *font_data
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data,
                                            int glyph_id, uint32_t color,
                                            GlyphBitmap *bmp);
+void rend_sdl3_atlas_log_stats(RendSdl3Atlas *atlas);
 
 #endif // REND_SDL3_ATLAS_H

@@ -19,11 +19,11 @@ void renderer_destroy(RendererBackend *rend)
     rend->destroy(rend);
 }
 
-int renderer_load_fonts(RendererBackend *rend)
+int renderer_load_fonts(RendererBackend *rend, float font_size)
 {
     if (!rend || !rend->load_fonts)
         return -1;
-    return rend->load_fonts(rend);
+    return rend->load_fonts(rend, font_size);
 }
 
 void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term)
@@ -52,4 +52,11 @@ void renderer_toggle_debug_grid(RendererBackend *rend)
     if (!rend || !rend->toggle_debug_grid)
         return;
     rend->toggle_debug_grid(rend);
+}
+
+void renderer_log_stats(RendererBackend *rend)
+{
+    if (!rend || !rend->log_stats)
+        return;
+    rend->log_stats(rend);
 }

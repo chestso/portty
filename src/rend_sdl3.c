@@ -13,6 +13,92 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#define EMOJI_FONT_SCALE 4.0f
+
+// Box-filter downscale a glyph bitmap to fit within max_w x max_h.
+// Returns a newly allocated GlyphBitmap, or NULL if no downscale is needed.
+static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
+{
+    if (!src || !src->pixels || src->width <= 0 || src->height <= 0)
+        return NULL;
+    if (src->width <= max_w && src->height <= max_h)
+        return NULL;
+
+    float scale_x = (float)max_w / (float)src->width;
+    float scale_y = (float)max_h / (float)src->height;
+    float scale = fminf(scale_x, scale_y);
+
+    int dst_w = (int)(src->width * scale + 0.5f);
+    int dst_h = (int)(src->height * scale + 0.5f);
+    if (dst_w <= 0)
+        dst_w = 1;
+    if (dst_h <= 0)
+        dst_h = 1;
+
+    uint8_t *dst_pixels = calloc((size_t)dst_w * dst_h, 4);
+    if (!dst_pixels)
+        return NULL;
+
+    for (int dy = 0; dy < dst_h; dy++) {
+        int sy0 = dy * src->height / dst_h;
+        int sy1 = (dy + 1) * src->height / dst_h;
+        if (sy1 > src->height)
+            sy1 = src->height;
+        if (sy0 == sy1)
+            sy1 = sy0 + 1;
+
+        for (int dx = 0; dx < dst_w; dx++) {
+            int sx0 = dx * src->width / dst_w;
+            int sx1 = (dx + 1) * src->width / dst_w;
+            if (sx1 > src->width)
+                sx1 = src->width;
+            if (sx0 == sx1)
+                sx1 = sx0 + 1;
+
+            float pr_sum = 0, pg_sum = 0, pb_sum = 0, a_sum = 0;
+            int count = 0;
+            for (int sy = sy0; sy < sy1; sy++) {
+                for (int sx = sx0; sx < sx1; sx++) {
+                    uint8_t *p = src->pixels + (sy * src->width + sx) * 4;
+                    float a = p[3] / 255.0f;
+                    pr_sum += p[0] * a;
+                    pg_sum += p[1] * a;
+                    pb_sum += p[2] * a;
+                    a_sum += p[3];
+                    count++;
+                }
+            }
+            if (count > 0) {
+                uint8_t *dp = dst_pixels + (dy * dst_w + dx) * 4;
+                float avg_a = a_sum / count;
+                if (avg_a > 0.5f) {
+                    float inv = 255.0f / a_sum;
+                    dp[0] = (uint8_t)fminf(pr_sum * inv + 0.5f, 255.0f);
+                    dp[1] = (uint8_t)fminf(pg_sum * inv + 0.5f, 255.0f);
+                    dp[2] = (uint8_t)fminf(pb_sum * inv + 0.5f, 255.0f);
+                } else {
+                    dp[0] = dp[1] = dp[2] = 0;
+                }
+                dp[3] = (uint8_t)(avg_a + 0.5f);
+            }
+        }
+    }
+
+    GlyphBitmap *result = malloc(sizeof(GlyphBitmap));
+    if (!result) {
+        free(dst_pixels);
+        return NULL;
+    }
+    result->pixels = dst_pixels;
+    result->width = dst_w;
+    result->height = dst_h;
+    result->x_offset = (int)(src->x_offset * scale + 0.5f);
+    result->y_offset = (int)(src->y_offset * scale + 0.5f);
+    result->advance = (int)(src->advance * scale + 0.5f);
+    result->glyph_id = src->glyph_id;
+    return result;
+}
+
 typedef struct RendererSdl3Data
 {
     SDL_Renderer *renderer;
@@ -216,14 +302,12 @@ static void sdl3_destroy(RendererBackend *backend)
     backend->backend_data = NULL;
 }
 
-static int sdl3_load_fonts(RendererBackend *backend)
+static int sdl3_load_fonts(RendererBackend *backend, float font_size)
 {
     if (!backend || !backend->backend_data)
         return -1;
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-
-    const float font_size = 24.0f; // Default font size in points
 
     vlog("Loading fonts with size %.1f\n", font_size);
 
@@ -290,7 +374,7 @@ static int sdl3_load_fonts(RendererBackend *backend)
 
     // Load emoji font
     if (font_resolver_find_font(FONT_TYPE_EMOJI, &result) == 0) {
-        if (font_load_font(data->font, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
+        if (font_load_font(data->font, FONT_STYLE_EMOJI, result.font_path, font_size * EMOJI_FONT_SCALE, &options)) {
             vlog("Emoji font loaded successfully from %s\n", result.font_path);
         } else {
             vlog("Failed to load emoji font from %s\n", result.font_path);
@@ -529,8 +613,16 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                             void *font_data = data->font ? data->font->font_data[style] : NULL;
                             uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
                             RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gb->glyph_id, color_key);
-                            if (!entry)
-                                entry = rend_sdl3_atlas_insert(&data->atlas, font_data, gb->glyph_id, color_key, gb);
+                            if (!entry) {
+                                GlyphBitmap *scaled = NULL;
+                                if (style == FONT_STYLE_EMOJI)
+                                    scaled = downscale_bitmap(gb, columns_to_consume * data->cell_width, data->cell_height);
+                                entry = rend_sdl3_atlas_insert(&data->atlas, font_data, gb->glyph_id, color_key, scaled ? scaled : gb);
+                                if (scaled) {
+                                    free(scaled->pixels);
+                                    free(scaled);
+                                }
+                            }
 
                             if (entry) {
                                 SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
@@ -549,7 +641,6 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                                         (float)cell_y + (avail_h - scaled_h) * 0.5f,
                                         scaled_w, scaled_h
                                     };
-                                    SDL_SetTextureScaleMode(data->atlas.pages[entry->page_index].texture, SDL_SCALEMODE_LINEAR);
                                 } else {
                                     int x = cell_x + shaped->x_positions[gi] + entry->x_offset;
                                     int y = cell_y + data->font_ascent - entry->y_offset;
@@ -581,8 +672,16 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                 GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
                 if (glyph_bitmap) {
                     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single);
-                    if (!entry)
-                        entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single, glyph_bitmap);
+                    if (!entry) {
+                        GlyphBitmap *scaled = NULL;
+                        if (style == FONT_STYLE_EMOJI)
+                            scaled = downscale_bitmap(glyph_bitmap, columns_to_consume * data->cell_width, data->cell_height);
+                        entry = rend_sdl3_atlas_insert(&data->atlas, font_data_single, glyph_bitmap->glyph_id, color_key_single, scaled ? scaled : glyph_bitmap);
+                        if (scaled) {
+                            free(scaled->pixels);
+                            free(scaled);
+                        }
+                    }
                     if (entry) {
                         int cell_x = col * data->cell_width;
                         int cell_y = row * data->cell_height;
@@ -602,7 +701,6 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
                                 (float)cell_y + (avail_h - scaled_h) * 0.5f,
                                 scaled_w, scaled_h
                             };
-                            SDL_SetTextureScaleMode(data->atlas.pages[entry->page_index].texture, SDL_SCALEMODE_LINEAR);
                         } else {
                             float text_x = (float)cell_x + entry->x_offset;
                             float text_y = (float)cell_y + data->font_ascent - entry->y_offset;
@@ -678,6 +776,15 @@ static void sdl3_toggle_debug_grid(RendererBackend *backend)
     vlog("Current debug_grid value: %d\n", data->debug_grid);
 }
 
+static void sdl3_log_stats(RendererBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    rend_sdl3_atlas_log_stats(&data->atlas);
+}
+
 static void sdl3_resize(RendererBackend *backend, int width, int height)
 {
     if (!backend || !backend->backend_data)
@@ -698,5 +805,6 @@ RendererBackend renderer_backend_sdl3 = {
     .draw_terminal = sdl3_draw_terminal,
     .present = sdl3_present,
     .resize = sdl3_resize,
-    .toggle_debug_grid = sdl3_toggle_debug_grid
+    .toggle_debug_grid = sdl3_toggle_debug_grid,
+    .log_stats = sdl3_log_stats
 };
