@@ -2,7 +2,7 @@
 #include "font.h"
 #include "font_resolver.h"
 #include "png_writer.h"
-#include "renderer.h"
+#include "rend.h"
 #include "term.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
@@ -198,8 +198,7 @@ int main(int argc, char *argv[])
         }
 
         // Set initial width/height in renderer
-        rend->width = WINDOW_WIDTH;
-        rend->height = WINDOW_HEIGHT;
+        renderer_resize(rend, WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // Load fonts
         if (renderer_load_fonts(rend) < 0) {

@@ -1,7 +1,7 @@
-#include "renderer.h"
 #include "common.h"
 #include "font.h"
 #include "font_resolver.h"
+#include "rend.h"
 #include <SDL3/SDL.h>
 #include <limits.h>
 #include <stdint.h>
@@ -10,6 +10,28 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+struct GlyphCacheEntry;
+
+struct Renderer
+{
+    SDL_Renderer *renderer;
+    SDL_Window *window;
+    Font *font;
+    int cell_width;
+    int cell_height;
+    int char_width;
+    int char_height;
+    int font_ascent;
+    int font_descent;
+    int width;
+    int height;
+    int debug_grid;
+
+    struct GlyphCacheEntry *glyph_cache;
+    int glyph_cache_size;
+    uint64_t cache_tick;
+};
 
 // Emoji helper functions
 static bool is_emoji_base_range(uint32_t cp)
