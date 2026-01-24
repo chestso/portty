@@ -43,7 +43,6 @@ typedef struct
     FT_UShort palette_size;
 
     // Font rendering options
-    bool antialias;
     int ft_hint_target; // FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT, _NORMAL, or _MONO
     int subpixel_order;
     int lcd_filter;

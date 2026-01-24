@@ -654,7 +654,6 @@ static int png_render_text(const char *text, const char *output_path)
 
     /* Setup font options (72 DPI matches hb-view default) */
     FontOptions options = { 0 };
-    options.antialias = true;
     options.ft_hint_target = FT_LOAD_TARGET_LIGHT;
     options.dpi_x = 72;
     options.dpi_y = 72;

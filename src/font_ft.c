@@ -256,15 +256,9 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
         if (layer_glyph == 0)
             break;
 
-        FT_Int32 load_flags = FT_LOAD_DEFAULT;
-        if (ft_data->antialias)
-            load_flags |= FT_LOAD_TARGET_NORMAL;
-        else
-            load_flags |= FT_LOAD_TARGET_MONO;
-
-        if (FT_Load_Glyph(face, layer_glyph, load_flags) != 0)
+        if (FT_Load_Glyph(face, layer_glyph, ft_data->ft_hint_target) != 0)
             continue;
-        if (FT_Render_Glyph(face->glyph, ft_data->antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO) != 0)
+        if (FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target)) != 0)
             continue;
 
         FT_Bitmap *bmp = &face->glyph->bitmap;
@@ -436,7 +430,7 @@ unsigned char *rasterize_glyph_mask(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
 
     // Convert glyph to bitmap (keeps hinting/size effects)
-    err = FT_Glyph_To_Bitmap(&glyph, ft_data->antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO, NULL, 1);
+    err = FT_Glyph_To_Bitmap(&glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target), NULL, 1);
     if (err) {
         FT_Done_Glyph(glyph);
         return NULL;
@@ -561,14 +555,12 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
 
     // Set font options
     if (options) {
-        ft_data->antialias = options->antialias;
         ft_data->ft_hint_target = options->ft_hint_target;
         ft_data->subpixel_order = options->subpixel_order;
         ft_data->lcd_filter = options->lcd_filter;
         ft_data->dpi_x = options->dpi_x;
         ft_data->dpi_y = options->dpi_y;
     } else {
-        ft_data->antialias = true;
         ft_data->ft_hint_target = FT_LOAD_NO_HINTING;
         ft_data->subpixel_order = 0;
         ft_data->lcd_filter = 0;
@@ -764,7 +756,7 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
     }
 
     // Render the glyph to a bitmap
-    error = FT_Render_Glyph(face->glyph, ft_data->antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO);
+    error = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
     if (error) {
         vlog("Failed to render glyph for U+%04X: error %d\n", codepoint, error);
         return NULL;
@@ -843,7 +835,7 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
     // COLR rendering not yet implemented with FreeType directly; fall back to simple grayscale rendering
     vlog("COLR glyph rendering requested for U+%04X but COLR support is not implemented; attempting grayscale fallback\n", codepoint);
     // Try to render a grayscale glyph as a fallback (may lose color information)
-    FT_Error colr_err = FT_Render_Glyph(face->glyph, ft_data->antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO);
+    FT_Error colr_err = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
     if (colr_err) {
         vlog("Fallback grayscale render failed for U+%04X: error %d\n", codepoint, colr_err);
         return NULL;
@@ -1004,7 +996,7 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     }
 
     // Render glyph to bitmap
-    error = FT_Render_Glyph(face->glyph, ft_data->antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO);
+    error = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
     if (error) {
         vlog("rasterize_glyph_index: Failed to render glyph index %u: error %d\n", glyph_index, error);
         return NULL;
