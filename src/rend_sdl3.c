@@ -431,10 +431,6 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
         return;
     }
 
-    vlog("Drawing terminal with dimensions %dx%d\n", data->width, data->height);
-    vlog("Cell dimensions: %dx%d, Font ascent: %d\n",
-         data->cell_width, data->cell_height, data->font_ascent);
-
     // Clear screen
     SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
     SDL_RenderClear(data->renderer);
