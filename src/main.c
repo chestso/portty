@@ -7,6 +7,7 @@
 #include "rend_sdl3.h"
 #include "term.h"
 #include "term_vt.h"
+#include "unicode.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -416,45 +417,6 @@ static void process_input_from_source(TerminalBackend *term, const char *source)
     if (terminal_get_dimensions(term, &rows, &cols) == 0) {
         fprintf(stderr, "STATUS: terminal_dimensions=%dx%d\n", cols, rows);
     }
-}
-
-/* Convert UTF-8 string to an array of Unicode codepoints.
- * Returns number of codepoints written, or -1 on error. */
-static int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out)
-{
-    int count = 0;
-    const uint8_t *s = (const uint8_t *)utf8;
-
-    while (*s && count < max_out) {
-        uint32_t cp;
-        int len;
-
-        if (s[0] < 0x80) {
-            cp = s[0];
-            len = 1;
-        } else if ((s[0] & 0xE0) == 0xC0) {
-            cp = s[0] & 0x1F;
-            len = 2;
-        } else if ((s[0] & 0xF0) == 0xE0) {
-            cp = s[0] & 0x0F;
-            len = 3;
-        } else if ((s[0] & 0xF8) == 0xF0) {
-            cp = s[0] & 0x07;
-            len = 4;
-        } else {
-            return -1; /* invalid UTF-8 */
-        }
-
-        for (int i = 1; i < len; i++) {
-            if ((s[i] & 0xC0) != 0x80)
-                return -1;
-            cp = (cp << 6) | (s[i] & 0x3F);
-        }
-
-        out[count++] = cp;
-        s += len;
-    }
-    return count;
 }
 
 static int png_render_text(const char *text, const char *output_path)

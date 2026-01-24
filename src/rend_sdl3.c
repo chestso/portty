@@ -4,6 +4,7 @@
 #include "font_ft.h"
 #include "font_resolver.h"
 #include "rend.h"
+#include "unicode.h"
 #include <SDL3/SDL.h>
 #include <limits.h>
 #include <stdint.h>
@@ -34,53 +35,6 @@ typedef struct RendererSdl3Data
     int glyph_cache_size;
     uint64_t cache_tick;
 } RendererSdl3Data;
-
-// Emoji helper functions
-static bool is_emoji_base_range(uint32_t cp)
-{
-    // Proper emoji base ranges from Unicode standard
-    return (cp >= 0x1F300 && cp <= 0x1F5FF) || // Miscellaneous Symbols and Pictographs
-           (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
-           (cp >= 0x1F680 && cp <= 0x1F6FF) || // Transport and Map Symbols
-           (cp >= 0x1F900 && cp <= 0x1F9FF) || // Supplemental Symbols and Pictographs
-           (cp >= 0x1FA70 && cp <= 0x1FAFF);   // Symbols and Pictographs Extended-A
-}
-
-static bool is_ambiguous_emoji(uint32_t cp)
-{
-    // Characters that MIGHT be emoji with U+FE0F (text vs. emoji presentation)
-    return (cp >= 0x2600 && cp <= 0x27BF) ||
-           (cp >= 0x231A && cp <= 0x231B) ||   // Watch, Clock
-           (cp == 0x2328) ||                   // Keyboard
-           (cp >= 0x23E9 && cp <= 0x23FA) ||   // Media controls
-           (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
-           (cp >= 0x1F300 && cp <= 0x1F5FF) || // Miscellaneous Symbols and Pictographs
-           (cp >= 0x1F680 && cp <= 0x1F6FF);   // Transport and Map Symbols
-}
-
-static bool is_emoji_presentation(uint32_t cp)
-{
-    // Check if character is in emoji base ranges or ambiguous emoji that needs variation selector
-    return is_emoji_base_range(cp) || is_ambiguous_emoji(cp);
-}
-
-static bool is_regional_indicator(uint32_t cp)
-{
-    // Regional indicators (U+1F1E6 to U+1F1FF)
-    return (cp >= 0x1F1E6 && cp <= 0x1F1FF);
-}
-
-static bool is_zwj(uint32_t cp)
-{
-    // Zero Width Joiner
-    return (cp == 0x200D);
-}
-
-static bool is_skin_tone_modifier(uint32_t cp)
-{
-    // Skin tone modifiers (U+1F3FB to U+1F3FF)
-    return (cp >= 0x1F3FB && cp <= 0x1F3FF);
-}
 
 // Function to combine emoji cells for multi-codepoint sequences
 static int combine_cells_for_emoji(TerminalBackend *term, int row, int col,

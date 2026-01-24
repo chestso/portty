@@ -1,0 +1,26 @@
+#ifndef UNICODE_H
+#define UNICODE_H
+
+#include <stdbool.h>
+#include <stdint.h>
+
+// Unicode codepoint constants
+#define UNICODE_ZERO_WIDTH_JOINER      0x200D
+#define UNICODE_VARIATION_SELECTOR_16  0xFE0F
+#define UNICODE_SKIN_TONE_MIN          0x1F3FB
+#define UNICODE_SKIN_TONE_MAX          0x1F3FF
+#define UNICODE_REGIONAL_INDICATOR_MIN 0x1F1E6
+#define UNICODE_REGIONAL_INDICATOR_MAX 0x1F1FF
+
+// Emoji detection functions
+bool is_emoji_base_range(uint32_t cp);
+bool is_ambiguous_emoji(uint32_t cp);
+bool is_emoji_presentation(uint32_t cp);
+bool is_regional_indicator(uint32_t cp);
+bool is_zwj(uint32_t cp);
+bool is_skin_tone_modifier(uint32_t cp);
+
+// UTF-8 conversion
+int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out);
+
+#endif /* UNICODE_H */
