@@ -43,9 +43,21 @@ int main(int argc, char *argv[])
 
     // Parse command line arguments
     int debug_grid_enabled = 0;
+    int list_fonts = 0;
+    int bench_mode = 0;
+    int ft_hint_target = FT_LOAD_NO_HINTING; // Default: no hinting
     char *png_text = NULL;
+    const char *font_name = NULL;
     float font_size = 12.0f; // Default font size in points
-    while ((opt = getopt(argc, argv, "hveds:P:")) != -1) {
+
+    static struct option long_options[] = {
+        { "list-fonts", no_argument, NULL, 'L' },
+        { "ft-hinting", required_argument, NULL, 'H' },
+        { "bench", no_argument, NULL, 'B' },
+        { NULL, 0, NULL, 0 }
+    };
+
+    while ((opt = getopt_long(argc, argv, "hveds:f:P:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -68,11 +80,33 @@ int main(int argc, char *argv[])
                 return 1;
             }
             break;
+        case 'f':
+            font_name = optarg;
+            break;
+        case 'L':
+            list_fonts = 1;
+            break;
+        case 'H':
+            if (strcmp(optarg, "none") == 0) {
+                ft_hint_target = FT_LOAD_NO_HINTING;
+            } else if (strcmp(optarg, "light") == 0) {
+                ft_hint_target = FT_LOAD_TARGET_LIGHT;
+            } else if (strcmp(optarg, "normal") == 0) {
+                ft_hint_target = FT_LOAD_TARGET_NORMAL;
+            } else if (strcmp(optarg, "mono") == 0) {
+                ft_hint_target = FT_LOAD_TARGET_MONO;
+            } else {
+                fprintf(stderr, "ERROR: Invalid hinting target: %s (use none, light, normal, mono)\n", optarg);
+                return 1;
+            }
+            break;
+        case 'B':
+            bench_mode = 1;
+            break;
         case 'P':
             png_text = optarg;
             break;
         case '?':
-            fprintf(stderr, "ERROR: Unknown option: -%c\n", optopt);
             print_usage(argv[0]);
             return 1;
         }
@@ -81,6 +115,17 @@ int main(int argc, char *argv[])
     // Check for input source argument
     if (optind < argc) {
         input_source = argv[optind];
+    }
+
+    // List monospace fonts and exit
+    if (list_fonts) {
+        if (font_resolver_init() != 0) {
+            fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
+            return 1;
+        }
+        font_resolver_list_monospace();
+        font_resolver_cleanup();
+        return 0;
     }
 
     // PNG render mode: skip SDL entirely, render text to PNG and exit
@@ -213,7 +258,7 @@ int main(int argc, char *argv[])
         renderer_resize(rend, WINDOW_WIDTH, WINDOW_HEIGHT);
 
         // Load fonts
-        if (renderer_load_fonts(rend, font_size) < 0) {
+        if (renderer_load_fonts(rend, font_size, font_name, ft_hint_target) < 0) {
             fprintf(stderr, "Failed to load fonts\n");
             renderer_destroy(rend);
             terminal_destroy(term);
@@ -233,113 +278,120 @@ int main(int argc, char *argv[])
 
     // Only enter event loop if running
     if (running) {
-        int force_redraw = 1; // Force initial render
-
         // Enable debug grid if requested via CLI
         if (debug_grid_enabled && rend) {
             renderer_toggle_debug_grid(rend);
             vlog("Debug grid enabled via CLI flag\n");
         }
 
-        // Main event loop
-        while (running) {
-            // Process events
-            while (SDL_PollEvent(&event)) {
-                switch (event.type) {
-                case SDL_EVENT_QUIT:
-                    running = 0;
-                    break;
+        if (bench_mode) {
+            // Benchmark mode: render one frame and exit
+            renderer_draw_terminal(rend, term);
+            SDL_RenderPresent(sdl_rend);
+            renderer_log_stats(rend);
+        } else {
+            int force_redraw = 1; // Force initial render
 
-                case SDL_EVENT_KEY_DOWN:
-                    // Handle key presses and send to terminal
-                    {
-                        char key_buffer[16] = { 0 };
-                        size_t len = 0;
+            // Main event loop
+            while (running) {
+                // Process events
+                while (SDL_PollEvent(&event)) {
+                    switch (event.type) {
+                    case SDL_EVENT_QUIT:
+                        running = 0;
+                        break;
 
-                        // Convert SDL key events to terminal input
-                        switch (event.key.key) {
-                        case SDLK_RETURN:
-                            vlog("ENTER key pressed, sending CRLF (%d bytes)\n", 2);
-                            key_buffer[0] = '\r';
-                            key_buffer[1] = '\n';
-                            len = 2;
-                            break;
-                        case SDLK_BACKSPACE:
-                            key_buffer[0] = '\x7f'; // DEL character
-                            len = 1;
-                            break;
-                        case SDLK_ESCAPE:
-                            key_buffer[0] = '\x1b'; // ESC character
-                            len = 1;
-                            break;
-                        case SDLK_UP:
-                            strcpy(key_buffer, "\x1b[A");
-                            len = 3;
-                            break;
-                        case SDLK_DOWN:
-                            strcpy(key_buffer, "\x1b[B");
-                            len = 3;
-                            break;
-                        case SDLK_RIGHT:
-                            strcpy(key_buffer, "\x1b[C");
-                            len = 3;
-                            break;
-                        case SDLK_LEFT:
-                            strcpy(key_buffer, "\x1b[D");
-                            len = 3;
-                            break;
-                        default:
-                            // Handle printable characters
-                            if (event.key.key >= 32 && event.key.key < 127) {
-                                // Check for Ctrl+G specifically
-                                if (event.key.key == 'g' || event.key.key == 'G') {
-                                    if (event.key.mod & SDL_KMOD_CTRL) {
-                                        if (rend) {
-                                            renderer_toggle_debug_grid(rend);
-                                            force_redraw = 1;
+                    case SDL_EVENT_KEY_DOWN:
+                        // Handle key presses and send to terminal
+                        {
+                            char key_buffer[16] = { 0 };
+                            size_t len = 0;
+
+                            // Convert SDL key events to terminal input
+                            switch (event.key.key) {
+                            case SDLK_RETURN:
+                                vlog("ENTER key pressed, sending CRLF (%d bytes)\n", 2);
+                                key_buffer[0] = '\r';
+                                key_buffer[1] = '\n';
+                                len = 2;
+                                break;
+                            case SDLK_BACKSPACE:
+                                key_buffer[0] = '\x7f'; // DEL character
+                                len = 1;
+                                break;
+                            case SDLK_ESCAPE:
+                                key_buffer[0] = '\x1b'; // ESC character
+                                len = 1;
+                                break;
+                            case SDLK_UP:
+                                strcpy(key_buffer, "\x1b[A");
+                                len = 3;
+                                break;
+                            case SDLK_DOWN:
+                                strcpy(key_buffer, "\x1b[B");
+                                len = 3;
+                                break;
+                            case SDLK_RIGHT:
+                                strcpy(key_buffer, "\x1b[C");
+                                len = 3;
+                                break;
+                            case SDLK_LEFT:
+                                strcpy(key_buffer, "\x1b[D");
+                                len = 3;
+                                break;
+                            default:
+                                // Handle printable characters
+                                if (event.key.key >= 32 && event.key.key < 127) {
+                                    // Check for Ctrl+G specifically
+                                    if (event.key.key == 'g' || event.key.key == 'G') {
+                                        if (event.key.mod & SDL_KMOD_CTRL) {
+                                            if (rend) {
+                                                renderer_toggle_debug_grid(rend);
+                                                force_redraw = 1;
+                                            }
+                                            // Don't send to terminal
+                                            len = 0;
+                                            vlog("Ctrl+G pressed, debug grid toggled\n");
+                                        } else {
+                                            key_buffer[0] = (char)event.key.key;
+                                            len = 1;
                                         }
-                                        // Don't send to terminal
-                                        len = 0;
-                                        vlog("Ctrl+G pressed, debug grid toggled\n");
                                     } else {
                                         key_buffer[0] = (char)event.key.key;
                                         len = 1;
                                     }
-                                } else {
-                                    key_buffer[0] = (char)event.key.key;
-                                    len = 1;
                                 }
+                                break;
                             }
-                            break;
-                        }
 
-                        if (len > 0) {
-                            terminal_process_input(term, key_buffer, len);
+                            if (len > 0) {
+                                terminal_process_input(term, key_buffer, len);
+                            }
                         }
+                        break;
+
+                    case SDL_EVENT_WINDOW_RESIZED:
+                        // Handle window resize
+                        terminal_resize(term, event.window.data1, event.window.data2);
+                        renderer_resize(rend, event.window.data1, event.window.data2);
+                        break;
                     }
-                    break;
-
-                case SDL_EVENT_WINDOW_RESIZED:
-                    // Handle window resize
-                    terminal_resize(term, event.window.data1, event.window.data2);
-                    renderer_resize(rend, event.window.data1, event.window.data2);
-                    break;
                 }
+
+                // Render terminal only if needed
+                if (terminal_needs_redraw(term) || force_redraw) {
+                    renderer_draw_terminal(rend, term);
+                    SDL_RenderPresent(sdl_rend);
+                    terminal_clear_redraw(term);
+                    force_redraw = 0;
+
+                    // Log atlas stats after rendering activity
+                    renderer_log_stats(rend);
+                }
+
+                // Small delay to prevent excessive CPU usage
+                SDL_Delay(16); // ~60 FPS
             }
-
-            // Render terminal only if needed
-            if (terminal_needs_redraw(term) || force_redraw) {
-                renderer_draw_terminal(rend, term);
-                SDL_RenderPresent(sdl_rend);
-                terminal_clear_redraw(term);
-                force_redraw = 0;
-
-                // Log atlas stats after rendering activity
-                renderer_log_stats(rend);
-            }
-
-            // Small delay to prevent excessive CPU usage
-            SDL_Delay(16); // ~60 FPS
         }
     }
 
@@ -378,7 +430,12 @@ static void print_usage(const char *progname)
     printf("  -e          Exit immediately (for testing)\n");
     printf("  -d          Enable debug grid (for testing)\n");
     printf("  -s SIZE     Font size in points (default: 12.0)\n");
+    printf("  -f FONT     Font family name (e.g., \"Adwaita Mono\")\n");
+    printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: none)\n");
+    printf("  --list-fonts  List available monospace fonts and exit\n");
+    printf("  --bench       Render one frame and exit (for profiling)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
+    printf("  --          End of options (use before - for stdin)\n");
     printf("\n");
     printf("Input:\n");
     printf("  INPUT_FILE  File containing terminal input to process\n");
@@ -461,14 +518,13 @@ static int png_render_text(const char *text, const char *output_path)
     /* Setup font options (72 DPI matches hb-view default) */
     FontOptions options = { 0 };
     options.antialias = true;
-    options.hinting = 1;
-    options.hint_style = 1;
+    options.ft_hint_target = FT_LOAD_TARGET_LIGHT;
     options.dpi_x = 72;
     options.dpi_y = 72;
 
     /* Load emoji font */
     FontResolutionResult result;
-    if (font_resolver_find_font(FONT_TYPE_EMOJI, &result) != 0) {
+    if (font_resolver_find_font(FONT_TYPE_EMOJI, NULL, &result) != 0) {
         fprintf(stderr, "ERROR: Failed to find emoji font\n");
         font_resolver_cleanup();
         font_destroy(&font_backend_ft);

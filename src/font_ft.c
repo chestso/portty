@@ -9,7 +9,6 @@
 #include "common.h"
 #include "font.h"
 #include "font_ft_internal.h"
-#include <fontconfig/fontconfig.h>
 #include <hb-ft.h>
 #include <hb.h>
 #include <math.h>
@@ -425,9 +424,7 @@ unsigned char *rasterize_glyph_mask(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
     FT_Face face = ft_data->ft_face;
 
-    FT_Int32 load_flags = FT_LOAD_DEFAULT | FT_LOAD_NO_BITMAP;
-    if (!ft_data->hinting)
-        load_flags |= FT_LOAD_NO_HINTING;
+    FT_Int32 load_flags = FT_LOAD_NO_BITMAP | ft_data->ft_hint_target;
 
     FT_Error err = FT_Load_Glyph(face, glyph_index, load_flags);
     if (err)
@@ -562,24 +559,19 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
     ft_data->font_size = font_size;
     ft_data->style = style;
 
-    // Set font options from Fontconfig
+    // Set font options
     if (options) {
         ft_data->antialias = options->antialias;
-        ft_data->hinting = options->hinting;
-        ft_data->hint_style = options->hint_style;
+        ft_data->ft_hint_target = options->ft_hint_target;
         ft_data->subpixel_order = options->subpixel_order;
         ft_data->lcd_filter = options->lcd_filter;
-        ft_data->ft_load_flags = options->ft_load_flags;
         ft_data->dpi_x = options->dpi_x;
         ft_data->dpi_y = options->dpi_y;
     } else {
-        // Set default options if none provided
         ft_data->antialias = true;
-        ft_data->hinting = true;
-        ft_data->hint_style = FC_HINT_SLIGHT;
-        ft_data->subpixel_order = FC_RGBA_NONE;
-        ft_data->lcd_filter = FC_LCD_DEFAULT;
-        ft_data->ft_load_flags = FT_LOAD_TARGET_LIGHT;
+        ft_data->ft_hint_target = FT_LOAD_NO_HINTING;
+        ft_data->subpixel_order = 0;
+        ft_data->lcd_filter = 0;
         ft_data->dpi_x = 96;
         ft_data->dpi_y = 96;
     }
@@ -713,8 +705,8 @@ static bool ft_get_metrics(FontBackend *font, void *font_data, FontMetrics *metr
     vlog("cell_width fallback to max_advance: %d\n", metrics->cell_width);
 m_done:;
 
-    // For cell height, use ascender + descender for proper baseline alignment
-    metrics->cell_height = metrics->ascent + metrics->descent;
+    // Cell height = font's recommended baseline-to-baseline distance (height metric)
+    metrics->cell_height = face->size->metrics.height >> 6;
 
     // For glyph dimensions, we'll use the actual metrics from the face
     // This is a simplified approach - in a full implementation we'd measure actual glyphs
@@ -762,31 +754,8 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
         vlog("COLR render path failed for U+%04X, falling back to outline/grayscale rendering\n", codepoint);
     }
 
-    // Load glyph with appropriate flags
-    FT_Int32 load_flags = FT_LOAD_DEFAULT;
-    if (ft_data->antialias) {
-        load_flags |= FT_LOAD_TARGET_NORMAL;
-    } else {
-        load_flags |= FT_LOAD_TARGET_MONO;
-    }
-
-    // Apply hinting settings
-    if (ft_data->hinting) {
-        switch (ft_data->hint_style) {
-        case FC_HINT_NONE:
-            load_flags |= FT_LOAD_NO_HINTING;
-            break;
-        case FC_HINT_SLIGHT:
-            load_flags |= FT_LOAD_TARGET_LIGHT;
-            break;
-        case FC_HINT_MEDIUM:
-        case FC_HINT_FULL:
-            load_flags |= FT_LOAD_TARGET_NORMAL;
-            break;
-        }
-    } else {
-        load_flags |= FT_LOAD_NO_HINTING;
-    }
+    // Load glyph with hinting flags
+    FT_Int32 load_flags = ft_data->ft_hint_target;
 
     FT_Error error = FT_Load_Glyph(face, glyph_index, load_flags);
     if (error) {
@@ -969,29 +938,8 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
 
     FT_Face face = ft_data->ft_face;
 
-    FT_Int32 load_flags = FT_LOAD_DEFAULT;
-    if (ft_data->antialias) {
-        load_flags |= FT_LOAD_TARGET_NORMAL;
-    } else {
-        load_flags |= FT_LOAD_TARGET_MONO;
-    }
-
-    if (ft_data->hinting) {
-        switch (ft_data->hint_style) {
-        case FC_HINT_NONE:
-            load_flags |= FT_LOAD_NO_HINTING;
-            break;
-        case FC_HINT_SLIGHT:
-            load_flags |= FT_LOAD_TARGET_LIGHT;
-            break;
-        case FC_HINT_MEDIUM:
-        case FC_HINT_FULL:
-            load_flags |= FT_LOAD_TARGET_NORMAL;
-            break;
-        }
-    } else {
-        load_flags |= FT_LOAD_NO_HINTING;
-    }
+    // Set hinting flags
+    FT_Int32 load_flags = ft_data->ft_hint_target;
 
     // If COLR and FreeType supports FT_LOAD_COLOR, try color render path first
     // (handles COLR v0 layers and bitmap color fonts like sbix/CBDT;

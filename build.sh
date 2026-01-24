@@ -180,6 +180,120 @@ run_application() {
     return 0
 }
 
+# Generate deterministic ANSI stress test data for profiling
+generate_profile_data() {
+    local output_file="$1"
+    log_info "Generating ANSI stress test data..."
+
+    : > "$output_file"
+
+    # Color cycling: 2000 lines with rotating SGR color codes
+    for i in $(seq 1 2000); do
+        local fg=$(( (i % 7) + 31 ))
+        local bg=$(( (i % 7) + 41 ))
+        printf '\033[%d;%dmLine %04d: The quick brown fox jumps over the lazy dog\033[0m\n' "$fg" "$bg" "$i" >> "$output_file"
+    done
+
+    # Truecolor gradients: 500 lines with 24-bit color
+    for i in $(seq 1 500); do
+        local r=$(( (i * 51) % 256 ))
+        local g=$(( (i * 37) % 256 ))
+        local b=$(( (i * 73) % 256 ))
+        printf '\033[38;2;%d;%d;%dmTruecolor gradient line %d: ABCDEFGHIJKLMNOPQRSTUVWXYZ\033[0m\n' "$r" "$g" "$b" "$i" >> "$output_file"
+    done
+
+    # Emoji sequences: 200 lines with various emoji
+    for i in $(seq 1 200); do
+        printf '😀🎉🚀💻🔥✨🌍🎨📚🔧 Emoji line %d 👋🏽👨‍👩‍👧‍👦🏳️‍🌈🇺🇸\n' "$i" >> "$output_file"
+    done
+
+    # Box drawing: 100 lines
+    for i in $(seq 1 100); do
+        printf '┌──────────────────────────────────────┐\n' >> "$output_file"
+        printf '│ Box drawing line %-20d │\n' "$i" >> "$output_file"
+        printf '└──────────────────────────────────────┘\n' >> "$output_file"
+    done
+
+    # Scrolling volume: raw text to push scrollback
+    for i in $(seq 1 1000); do
+        printf 'Scrollback filler line %d: Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n' "$i" >> "$output_file"
+    done
+
+    local size
+    size=$(wc -c < "$output_file")
+    log_info "Generated $(( size / 1024 ))KB of test data ($output_file)"
+}
+
+# Run profiling build, benchmark, and report
+run_profiling() {
+    log_info "Building with profiling instrumentation (-pg)..."
+
+    # Generate configure script
+    if ! generate_configure; then
+        exit 1
+    fi
+
+    # Configure with profiling flags
+    if [ -d "$BUILD_DIR" ]; then
+        rm -rf "$BUILD_DIR"
+    fi
+    mkdir -p "$BUILD_DIR"
+    cd "$BUILD_DIR"
+    eval "../configure --prefix=$INSTALL_PREFIX CFLAGS='-O2 -g -pg' LDFLAGS='-pg'"
+    if [ $? -ne 0 ]; then
+        log_error "Configure with profiling flags failed"
+        cd ..
+        exit 1
+    fi
+    cd ..
+
+    # Build
+    cd "$BUILD_DIR"
+    make -j"$PARALLEL_JOBS"
+    if [ $? -ne 0 ]; then
+        log_error "Profiling build failed"
+        cd ..
+        exit 1
+    fi
+    cd ..
+
+    # Generate test data
+    local profile_data="profile-test-data.txt"
+    generate_profile_data "$profile_data"
+
+    # Run benchmark
+    log_info "Running benchmark (SDL_VIDEO_DRIVER=offscreen --bench)..."
+    rm -f gmon.out
+    SDL_VIDEO_DRIVER=offscreen ./"$BUILD_DIR"/src/"$PROJECT_NAME" --bench - < "$profile_data"
+    if [ $? -ne 0 ]; then
+        log_error "Benchmark run failed"
+        rm -f "$profile_data"
+        exit 1
+    fi
+
+    # Check gmon.out was generated
+    if [ ! -f gmon.out ]; then
+        log_error "gmon.out not generated (profiling data missing)"
+        rm -f "$profile_data"
+        exit 1
+    fi
+
+    # Generate report
+    log_info "Generating gprof report..."
+    local report_file="profile-report.txt"
+    gprof ./"$BUILD_DIR"/src/"$PROJECT_NAME" gmon.out > "$report_file"
+
+    echo ""
+    echo "=== Top 20 Functions by Cumulative Time ==="
+    head -30 "$report_file" | tail -20
+    echo ""
+
+    log_info "Full report saved to: $report_file"
+
+    # Cleanup test data
+    rm -f "$profile_data"
+}
+
 # Format source files
 format_sources() {
     log_info "Formatting source files..."
@@ -234,6 +348,10 @@ main() {
                 INSTALL_PREFIX="${1#*=}"
                 shift
                 ;;
+            --profiling)
+                run_profiling
+                exit 0
+                ;;
             --format)
                 format_sources
                 exit 0
@@ -278,6 +396,7 @@ main() {
                 echo "  --install         Only install the project (skip build and run)"
                 echo "  --bear            Generate compile_commands.json using bear"
                 echo "  --no-debug        Disable debug build"
+                echo "  --profiling       Build with gprof, run benchmark, generate profile report"
                 echo "  --format          Format source files with clang-format, shfmt, and prettier"
                 echo "  --ref-png T OUT   Generate reference PNG of text T using hb-view"
                 echo "  --prefix=PATH     Set installation prefix (default: $HOME/.local)"

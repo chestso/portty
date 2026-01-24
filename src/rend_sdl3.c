@@ -302,14 +302,21 @@ static void sdl3_destroy(RendererBackend *backend)
     backend->backend_data = NULL;
 }
 
-static int sdl3_load_fonts(RendererBackend *backend, float font_size)
+static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char *font_name, int ft_hint_target)
 {
     if (!backend || !backend->backend_data)
         return -1;
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
 
-    vlog("Loading fonts with size %.1f\n", font_size);
+    const char *hint_name = "none";
+    if (ft_hint_target == FT_LOAD_TARGET_LIGHT)
+        hint_name = "light";
+    else if (ft_hint_target == FT_LOAD_TARGET_NORMAL)
+        hint_name = "normal";
+    else if (ft_hint_target == FT_LOAD_TARGET_MONO)
+        hint_name = "mono";
+    vlog("Loading fonts with size %.1f, hinting=%s\n", font_size, hint_name);
 
     // Initialize font resolver
     if (font_resolver_init() != 0) {
@@ -320,11 +327,9 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size)
     // Setup DPI options
     FontOptions options = { 0 };
     options.antialias = true;
-    options.hinting = 1;
-    options.hint_style = 1;
+    options.ft_hint_target = ft_hint_target;
     options.subpixel_order = 0;
     options.lcd_filter = 0;
-    options.ft_load_flags = 0;
     options.dpi_x = 96;
     options.dpi_y = 96;
 
@@ -346,7 +351,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size)
 
     // Load normal monospace font
     FontResolutionResult result;
-    if (font_resolver_find_font(FONT_TYPE_NORMAL, &result) == 0) {
+    if (font_resolver_find_font(FONT_TYPE_NORMAL, font_name, &result) == 0) {
         if (font_load_font(data->font, FONT_STYLE_NORMAL, result.font_path, font_size, &options)) {
             vlog("Normal font loaded successfully from %s\n", result.font_path);
         } else {
@@ -363,7 +368,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size)
     }
 
     // Load bold font
-    if (font_resolver_find_font(FONT_TYPE_BOLD, &result) == 0) {
+    if (font_resolver_find_font(FONT_TYPE_BOLD, font_name, &result) == 0) {
         if (font_load_font(data->font, FONT_STYLE_BOLD, result.font_path, font_size, &options)) {
             vlog("Bold font loaded successfully from %s\n", result.font_path);
         } else {
@@ -373,7 +378,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size)
     }
 
     // Load emoji font
-    if (font_resolver_find_font(FONT_TYPE_EMOJI, &result) == 0) {
+    if (font_resolver_find_font(FONT_TYPE_EMOJI, NULL, &result) == 0) {
         if (font_load_font(data->font, FONT_STYLE_EMOJI, result.font_path, font_size * EMOJI_FONT_SCALE, &options)) {
             vlog("Emoji font loaded successfully from %s\n", result.font_path);
         } else {

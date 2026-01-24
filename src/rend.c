@@ -19,11 +19,11 @@ void renderer_destroy(RendererBackend *rend)
     rend->destroy(rend);
 }
 
-int renderer_load_fonts(RendererBackend *rend, float font_size)
+int renderer_load_fonts(RendererBackend *rend, float font_size, const char *font_name, int ft_hint_target)
 {
     if (!rend || !rend->load_fonts)
         return -1;
-    return rend->load_fonts(rend, font_size);
+    return rend->load_fonts(rend, font_size, font_name, ft_hint_target);
 }
 
 void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term)

@@ -78,5 +78,9 @@ core
 *.tar.gz
 *.zip
 
+# Profiling artifacts
+profile-report.txt
+profile-test-data.txt
+
 # Opencode configuration
 opencode.jsonc

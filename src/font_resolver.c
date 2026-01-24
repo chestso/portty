@@ -3,13 +3,14 @@
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 
 // Forward declarations
 static char *find_font_with_pattern(const char *pattern, char **family_name);
-static int query_font_options(const char *pattern, bool *antialias, int *hinting, int *hint_style,
-                              int *subpixel_order, int *lcd_filter, int *ft_load_flags);
+static int is_fixed_width_font(const char *font_path);
 
 // Global fontconfig configuration
 static FcConfig *fc_config = NULL;
@@ -61,115 +62,37 @@ static char *find_font_with_pattern(const char *pattern, char **family_name)
     return font_path;
 }
 
-// Helper function to query font rendering options from Fontconfig
-static int query_font_options(const char *pattern, bool *antialias, int *hinting, int *hint_style,
-                              int *subpixel_order, int *lcd_filter, int *ft_load_flags)
+// Check if a font file is actually monospace by comparing glyph advances
+static int is_fixed_width_font(const char *font_path)
 {
-    FcPattern *pat;
-    FcPattern *match;
-    FcResult result;
-    int value;
+    FT_Library lib;
+    if (FT_Init_FreeType(&lib) != 0)
+        return 0;
 
-    vlog("Querying font options for pattern: '%s'\n", pattern);
-
-    pat = FcNameParse((FcChar8 *)pattern);
-    if (!pat) {
-        vlog("Failed to parse font pattern: '%s'\n", pattern);
-        return -1;
+    FT_Face face;
+    if (FT_New_Face(lib, font_path, 0, &face) != 0) {
+        FT_Done_FreeType(lib);
+        return 0;
     }
 
-    FcConfigSubstitute(fc_config, pat, FcMatchPattern);
-    FcDefaultSubstitute(pat);
+    FT_Set_Char_Size(face, 0, 16 * 64, 72, 72);
 
-    match = FcFontMatch(fc_config, pat, &result);
-    if (!match) {
-        vlog("No matching font found for pattern: '%s'\n", pattern);
-        FcPatternDestroy(pat);
-        return -1;
-    }
+    FT_UInt gi_i = FT_Get_Char_Index(face, 'i');
+    FT_UInt gi_M = FT_Get_Char_Index(face, 'M');
+    int fixed = 0;
 
-    // Query antialiasing
-    if (FcPatternGetBool(match, FC_ANTIALIAS, 0, (FcBool *)&value) == FcResultMatch) {
-        *antialias = (value != 0);
-        vlog("Font antialias: %s\n", *antialias ? "true" : "false");
-    } else {
-        *antialias = true; // Default to true
-        vlog("Font antialias: default (true)\n");
-    }
-
-    // Query hinting
-    if (FcPatternGetBool(match, FC_HINTING, 0, (FcBool *)&value) == FcResultMatch) {
-        *hinting = value;
-        vlog("Font hinting: %s\n", *hinting ? "true" : "false");
-    } else {
-        *hinting = true; // Default to true
-        vlog("Font hinting: default (true)\n");
-    }
-
-    // Query hint style
-    if (FcPatternGetInteger(match, FC_HINT_STYLE, 0, &value) == FcResultMatch) {
-        *hint_style = value;
-        vlog("Font hint style: %d\n", *hint_style);
-    } else {
-        *hint_style = FC_HINT_SLIGHT; // Default to slight
-        vlog("Font hint style: default (slight)\n");
-    }
-
-    // Query subpixel order
-    if (FcPatternGetInteger(match, FC_RGBA, 0, &value) == FcResultMatch) {
-        *subpixel_order = value;
-        vlog("Font subpixel order: %d\n", *subpixel_order);
-    } else {
-        *subpixel_order = FC_RGBA_NONE; // Default to none
-        vlog("Font subpixel order: default (none)\n");
-    }
-
-    // Query LCD filter
-    if (FcPatternGetInteger(match, FC_LCD_FILTER, 0, &value) == FcResultMatch) {
-        *lcd_filter = value;
-        vlog("Font LCD filter: %d\n", *lcd_filter);
-    } else {
-        *lcd_filter = FC_LCD_DEFAULT; // Default to default
-        vlog("Font LCD filter: default (default)\n");
-    }
-
-    // Set FreeType load flags based on the options
-    *ft_load_flags = 0;
-    if (*hinting) {
-        switch (*hint_style) {
-        case FC_HINT_NONE:
-            *ft_load_flags |= FT_LOAD_NO_HINTING;
-            break;
-        case FC_HINT_SLIGHT:
-            *ft_load_flags |= FT_LOAD_TARGET_LIGHT;
-            break;
-        case FC_HINT_MEDIUM:
-            *ft_load_flags |= FT_LOAD_TARGET_NORMAL;
-            break;
-        case FC_HINT_FULL:
-            *ft_load_flags |= FT_LOAD_TARGET_NORMAL;
-            break;
-        default:
-            *ft_load_flags |= FT_LOAD_TARGET_NORMAL;
-            break;
+    if (gi_i && gi_M &&
+        FT_Load_Glyph(face, gi_i, FT_LOAD_NO_HINTING) == 0) {
+        FT_Fixed adv_i = face->glyph->linearHoriAdvance;
+        if (FT_Load_Glyph(face, gi_M, FT_LOAD_NO_HINTING) == 0) {
+            FT_Fixed adv_M = face->glyph->linearHoriAdvance;
+            fixed = (adv_i == adv_M);
         }
-    } else {
-        *ft_load_flags |= FT_LOAD_NO_HINTING;
     }
 
-    // Add force autohint if requested
-    FcBool autohint;
-    if (FcPatternGetBool(match, FC_AUTOHINT, 0, &autohint) == FcResultMatch && autohint) {
-        *ft_load_flags |= FT_LOAD_FORCE_AUTOHINT;
-        vlog("Font force autohint: true\n");
-    }
-
-    vlog("Font FreeType load flags: 0x%x\n", *ft_load_flags);
-
-    FcPatternDestroy(match);
-    FcPatternDestroy(pat);
-
-    return 0;
+    FT_Done_Face(face);
+    FT_Done_FreeType(lib);
+    return fixed;
 }
 
 int font_resolver_init()
@@ -191,7 +114,7 @@ int font_resolver_init()
     return 0;
 }
 
-int font_resolver_find_font(FontType type, FontResolutionResult *result)
+int font_resolver_find_font(FontType type, const char *family, FontResolutionResult *result)
 {
     if (!result) {
         return -1;
@@ -202,21 +125,19 @@ int font_resolver_find_font(FontType type, FontResolutionResult *result)
     result->family_name = NULL;
     result->size = 24.0f; // Default size
 
-    // Initialize font options with defaults
-    result->antialias = true;
-    result->hinting = true;
-    result->hint_style = FC_HINT_SLIGHT;
-    result->subpixel_order = FC_RGBA_NONE;
-    result->lcd_filter = FC_LCD_DEFAULT;
-    result->ft_load_flags = FT_LOAD_TARGET_LIGHT;
-
     const char *pattern = NULL;
+    char bold_pattern[256];
     switch (type) {
     case FONT_TYPE_NORMAL:
-        pattern = "monospace";
+        pattern = family ? family : "monospace";
         break;
     case FONT_TYPE_BOLD:
-        pattern = "monospace:weight=bold";
+        if (family) {
+            snprintf(bold_pattern, sizeof(bold_pattern), "%s:weight=bold", family);
+            pattern = bold_pattern;
+        } else {
+            pattern = "monospace:weight=bold";
+        }
         break;
     case FONT_TYPE_EMOJI:
         pattern = "emoji";
@@ -225,10 +146,6 @@ int font_resolver_find_font(FontType type, FontResolutionResult *result)
         vlog("Invalid font type requested\n");
         return -1;
     }
-
-    // Query font rendering options
-    query_font_options(pattern, &result->antialias, &result->hinting, &result->hint_style,
-                       &result->subpixel_order, &result->lcd_filter, &result->ft_load_flags);
 
     char *font_path = NULL;
     char *family_name = NULL;
@@ -243,6 +160,109 @@ int font_resolver_find_font(FontType type, FontResolutionResult *result)
     result->family_name = family_name;
     vlog("font_resolver_find_font: resolved type=%d to path='%s' family='%s'\n", type, result->font_path, result->family_name ? result->family_name : "(null)");
     return 0;
+}
+
+void font_resolver_list_monospace()
+{
+    // Substitute "monospace" to expand into all aliased families
+    FcPattern *pat = FcNameParse((FcChar8 *)"monospace");
+    if (!pat)
+        return;
+
+    FcConfigSubstitute(fc_config, pat, FcMatchPattern);
+
+    // Extract all family names from the substituted pattern
+    int capacity = 64;
+    char **names = malloc(sizeof(char *) * capacity);
+    int count = 0;
+    if (!names) {
+        FcPatternDestroy(pat);
+        return;
+    }
+
+    FcChar8 *family = NULL;
+    for (int i = 0; FcPatternGetString(pat, FC_FAMILY, i, &family) == FcResultMatch; i++) {
+        // Skip the generic "monospace" alias itself
+        if (strcasecmp((char *)family, "monospace") == 0)
+            continue;
+
+        // Verify the font is actually installed (resolves to itself)
+        FcPattern *check = FcNameParse(family);
+        if (!check)
+            continue;
+        FcConfigSubstitute(fc_config, check, FcMatchPattern);
+        FcDefaultSubstitute(check);
+
+        FcResult res;
+        FcPattern *match = FcFontMatch(fc_config, check, &res);
+        FcPatternDestroy(check);
+        if (!match)
+            continue;
+
+        // Check that resolved family matches what we asked for
+        FcChar8 *matched_family = NULL;
+        int family_matches = 0;
+        if (FcPatternGetString(match, FC_FAMILY, 0, &matched_family) == FcResultMatch) {
+            family_matches = (strcasecmp((char *)family, (char *)matched_family) == 0);
+        }
+
+        // Check charset for Latin 'A'
+        FcCharSet *cs = NULL;
+        int has_latin = 0;
+        if (family_matches && FcPatternGetCharSet(match, FC_CHARSET, 0, &cs) == FcResultMatch && cs) {
+            has_latin = FcCharSetHasChar(cs, 0x0041);
+        }
+
+        // Verify the font is actually fixed-width
+        int is_mono = 0;
+        FcChar8 *file = NULL;
+        if (family_matches && has_latin &&
+            FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
+            is_mono = is_fixed_width_font((const char *)file);
+        }
+        FcPatternDestroy(match);
+
+        if (!family_matches || !has_latin || !is_mono)
+            continue;
+
+        // Deduplicate
+        int dup = 0;
+        for (int j = 0; j < count; j++) {
+            if (strcasecmp(names[j], (char *)family) == 0) {
+                dup = 1;
+                break;
+            }
+        }
+        if (!dup) {
+            if (count >= capacity) {
+                capacity *= 2;
+                names = realloc(names, sizeof(char *) * capacity);
+                if (!names) {
+                    FcPatternDestroy(pat);
+                    return;
+                }
+            }
+            names[count++] = strdup((char *)family);
+        }
+    }
+    FcPatternDestroy(pat);
+
+    // Sort alphabetically
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i + 1; j < count; j++) {
+            if (strcasecmp(names[i], names[j]) > 0) {
+                char *tmp = names[i];
+                names[i] = names[j];
+                names[j] = tmp;
+            }
+        }
+    }
+
+    for (int i = 0; i < count; i++) {
+        printf("%s\n", names[i]);
+        free(names[i]);
+    }
+    free(names);
 }
 
 void font_resolver_free_result(FontResolutionResult *result)
