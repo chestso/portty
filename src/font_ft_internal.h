@@ -53,7 +53,7 @@ typedef struct
     int dpi_y;         // Vertical DPI for HiDPI support
 } FtFontData;
 
-// Shared functions used by colr_paint.c
+// Shared functions used by colr.c
 void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
                         uint8_t *out_r, uint8_t *out_g, uint8_t *out_b, uint8_t *out_a);
 
@@ -63,7 +63,7 @@ unsigned char *rasterize_glyph_mask(FtFontData *ft_data, FT_UInt glyph_index,
 GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
                                    uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
-// COLR v1 custom paint entry point (defined in colr_paint.c)
+// COLR v1 custom paint entry point (defined in colr.c)
 GlyphBitmap *render_colr_paint_glyph(FtFontData *ft_data, FT_UInt glyph_index,
                                      uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
