@@ -7,7 +7,9 @@
 
 #define TERM_MAX_CHARS_PER_CELL 6
 
-typedef struct Terminal Terminal;
+// Forward declarations
+struct TerminalBackend;
+typedef struct TerminalBackend TerminalBackend;
 
 typedef struct
 {
@@ -43,15 +45,36 @@ typedef struct
     TerminalColor bg;
 } TerminalCell;
 
-Terminal *terminal_init(int width, int height);
-void terminal_destroy(Terminal *term);
-void terminal_resize(Terminal *term, int width, int height);
-int terminal_process_input(Terminal *term, const char *input, size_t len);
-int terminal_get_cell(Terminal *term, int row, int col, TerminalCell *cell);
-int terminal_get_dimensions(Terminal *term, int *rows, int *cols);
-TerminalPos terminal_get_cursor_pos(Terminal *term);
-const char *terminal_get_title(Terminal *term);
-bool terminal_needs_redraw(Terminal *term);
-void terminal_clear_redraw(Terminal *term);
+// Backend interface definition
+struct TerminalBackend
+{
+    const char *name;
+
+    // Backend-specific data
+    void *backend_data;
+
+    // Backend function pointers
+    bool (*init)(TerminalBackend *term, int width, int height);
+    void (*destroy)(TerminalBackend *term);
+    void (*resize)(TerminalBackend *term, int width, int height);
+    int (*process_input)(TerminalBackend *term, const char *input, size_t len);
+    int (*get_cell)(TerminalBackend *term, int row, int col, TerminalCell *cell);
+    int (*get_dimensions)(TerminalBackend *term, int *rows, int *cols);
+    TerminalPos (*get_cursor_pos)(TerminalBackend *term);
+    const char *(*get_title)(TerminalBackend *term);
+    bool (*needs_redraw)(TerminalBackend *term);
+    void (*clear_redraw)(TerminalBackend *term);
+};
+
+TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
+void terminal_destroy(TerminalBackend *term);
+void terminal_resize(TerminalBackend *term, int width, int height);
+int terminal_process_input(TerminalBackend *term, const char *input, size_t len);
+int terminal_get_cell(TerminalBackend *term, int row, int col, TerminalCell *cell);
+int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols);
+TerminalPos terminal_get_cursor_pos(TerminalBackend *term);
+const char *terminal_get_title(TerminalBackend *term);
+bool terminal_needs_redraw(TerminalBackend *term);
+void terminal_clear_redraw(TerminalBackend *term);
 
 #endif /* TERM_H */

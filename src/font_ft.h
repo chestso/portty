@@ -3,7 +3,7 @@
 
 #include "font.h"
 
-// FreeType/HarfBuzz backend implementation
-extern FontBackend font;
+// FreeType/HarfBuzz font backend implementation
+extern FontBackend font_backend_ft;
 
 #endif // FONT_FT_H

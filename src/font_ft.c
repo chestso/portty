@@ -1313,7 +1313,7 @@ static bool ft_style_has_colr(FontBackend *font, void *font_data)
     return ft_data->has_colr;
 }
 
-FontBackend font = {
+FontBackend font_backend_ft = {
     .name = "freetype",
     .init = font_init,
     .destroy = font_destroy,

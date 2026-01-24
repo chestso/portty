@@ -26,7 +26,7 @@ int renderer_load_fonts(RendererBackend *rend)
     return rend->load_fonts(rend);
 }
 
-void renderer_draw_terminal(RendererBackend *rend, Terminal *term)
+void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term)
 {
     if (!rend || !rend->draw_terminal)
         return;

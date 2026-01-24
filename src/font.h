@@ -158,7 +158,4 @@ bool font_has_style(FontBackend *font, FontStyle style);
 // NEW: Check if a loaded style supports COLR (color glyphs)
 bool font_style_has_colr(FontBackend *font, FontStyle style);
 
-// Extern declaration for the FreeType backend implementation
-extern FontBackend font;
-
 #endif // FONT_H

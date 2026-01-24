@@ -1,10 +1,12 @@
 #include "common.h"
 #include "font.h"
+#include "font_ft.h"
 #include "font_resolver.h"
 #include "png_writer.h"
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
+#include "term_vt.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -24,12 +26,12 @@ int verbose = 0;
 
 // Function prototypes
 static void print_usage(const char *progname);
-static void process_input_from_source(Terminal *term, const char *source);
+static void process_input_from_source(TerminalBackend *term, const char *source);
 static int png_render_text(const char *text, const char *output_path);
 
 int main(int argc, char *argv[])
 {
-    Terminal *term;
+    TerminalBackend *term;
     RendererBackend *rend = NULL;
     SDL_Window *window = NULL;
     SDL_Renderer *sdl_rend = NULL;
@@ -136,7 +138,7 @@ int main(int argc, char *argv[])
     vlog("FreeType will be initialized in renderer\n");
 
     // Initialize terminal
-    term = terminal_init(WINDOW_WIDTH, WINDOW_HEIGHT);
+    term = terminal_init(&terminal_backend_vt, WINDOW_WIDTH, WINDOW_HEIGHT);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
         SDL_Quit();
@@ -371,7 +373,7 @@ static void print_usage(const char *progname)
     printf("  (none)      Run interactively without pre-loaded input\n");
 }
 
-static void process_input_from_source(Terminal *term, const char *source)
+static void process_input_from_source(TerminalBackend *term, const char *source)
 {
     FILE *input_file;
     char buffer[4096];
@@ -470,7 +472,7 @@ static int png_render_text(const char *text, const char *output_path)
     vlog("PNG mode: %d codepoints, output=%s\n", cp_count, output_path);
 
     /* Initialize font backend */
-    if (!font_init(&font)) {
+    if (!font_init(&font_backend_ft)) {
         fprintf(stderr, "ERROR: Failed to initialize font backend\n");
         return 1;
     }
@@ -478,7 +480,7 @@ static int png_render_text(const char *text, const char *output_path)
     /* Initialize font resolver (fontconfig) */
     if (font_resolver_init() != 0) {
         fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
@@ -495,15 +497,15 @@ static int png_render_text(const char *text, const char *output_path)
     if (font_resolver_find_font(FONT_TYPE_EMOJI, &result) != 0) {
         fprintf(stderr, "ERROR: Failed to find emoji font\n");
         font_resolver_cleanup();
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
-    if (!font_load_font(&font, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
+    if (!font_load_font(&font_backend_ft, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
         fprintf(stderr, "ERROR: Failed to load emoji font from %s\n", result.font_path);
         font_resolver_free_result(&result);
         font_resolver_cleanup();
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
@@ -512,22 +514,22 @@ static int png_render_text(const char *text, const char *output_path)
     font_resolver_cleanup();
 
     /* Shape and render */
-    ShapedGlyphs *shaped = font_render_shaped_text(&font, FONT_STYLE_EMOJI,
+    ShapedGlyphs *shaped = font_render_shaped_text(&font_backend_ft, FONT_STYLE_EMOJI,
                                                    codepoints, cp_count,
                                                    255, 255, 255);
     if (!shaped || shaped->num_glyphs == 0) {
         fprintf(stderr, "ERROR: font_render_shaped_text returned no glyphs\n");
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
     vlog("Shaped %d glyphs, total_advance=%d\n", shaped->num_glyphs, shaped->total_advance);
 
     /* Use font metrics to determine image size (matches hb-view behavior) */
-    const FontMetrics *metrics = font_get_metrics(&font, FONT_STYLE_EMOJI);
+    const FontMetrics *metrics = font_get_metrics(&font_backend_ft, FONT_STYLE_EMOJI);
     if (!metrics) {
         fprintf(stderr, "ERROR: Failed to get font metrics\n");
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
@@ -537,7 +539,7 @@ static int png_render_text(const char *text, const char *output_path)
 
     if (img_w <= 0 || img_h <= 0) {
         fprintf(stderr, "ERROR: Computed image has zero size (%dx%d)\n", img_w, img_h);
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
@@ -548,7 +550,7 @@ static int png_render_text(const char *text, const char *output_path)
     uint8_t *pixels = calloc(img_w * img_h * 4, 1);
     if (!pixels) {
         fprintf(stderr, "ERROR: Failed to allocate %dx%d pixel buffer\n", img_w, img_h);
-        font_destroy(&font);
+        font_destroy(&font_backend_ft);
         return 1;
     }
 
@@ -610,6 +612,6 @@ static int png_render_text(const char *text, const char *output_path)
     }
 
     free(pixels);
-    font_destroy(&font);
+    font_destroy(&font_backend_ft);
     return rc == 0 ? 0 : 1;
 }

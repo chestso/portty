@@ -1,6 +1,7 @@
 #include "rend_sdl3.h"
 #include "common.h"
 #include "font.h"
+#include "font_ft.h"
 #include "font_resolver.h"
 #include "rend.h"
 #include <SDL3/SDL.h>
@@ -82,7 +83,7 @@ static bool is_skin_tone_modifier(uint32_t cp)
 }
 
 // Function to combine emoji cells for multi-codepoint sequences
-static int combine_cells_for_emoji(Terminal *term, int row, int col,
+static int combine_cells_for_emoji(TerminalBackend *term, int row, int col,
                                    uint32_t *combined_codepoints,
                                    int max_combined,
                                    int *columns_consumed)
@@ -346,7 +347,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->cache_tick = 0;
 
     // Initialize font backend with FreeType backend
-    data->font = &font;
+    data->font = &font_backend_ft;
     if (!font_init(data->font)) {
         vlog("Failed to initialize font backend\n");
         if (data->glyph_cache)
@@ -502,7 +503,7 @@ static int sdl3_load_fonts(RendererBackend *backend)
     return 0;
 }
 
-static void sdl3_draw_terminal(RendererBackend *backend, Terminal *term)
+static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
 {
     if (!backend || !backend->backend_data || !term)
         return;

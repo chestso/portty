@@ -1,3 +1,4 @@
+#include "term_vt.h"
 #include "common.h"
 #include "term.h"
 #include <stdio.h>
@@ -7,7 +8,7 @@
 
 #define SCROLLBACK_SIZE 1000
 
-struct Terminal
+typedef struct TerminalVtData
 {
     VTerm *vt;
     VTermState *state;
@@ -20,7 +21,7 @@ struct Terminal
     VTermScreenCell **scrollback;
     int scrollback_lines;
     int scrollback_capacity;
-};
+} TerminalVtData;
 
 // Forward declarations for callback functions
 static int term_damage(VTermRect rect, void *user);
@@ -81,95 +82,112 @@ static TerminalColor convert_vterm_color(const VTermColor *vcol, VTermState *sta
     return result;
 }
 
-Terminal *terminal_init(int width, int height)
+static bool vt_init(TerminalBackend *backend, int width, int height)
 {
-    Terminal *term = malloc(sizeof(Terminal));
-    if (!term) {
-        return NULL;
+    // Allocate libvterm-specific data
+    TerminalVtData *data = malloc(sizeof(TerminalVtData));
+    if (!data) {
+        return false;
     }
 
-    term->width = width;
-    term->height = height;
-    term->need_redraw = 0;
-    term->cursor_pos.row = 0;
-    term->cursor_pos.col = 0;
-    term->title = NULL;
-    term->scrollback = NULL;
-    term->scrollback_lines = 0;
-    term->scrollback_capacity = 0;
+    data->width = width;
+    data->height = height;
+    data->need_redraw = 0;
+    data->cursor_pos.row = 0;
+    data->cursor_pos.col = 0;
+    data->title = NULL;
+    data->scrollback = NULL;
+    data->scrollback_lines = 0;
+    data->scrollback_capacity = 0;
 
-    term->vt = vterm_new(height, width);
-    if (!term->vt) {
-        free(term);
-        return NULL;
+    data->vt = vterm_new(height, width);
+    if (!data->vt) {
+        free(data);
+        return false;
     }
 
-    vterm_set_utf8(term->vt, 1);
+    vterm_set_utf8(data->vt, 1);
 
-    term->screen = vterm_obtain_screen(term->vt);
-    term->state = vterm_obtain_state(term->vt);
-    vterm_screen_enable_altscreen(term->screen, 1);
-    vterm_screen_set_callbacks(term->screen, &cb, term);
-    vterm_screen_set_damage_merge(term->screen, VTERM_DAMAGE_SCROLL);
+    data->screen = vterm_obtain_screen(data->vt);
+    data->state = vterm_obtain_state(data->vt);
+    vterm_screen_enable_altscreen(data->screen, 1);
+    vterm_screen_set_callbacks(data->screen, &cb, data);
+    vterm_screen_set_damage_merge(data->screen, VTERM_DAMAGE_SCROLL);
 
-    vterm_screen_reset(term->screen, 1);
+    vterm_screen_reset(data->screen, 1);
 
-    return term;
+    // Store in backend
+    backend->backend_data = data;
+
+    return true;
 }
 
-void terminal_destroy(Terminal *term)
+static void vt_destroy(TerminalBackend *backend)
 {
-    if (term) {
-        if (term->vt) {
-            vterm_free(term->vt);
-        }
-        if (term->title) {
-            free(term->title);
-        }
-        if (term->scrollback) {
-            for (int i = 0; i < term->scrollback_lines; i++) {
-                free(term->scrollback[i]);
-            }
-            free(term->scrollback);
-        }
-        free(term);
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    if (data->vt)
+        vterm_free(data->vt);
+    if (data->title)
+        free(data->title);
+    if (data->scrollback) {
+        for (int i = 0; i < data->scrollback_lines; i++)
+            free(data->scrollback[i]);
+        free(data->scrollback);
+    }
+
+    free(data);
+    backend->backend_data = NULL;
+}
+
+static void vt_resize(TerminalBackend *backend, int width, int height)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    if (data->vt) {
+        data->width = width;
+        data->height = height;
+        vterm_set_size(data->vt, height, width);
+        vterm_screen_flush_damage(data->screen);
     }
 }
 
-void terminal_resize(Terminal *term, int width, int height)
+static int vt_process_input(TerminalBackend *backend, const char *input, size_t len)
 {
-    if (term && term->vt) {
-        term->width = width;
-        term->height = height;
-        vterm_set_size(term->vt, height, width);
-        vterm_screen_flush_damage(term->screen);
-    }
-}
+    if (!backend || !backend->backend_data)
+        return -1;
 
-int terminal_process_input(Terminal *term, const char *input, size_t len)
-{
-    if (term && term->vt) {
-        return vterm_input_write(term->vt, input, len);
-    }
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    if (data->vt)
+        return vterm_input_write(data->vt, input, len);
+
     return -1;
 }
 
-int terminal_get_cell(Terminal *term, int row, int col, TerminalCell *cell)
+static int vt_get_cell(TerminalBackend *backend, int row, int col, TerminalCell *cell)
 {
-    if (!term || !term->screen || !cell) {
+    if (!backend || !backend->backend_data || !cell)
         return -1;
-    }
 
-    int rows, cols;
-    terminal_get_dimensions(term, &rows, &cols);
-    if (row < 0 || row >= rows || col < 0 || col >= cols) {
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    if (!data->screen)
         return -1;
-    }
+
+    // Check bounds
+    if (row < 0 || row >= data->height || col < 0 || col >= data->width)
+        return -1;
 
     VTermScreenCell vcell;
-    if (vterm_screen_get_cell(term->screen, (VTermPos){ .row = row, .col = col }, &vcell) < 0) {
+    if (vterm_screen_get_cell(data->screen, (VTermPos){ .row = row, .col = col }, &vcell) < 0)
         return -1;
-    }
 
     // Copy character data
     int i;
@@ -195,98 +213,104 @@ int terminal_get_cell(Terminal *term, int row, int col, TerminalCell *cell)
     cell->attrs.dhl = vcell.attrs.dhl;
 
     // Convert colors
-    cell->fg = convert_vterm_color(&vcell.fg, term->state, false);
-    cell->bg = convert_vterm_color(&vcell.bg, term->state, true);
+    cell->fg = convert_vterm_color(&vcell.fg, data->state, false);
+    cell->bg = convert_vterm_color(&vcell.bg, data->state, true);
 
     return 0;
 }
 
-int terminal_get_dimensions(Terminal *term, int *rows, int *cols)
+static int vt_get_dimensions(TerminalBackend *backend, int *rows, int *cols)
 {
-    if (!term || !rows || !cols) {
+    if (!backend || !backend->backend_data || !rows || !cols)
         return -1;
-    }
 
-    *rows = term->height;
-    *cols = term->width;
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    *rows = data->height;
+    *cols = data->width;
     return 0;
 }
 
-TerminalPos terminal_get_cursor_pos(Terminal *term)
+static TerminalPos vt_get_cursor_pos(TerminalBackend *backend)
 {
-    if (!term) {
+    if (!backend || !backend->backend_data)
         return (TerminalPos){ 0, 0 };
-    }
-    return (TerminalPos){ term->cursor_pos.row, term->cursor_pos.col };
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return (TerminalPos){ data->cursor_pos.row, data->cursor_pos.col };
 }
 
-const char *terminal_get_title(Terminal *term)
+static const char *vt_get_title(TerminalBackend *backend)
 {
-    if (!term) {
+    if (!backend || !backend->backend_data)
         return NULL;
-    }
-    return term->title;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->title;
 }
 
-bool terminal_needs_redraw(Terminal *term)
+static bool vt_needs_redraw(TerminalBackend *backend)
 {
-    if (!term) {
+    if (!backend || !backend->backend_data)
         return false;
-    }
-    return term->need_redraw != 0;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->need_redraw != 0;
 }
 
-void terminal_clear_redraw(Terminal *term)
+static void vt_clear_redraw(TerminalBackend *backend)
 {
-    if (term) {
-        term->need_redraw = 0;
-    }
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    data->need_redraw = 0;
 }
 
 // Callback implementations
 static int term_damage(VTermRect rect, void *user)
 {
-    Terminal *term = (Terminal *)user;
+    TerminalVtData *data = (TerminalVtData *)user;
     vlog("Terminal damage callback: rect=(%d,%d)-(%d,%d)\n",
          rect.start_row, rect.start_col, rect.end_row, rect.end_col);
-    term->need_redraw = 1;
+    data->need_redraw = 1;
     return 1;
 }
 
 static int term_moverect(VTermRect dest, VTermRect src, void *user)
 {
-    Terminal *term = (Terminal *)user;
+    TerminalVtData *data = (TerminalVtData *)user;
     vlog("Terminal move rectangle callback: src=(%d,%d)-(%d,%d) dest=(%d,%d)-(%d,%d)\n",
          src.start_row, src.start_col, src.end_row, src.end_col,
          dest.start_row, dest.start_col, dest.end_row, dest.end_col);
-    term->need_redraw = 1;
+    data->need_redraw = 1;
     return 1;
 }
 
 static int term_movecursor(VTermPos pos, VTermPos oldpos, int visible, void *user)
 {
-    Terminal *term = (Terminal *)user;
+    TerminalVtData *data = (TerminalVtData *)user;
     vlog("Terminal move cursor callback: pos=(%d,%d) oldpos=(%d,%d) visible=%d\n",
          pos.row, pos.col, oldpos.row, oldpos.col, visible);
-    term->cursor_pos = pos;
-    term->need_redraw = 1;
+    data->cursor_pos = pos;
+    data->need_redraw = 1;
     return 1;
 }
 
 static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
 {
-    Terminal *term = (Terminal *)user;
+    TerminalVtData *data = (TerminalVtData *)user;
 
     switch (prop) {
     case VTERM_PROP_TITLE:
         vlog("Terminal set property: title = %.*s\n", val->string.len, val->string.str);
-        if (term->title) {
-            free(term->title);
+        if (data->title) {
+            free(data->title);
         }
-        term->title = malloc(val->string.len + 1);
-        if (term->title) {
-            memcpy(term->title, val->string.str, val->string.len);
-            term->title[val->string.len] = '\0';
+        data->title = malloc(val->string.len + 1);
+        if (data->title) {
+            memcpy(data->title, val->string.str, val->string.len);
+            data->title[val->string.len] = '\0';
         }
         break;
     case VTERM_PROP_ICONNAME:
@@ -294,33 +318,33 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
         break;
     case VTERM_PROP_CURSORVISIBLE:
         vlog("Terminal set property: cursor visible = %d\n", val->boolean);
-        term->need_redraw = 1;
+        data->need_redraw = 1;
         break;
     case VTERM_PROP_CURSORBLINK:
         vlog("Terminal set property: cursor blink = %d\n", val->boolean);
-        term->need_redraw = 1;
+        data->need_redraw = 1;
         break;
     case VTERM_PROP_REVERSE:
         vlog("Terminal set property: reverse video = %d\n", val->boolean);
-        term->need_redraw = 1;
+        data->need_redraw = 1;
         break;
     case VTERM_PROP_ALTSCREEN:
         vlog("Terminal set property: alt screen = %d\n", val->boolean);
-        term->need_redraw = 1;
+        data->need_redraw = 1;
         break;
     default:
         vlog("Terminal set property: unknown property %d\n", prop);
         break;
     }
 
-    term->need_redraw = 1;
+    data->need_redraw = 1;
     return 1;
 }
 
 static int term_bell(void *user)
 {
-    Terminal *term = (Terminal *)user;
-    (void)term;
+    TerminalVtData *data = (TerminalVtData *)user;
+    (void)data;
     vlog("Terminal bell callback\n");
     fprintf(stderr, "Bell!\n");
     return 1;
@@ -328,34 +352,34 @@ static int term_bell(void *user)
 
 static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
 {
-    Terminal *term = (Terminal *)user;
+    TerminalVtData *data = (TerminalVtData *)user;
 
-    vlog("Terminal scrollback push line: cols=%d, current_lines=%d\n", cols, term->scrollback_lines);
+    vlog("Terminal scrollback push line: cols=%d, current_lines=%d\n", cols, data->scrollback_lines);
 
     // Initialize scrollback buffer if needed
-    if (!term->scrollback) {
-        term->scrollback = malloc(SCROLLBACK_SIZE * sizeof(VTermScreenCell *));
-        if (!term->scrollback) {
+    if (!data->scrollback) {
+        data->scrollback = malloc(SCROLLBACK_SIZE * sizeof(VTermScreenCell *));
+        if (!data->scrollback) {
             vlog("Failed to allocate initial scrollback buffer\n");
             return 0;
         }
-        term->scrollback_capacity = SCROLLBACK_SIZE;
-        term->scrollback_lines = 0;
+        data->scrollback_capacity = SCROLLBACK_SIZE;
+        data->scrollback_lines = 0;
         vlog("Allocated initial scrollback buffer with capacity %d\n", SCROLLBACK_SIZE);
     }
 
     // Expand scrollback buffer if needed
-    if (term->scrollback_lines >= term->scrollback_capacity) {
+    if (data->scrollback_lines >= data->scrollback_capacity) {
         VTermScreenCell **new_scrollback = realloc(
-            term->scrollback,
-            (term->scrollback_capacity + SCROLLBACK_SIZE) * sizeof(VTermScreenCell *));
+            data->scrollback,
+            (data->scrollback_capacity + SCROLLBACK_SIZE) * sizeof(VTermScreenCell *));
         if (!new_scrollback) {
             vlog("Failed to expand scrollback buffer\n");
             return 0;
         }
-        term->scrollback = new_scrollback;
-        term->scrollback_capacity += SCROLLBACK_SIZE;
-        vlog("Expanded scrollback buffer to capacity %d\n", term->scrollback_capacity);
+        data->scrollback = new_scrollback;
+        data->scrollback_capacity += SCROLLBACK_SIZE;
+        vlog("Expanded scrollback buffer to capacity %d\n", data->scrollback_capacity);
     }
 
     // Allocate and copy the line
@@ -368,38 +392,38 @@ static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
     memcpy(line, cells, cols * sizeof(VTermScreenCell));
 
     // Add to scrollback buffer
-    term->scrollback[term->scrollback_lines] = line;
-    term->scrollback_lines++;
+    data->scrollback[data->scrollback_lines] = line;
+    data->scrollback_lines++;
 
-    vlog("Successfully pushed line to scrollback, now %d lines\n", term->scrollback_lines);
+    vlog("Successfully pushed line to scrollback, now %d lines\n", data->scrollback_lines);
 
     return 1;
 }
 
 static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
 {
-    Terminal *term = (Terminal *)user;
+    TerminalVtData *data = (TerminalVtData *)user;
 
-    vlog("Terminal scrollback pop line: cols=%d, current_lines=%d\n", cols, term->scrollback_lines);
+    vlog("Terminal scrollback pop line: cols=%d, current_lines=%d\n", cols, data->scrollback_lines);
 
-    if (term->scrollback_lines <= 0) {
+    if (data->scrollback_lines <= 0) {
         vlog("No lines in scrollback to pop\n");
         return 0;
     }
 
     // Get the last line from scrollback
-    term->scrollback_lines--;
-    VTermScreenCell *line = term->scrollback[term->scrollback_lines];
+    data->scrollback_lines--;
+    VTermScreenCell *line = data->scrollback[data->scrollback_lines];
 
     // Copy cells to output
-    int copy_cols = (cols < term->width) ? cols : term->width;
+    int copy_cols = (cols < data->width) ? cols : data->width;
     memcpy(cells, line, copy_cols * sizeof(VTermScreenCell));
 
     // Fill remaining cells with default cells if needed
     if (copy_cols < cols) {
         VTermScreenCell default_cell;
         VTermPos pos = { .row = 0, .col = 0 };
-        vterm_screen_get_cell(term->screen, pos, &default_cell);
+        vterm_screen_get_cell(data->screen, pos, &default_cell);
         default_cell.chars[0] = 0;
         for (int i = copy_cols; i < cols; i++) {
             cells[i] = default_cell;
@@ -408,9 +432,25 @@ static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
 
     // Free the line
     free(line);
-    term->scrollback[term->scrollback_lines] = NULL;
+    data->scrollback[data->scrollback_lines] = NULL;
 
-    vlog("Successfully popped line from scrollback, now %d lines\n", term->scrollback_lines);
+    vlog("Successfully popped line from scrollback, now %d lines\n", data->scrollback_lines);
 
     return 1;
 }
+
+// Global backend instance
+TerminalBackend terminal_backend_vt = {
+    .name = "libvterm",
+    .backend_data = NULL,
+    .init = vt_init,
+    .destroy = vt_destroy,
+    .resize = vt_resize,
+    .process_input = vt_process_input,
+    .get_cell = vt_get_cell,
+    .get_dimensions = vt_get_dimensions,
+    .get_cursor_pos = vt_get_cursor_pos,
+    .get_title = vt_get_title,
+    .needs_redraw = vt_needs_redraw,
+    .clear_redraw = vt_clear_redraw
+};
