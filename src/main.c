@@ -25,10 +25,44 @@
 /* Global verbose flag - controls debug output */
 int verbose = 0;
 
+/* Bench mode scripted event structures */
+typedef struct BenchEvent
+{
+    uint32_t delay_ms; // delay before this event
+    SDL_Keycode key;   // SDL keycode
+    SDL_Keymod mod;    // modifier (SDL_KMOD_CTRL for Ctrl combos)
+} BenchEvent;
+
+typedef struct BenchScript
+{
+    BenchEvent *events;
+    int count;
+    int capacity;
+} BenchScript;
+
 // Function prototypes
 static void print_usage(const char *progname);
 static void process_input_from_source(TerminalBackend *term, const char *source);
 static int png_render_text(const char *text, const char *output_path);
+static BenchScript *bench_parse_script(const char *path);
+static void bench_free_script(BenchScript *script);
+
+/* Thread function: pushes bench script events with real delays */
+static int bench_thread_func(void *data)
+{
+    BenchScript *script = (BenchScript *)data;
+    for (int i = 0; i < script->count; i++) {
+        if (script->events[i].delay_ms > 0)
+            SDL_Delay(script->events[i].delay_ms);
+
+        SDL_Event synth = { 0 };
+        synth.type = SDL_EVENT_KEY_DOWN;
+        synth.key.key = script->events[i].key;
+        synth.key.mod = script->events[i].mod;
+        SDL_PushEvent(&synth);
+    }
+    return 0;
+}
 
 int main(int argc, char *argv[])
 {
@@ -44,7 +78,8 @@ int main(int argc, char *argv[])
     // Parse command line arguments
     int debug_grid_enabled = 0;
     int list_fonts = 0;
-    int bench_mode = 0;
+    int bench_timing = 0;
+    const char *bench_script_path = NULL;
     int ft_hint_target = FT_LOAD_NO_HINTING; // Default: no hinting
     char *png_text = NULL;
     const char *font_name = NULL;
@@ -53,7 +88,7 @@ int main(int argc, char *argv[])
     static struct option long_options[] = {
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
-        { "bench", no_argument, NULL, 'B' },
+        { "bench", optional_argument, NULL, 'B' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -101,7 +136,9 @@ int main(int argc, char *argv[])
             }
             break;
         case 'B':
-            bench_mode = 1;
+            bench_timing = 1;
+            if (optarg)
+                bench_script_path = optarg;
             break;
         case 'P':
             png_text = optarg;
@@ -243,6 +280,10 @@ int main(int argc, char *argv[])
         }
         vlog("Renderer created successfully\n");
 
+        // Disable VSync for lowest input latency — we only render on
+        // demand so there is no wasted GPU work or tearing concern.
+        SDL_SetRenderVSync(sdl_rend, 0);
+
         // Initialize renderer
         rend = renderer_init(&renderer_backend_sdl3, window, sdl_rend);
         if (!rend) {
@@ -284,115 +325,211 @@ int main(int argc, char *argv[])
             vlog("Debug grid enabled via CLI flag\n");
         }
 
-        if (bench_mode) {
-            // Benchmark mode: render one frame and exit
-            renderer_draw_terminal(rend, term);
-            SDL_RenderPresent(sdl_rend);
-            renderer_log_stats(rend);
-        } else {
+        // Parse bench script and spawn feeder thread
+        BenchScript *bench = NULL;
+        SDL_Thread *bench_thread = NULL;
+
+        if (bench_script_path) {
+            bench = bench_parse_script(bench_script_path);
+            if (!bench) {
+                fprintf(stderr, "ERROR: Failed to parse bench script: %s\n", bench_script_path);
+                renderer_destroy(rend);
+                terminal_destroy(term);
+                SDL_DestroyRenderer(sdl_rend);
+                SDL_DestroyWindow(window);
+                SDL_Quit();
+                return 1;
+            }
+            vlog("Bench mode: loaded %d events from %s\n", bench->count, bench_script_path);
+            bench_thread = SDL_CreateThread(bench_thread_func, "bench", bench);
+        }
+
+        {
             int force_redraw = 1; // Force initial render
+
+            // Frame timing stats (bench mode)
+            uint64_t perf_freq = SDL_GetPerformanceFrequency();
+            double *frame_times_ms = NULL;
+            int frame_count = 0;
+            int frame_capacity = 0;
+            int total_keys_processed = 0;
 
             // Main event loop
             while (running) {
-                // Process events
-                while (SDL_PollEvent(&event)) {
-                    switch (event.type) {
-                    case SDL_EVENT_QUIT:
-                        running = 0;
-                        break;
+                // Wait for events (bench thread pushes events that wake this up)
+                int keys_this_frame = 0;
+                int have_event = SDL_WaitEventTimeout(&event, 16);
+                // Start timing AFTER the first event arrives (not during idle wait)
+                uint64_t frame_start = SDL_GetPerformanceCounter();
+                if (have_event)
+                    do {
+                        switch (event.type) {
+                        case SDL_EVENT_QUIT:
+                            running = 0;
+                            break;
 
-                    case SDL_EVENT_KEY_DOWN:
-                        // Handle key presses and send to terminal
-                        {
-                            char key_buffer[16] = { 0 };
-                            size_t len = 0;
+                        case SDL_EVENT_KEY_DOWN:
+                            // Handle key presses and send to terminal
+                            {
+                                char key_buffer[16] = { 0 };
+                                size_t len = 0;
 
-                            // Convert SDL key events to terminal input
-                            switch (event.key.key) {
-                            case SDLK_RETURN:
-                                vlog("ENTER key pressed, sending CRLF (%d bytes)\n", 2);
-                                key_buffer[0] = '\r';
-                                key_buffer[1] = '\n';
-                                len = 2;
-                                break;
-                            case SDLK_BACKSPACE:
-                                key_buffer[0] = '\x7f'; // DEL character
-                                len = 1;
-                                break;
-                            case SDLK_ESCAPE:
-                                key_buffer[0] = '\x1b'; // ESC character
-                                len = 1;
-                                break;
-                            case SDLK_UP:
-                                strcpy(key_buffer, "\x1b[A");
-                                len = 3;
-                                break;
-                            case SDLK_DOWN:
-                                strcpy(key_buffer, "\x1b[B");
-                                len = 3;
-                                break;
-                            case SDLK_RIGHT:
-                                strcpy(key_buffer, "\x1b[C");
-                                len = 3;
-                                break;
-                            case SDLK_LEFT:
-                                strcpy(key_buffer, "\x1b[D");
-                                len = 3;
-                                break;
-                            default:
-                                // Handle printable characters
-                                if (event.key.key >= 32 && event.key.key < 127) {
-                                    // Check for Ctrl+G specifically
-                                    if (event.key.key == 'g' || event.key.key == 'G') {
-                                        if (event.key.mod & SDL_KMOD_CTRL) {
-                                            if (rend) {
-                                                renderer_toggle_debug_grid(rend);
-                                                force_redraw = 1;
+                                // Ctrl+Q: exit
+                                if (event.key.key == SDLK_Q &&
+                                    (event.key.mod & SDL_KMOD_CTRL)) {
+                                    running = 0;
+                                    break;
+                                }
+
+                                // Convert SDL key events to terminal input
+                                switch (event.key.key) {
+                                case SDLK_RETURN:
+                                    vlog("ENTER key pressed, sending CRLF (%d bytes)\n", 2);
+                                    key_buffer[0] = '\r';
+                                    key_buffer[1] = '\n';
+                                    len = 2;
+                                    break;
+                                case SDLK_BACKSPACE:
+                                    key_buffer[0] = '\x7f'; // DEL character
+                                    len = 1;
+                                    break;
+                                case SDLK_ESCAPE:
+                                    key_buffer[0] = '\x1b'; // ESC character
+                                    len = 1;
+                                    break;
+                                case SDLK_UP:
+                                    strcpy(key_buffer, "\x1b[A");
+                                    len = 3;
+                                    break;
+                                case SDLK_DOWN:
+                                    strcpy(key_buffer, "\x1b[B");
+                                    len = 3;
+                                    break;
+                                case SDLK_RIGHT:
+                                    strcpy(key_buffer, "\x1b[C");
+                                    len = 3;
+                                    break;
+                                case SDLK_LEFT:
+                                    strcpy(key_buffer, "\x1b[D");
+                                    len = 3;
+                                    break;
+                                default:
+                                    // Handle printable characters
+                                    if (event.key.key >= 32 && event.key.key < 127) {
+                                        // Check for Ctrl+G specifically
+                                        if (event.key.key == 'g' || event.key.key == 'G') {
+                                            if (event.key.mod & SDL_KMOD_CTRL) {
+                                                if (rend) {
+                                                    renderer_toggle_debug_grid(rend);
+                                                    force_redraw = 1;
+                                                }
+                                                // Don't send to terminal
+                                                len = 0;
+                                                vlog("Ctrl+G pressed, debug grid toggled\n");
+                                            } else {
+                                                key_buffer[0] = (char)event.key.key;
+                                                len = 1;
                                             }
-                                            // Don't send to terminal
-                                            len = 0;
-                                            vlog("Ctrl+G pressed, debug grid toggled\n");
+                                        } else if (event.key.mod & SDL_KMOD_CTRL) {
+                                            // Ctrl+letter: send as control character
+                                            char ch = (char)event.key.key;
+                                            if (ch >= 'a' && ch <= 'z') {
+                                                key_buffer[0] = (char)(ch - 'a' + 1);
+                                                len = 1;
+                                            }
                                         } else {
                                             key_buffer[0] = (char)event.key.key;
                                             len = 1;
                                         }
-                                    } else {
-                                        key_buffer[0] = (char)event.key.key;
-                                        len = 1;
                                     }
+                                    break;
                                 }
-                                break;
-                            }
 
-                            if (len > 0) {
-                                terminal_process_input(term, key_buffer, len);
+                                if (len > 0) {
+                                    terminal_process_input(term, key_buffer, len);
+                                    keys_this_frame++;
+                                }
                             }
+                            break;
+
+                        case SDL_EVENT_WINDOW_RESIZED:
+                            // Handle window resize
+                            terminal_resize(term, event.window.data1, event.window.data2);
+                            renderer_resize(rend, event.window.data1, event.window.data2);
+                            break;
                         }
-                        break;
-
-                    case SDL_EVENT_WINDOW_RESIZED:
-                        // Handle window resize
-                        terminal_resize(term, event.window.data1, event.window.data2);
-                        renderer_resize(rend, event.window.data1, event.window.data2);
-                        break;
-                    }
-                }
+                    } while (SDL_PollEvent(&event));
 
                 // Render terminal only if needed
                 if (terminal_needs_redraw(term) || force_redraw) {
+                    uint64_t t_draw_start = SDL_GetPerformanceCounter();
                     renderer_draw_terminal(rend, term);
+                    uint64_t t_present_start = SDL_GetPerformanceCounter();
                     SDL_RenderPresent(sdl_rend);
+                    uint64_t t_present_end = SDL_GetPerformanceCounter();
                     terminal_clear_redraw(term);
                     force_redraw = 0;
+
+                    // Record frame latency breakdown (bench mode)
+                    if (bench_timing && keys_this_frame > 0) {
+                        double event_ms = (double)(t_draw_start - frame_start) * 1000.0 / (double)perf_freq;
+                        double draw_ms = (double)(t_present_start - t_draw_start) * 1000.0 / (double)perf_freq;
+                        double present_ms = (double)(t_present_end - t_present_start) * 1000.0 / (double)perf_freq;
+                        double total_ms = event_ms + draw_ms + present_ms;
+
+                        if (frame_count >= frame_capacity) {
+                            frame_capacity = frame_capacity ? frame_capacity * 2 : 1024;
+                            frame_times_ms = realloc(frame_times_ms, frame_capacity * sizeof(double));
+                        }
+                        frame_times_ms[frame_count++] = total_ms;
+                        total_keys_processed += keys_this_frame;
+
+                        // Print per-frame breakdown for first 20 frames
+                        if (frame_count <= 20) {
+                            fprintf(stderr, "  frame %3d: events=%.3fms draw=%.3fms present=%.3fms total=%.3fms keys=%d\n",
+                                    frame_count, event_ms, draw_ms, present_ms, total_ms, keys_this_frame);
+                        }
+                    }
 
                     // Log atlas stats after rendering activity
                     renderer_log_stats(rend);
                 }
-
-                // Small delay to prevent excessive CPU usage
-                SDL_Delay(16); // ~60 FPS
             }
+
+            // Print frame latency summary in bench mode
+            if (bench_timing && frame_count > 0) {
+                // Sort for percentiles
+                for (int i = 0; i < frame_count - 1; i++)
+                    for (int j = i + 1; j < frame_count; j++)
+                        if (frame_times_ms[j] < frame_times_ms[i]) {
+                            double t = frame_times_ms[i];
+                            frame_times_ms[i] = frame_times_ms[j];
+                            frame_times_ms[j] = t;
+                        }
+
+                double sum = 0, min_ms = frame_times_ms[0], max_ms = frame_times_ms[frame_count - 1];
+                for (int i = 0; i < frame_count; i++)
+                    sum += frame_times_ms[i];
+
+                fprintf(stderr, "\n=== Bench Frame Latency (input-to-render) ===\n");
+                fprintf(stderr, "  Frames rendered: %d\n", frame_count);
+                fprintf(stderr, "  Keys processed:  %d\n", total_keys_processed);
+                fprintf(stderr, "  Keys/frame avg:  %.1f\n", (double)total_keys_processed / frame_count);
+                fprintf(stderr, "  Min:    %7.3f ms\n", min_ms);
+                fprintf(stderr, "  Avg:    %7.3f ms\n", sum / frame_count);
+                fprintf(stderr, "  Median: %7.3f ms\n", frame_times_ms[frame_count / 2]);
+                fprintf(stderr, "  P95:    %7.3f ms\n", frame_times_ms[(int)(frame_count * 0.95)]);
+                fprintf(stderr, "  P99:    %7.3f ms\n", frame_times_ms[(int)(frame_count * 0.99)]);
+                fprintf(stderr, "  Max:    %7.3f ms\n", max_ms);
+                fprintf(stderr, "  Total:  %7.1f ms\n", sum);
+                fprintf(stderr, "============================================\n");
+            }
+            free(frame_times_ms);
         }
+
+        if (bench_thread)
+            SDL_WaitThread(bench_thread, NULL);
+        bench_free_script(bench);
     }
 
     // Cleanup
@@ -433,7 +570,7 @@ static void print_usage(const char *progname)
     printf("  -f FONT     Font family name (e.g., \"Adwaita Mono\")\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: none)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
-    printf("  --bench       Render one frame and exit (for profiling)\n");
+    printf("  --bench[=FILE]  Enable frame timing (optionally play scripted events from FILE)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  --          End of options (use before - for stdin)\n");
     printf("\n");
@@ -644,4 +781,129 @@ static int png_render_text(const char *text, const char *output_path)
     free(pixels);
     font_destroy(&font_backend_ft);
     return rc == 0 ? 0 : 1;
+}
+
+static void bench_add_event(BenchScript *script, uint32_t delay_ms, SDL_Keycode key, SDL_Keymod mod)
+{
+    if (script->count >= script->capacity) {
+        script->capacity = script->capacity ? script->capacity * 2 : 256;
+        script->events = realloc(script->events, script->capacity * sizeof(BenchEvent));
+    }
+    script->events[script->count].delay_ms = delay_ms;
+    script->events[script->count].key = key;
+    script->events[script->count].mod = mod;
+    script->count++;
+}
+
+static BenchScript *bench_parse_script(const char *path)
+{
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "ERROR: Cannot open bench script '%s': %s\n", path, strerror(errno));
+        return NULL;
+    }
+
+    BenchScript *script = calloc(1, sizeof(BenchScript));
+    char line[1024];
+
+    while (fgets(line, sizeof(line), f)) {
+        // Strip trailing newline
+        size_t len = strlen(line);
+        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+            line[--len] = '\0';
+
+        // Skip empty lines and comments
+        if (len == 0 || line[0] == '#')
+            continue;
+
+        // Parse optional leading delay
+        uint32_t delay_ms = 0;
+        const char *p = line;
+        if (*p >= '0' && *p <= '9') {
+            delay_ms = (uint32_t)strtoul(p, (char **)&p, 10);
+            // Skip whitespace after delay
+            while (*p == ' ' || *p == '\t')
+                p++;
+        }
+
+        // Parse key_spec: expand characters and escape sequences
+        int first_event = 1;
+        while (*p) {
+            SDL_Keycode key = 0;
+            SDL_Keymod mod = 0;
+            int advance = 1;
+
+            if (*p == '\\' && *(p + 1)) {
+                switch (*(p + 1)) {
+                case 'n':
+                    key = SDLK_RETURN;
+                    advance = 2;
+                    break;
+                case 'b':
+                    key = SDLK_BACKSPACE;
+                    advance = 2;
+                    break;
+                case 'e':
+                    key = SDLK_ESCAPE;
+                    advance = 2;
+                    break;
+                case 'C':
+                    // \C-x = Ctrl+x
+                    if (*(p + 2) == '-' && *(p + 3)) {
+                        char ch = *(p + 3);
+                        if (ch >= 'A' && ch <= 'Z')
+                            ch = (char)(ch - 'A' + 'a');
+                        key = (SDL_Keycode)ch;
+                        mod = SDL_KMOD_CTRL;
+                        advance = 4;
+                    } else {
+                        key = (SDL_Keycode)*p;
+                        advance = 1;
+                    }
+                    break;
+                case '\\':
+                    key = (SDL_Keycode)'\\';
+                    advance = 2;
+                    break;
+                default:
+                    // Check for arrow key names
+                    if (strncmp(p + 1, "UP", 2) == 0) {
+                        key = SDLK_UP;
+                        advance = 3;
+                    } else if (strncmp(p + 1, "DOWN", 4) == 0) {
+                        key = SDLK_DOWN;
+                        advance = 5;
+                    } else if (strncmp(p + 1, "LEFT", 4) == 0) {
+                        key = SDLK_LEFT;
+                        advance = 5;
+                    } else if (strncmp(p + 1, "RIGHT", 5) == 0) {
+                        key = SDLK_RIGHT;
+                        advance = 6;
+                    } else {
+                        key = (SDL_Keycode)*p;
+                        advance = 1;
+                    }
+                    break;
+                }
+            } else {
+                key = (SDL_Keycode)*p;
+            }
+
+            // Only the first event in a line gets the delay
+            bench_add_event(script, first_event ? delay_ms : 0, key, mod);
+            first_event = 0;
+            p += advance;
+        }
+    }
+
+    fclose(f);
+    return script;
+}
+
+static void bench_free_script(BenchScript *script)
+{
+    if (!script)
+        return;
+    free(script->events);
+    free(script);
 }

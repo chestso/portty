@@ -180,48 +180,45 @@ run_application() {
     return 0
 }
 
-# Generate deterministic ANSI stress test data for profiling
-generate_profile_data() {
+# Generate a bench script for profiling (scripted key events)
+generate_bench_script() {
     local output_file="$1"
-    log_info "Generating ANSI stress test data..."
+    log_info "Generating bench script..."
 
-    : > "$output_file"
+    cat > "$output_file" <<'SCRIPT'
+# Bench script for profiling: exercises typing, scrolling, special keys
+# Format: [delay_ms] <key_spec>
 
-    # Color cycling: 2000 lines with rotating SGR color codes
-    for i in $(seq 1 2000); do
-        local fg=$(( (i % 7) + 31 ))
-        local bg=$(( (i % 7) + 41 ))
-        printf '\033[%d;%dmLine %04d: The quick brown fox jumps over the lazy dog\033[0m\n' "$fg" "$bg" "$i" >> "$output_file"
-    done
+# Type a command with color output
+0 echo -e "\e[31mRed\e[32mGreen\e[34mBlue\e[0m"\n
+50 echo -e "\e[1;33mBold Yellow\e[0m and \e[4;36mUnderline Cyan\e[0m"\n
 
-    # Truecolor gradients: 500 lines with 24-bit color
-    for i in $(seq 1 500); do
-        local r=$(( (i * 51) % 256 ))
-        local g=$(( (i * 37) % 256 ))
-        local b=$(( (i * 73) % 256 ))
-        printf '\033[38;2;%d;%d;%dmTruecolor gradient line %d: ABCDEFGHIJKLMNOPQRSTUVWXYZ\033[0m\n' "$r" "$g" "$b" "$i" >> "$output_file"
-    done
+# Type lines to fill the screen and exercise scrollback
+10 for i in $(seq 1 50); do echo "Line $i: The quick brown fox jumps over the lazy dog"; done\n
 
-    # Emoji sequences: 200 lines with various emoji
-    for i in $(seq 1 200); do
-        printf '😀🎉🚀💻🔥✨🌍🎨📚🔧 Emoji line %d 👋🏽👨‍👩‍👧‍👦🏳️‍🌈🇺🇸\n' "$i" >> "$output_file"
-    done
+# Truecolor gradient
+50 for i in $(seq 0 5 255); do printf "\e[38;2;${i};$((255-i));128m#\e[0m"; done; echo\n
 
-    # Box drawing: 100 lines
-    for i in $(seq 1 100); do
-        printf '┌──────────────────────────────────────┐\n' >> "$output_file"
-        printf '│ Box drawing line %-20d │\n' "$i" >> "$output_file"
-        printf '└──────────────────────────────────────┘\n' >> "$output_file"
-    done
+# Emoji
+50 echo "Emoji: 😀🎉🚀💻🔥✨🌍🎨📚🔧"\n
 
-    # Scrolling volume: raw text to push scrollback
-    for i in $(seq 1 1000); do
-        printf 'Scrollback filler line %d: Lorem ipsum dolor sit amet, consectetur adipiscing elit.\n' "$i" >> "$output_file"
-    done
+# Box drawing
+50 echo "┌────────────────────┐"\n
+0 echo "│ Box drawing test   │"\n
+0 echo "└────────────────────┘"\n
 
-    local size
-    size=$(wc -c < "$output_file")
-    log_info "Generated $(( size / 1024 ))KB of test data ($output_file)"
+# More scrolling
+10 for i in $(seq 1 100); do echo "Scroll $i: Lorem ipsum dolor sit amet"; done\n
+
+# Arrow keys and backspace
+100 Hello\b\b\b\b\bWorld
+50 \n
+
+# Exit
+100 \C-q
+SCRIPT
+
+    log_info "Bench script written to $output_file"
 }
 
 # Run profiling build, benchmark, and report
@@ -257,24 +254,24 @@ run_profiling() {
     fi
     cd ..
 
-    # Generate test data
-    local profile_data="profile-test-data.txt"
-    generate_profile_data "$profile_data"
+    # Generate bench script
+    local bench_script="bench-script.txt"
+    generate_bench_script "$bench_script"
 
-    # Run benchmark
-    log_info "Running benchmark (SDL_VIDEO_DRIVER=offscreen --bench)..."
+    # Run benchmark with scripted events (window opens, script plays, Ctrl+Q exits)
+    log_info "Running benchmark (--bench $bench_script)..."
     rm -f gmon.out
-    SDL_VIDEO_DRIVER=offscreen ./"$BUILD_DIR"/src/"$PROJECT_NAME" --bench - < "$profile_data"
+    ./"$BUILD_DIR"/src/"$PROJECT_NAME" --bench="$bench_script"
     if [ $? -ne 0 ]; then
         log_error "Benchmark run failed"
-        rm -f "$profile_data"
+        rm -f "$bench_script"
         exit 1
     fi
 
     # Check gmon.out was generated
     if [ ! -f gmon.out ]; then
         log_error "gmon.out not generated (profiling data missing)"
-        rm -f "$profile_data"
+        rm -f "$bench_script"
         exit 1
     fi
 
@@ -290,8 +287,8 @@ run_profiling() {
 
     log_info "Full report saved to: $report_file"
 
-    # Cleanup test data
-    rm -f "$profile_data"
+    # Cleanup
+    rm -f "$bench_script"
 }
 
 # Format source files
