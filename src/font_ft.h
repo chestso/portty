@@ -4,6 +4,6 @@
 #include "font.h"
 
 // FreeType/HarfBuzz backend implementation
-extern Font font;
+extern FontBackend font;
 
 #endif // FONT_FT_H

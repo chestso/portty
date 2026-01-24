@@ -58,7 +58,7 @@ static bool load_font_file(const char *font_path, unsigned char **data, size_t *
 }
 
 // Helper function to free a glyph bitmap
-static void ft_free_glyph_bitmap(Font *font, GlyphBitmap *bitmap)
+static void ft_free_glyph_bitmap(FontBackend *font, GlyphBitmap *bitmap)
 {
     (void)font; // Unused
 
@@ -536,7 +536,7 @@ void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uin
 }
 
 // Initialize FreeType font
-static void *ft_init_font(Font *font, const char *font_path,
+static void *ft_init_font(FontBackend *font, const char *font_path,
                           float font_size, FontStyle style, const FontOptions *options)
 {
     (void)font; // Unused
@@ -648,7 +648,7 @@ static void *ft_init_font(Font *font, const char *font_path,
 }
 
 // Destroy FreeType font
-static void ft_destroy_font(Font *font, void *font_data)
+static void ft_destroy_font(FontBackend *font, void *font_data)
 {
     (void)font; // Unused
 
@@ -680,7 +680,7 @@ static void ft_destroy_font(Font *font, void *font_data)
 }
 
 // Get font metrics
-static bool ft_get_metrics(Font *font, void *font_data, FontMetrics *metrics)
+static bool ft_get_metrics(FontBackend *font, void *font_data, FontMetrics *metrics)
 {
     (void)font; // Unused
 
@@ -730,7 +730,7 @@ m_done:;
 }
 
 // Render glyphs using FreeType directly (unified function for single/multiple codepoints)
-static GlyphBitmap *ft_render_glyph(Font *font, void *font_data,
+static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
                                     uint32_t *codepoints, int codepoint_count,
                                     uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
 {
@@ -1124,7 +1124,7 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
 }
 
 // Render a shaped run: shape with HarfBuzz, rasterize each glyph with FreeType
-static ShapedGlyphs *ft_render_shaped(Font *font, void *font_data,
+static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
                                       uint32_t *codepoints, int codepoint_count,
                                       uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
 {
@@ -1192,7 +1192,7 @@ static ShapedGlyphs *ft_render_shaped(Font *font, void *font_data,
 }
 
 // Set a single variation axis value
-static bool ft_set_variation_axis(Font *font, void *font_data, const char *axis_tag, float value)
+static bool ft_set_variation_axis(FontBackend *font, void *font_data, const char *axis_tag, float value)
 {
     (void)font;
     FtFontData *ft_data = (FtFontData *)font_data;
@@ -1234,7 +1234,7 @@ static bool ft_set_variation_axis(Font *font, void *font_data, const char *axis_
 }
 
 // Set multiple variation axis coordinates
-static bool ft_set_variation_axes(Font *font, void *font_data, float *coords_in, int num_coords)
+static bool ft_set_variation_axes(FontBackend *font, void *font_data, float *coords_in, int num_coords)
 {
     (void)font;
     FtFontData *ft_data = (FtFontData *)font_data;
@@ -1271,7 +1271,7 @@ static bool ft_set_variation_axes(Font *font, void *font_data, float *coords_in,
 }
 
 // Get glyph info without rendering
-static bool ft_get_glyph_info(Font *font, void *font_data, uint32_t codepoint,
+static bool ft_get_glyph_info(FontBackend *font, void *font_data, uint32_t codepoint,
                               int *advance, int *left_bearing, int *top_bearing)
 {
     (void)font; // Unused
@@ -1304,7 +1304,7 @@ static bool ft_get_glyph_info(Font *font, void *font_data, uint32_t codepoint,
 }
 
 // FreeType font implementation
-static bool ft_style_has_colr(Font *font, void *font_data)
+static bool ft_style_has_colr(FontBackend *font, void *font_data)
 {
     (void)font;
     FtFontData *ft_data = (FtFontData *)font_data;
@@ -1313,7 +1313,7 @@ static bool ft_style_has_colr(Font *font, void *font_data)
     return ft_data->has_colr;
 }
 
-Font font = {
+FontBackend font = {
     .name = "freetype",
     .init = font_init,
     .destroy = font_destroy,

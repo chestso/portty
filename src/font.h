@@ -62,11 +62,11 @@ typedef struct ShapedGlyphs
 } ShapedGlyphs;
 
 // Abstract font font interface
-struct Font;
-typedef struct Font Font;
+struct FontBackend;
+typedef struct FontBackend FontBackend;
 
 // Backend interface definition
-struct Font
+struct FontBackend
 {
     const char *name;
 
@@ -76,89 +76,89 @@ struct Font
     uint32_t loaded_styles;                // Bitmask of loaded font styles
 
     // Initialize font
-    bool (*init)(Font *font);
+    bool (*init)(FontBackend *font);
 
     // Destroy font
-    void (*destroy)(Font *font);
+    void (*destroy)(FontBackend *font);
 
     // Initialize font-specific data for a font style
-    void *(*init_font)(Font *font, const char *font_path,
+    void *(*init_font)(FontBackend *font, const char *font_path,
                        float font_size, FontStyle style, const FontOptions *options);
 
     // Destroy font-specific data
-    void (*destroy_font)(Font *font, void *font_data);
+    void (*destroy_font)(FontBackend *font, void *font_data);
 
     // Get metrics for a font
-    bool (*get_metrics)(Font *font, void *font_data, FontMetrics *metrics);
+    bool (*get_metrics)(FontBackend *font, void *font_data, FontMetrics *metrics);
 
     // Unified glyph renderer for both single and multiple codepoints
-    GlyphBitmap *(*render_glyphs)(Font *font, void *font_data,
+    GlyphBitmap *(*render_glyphs)(FontBackend *font, void *font_data,
                                   uint32_t *codepoints, int codepoint_count,
                                   uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
     // NEW: Render shaped multi-codepoint runs (HarfBuzz + FreeType)
-    ShapedGlyphs *(*render_shaped)(Font *font, void *font_data,
+    ShapedGlyphs *(*render_shaped)(FontBackend *font, void *font_data,
                                    uint32_t *codepoints, int codepoint_count,
                                    uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
     // NEW: Variable font axis control
-    bool (*set_variation_axis)(Font *font, void *font_data,
+    bool (*set_variation_axis)(FontBackend *font, void *font_data,
                                const char *axis_tag, float value);
 
     // NEW: Set multiple axes at once
-    bool (*set_variation_axes)(Font *font, void *font_data,
+    bool (*set_variation_axes)(FontBackend *font, void *font_data,
                                float *coords, int num_coords);
 
     // Get glyph metrics without rendering
-    bool (*get_glyph_info)(Font *font, void *font_data, uint32_t codepoint,
+    bool (*get_glyph_info)(FontBackend *font, void *font_data, uint32_t codepoint,
                            int *advance, int *left_bearing, int *top_bearing);
 
     // Free a glyph bitmap
-    void (*free_glyph_bitmap)(Font *font, GlyphBitmap *bitmap);
+    void (*free_glyph_bitmap)(FontBackend *font, GlyphBitmap *bitmap);
 
     // Font loading functions
-    bool (*load_font)(Font *font, FontStyle style,
+    bool (*load_font)(FontBackend *font, FontStyle style,
                       const char *font_path, float font_size, const FontOptions *options);
 
     // Get metrics for a specific style
-    const FontMetrics *(*get_style_metrics)(Font *font, FontStyle style);
+    const FontMetrics *(*get_style_metrics)(FontBackend *font, FontStyle style);
 
     // Check if a style is loaded
-    bool (*has_style)(Font *font, FontStyle style);
+    bool (*has_style)(FontBackend *font, FontStyle style);
 
     // Check if a loaded style supports COLR (color glyphs)
-    bool (*style_has_colr)(Font *font, void *font_data);
+    bool (*style_has_colr)(FontBackend *font, void *font_data);
 };
 
 // Font font API
-bool font_init(Font *font);
-void font_destroy(Font *font);
-bool font_load_font(Font *font, FontStyle style,
+bool font_init(FontBackend *font);
+void font_destroy(FontBackend *font);
+bool font_load_font(FontBackend *font, FontStyle style,
                     const char *font_path, float font_size, const FontOptions *options);
-const FontMetrics *font_get_metrics(Font *font, FontStyle style);
-GlyphBitmap *font_render_glyphs(Font *font, FontStyle style,
+const FontMetrics *font_get_metrics(FontBackend *font, FontStyle style);
+GlyphBitmap *font_render_glyphs(FontBackend *font, FontStyle style,
                                 uint32_t *codepoints, int codepoint_count,
                                 uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
 // NEW: Render shaped text (multi-codepoint runs)
-ShapedGlyphs *font_render_shaped_text(Font *font, FontStyle style,
+ShapedGlyphs *font_render_shaped_text(FontBackend *font, FontStyle style,
                                       uint32_t *codepoints, int count,
                                       uint8_t r, uint8_t g, uint8_t b);
 
 // NEW: Set variable font axis value
-bool font_set_variation_axis(Font *font, FontStyle style,
+bool font_set_variation_axis(FontBackend *font, FontStyle style,
                              const char *axis_tag, float value);
 
 // NEW: Set multiple axis coordinates at once
-bool font_set_variation_axes(Font *font, FontStyle style,
+bool font_set_variation_axes(FontBackend *font, FontStyle style,
                              float *coords, int num_coords);
 
-bool font_has_style(Font *font, FontStyle style);
+bool font_has_style(FontBackend *font, FontStyle style);
 
 // NEW: Check if a loaded style supports COLR (color glyphs)
-bool font_style_has_colr(Font *font, FontStyle style);
+bool font_style_has_colr(FontBackend *font, FontStyle style);
 
 // Extern declaration for the FreeType backend implementation
-extern Font font;
+extern FontBackend font;
 
 #endif // FONT_H

@@ -17,7 +17,7 @@ struct Renderer
 {
     SDL_Renderer *renderer;
     SDL_Window *window;
-    Font *font;
+    FontBackend *font;
     int cell_width;
     int cell_height;
     int char_width;

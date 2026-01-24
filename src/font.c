@@ -3,7 +3,7 @@
 #include <string.h>
 
 // Initialize the font font
-bool font_init(Font *font)
+bool font_init(FontBackend *font)
 {
     if (!font) {
         return false;
@@ -21,7 +21,7 @@ bool font_init(Font *font)
 }
 
 // Destroy the font font
-void font_destroy(Font *font)
+void font_destroy(FontBackend *font)
 {
     if (!font)
         return;
@@ -36,7 +36,7 @@ void font_destroy(Font *font)
 }
 
 // Load a font with a specific style
-bool font_load_font(Font *font, FontStyle style,
+bool font_load_font(FontBackend *font, FontStyle style,
                     const char *font_path, float font_size, const FontOptions *options)
 {
     if (!font || style >= FONT_STYLE_COUNT || !font_path) {
@@ -73,7 +73,7 @@ bool font_load_font(Font *font, FontStyle style,
 }
 
 // Get metrics for a specific style
-const FontMetrics *font_get_metrics(Font *font, FontStyle style)
+const FontMetrics *font_get_metrics(FontBackend *font, FontStyle style)
 {
     if (!font || style >= FONT_STYLE_COUNT ||
         !(font->loaded_styles & (1u << style))) {
@@ -84,7 +84,7 @@ const FontMetrics *font_get_metrics(Font *font, FontStyle style)
 }
 
 // Unified glyph renderer for single and multiple codepoints
-GlyphBitmap *font_render_glyphs(Font *font, FontStyle style,
+GlyphBitmap *font_render_glyphs(FontBackend *font, FontStyle style,
                                 uint32_t *codepoints, int codepoint_count,
                                 uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
 {
@@ -98,7 +98,7 @@ GlyphBitmap *font_render_glyphs(Font *font, FontStyle style,
 }
 
 // Render shaped text (multi-codepoint runs)
-ShapedGlyphs *font_render_shaped_text(Font *font, FontStyle style,
+ShapedGlyphs *font_render_shaped_text(FontBackend *font, FontStyle style,
                                       uint32_t *codepoints, int count,
                                       uint8_t r, uint8_t g, uint8_t b)
 {
@@ -114,7 +114,7 @@ ShapedGlyphs *font_render_shaped_text(Font *font, FontStyle style,
 }
 
 // Set variable font axis value
-bool font_set_variation_axis(Font *font, FontStyle style,
+bool font_set_variation_axis(FontBackend *font, FontStyle style,
                              const char *axis_tag, float value)
 {
     if (!font || style >= FONT_STYLE_COUNT ||
@@ -129,7 +129,7 @@ bool font_set_variation_axis(Font *font, FontStyle style,
 }
 
 // Set multiple variation axis coordinates
-bool font_set_variation_axes(Font *font, FontStyle style,
+bool font_set_variation_axes(FontBackend *font, FontStyle style,
                              float *coords, int num_coords)
 {
     if (!font || style >= FONT_STYLE_COUNT ||
@@ -144,14 +144,14 @@ bool font_set_variation_axes(Font *font, FontStyle style,
 }
 
 // Check if a style is loaded
-bool font_has_style(Font *font, FontStyle style)
+bool font_has_style(FontBackend *font, FontStyle style)
 {
     return font && style < FONT_STYLE_COUNT &&
            (font->loaded_styles & (1u << style));
 }
 
 // Check if a loaded style supports COLR (color glyphs)
-bool font_style_has_colr(Font *font, FontStyle style)
+bool font_style_has_colr(FontBackend *font, FontStyle style)
 {
     if (!font || style >= FONT_STYLE_COUNT || !(font->loaded_styles & (1u << style)))
         return false;
