@@ -807,6 +807,18 @@ static void sdl3_resize(RendererBackend *backend, int width, int height)
     data->height = height;
 }
 
+static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *cell_height)
+{
+    if (!backend || !backend->backend_data)
+        return false;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (data->cell_width <= 0 || data->cell_height <= 0)
+        return false;
+    *cell_width = data->cell_width;
+    *cell_height = data->cell_height;
+    return true;
+}
+
 // SDL3 renderer backend instance
 RendererBackend renderer_backend_sdl3 = {
     .name = "sdl3",
@@ -818,5 +830,6 @@ RendererBackend renderer_backend_sdl3 = {
     .present = sdl3_present,
     .resize = sdl3_resize,
     .toggle_debug_grid = sdl3_toggle_debug_grid,
-    .log_stats = sdl3_log_stats
+    .log_stats = sdl3_log_stats,
+    .get_cell_size = sdl3_get_cell_size
 };

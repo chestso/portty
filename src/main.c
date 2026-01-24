@@ -19,8 +19,8 @@
 #include <string.h>
 #include <unistd.h>
 
-#define WINDOW_WIDTH  800
-#define WINDOW_HEIGHT 600
+#define DEFAULT_COLS 80
+#define DEFAULT_ROWS 24
 
 /* Global verbose flag - controls debug output */
 int verbose = 0;
@@ -84,6 +84,8 @@ int main(int argc, char *argv[])
     char *png_text = NULL;
     const char *font_name = NULL;
     float font_size = 12.0f; // Default font size in points
+    int init_cols = DEFAULT_COLS;
+    int init_rows = DEFAULT_ROWS;
 
     static struct option long_options[] = {
         { "list-fonts", no_argument, NULL, 'L' },
@@ -92,7 +94,7 @@ int main(int argc, char *argv[])
         { NULL, 0, NULL, 0 }
     };
 
-    while ((opt = getopt_long(argc, argv, "hveds:f:P:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hveds:f:g:P:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -140,6 +142,18 @@ int main(int argc, char *argv[])
             if (optarg)
                 bench_script_path = optarg;
             break;
+        case 'g':
+        {
+            int w = 0, h = 0;
+            if (sscanf(optarg, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
+                init_cols = w;
+                init_rows = h;
+            } else {
+                fprintf(stderr, "ERROR: Invalid geometry: %s (use COLSxROWS, e.g. 120x40)\n", optarg);
+                return 1;
+            }
+            break;
+        }
         case 'P':
             png_text = optarg;
             break;
@@ -228,8 +242,8 @@ int main(int argc, char *argv[])
     // FreeType is initialized in renderer_init, not here
     vlog("FreeType will be initialized in renderer\n");
 
-    // Initialize terminal
-    term = terminal_init(&terminal_backend_vt, WINDOW_WIDTH, WINDOW_HEIGHT);
+    // Initialize terminal with cell dimensions (cols x rows)
+    term = terminal_init(&terminal_backend_vt, init_cols, init_rows);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
         SDL_Quit();
@@ -238,14 +252,14 @@ int main(int argc, char *argv[])
 
     // Only create window and renderer if we're going to run the event loop
     if (running) {
-        // Create window with flags
-        vlog("Creating window with dimensions %dx%d\n", WINDOW_WIDTH, WINDOW_HEIGHT);
+        // Create window at placeholder size; will be resized after font loading
+        vlog("Creating window (placeholder size, will resize after font load)\n");
 
         // Clear errors before window creation
         SDL_ClearError();
 
-        Uint32 window_flags = SDL_WINDOW_RESIZABLE;
-        window = SDL_CreateWindow("vterm-sdl3 Terminal", WINDOW_WIDTH, WINDOW_HEIGHT, window_flags);
+        Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
+        window = SDL_CreateWindow("vterm-sdl3 Terminal", 800, 600, window_flags);
         if (!window) {
             const char *error = SDL_GetError();
             if (error && error[0] != '\0') {
@@ -295,9 +309,6 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // Set initial width/height in renderer
-        renderer_resize(rend, WINDOW_WIDTH, WINDOW_HEIGHT);
-
         // Load fonts
         if (renderer_load_fonts(rend, font_size, font_name, ft_hint_target) < 0) {
             fprintf(stderr, "Failed to load fonts\n");
@@ -308,6 +319,19 @@ int main(int argc, char *argv[])
             SDL_Quit();
             return 1;
         }
+
+        // Derive window size from font cell dimensions
+        int cell_w, cell_h;
+        int win_w = 800, win_h = 600;
+        if (renderer_get_cell_size(rend, &cell_w, &cell_h)) {
+            win_w = init_cols * cell_w;
+            win_h = init_rows * cell_h;
+            vlog("Derived window size from font: %dx%d (%d cols * %d px, %d rows * %d px)\n",
+                 win_w, win_h, init_cols, cell_w, init_rows, cell_h);
+        }
+        SDL_SetWindowSize(window, win_w, win_h);
+        renderer_resize(rend, win_w, win_h);
+        SDL_ShowWindow(window);
     }
 
     // Process input if provided
@@ -453,10 +477,21 @@ int main(int argc, char *argv[])
                             break;
 
                         case SDL_EVENT_WINDOW_RESIZED:
-                            // Handle window resize
-                            terminal_resize(term, event.window.data1, event.window.data2);
-                            renderer_resize(rend, event.window.data1, event.window.data2);
+                        {
+                            int pixel_w = event.window.data1;
+                            int pixel_h = event.window.data2;
+                            renderer_resize(rend, pixel_w, pixel_h);
+
+                            int cell_w, cell_h;
+                            if (renderer_get_cell_size(rend, &cell_w, &cell_h)) {
+                                int cols = pixel_w / cell_w;
+                                int rows = pixel_h / cell_h;
+                                if (cols > 0 && rows > 0)
+                                    terminal_resize(term, cols, rows);
+                            }
+                            force_redraw = 1;
                             break;
+                        }
                         }
                     } while (SDL_PollEvent(&event));
 
@@ -568,6 +603,7 @@ static void print_usage(const char *progname)
     printf("  -d          Enable debug grid (for testing)\n");
     printf("  -s SIZE     Font size in points (default: 12.0)\n");
     printf("  -f FONT     Font family name (e.g., \"Adwaita Mono\")\n");
+    printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: none)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  --bench[=FILE]  Enable frame timing (optionally play scripted events from FILE)\n");

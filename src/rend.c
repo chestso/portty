@@ -60,3 +60,10 @@ void renderer_log_stats(RendererBackend *rend)
         return;
     rend->log_stats(rend);
 }
+
+bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_height)
+{
+    if (!rend || !rend->get_cell_size)
+        return false;
+    return rend->get_cell_size(rend, cell_width, cell_height);
+}

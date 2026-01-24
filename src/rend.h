@@ -25,6 +25,7 @@ struct RendererBackend
     void (*resize)(RendererBackend *rend, int width, int height);
     void (*toggle_debug_grid)(RendererBackend *rend);
     void (*log_stats)(RendererBackend *rend);
+    bool (*get_cell_size)(RendererBackend *rend, int *cell_width, int *cell_height);
 };
 
 // Renderer API
@@ -36,5 +37,6 @@ void renderer_present(RendererBackend *rend);
 void renderer_resize(RendererBackend *rend, int width, int height);
 void renderer_toggle_debug_grid(RendererBackend *rend);
 void renderer_log_stats(RendererBackend *rend);
+bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_height);
 
 #endif /* REND_H */
