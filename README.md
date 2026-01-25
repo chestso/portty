@@ -1,6 +1,8 @@
 # bloom-term
 
-A terminal emulator built with SDL3, libvterm, FreeType and HarfBuzz.
+A universal terminal emulator with pluggable backends for terminal emulation, rendering, and fonts.
+
+Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz (fonts).
 
 ## Features
 
