@@ -6,27 +6,31 @@ This document outlines potential future enhancements for the bloom-term terminal
 
 ## 1. SDL3 GPU API Migration
 
-**Priority:** Medium  
-**Complexity:** High  
+**Priority:** Medium
+**Complexity:** High
 **Performance Gain:** Moderate-to-High (10-30% for large glyph counts)
+**Status:** ❌ **NOT STARTED**
 
 ### Current State
 
 - Using SDL_Renderer with SDL_Texture for glyph rendering
-- Each glyph uploaded as separate texture
+- Texture atlas already implemented (see section 4)
 - Simple, well-tested, portable approach
 
 ### Enhancement Goals
 
 - Migrate to SDL3 GPU API for lower-level control
 - Reduce CPU-GPU synchronization overhead
-- Enable advanced techniques (texture atlas, instanced rendering)
+- ✅ ~~Enable texture atlas~~ (already implemented - see section 4)
+- ❌ Enable instanced rendering
 
 ### Technical Design
 
 #### 1.1 Texture Atlas Generation
 
-**Concept:** Pack multiple glyphs into single large texture to reduce draw calls.
+**Status:** ✅ **ALREADY IMPLEMENTED** (see `src/rend_sdl3_atlas.{c,h}`)
+
+The two-page atlas with shelf packing is already in place. The design below shows the original concept for reference:
 
 ```c
 typedef struct GlyphAtlas {
@@ -225,14 +229,23 @@ void main() {
 
 ## 2. Advanced Variable Font Axes
 
-**Priority:** Low  
-**Complexity:** Medium  
+**Priority:** Low
+**Complexity:** Medium
 **User Benefit:** Enhanced typography and accessibility
+**Status:** ⚠️ **PARTIAL** (basic variable font support exists)
 
 ### Current State
 
-- Support for Weight (wght) axis: 100-900
-- Support for Width (wdth) axis: 50-200
+✅ **Already Implemented:**
+- Variable font (MM_Var) support
+- Weight (wght) axis: Dynamic adjustment for bold style
+- Axis caching and coordinate array management
+- FreeType/HarfBuzz synchronization via `hb_ft_font_changed()`
+
+❌ **Not Yet Implemented:**
+- Width (wdth) axis
+- Other axes: slnt, ital, opsz, GRAD
+- User configuration for custom axes
 
 ### Additional Axes to Support
 
@@ -358,14 +371,16 @@ italic.slant = -12
 
 ## 3. Bidirectional Text (BiDi) Support
 
-**Priority:** Low (unless targeting RTL languages)  
-**Complexity:** High  
+**Priority:** Low (unless targeting RTL languages)
+**Complexity:** High
 **User Benefit:** Proper Arabic, Hebrew, Persian rendering
+**Status:** ❌ **NOT STARTED**
 
 ### Current State
 
 - LTR (left-to-right) only
 - No Unicode BiDi algorithm
+- No FriBidi dependency
 
 ### Enhancement Goals
 
@@ -549,20 +564,28 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ## 4. Advanced Glyph Caching
 
-**Priority:** Medium  
-**Complexity:** Medium  
+**Priority:** Medium
+**Complexity:** Medium
 **Performance Gain:** High (50-80% for repeated glyphs)
+**Status:** ✅ **IMPLEMENTED** (as of current version)
 
 ### Current State
 
-- No caching: every glyph rendered on-demand
-- GPU textures created/destroyed per frame
+✅ **Two-page texture atlas implemented** (`src/rend_sdl3_atlas.{c,h}`):
+- Page 0: Small glyphs (≤48px)
+- Page 1: Large glyphs (>48px)
+- 2048×2048 RGBA textures
+- Shelf-based packing algorithm
+- FNV-1a hash-based lookup (O(1) with 4096 hash table entries)
+- LRU eviction when pages fill
+- Comprehensive vlog diagnostics
 
-### Enhancement Goals
+The implementation described below was **already completed**. Remaining work:
 
-- LRU (Least Recently Used) cache for rendered glyphs
-- Cache shaped runs (e.g., "fi" ligature)
-- Texture reuse to reduce GPU allocations
+### Enhancement Goals (REMAINING)
+
+- ❌ Cache shaped runs (e.g., "fi" ligature) - not yet implemented
+- ❌ Shaped run cache - not yet implemented
 
 ### Technical Design
 
@@ -786,16 +809,20 @@ void cache_print_stats(GlyphCache *cache, CacheStats *stats) {
 
 ## 5. Subpixel Rendering and LCD Filtering
 
-**Priority:** Low  
-**Complexity:** Medium  
+**Priority:** Low
+**Complexity:** Medium
 **User Benefit:** Sharper text on LCD screens
+**Status:** ⚠️ **PARTIAL** (foundation exists but not active)
 
 ### Current State
 
-- Basic grayscale anti-aliasing
-- No subpixel rendering
+⚠️ **Partially Enabled:**
+- `FT_CONFIG_OPTION_SUBPIXEL_RENDERING` is defined in `src/font_ft.c:1`
+- Basic grayscale anti-aliasing active
+- No FT_LOAD_TARGET_LCD flag usage
+- No LCD filter configuration
 
-### Enhancement Goals
+### Enhancement Goals (REMAINING)
 
 - RGB subpixel rendering for LCD screens
 - FreeType LCD filtering support
@@ -905,13 +932,15 @@ SubpixelOrder detect_subpixel_order(FcPattern *pattern) {
 
 ## 6. Font Fallback Chain
 
-**Priority:** Medium  
-**Complexity:** Medium  
+**Priority:** Medium
+**Complexity:** Medium
 **User Benefit:** Better Unicode coverage
+**Status:** ❌ **NOT STARTED**
 
 ### Current State
 
-- Single font per style (normal, bold, emoji)
+- Single font per style (normal, bold, emoji) via `font_resolver.c`
+- No fallback chain mechanism
 - Missing glyphs render as □ (tofu)
 
 ### Enhancement Goals
@@ -983,24 +1012,35 @@ GlyphBitmap *render_with_fallback(FontFallbackChain *chain, uint32_t codepoint,
 
 ---
 
+## Implementation Status
+
+| Enhancement        | Status           | Notes                                                                        |
+| ------------------ | ---------------- | ---------------------------------------------------------------------------- |
+| SDL3 GPU API       | ❌ Not Started   | Still using SDL_Renderer                                                     |
+| Variable Font Axes | ⚠️ Partial       | Only 'wght' (weight) axis implemented; no slnt, ital, opsz, GRAD support     |
+| BiDi Support       | ❌ Not Started   | No FriBidi integration, LTR only                                             |
+| Glyph Caching      | ✅ **DONE**      | Two-page texture atlas with shelf packing, FNV-1a hash, LRU eviction         |
+| Subpixel Rendering | ⚠️ Partial       | FT_CONFIG_OPTION_SUBPIXEL_RENDERING defined but FT_LOAD_TARGET_LCD not used  |
+| Font Fallback      | ❌ Not Started   | Single font per type (normal/bold/emoji), no fallback chain                  |
+
 ## Summary Table
 
-| Enhancement        | Priority | Complexity | Effort    | Performance Gain        |
-| ------------------ | -------- | ---------- | --------- | ----------------------- |
-| SDL3 GPU API       | Medium   | High       | 3-4 weeks | 10-30% rendering        |
-| Variable Font Axes | Low      | Medium     | 1 week    | None (UX improvement)   |
-| BiDi Support       | Low      | High       | 3-4 weeks | None (RTL languages)    |
-| Glyph Caching      | Medium   | Medium     | 1 week    | 50-80% rendering        |
-| Subpixel Rendering | Low      | Medium     | 1 week    | None (visual quality)   |
-| Font Fallback      | Medium   | Medium     | 1-2 weeks | None (Unicode coverage) |
+| Enhancement        | Priority | Complexity | Effort    | Performance Gain        | Status          |
+| ------------------ | -------- | ---------- | --------- | ----------------------- | --------------- |
+| SDL3 GPU API       | Medium   | High       | 3-4 weeks | 10-30% rendering        | ❌ Not Started  |
+| Variable Font Axes | Low      | Medium     | 1 week    | None (UX improvement)   | ⚠️ Partial      |
+| BiDi Support       | Low      | High       | 3-4 weeks | None (RTL languages)    | ❌ Not Started  |
+| Glyph Caching      | Medium   | Medium     | 1 week    | 50-80% rendering        | ✅ **DONE**     |
+| Subpixel Rendering | Low      | Medium     | 1 week    | None (visual quality)   | ⚠️ Partial      |
+| Font Fallback      | Medium   | Medium     | 1-2 weeks | None (Unicode coverage) | ❌ Not Started  |
 
 **Recommended Order:**
 
-1. **Glyph Caching** - Highest ROI (quick win)
+1. ~~**Glyph Caching**~~ - ✅ **DONE** (two-page atlas with shelf packing)
 2. **Font Fallback** - Better Unicode support
 3. **SDL3 GPU API** - Performance for large terminals
-4. **Variable Font Axes** - Enhanced typography
-5. **Subpixel Rendering** - Visual polish
+4. **Variable Font Axes** - Enhanced typography (complete remaining axes)
+5. **Subpixel Rendering** - Visual polish (enable FT_LOAD_TARGET_LCD)
 6. **BiDi Support** - Only if RTL language support needed
 
 ---
