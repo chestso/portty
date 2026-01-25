@@ -581,7 +581,7 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 - Shelf-based packing algorithm
 - FNV-1a hash-based lookup (O(1) with 4096 hash table entries)
 - LRU eviction when pages fill
-- Comprehensive vlog diagnostics
+- vlog diagnostics
 
 The implementation described below was **already completed**. Remaining work:
 
