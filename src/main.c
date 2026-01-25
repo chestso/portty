@@ -193,7 +193,7 @@ int main(int argc, char *argv[])
     if (verbose) {
         fprintf(stderr, "DEBUG: Setting SDL app metadata\n");
     }
-    if (!SDL_SetAppMetadata("vterm-sdl3", "1.0.0", "org.vterm.sdl3")) {
+    if (!SDL_SetAppMetadata("bloom-term", "1.0.0", "org.bloom.term")) {
         fprintf(stderr, "WARNING: Failed to set SDL app metadata: %s\n", SDL_GetError());
     }
 
@@ -259,7 +259,7 @@ int main(int argc, char *argv[])
         SDL_ClearError();
 
         Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
-        window = SDL_CreateWindow("vterm-sdl3 Terminal", 800, 600, window_flags);
+        window = SDL_CreateWindow("bloom-term", 800, 600, window_flags);
         if (!window) {
             const char *error = SDL_GetError();
             if (error && error[0] != '\0') {

@@ -1,4 +1,4 @@
-AC_INIT([vterm-sdl3], [0.1], [bug-report@example.com])
+AC_INIT([bloom-term], [0.1], [bug-report@example.com])
 AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 

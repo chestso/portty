@@ -35,8 +35,8 @@ build-aux/
 *.a
 *.exe
 *.out
-vterm-sdl3
-src/vterm-sdl3
+bloom-term
+src/bloom-term
 
 # Test binaries
 tests/*.log

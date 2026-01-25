@@ -3,13 +3,13 @@
 # Enable strict error handling
 set -euo pipefail
 
-# vterm-sdl3 Test Runner
+# bloom-term Test Runner
 # Run all tests or specific test categories
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-VTERM_BIN="$PROJECT_ROOT/build/src/vterm-sdl3"
+VTERM_BIN="$PROJECT_ROOT/build/src/bloom-term"
 VERBOSE="-v"
 
 # Timeout configuration (in seconds)
@@ -31,7 +31,7 @@ is_shell_script() {
 cd "$SCRIPT_DIR"
 
 if [ ! -f "$VTERM_BIN" ]; then
-	echo "Error: vterm-sdl3 not found at $VTERM_BIN"
+	echo "Error: bloom-term not found at $VTERM_BIN"
 	echo "Checked absolute path: $VTERM_BIN"
 	echo "Please build the project first:"
 	echo "  From project root: ./build.sh -y"
@@ -71,7 +71,7 @@ run_test() {
 		return 1
 	fi
 
-	# Run the test script and pipe its output to vterm-sdl3 with timeout
+	# Run the test script and pipe its output to bloom-term with timeout
 	echo "DEBUG: Running pipeline: timeout $TIMEOUT \"$test_file\" | timeout $TIMEOUT "$VTERM_BIN" $VERBOSE -e -" >&2
 	if timeout $TIMEOUT "$test_file" | timeout $TIMEOUT "$VTERM_BIN" $VERBOSE -e -; then
 		# Success
@@ -204,7 +204,7 @@ list_tests() {
 show_help() {
 	echo "Usage: ./run-examples.sh [OPTIONS] [TEST_PATH]"
 	echo
-	echo "Run vterm-sdl3 tests"
+	echo "Run bloom-term tests"
 	echo
 	echo "Options:"
 	echo "  -h, --help     Show this help message"

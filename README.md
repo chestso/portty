@@ -1,4 +1,4 @@
-# vterm-sdl3
+# bloom-term
 
 A terminal emulator built with SDL3, libvterm, FreeType and HarfBuzz.
 
@@ -49,16 +49,16 @@ Available options:
 
 ```bash
 # Run the terminal emulator
-build/src/vterm-sdl3
+build/src/bloom-term
 
 # Run with verbose output (useful to debug font/COLR/emoji handling)
-build/src/vterm-sdl3 -v
+build/src/bloom-term -v
 
 # Process input from a file
-build/src/vterm-sdl3 input.txt
+build/src/bloom-term input.txt
 
 # Process input from stdin
-echo -e "\x1b[31mHello World\x1b[0m" | build/src/vterm-sdl3 -
+echo -e "\x1b[31mHello World\x1b[0m" | build/src/bloom-term -
 ```
 
 ## Dependencies

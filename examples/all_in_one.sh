@@ -2,10 +2,10 @@
 # Comprehensive test combining all features
 printf "\033[2J\r" # Clear screen
 printf "\r\n"
-printf "\033]0;vterm-sdl3 Comprehensive Test\007\r" # Set window title
+printf "\033]0;bloom-term Comprehensive Test\007\r" # Set window title
 printf "\r\n"
 
-printf "\033[1;36m=== vterm-sdl3 Comprehensive Test ===\033[0m\r\n"
+printf "\033[1;36m=== bloom-term Comprehensive Test ===\033[0m\r\n"
 printf "\r\n"
 
 # Colors and attributes
@@ -23,7 +23,7 @@ printf "\r\n"
 printf "\r\n\033[14;1H┌─────────────────────────────┐\r\n"
 printf "\033[15;1H│ Unicode Box Drawing Test    │\r\n"
 printf "\033[16;1H├─────────────────────────────┤\r\n"
-printf "\033[17;1H│ Works with vterm-sdl3      │\r\n"
+printf "\033[17;1H│ Works with bloom-term      │\r\n"
 printf "\033[18;1H└─────────────────────────────┘\r\n"
 printf "\r\n"
 

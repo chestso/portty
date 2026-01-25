@@ -1,6 +1,6 @@
-# Future Enhancements - vterm-sdl3
+# Future Enhancements - bloom-term
 
-This document outlines potential future enhancements for the vterm-sdl3 terminal emulator, building on the FreeType + HarfBuzz + SDL3 architecture.
+This document outlines potential future enhancements for the bloom-term terminal emulator, building on the FreeType + HarfBuzz + SDL3 architecture.
 
 ---
 
@@ -326,7 +326,7 @@ bool ft_set_custom_axis(FtFontData *ft_data, uint32_t tag, float value) {
 
 ### Configuration Interface
 
-**User Config File (e.g., `~/.config/vterm-sdl3/fontrc`):**
+**User Config File (e.g., `~/.config/bloom-term/fontrc`):**
 
 ```ini
 [font.axes]

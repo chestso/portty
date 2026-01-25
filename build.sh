@@ -1,5 +1,5 @@
 #!/bin/bash
-# Build Script for vterm-sdl3 terminal emulator
+# Build Script for bloom-term terminal emulator
 
 set -e  # Exit on any error
 set -u  # Treat unset variables as errors
@@ -11,7 +11,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-PROJECT_NAME="vterm-sdl3"
+PROJECT_NAME="bloom-term"
 BUILD_DIR="build"
 INSTALL_PREFIX="$HOME/.local"
 ENABLE_DEBUG=true
