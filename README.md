@@ -7,11 +7,25 @@ A terminal emulator built with SDL3, libvterm, FreeType and HarfBuzz.
 - Full terminal emulation using libvterm
 - Rendering with SDL3
 - Text shaping with HarfBuzz
-- Font rasterization and COLR v1 paint traversal using FreeType
+- Font rasterization with FreeType
+- Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Variable-font support (MM_Var) and axis control
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
 - Configurable color schemes
 - Proper terminal resize handling
+
+## Architecture
+
+bloom-term uses a modular backend abstraction design:
+
+- **Terminal Backend**: Handles terminal emulation and screen state
+  - Current implementation: libvterm (`terminal_backend_vt`)
+- **Renderer Backend**: Handles graphics output and windowing
+  - Current implementation: SDL3 (`renderer_backend_sdl3`)
+- **Font Backend**: Handles font loading, shaping, and glyph rasterization
+  - Current implementation: FreeType/HarfBuzz (`font_backend_ft`)
+
+Each backend defines a standard interface (`TerminalBackend`, `RendererBackend`, `FontBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
 
 ## Building
 
@@ -42,8 +56,11 @@ Available options:
 - `--install` - Only install the project (skip build and run)
 - `--bear` - Generate compile_commands.json using bear
 - `--no-debug` - Disable debug build
+- `--profiling` - Build with gprof, run benchmark, generate profile report
 - `--format` - Format source files with clang-format, shfmt, and prettier
+- `--ref-png TEXT OUT` - Generate reference PNG of text using hb-view
 - `--prefix=PATH` - Set installation prefix (default: $HOME/.local)
+- `--help` - Show help message
 
 ## Usage
 
@@ -69,8 +86,6 @@ echo -e "\x1b[31mHello World\x1b[0m" | build/src/bloom-term -
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz
 
-Note: Cairo is not required for the renderer anymore; COLR v1 paint traversal and shaping are handled by the FreeType/HarfBuzz backend.
-
 ## Development
 
 The project includes:
@@ -81,6 +96,6 @@ The project includes:
 
 ## Notes and current limitations
 
-- COLR v1 support is implemented in the FreeType backend and covers many common paint types (solid, linear/radial/sweep gradients, transforms, glyph masking and basic composite modes), but several paint semantics (extend modes, all composite operators, some transform edge-cases) are still best-effort and may need refinement.
+- COLR v1 support uses custom paint tree traversal (see `src/colr.c`). FreeType provides COLR v1 APIs for accessing paint data, but the recursive evaluation, affine transforms, and Porter-Duff compositing are implemented manually. Covers many common paint types (solid, linear/radial/sweep gradients, transforms, glyph masking and basic composite modes), but several paint semantics (extend modes, all composite operators, some transform edge-cases) are still best-effort and may need refinement.
 - Renderer currently uploads per-glyph textures and uses a simple LRU cache. A texture atlas / batched GPU upload path is a planned optimization.
 - Automated visual tests for COLR/emoji rendering are not yet available; use the provided examples with `-v` to inspect behavior.
