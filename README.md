@@ -97,5 +97,5 @@ The project includes:
 ## Notes and current limitations
 
 - COLR v1 support uses custom paint tree traversal (see `src/colr.c`). FreeType provides COLR v1 APIs for accessing paint data, but the recursive evaluation, affine transforms, and Porter-Duff compositing are implemented manually. Covers many common paint types (solid, linear/radial/sweep gradients, transforms, glyph masking and basic composite modes), but several paint semantics (extend modes, all composite operators, some transform edge-cases) are still best-effort and may need refinement.
-- Renderer currently uploads per-glyph textures and uses a simple LRU cache. A texture atlas / batched GPU upload path is a planned optimization.
+- Renderer uses a two-page texture atlas with shelf packing and FNV-1a hash-based lookup. Page 0 handles small glyphs (≤48px), page 1 handles large glyphs. LRU eviction occurs when pages fill.
 - Automated visual tests for COLR/emoji rendering are not yet available; use the provided examples with `-v` to inspect behavior.
