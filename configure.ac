@@ -33,6 +33,23 @@ PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 
+# Optional: X11 support for unified event loop (poll on display fd)
+PKG_CHECK_MODULES([X11], [x11], [have_x11=yes], [have_x11=no])
+if test "x$have_x11" = "xyes"; then
+  AC_DEFINE([HAVE_X11], [1], [Define if X11 is available])
+fi
+AM_CONDITIONAL([HAVE_X11], [test "x$have_x11" = "xyes"])
+
+# Optional: Wayland support for unified event loop (poll on display fd)
+PKG_CHECK_MODULES([WAYLAND], [wayland-client], [have_wayland=yes], [have_wayland=no])
+if test "x$have_wayland" = "xyes"; then
+  AC_DEFINE([HAVE_WAYLAND], [1], [Define if Wayland is available])
+fi
+AM_CONDITIONAL([HAVE_WAYLAND], [test "x$have_wayland" = "xyes"])
+
+# Generate config.h header
+AC_CONFIG_HEADERS([config.h])
+
 # Check for header files
 AC_CHECK_HEADERS([stdio.h stdlib.h string.h])
 

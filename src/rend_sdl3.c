@@ -484,11 +484,6 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (terminal_get_cell(term, row, col, &cell) < 0)
         return 1;
 
-    if (cell.attrs.bold || cell.attrs.italic) {
-        vlog("Cell (%d,%d) attributes: bold=%d, italic=%d\n",
-             row, col, cell.attrs.bold, cell.attrs.italic);
-    }
-
     // Draw background if non-default
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
     if (!cell.bg.is_default) {
