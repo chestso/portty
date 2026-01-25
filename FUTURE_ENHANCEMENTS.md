@@ -237,12 +237,14 @@ void main() {
 ### Current State
 
 ✅ **Already Implemented:**
+
 - Variable font (MM_Var) support
 - Weight (wght) axis: Dynamic adjustment for bold style
 - Axis caching and coordinate array management
 - FreeType/HarfBuzz synchronization via `hb_ft_font_changed()`
 
 ❌ **Not Yet Implemented:**
+
 - Width (wdth) axis
 - Other axes: slnt, ital, opsz, GRAD
 - User configuration for custom axes
@@ -572,6 +574,7 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 ### Current State
 
 ✅ **Two-page texture atlas implemented** (`src/rend_sdl3_atlas.{c,h}`):
+
 - Page 0: Small glyphs (≤48px)
 - Page 1: Large glyphs (>48px)
 - 2048×2048 RGBA textures
@@ -817,6 +820,7 @@ void cache_print_stats(GlyphCache *cache, CacheStats *stats) {
 ### Current State
 
 ⚠️ **Partially Enabled:**
+
 - `FT_CONFIG_OPTION_SUBPIXEL_RENDERING` is defined in `src/font_ft.c:1`
 - Basic grayscale anti-aliasing active
 - No FT_LOAD_TARGET_LCD flag usage
@@ -1014,25 +1018,25 @@ GlyphBitmap *render_with_fallback(FontFallbackChain *chain, uint32_t codepoint,
 
 ## Implementation Status
 
-| Enhancement        | Status           | Notes                                                                        |
-| ------------------ | ---------------- | ---------------------------------------------------------------------------- |
-| SDL3 GPU API       | ❌ Not Started   | Still using SDL_Renderer                                                     |
-| Variable Font Axes | ⚠️ Partial       | Only 'wght' (weight) axis implemented; no slnt, ital, opsz, GRAD support     |
-| BiDi Support       | ❌ Not Started   | No FriBidi integration, LTR only                                             |
-| Glyph Caching      | ✅ **DONE**      | Two-page texture atlas with shelf packing, FNV-1a hash, LRU eviction         |
-| Subpixel Rendering | ⚠️ Partial       | FT_CONFIG_OPTION_SUBPIXEL_RENDERING defined but FT_LOAD_TARGET_LCD not used  |
-| Font Fallback      | ❌ Not Started   | Single font per type (normal/bold/emoji), no fallback chain                  |
+| Enhancement        | Status         | Notes                                                                       |
+| ------------------ | -------------- | --------------------------------------------------------------------------- |
+| SDL3 GPU API       | ❌ Not Started | Still using SDL_Renderer                                                    |
+| Variable Font Axes | ⚠️ Partial     | Only 'wght' (weight) axis implemented; no slnt, ital, opsz, GRAD support    |
+| BiDi Support       | ❌ Not Started | No FriBidi integration, LTR only                                            |
+| Glyph Caching      | ✅ **DONE**    | Two-page texture atlas with shelf packing, FNV-1a hash, LRU eviction        |
+| Subpixel Rendering | ⚠️ Partial     | FT_CONFIG_OPTION_SUBPIXEL_RENDERING defined but FT_LOAD_TARGET_LCD not used |
+| Font Fallback      | ❌ Not Started | Single font per type (normal/bold/emoji), no fallback chain                 |
 
 ## Summary Table
 
-| Enhancement        | Priority | Complexity | Effort    | Performance Gain        | Status          |
-| ------------------ | -------- | ---------- | --------- | ----------------------- | --------------- |
-| SDL3 GPU API       | Medium   | High       | 3-4 weeks | 10-30% rendering        | ❌ Not Started  |
-| Variable Font Axes | Low      | Medium     | 1 week    | None (UX improvement)   | ⚠️ Partial      |
-| BiDi Support       | Low      | High       | 3-4 weeks | None (RTL languages)    | ❌ Not Started  |
-| Glyph Caching      | Medium   | Medium     | 1 week    | 50-80% rendering        | ✅ **DONE**     |
-| Subpixel Rendering | Low      | Medium     | 1 week    | None (visual quality)   | ⚠️ Partial      |
-| Font Fallback      | Medium   | Medium     | 1-2 weeks | None (Unicode coverage) | ❌ Not Started  |
+| Enhancement        | Priority | Complexity | Effort    | Performance Gain        | Status         |
+| ------------------ | -------- | ---------- | --------- | ----------------------- | -------------- |
+| SDL3 GPU API       | Medium   | High       | 3-4 weeks | 10-30% rendering        | ❌ Not Started |
+| Variable Font Axes | Low      | Medium     | 1 week    | None (UX improvement)   | ⚠️ Partial     |
+| BiDi Support       | Low      | High       | 3-4 weeks | None (RTL languages)    | ❌ Not Started |
+| Glyph Caching      | Medium   | Medium     | 1 week    | 50-80% rendering        | ✅ **DONE**    |
+| Subpixel Rendering | Low      | Medium     | 1 week    | None (visual quality)   | ⚠️ Partial     |
+| Font Fallback      | Medium   | Medium     | 1-2 weeks | None (Unicode coverage) | ❌ Not Started |
 
 **Recommended Order:**
 
