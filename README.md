@@ -20,10 +20,19 @@ bloom-term uses a modular backend abstraction design:
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: libvterm (`terminal_backend_vt`)
+
 - **Renderer Backend**: Handles graphics output and windowing
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
+  - Uses a two-page texture atlas with shelf packing and FNV-1a hash-based lookup
+  - Page 0 handles small glyphs (≤48px), page 1 handles large glyphs
+  - LRU eviction occurs when pages fill
+
 - **Font Backend**: Handles font loading, shaping, and glyph rasterization
   - Current implementation: FreeType/HarfBuzz (`font_backend_ft`)
+  - Custom COLR v1 paint tree traversal implemented in `src/colr.c`
+  - FreeType provides COLR v1 APIs for accessing paint data; recursive evaluation, affine transforms, and Porter-Duff compositing are implemented manually
+  - Supports solid fills, linear/radial/sweep gradients, transforms, glyph masking, and basic composite modes
+  - Some paint semantics (extend modes, all composite operators, transform edge-cases) are best-effort
 
 Each backend defines a standard interface (`TerminalBackend`, `RendererBackend`, `FontBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
 
@@ -94,8 +103,4 @@ The project includes:
 - `build.sh` for automated builds
 - Example scripts demonstrating terminal features, including `examples/unicode/emoji.sh` which exercises COLR/emoji paths
 
-## Notes and current limitations
-
-- COLR v1 support uses custom paint tree traversal (see `src/colr.c`). FreeType provides COLR v1 APIs for accessing paint data, but the recursive evaluation, affine transforms, and Porter-Duff compositing are implemented manually. Covers many common paint types (solid, linear/radial/sweep gradients, transforms, glyph masking and basic composite modes), but several paint semantics (extend modes, all composite operators, some transform edge-cases) are still best-effort and may need refinement.
-- Renderer uses a two-page texture atlas with shelf packing and FNV-1a hash-based lookup. Page 0 handles small glyphs (≤48px), page 1 handles large glyphs. LRU eviction occurs when pages fill.
-- Automated visual tests for COLR/emoji rendering are not yet available; use the provided examples with `-v` to inspect behavior.
+Testing is currently manual using example scripts with the `-v` verbose flag. Automated visual tests for COLR/emoji rendering are not yet available.
