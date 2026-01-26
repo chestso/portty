@@ -14,7 +14,8 @@ Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz
 - Variable-font support (MM_Var) and axis control
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
 - Configurable color schemes
-- Proper terminal resize handling
+- Proper terminal resize handling with reflow
+- Scrollback buffer with mouse wheel and Shift+PageUp/Down
 
 ## Architecture
 
@@ -70,6 +71,7 @@ Available options:
 - `--profiling` - Build with gprof, run benchmark, generate profile report
 - `--format` - Format source files with clang-format, shfmt, and prettier
 - `--ref-png TEXT OUT` - Generate reference PNG of text using hb-view
+- `--ref-layers TEXT PREFIX` - Export COLR layers for debugging (requires blackrenderer)
 - `--prefix=PATH` - Set installation prefix (default: $HOME/.local)
 - `--help` - Show help message
 
