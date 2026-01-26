@@ -387,6 +387,26 @@ main() {
                 fi
                 exit 0
                 ;;
+            --ref-layers)
+                # Usage: --ref-layers "emoji" output_prefix
+                if [[ $# -lt 3 ]]; then
+                    log_error "--ref-layers requires TEXT and OUTPUT_PREFIX arguments"
+                    echo "Usage: $0 --ref-layers \"emoji\" /tmp/prefix"
+                    exit 1
+                fi
+                REF_TEXT="$2"
+                REF_PREFIX="$3"
+
+                # Check for blackrenderer
+                if ! python3 -c "import blackrenderer" 2>/dev/null; then
+                    log_error "blackrenderer not installed. Run: pip install blackrenderer"
+                    exit 1
+                fi
+
+                log_info "Exporting COLR layers for \"$REF_TEXT\" -> ${REF_PREFIX}_layer*.png"
+                python3 scripts/colr_layers.py "$REF_TEXT" "$REF_PREFIX"
+                exit 0
+                ;;
             --help)
                 echo "Usage: $0 [options]"
                 echo "Options:"
@@ -396,6 +416,7 @@ main() {
                 echo "  --profiling       Build with gprof, run benchmark, generate profile report"
                 echo "  --format          Format source files with clang-format, shfmt, and prettier"
                 echo "  --ref-png T OUT   Generate reference PNG of text T using hb-view"
+                echo "  --ref-layers T P  Export COLR layers of text T with prefix P (requires blackrenderer)"
                 echo "  --prefix=PATH     Set installation prefix (default: $HOME/.local)"
                 echo "  --help            Show this help message"
                 exit 0
