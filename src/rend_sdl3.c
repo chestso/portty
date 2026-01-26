@@ -96,6 +96,7 @@ static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
     result->y_offset = (int)(src->y_offset * scale + 0.5f);
     result->advance = (int)(src->advance * scale + 0.5f);
     result->glyph_id = src->glyph_id;
+
     return result;
 }
 
@@ -119,128 +120,6 @@ typedef struct RendererSdl3Data
     SDL_Texture *terminal_texture;
     RendSdl3Atlas atlas;
 } RendererSdl3Data;
-
-// Function to combine emoji cells for multi-codepoint sequences
-static int combine_cells_for_emoji(TerminalBackend *term, int row, int col,
-                                   uint32_t *combined_codepoints,
-                                   int max_combined,
-                                   int *columns_consumed)
-{
-    int term_rows, term_cols;
-    terminal_get_dimensions(term, &term_rows, &term_cols);
-
-    // Read the first cell
-    TerminalCell cell;
-    if (terminal_get_cell(term, row, col, &cell) < 0 || cell.chars[0] == 0) {
-        *columns_consumed = 0;
-        return 0;
-    }
-
-    vlog("combine_cells_for_emoji: starting at (%d,%d), first char=U+%04X, width=%d, term_cols=%d\n",
-         row, col, cell.chars[0], cell.width, term_cols);
-
-    // Collect first cell's codepoints
-    int cp_count = 0;
-    for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
-        if (cp_count >= max_combined - 1) {
-            break;
-        }
-        combined_codepoints[cp_count++] = cell.chars[i];
-        vlog("  Added U+%04X from first cell\n", cell.chars[i]);
-    }
-
-    int col_offset = cell.width;          // Track column offset (not cell offset!)
-    int lookahead_col = col + cell.width; // Next column to check
-
-    // Look ahead for combinable cells
-    const int MAX_LOOKAHEAD = 10; // Maximum cells to look ahead
-    int cells_checked = 1;        // Already checked first cell
-
-    vlog("  Looking ahead starting from column %d\n", lookahead_col);
-
-    while (lookahead_col < term_cols && cells_checked < MAX_LOOKAHEAD) {
-        TerminalCell next_cell;
-        if (terminal_get_cell(term, row, lookahead_col, &next_cell) < 0) {
-            vlog("  Can't read cell at column %d\n", lookahead_col);
-            break; // Can't read cell
-        }
-
-        if (next_cell.chars[0] == 0) {
-            vlog("  Empty cell at column %d\n", lookahead_col);
-            break; // Empty cell, end of content
-        }
-
-        // Check if we should combine this cell
-        uint32_t first_cp = next_cell.chars[0];
-        vlog("  Checking cell at column %d: U+%04X (width=%d)\n", lookahead_col, first_cp, next_cell.width);
-        bool should_combine = false;
-
-        // Check if we just collected a ZWJ - if so, continue to get the next emoji
-        if (cp_count > 0 && is_zwj(combined_codepoints[cp_count - 1])) {
-            // After ZWJ, combine next emoji
-            if (is_emoji_base_range(first_cp)) {
-                should_combine = true;
-            }
-        }
-        // Check if next cell has a skin tone modifier
-        else if (is_skin_tone_modifier(first_cp)) {
-            vlog("  Next cell U+%04X is skin tone modifier\n", first_cp);
-            // Skin tone can combine with base emoji
-            if (cp_count > 0 && is_emoji_base_range(combined_codepoints[0])) {
-                vlog("  And we have base emoji U+%04X - should combine!\n", combined_codepoints[0]);
-                should_combine = true;
-            } else {
-                vlog("  But no base emoji (cp_count=%d, first=U+%04X)\n", cp_count,
-                     cp_count > 0 ? combined_codepoints[0] : 0);
-            }
-        }
-        // Check if we're collecting regional indicators for a flag
-        else if (is_regional_indicator(first_cp)) {
-            // Check if first codepoint is also RI
-            if (cp_count > 0 && is_regional_indicator(combined_codepoints[0])) {
-                // Only combine first two RIs (flag emoji)
-                if (cp_count == 1) {
-                    should_combine = true;
-                }
-            }
-        }
-        // Check if next cell has ZWJ - always combine ZWJ
-        else if (is_zwj(first_cp)) {
-            should_combine = true;
-        }
-
-        if (!should_combine) {
-            vlog("  Not combining with U+%04X at col %d\n", first_cp, lookahead_col);
-            break; // Not part of sequence
-        }
-
-        vlog("  Combining with U+%04X at col %d (width=%d)\n", first_cp, lookahead_col, next_cell.width);
-
-        // Add this cell's codepoints
-        for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && next_cell.chars[i] != 0; i++) {
-            if (cp_count >= max_combined - 1) {
-                break;
-            }
-            combined_codepoints[cp_count++] = next_cell.chars[i];
-        }
-
-        col_offset += next_cell.width;
-        lookahead_col += next_cell.width; // Advance by cell width, not 1
-        cells_checked++;
-    }
-
-    // Ensure null termination for safety
-    if (cp_count < max_combined) {
-        combined_codepoints[cp_count] = 0; // null terminate
-    }
-
-    vlog("combine_cells_for_emoji: collected %d codepoints, %d columns consumed\n",
-         cp_count, col_offset);
-
-    // Return number of codepoints that were combined
-    *columns_consumed = col_offset;
-    return cp_count;
-}
 
 static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
 {
@@ -519,36 +398,13 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (cell.chars[0] == 0)
         return 1;
 
-    // Collect codepoints (emoji combining logic)
+    // Collect codepoints from cell
     uint32_t cps[TERM_MAX_CHARS_PER_CELL];
     int cp_count = 0;
     int columns_to_consume = cell.width;
 
-    // Only do cross-cell emoji combining when not scrolled back, since
-    // combine_cells_for_emoji reads from terminal directly (not scrollback)
-    bool can_combine_emoji = (data->scroll_offset == 0);
-
-    if (can_combine_emoji && (is_emoji_presentation(cell.chars[0]) ||
-                              is_regional_indicator(cell.chars[0]) || is_zwj(cell.chars[0]) ||
-                              is_skin_tone_modifier(cell.chars[0]))) {
-        uint32_t combined_cps[TERM_MAX_CHARS_PER_CELL * 2];
-        int columns_consumed = 0;
-        int combined_cp_count =
-            combine_cells_for_emoji(term, row, col, combined_cps,
-                                    sizeof(combined_cps) / sizeof(combined_cps[0]), &columns_consumed);
-        if (combined_cp_count > 1) {
-            columns_to_consume = columns_consumed;
-            cp_count = combined_cp_count;
-            for (int i = 0; i < cp_count; i++)
-                cps[i] = combined_cps[i];
-        } else {
-            for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
-                cps[cp_count++] = cell.chars[i];
-        }
-    } else {
-        for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
-            cps[cp_count++] = cell.chars[i];
-    }
+    for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
+        cps[cp_count++] = cell.chars[i];
 
     // Select font style
     FontStyle style = FONT_STYLE_NORMAL;
