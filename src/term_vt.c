@@ -116,6 +116,7 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     vterm_screen_enable_altscreen(data->screen, 1);
     vterm_screen_set_callbacks(data->screen, &cb, data);
     vterm_screen_set_damage_merge(data->screen, VTERM_DAMAGE_SCROLL);
+    vterm_screen_enable_reflow(data->screen, true);
 
     vterm_screen_reset(data->screen, 1);
 
