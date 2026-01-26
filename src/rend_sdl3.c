@@ -114,6 +114,7 @@ typedef struct RendererSdl3Data
     int height;
     int debug_grid;
     bool full_redraw;
+    int scroll_offset;
 
     SDL_Texture *terminal_texture;
     RendSdl3Atlas atlas;
@@ -264,6 +265,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->height = 0;
     data->debug_grid = 0;
     data->full_redraw = true;
+    data->scroll_offset = 0;
     data->terminal_texture = NULL;
 
     // Initialize glyph atlas
@@ -477,11 +479,28 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
     SDL_RenderTexture(renderer, atlas->pages[entry->page_index].texture, &src, &dst);
 }
 
+// Helper to get a cell considering scroll offset
+static int get_cell_with_scroll(RendererSdl3Data *data, TerminalBackend *term, int display_row,
+                                int col, TerminalCell *cell)
+{
+    int scroll_offset = data->scroll_offset;
+    int scrollback_row = scroll_offset - 1 - display_row;
+
+    if (scrollback_row >= 0) {
+        // Fetch from scrollback buffer
+        return terminal_get_scrollback_cell(term, scrollback_row, col, cell);
+    } else {
+        // Fetch from visible terminal
+        int terminal_row = display_row - scroll_offset;
+        return terminal_get_cell(term, terminal_row, col, cell);
+    }
+}
+
 static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
-                       int row, int col, TerminalPos cursor_pos)
+                       int row, int col, TerminalPos cursor_pos, bool show_cursor)
 {
     TerminalCell cell;
-    if (terminal_get_cell(term, row, col, &cell) < 0)
+    if (get_cell_with_scroll(data, term, row, col, &cell) < 0)
         return 1;
 
     // Draw background if non-default
@@ -505,13 +524,18 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int cp_count = 0;
     int columns_to_consume = cell.width;
 
-    if (is_emoji_presentation(cell.chars[0]) || is_regional_indicator(cell.chars[0]) ||
-        is_zwj(cell.chars[0]) || is_skin_tone_modifier(cell.chars[0])) {
+    // Only do cross-cell emoji combining when not scrolled back, since
+    // combine_cells_for_emoji reads from terminal directly (not scrollback)
+    bool can_combine_emoji = (data->scroll_offset == 0);
+
+    if (can_combine_emoji && (is_emoji_presentation(cell.chars[0]) ||
+                              is_regional_indicator(cell.chars[0]) || is_zwj(cell.chars[0]) ||
+                              is_skin_tone_modifier(cell.chars[0]))) {
         uint32_t combined_cps[TERM_MAX_CHARS_PER_CELL * 2];
         int columns_consumed = 0;
-        int combined_cp_count = combine_cells_for_emoji(term, row, col, combined_cps,
-                                                        sizeof(combined_cps) / sizeof(combined_cps[0]),
-                                                        &columns_consumed);
+        int combined_cp_count =
+            combine_cells_for_emoji(term, row, col, combined_cps,
+                                    sizeof(combined_cps) / sizeof(combined_cps[0]), &columns_consumed);
         if (combined_cp_count > 1) {
             columns_to_consume = columns_consumed;
             cp_count = combined_cp_count;
@@ -601,7 +625,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     }
 
 render_cursor:
-    if (row == cursor_pos.row && col == cursor_pos.col) {
+    if (show_cursor && row == cursor_pos.row && col == cursor_pos.col) {
         SDL_FRect cursor_rect = {
             (float)(col * data->cell_width),
             (float)(row * data->cell_height),
@@ -633,10 +657,12 @@ static void render_damage_region(RendererSdl3Data *data, TerminalBackend *term,
     }
 
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
+    // Hide cursor when scrolled back
+    bool show_cursor = (data->scroll_offset == 0);
 
     for (int row = damage.start_row; row < damage.end_row; row++) {
         for (int col = damage.start_col; col < damage.end_col;) {
-            col += render_cell(data, term, row, col, cursor_pos);
+            col += render_cell(data, term, row, col, cursor_pos, show_cursor);
         }
     }
 
@@ -780,6 +806,49 @@ static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *c
     return true;
 }
 
+static void sdl3_scroll(RendererBackend *backend, TerminalBackend *term, int delta)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    int scrollback_lines = terminal_get_scrollback_lines(term);
+
+    int new_offset = data->scroll_offset + delta;
+    if (new_offset < 0)
+        new_offset = 0;
+    if (new_offset > scrollback_lines)
+        new_offset = scrollback_lines;
+
+    if (new_offset != data->scroll_offset) {
+        data->scroll_offset = new_offset;
+        data->full_redraw = true;
+        vlog("Scroll offset changed to %d (max: %d)\n", data->scroll_offset, scrollback_lines);
+    }
+}
+
+static void sdl3_reset_scroll(RendererBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (data->scroll_offset != 0) {
+        data->scroll_offset = 0;
+        data->full_redraw = true;
+        vlog("Scroll offset reset to 0\n");
+    }
+}
+
+static int sdl3_get_scroll_offset(RendererBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return 0;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    return data->scroll_offset;
+}
+
 // SDL3 renderer backend instance
 RendererBackend renderer_backend_sdl3 = {
     .name = "sdl3",
@@ -792,5 +861,8 @@ RendererBackend renderer_backend_sdl3 = {
     .resize = sdl3_resize,
     .toggle_debug_grid = sdl3_toggle_debug_grid,
     .log_stats = sdl3_log_stats,
-    .get_cell_size = sdl3_get_cell_size
+    .get_cell_size = sdl3_get_cell_size,
+    .scroll = sdl3_scroll,
+    .reset_scroll = sdl3_reset_scroll,
+    .get_scroll_offset = sdl3_get_scroll_offset
 };

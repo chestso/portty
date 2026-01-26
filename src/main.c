@@ -577,12 +577,30 @@ int main(int argc, char *argv[])
                             len = 4;
                             break;
                         case SDLK_PAGEUP:
-                            strcpy(key_buffer, "\x1b[5~");
-                            len = 4;
+                            if (event.key.mod & SDL_KMOD_SHIFT) {
+                                // Shift+PageUp: scroll back one page
+                                int rows, cols;
+                                terminal_get_dimensions(term, &rows, &cols);
+                                renderer_scroll(rend, term, rows);
+                                force_redraw = 1;
+                                len = 0; // Don't send to PTY
+                            } else {
+                                strcpy(key_buffer, "\x1b[5~");
+                                len = 4;
+                            }
                             break;
                         case SDLK_PAGEDOWN:
-                            strcpy(key_buffer, "\x1b[6~");
-                            len = 4;
+                            if (event.key.mod & SDL_KMOD_SHIFT) {
+                                // Shift+PageDown: scroll forward one page
+                                int rows, cols;
+                                terminal_get_dimensions(term, &rows, &cols);
+                                renderer_scroll(rend, term, -rows);
+                                force_redraw = 1;
+                                len = 0; // Don't send to PTY
+                            } else {
+                                strcpy(key_buffer, "\x1b[6~");
+                                len = 4;
+                            }
                             break;
                         default:
                             // Handle printable characters
@@ -621,6 +639,11 @@ int main(int argc, char *argv[])
 
                         // Write to PTY instead of directly to terminal
                         if (len > 0) {
+                            // Reset scroll position when typing
+                            if (renderer_get_scroll_offset(rend) != 0) {
+                                renderer_reset_scroll(rend);
+                                force_redraw = 1;
+                            }
                             ssize_t written = pty_write(pty, key_buffer, len);
                             if (written < 0) {
                                 vlog("PTY write failed: %s\n", strerror(errno));
@@ -635,6 +658,11 @@ int main(int argc, char *argv[])
                         const char *text = event.text.text;
                         size_t text_len = strlen(text);
                         if (text_len > 0) {
+                            // Reset scroll position when typing
+                            if (renderer_get_scroll_offset(rend) != 0) {
+                                renderer_reset_scroll(rend);
+                                force_redraw = 1;
+                            }
                             pty_write(pty, text, text_len);
                         }
                     }
@@ -658,6 +686,14 @@ int main(int argc, char *argv[])
                     force_redraw = 1;
                     break;
                 }
+
+                case SDL_EVENT_MOUSE_WHEEL:
+                    if (event.wheel.y != 0) {
+                        // Scroll 3 lines per tick
+                        renderer_scroll(rend, term, (int)event.wheel.y * 3);
+                        force_redraw = 1;
+                    }
+                    break;
                 }
             }
 

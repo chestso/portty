@@ -447,6 +447,67 @@ static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
     return 1;
 }
 
+static int vt_get_scrollback_lines(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return 0;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->scrollback_lines;
+}
+
+static int vt_get_scrollback_cell(TerminalBackend *backend, int scrollback_row, int col,
+                                  TerminalCell *cell)
+{
+    if (!backend || !backend->backend_data || !cell)
+        return -1;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    // scrollback_row 0 = most recent line (map to internal scrollback_lines - 1 - scrollback_row)
+    int internal_row = data->scrollback_lines - 1 - scrollback_row;
+    if (internal_row < 0 || internal_row >= data->scrollback_lines)
+        return -1;
+    if (col < 0 || col >= data->width)
+        return -1;
+
+    VTermScreenCell *line = data->scrollback[internal_row];
+    if (!line)
+        return -1;
+
+    VTermScreenCell *vcell = &line[col];
+
+    // Copy character data
+    int i;
+    for (i = 0; i < VTERM_MAX_CHARS_PER_CELL && i < TERM_MAX_CHARS_PER_CELL && vcell->chars[i] != 0;
+         i++) {
+        cell->chars[i] = vcell->chars[i];
+    }
+    if (i < TERM_MAX_CHARS_PER_CELL) {
+        cell->chars[i] = 0;
+    }
+
+    // Copy width
+    cell->width = vcell->width;
+
+    // Copy attributes
+    cell->attrs.bold = vcell->attrs.bold;
+    cell->attrs.underline = vcell->attrs.underline;
+    cell->attrs.italic = vcell->attrs.italic;
+    cell->attrs.blink = vcell->attrs.blink;
+    cell->attrs.reverse = vcell->attrs.reverse;
+    cell->attrs.strikethrough = vcell->attrs.strike;
+    cell->attrs.font = vcell->attrs.font;
+    cell->attrs.dwl = vcell->attrs.dwl;
+    cell->attrs.dhl = vcell->attrs.dhl;
+
+    // Convert colors
+    cell->fg = convert_vterm_color(&vcell->fg, data->state, false);
+    cell->bg = convert_vterm_color(&vcell->bg, data->state, true);
+
+    return 0;
+}
+
 // Global backend instance
 TerminalBackend terminal_backend_vt = {
     .name = "libvterm",
@@ -461,5 +522,7 @@ TerminalBackend terminal_backend_vt = {
     .get_title = vt_get_title,
     .needs_redraw = vt_needs_redraw,
     .clear_redraw = vt_clear_redraw,
-    .get_damage_rect = vt_get_damage_rect
+    .get_damage_rect = vt_get_damage_rect,
+    .get_scrollback_lines = vt_get_scrollback_lines,
+    .get_scrollback_cell = vt_get_scrollback_cell
 };

@@ -81,3 +81,18 @@ bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect)
         return false;
     return term->get_damage_rect(term, rect);
 }
+
+int terminal_get_scrollback_lines(TerminalBackend *term)
+{
+    if (!term || !term->get_scrollback_lines)
+        return 0;
+    return term->get_scrollback_lines(term);
+}
+
+int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
+                                 TerminalCell *cell)
+{
+    if (!term || !term->get_scrollback_cell || !cell)
+        return -1;
+    return term->get_scrollback_cell(term, scrollback_row, col, cell);
+}

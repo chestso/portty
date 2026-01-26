@@ -71,6 +71,9 @@ struct TerminalBackend
     bool (*needs_redraw)(TerminalBackend *term);
     void (*clear_redraw)(TerminalBackend *term);
     bool (*get_damage_rect)(TerminalBackend *term, TerminalDamageRect *rect);
+    int (*get_scrollback_lines)(TerminalBackend *term);
+    int (*get_scrollback_cell)(TerminalBackend *term, int scrollback_row, int col,
+                               TerminalCell *cell);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -84,5 +87,8 @@ const char *terminal_get_title(TerminalBackend *term);
 bool terminal_needs_redraw(TerminalBackend *term);
 void terminal_clear_redraw(TerminalBackend *term);
 bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
+int terminal_get_scrollback_lines(TerminalBackend *term);
+int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
+                                 TerminalCell *cell);
 
 #endif /* TERM_H */

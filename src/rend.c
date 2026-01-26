@@ -67,3 +67,24 @@ bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_he
         return false;
     return rend->get_cell_size(rend, cell_width, cell_height);
 }
+
+void renderer_scroll(RendererBackend *rend, TerminalBackend *term, int delta)
+{
+    if (!rend || !rend->scroll)
+        return;
+    rend->scroll(rend, term, delta);
+}
+
+void renderer_reset_scroll(RendererBackend *rend)
+{
+    if (!rend || !rend->reset_scroll)
+        return;
+    rend->reset_scroll(rend);
+}
+
+int renderer_get_scroll_offset(RendererBackend *rend)
+{
+    if (!rend || !rend->get_scroll_offset)
+        return 0;
+    return rend->get_scroll_offset(rend);
+}
