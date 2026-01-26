@@ -1016,27 +1016,95 @@ GlyphBitmap *render_with_fallback(FontFallbackChain *chain, uint32_t codepoint,
 
 ---
 
+## 7. Custom Terminal Emulation Library
+
+**Priority:** Low-Medium
+**Complexity:** Very High
+**User Benefit:** Proper multi-codepoint emoji and grapheme cluster support
+**Status:** ❌ **NOT STARTED**
+
+### Current State
+
+- Using libvterm for terminal emulation
+- libvterm splits multi-codepoint sequences across cells (ZWJ sequences, flags, skin tone modifiers)
+- No renderer-level workaround for combining cells—emojis render as separate glyphs
+
+### Problem
+
+libvterm doesn't properly handle multi-cell Unicode combining:
+
+- **ZWJ sequences** (👨‍👩‍👧): Split into separate cells (👨, ZWJ, 👩, ZWJ, 👧)
+- **Flag emoji** (🇺🇸): Regional indicators in separate cells (🇺, 🇸)
+- **Skin tone modifiers** (👋🏽): Base emoji and modifier in separate cells
+
+This is a fundamental limitation of libvterm's cell-based model. The terminal emulator treats each cell as an independent unit, but Unicode grapheme clusters can span multiple codepoints that should render as a single glyph.
+
+### Enhancement Goals
+
+- Maintain grapheme clusters as atomic units during terminal emulation
+- Proper cursor movement over grapheme clusters
+- Correct width calculation for complex emoji sequences
+- Consistent behavior between live terminal and scrollback
+
+### Alternatives to Evaluate
+
+1. **Fork libvterm**: Modify cell storage to support grapheme clusters
+   - Pros: Minimal architectural changes to bloom-term
+   - Cons: Ongoing maintenance burden, may diverge from upstream
+
+2. **notcurses**: Modern terminal library with better Unicode support
+   - Pros: Active development, good emoji support
+   - Cons: Different API model, may require significant refactoring
+
+3. **VTE (GNOME)**: GTK terminal widget library
+   - Pros: Mature, well-tested
+   - Cons: GTK dependency, designed as a widget not library
+
+4. **Custom implementation**: Build terminal emulation from scratch
+   - Pros: Full control over cell model and grapheme handling
+   - Cons: Massive undertaking, many edge cases
+
+### Technical Considerations
+
+- Need to handle variable-width grapheme clusters in fixed-width cell grid
+- Cursor positioning must account for cluster boundaries
+- Selection and copy/paste need grapheme-aware text handling
+- Performance impact of more complex cell structures
+
+### Implementation Notes
+
+This is a significant architectural change. Before starting:
+
+1. Benchmark current emoji rendering to establish baseline
+2. Survey other terminal emulators (kitty, alacritty, wezterm) for their approaches
+3. Create proof-of-concept with simplest alternative first
+4. Consider hybrid approach: keep libvterm for escape sequences, custom layer for cell management
+
+---
+
 ## Implementation Status
 
-| Enhancement        | Status         | Notes                                                                       |
-| ------------------ | -------------- | --------------------------------------------------------------------------- |
-| SDL3 GPU API       | ❌ Not Started | Still using SDL_Renderer                                                    |
-| Variable Font Axes | ⚠️ Partial     | Only 'wght' (weight) axis implemented; no slnt, ital, opsz, GRAD support    |
-| BiDi Support       | ❌ Not Started | No FriBidi integration, LTR only                                            |
-| Glyph Caching      | ✅ **DONE**    | Two-page texture atlas with shelf packing, FNV-1a hash, LRU eviction        |
-| Subpixel Rendering | ⚠️ Partial     | FT_CONFIG_OPTION_SUBPIXEL_RENDERING defined but FT_LOAD_TARGET_LCD not used |
-| Font Fallback      | ❌ Not Started | Single font per type (normal/bold/emoji), no fallback chain                 |
+| Enhancement         | Status         | Notes                                                                       |
+| ------------------- | -------------- | --------------------------------------------------------------------------- |
+| SDL3 GPU API        | ❌ Not Started | Still using SDL_Renderer                                                    |
+| Variable Font Axes  | ⚠️ Partial     | Only 'wght' (weight) axis implemented; no slnt, ital, opsz, GRAD support    |
+| BiDi Support        | ❌ Not Started | No FriBidi integration, LTR only                                            |
+| Glyph Caching       | ✅ **DONE**    | Two-page texture atlas with shelf packing, FNV-1a hash, LRU eviction        |
+| Subpixel Rendering  | ⚠️ Partial     | FT_CONFIG_OPTION_SUBPIXEL_RENDERING defined but FT_LOAD_TARGET_LCD not used |
+| Font Fallback       | ❌ Not Started | Single font per type (normal/bold/emoji), no fallback chain                 |
+| Custom Terminal Lib | ❌ Not Started | libvterm splits multi-codepoint emoji; need grapheme-aware cell model       |
 
 ## Summary Table
 
-| Enhancement        | Priority | Complexity | Effort    | Performance Gain        | Status         |
-| ------------------ | -------- | ---------- | --------- | ----------------------- | -------------- |
-| SDL3 GPU API       | Medium   | High       | 3-4 weeks | 10-30% rendering        | ❌ Not Started |
-| Variable Font Axes | Low      | Medium     | 1 week    | None (UX improvement)   | ⚠️ Partial     |
-| BiDi Support       | Low      | High       | 3-4 weeks | None (RTL languages)    | ❌ Not Started |
-| Glyph Caching      | Medium   | Medium     | 1 week    | 50-80% rendering        | ✅ **DONE**    |
-| Subpixel Rendering | Low      | Medium     | 1 week    | None (visual quality)   | ⚠️ Partial     |
-| Font Fallback      | Medium   | Medium     | 1-2 weeks | None (Unicode coverage) | ❌ Not Started |
+| Enhancement         | Priority   | Complexity | Effort     | Performance Gain         | Status         |
+| ------------------- | ---------- | ---------- | ---------- | ------------------------ | -------------- |
+| SDL3 GPU API        | Medium     | High       | 3-4 weeks  | 10-30% rendering         | ❌ Not Started |
+| Variable Font Axes  | Low        | Medium     | 1 week     | None (UX improvement)    | ⚠️ Partial     |
+| BiDi Support        | Low        | High       | 3-4 weeks  | None (RTL languages)     | ❌ Not Started |
+| Glyph Caching       | Medium     | Medium     | 1 week     | 50-80% rendering         | ✅ **DONE**    |
+| Subpixel Rendering  | Low        | Medium     | 1 week     | None (visual quality)    | ⚠️ Partial     |
+| Font Fallback       | Medium     | Medium     | 1-2 weeks  | None (Unicode coverage)  | ❌ Not Started |
+| Custom Terminal Lib | Low-Medium | Very High  | 2-3 months | None (emoji correctness) | ❌ Not Started |
 
 **Recommended Order:**
 
@@ -1046,6 +1114,7 @@ GlyphBitmap *render_with_fallback(FontFallbackChain *chain, uint32_t codepoint,
 4. **Variable Font Axes** - Enhanced typography (complete remaining axes)
 5. **Subpixel Rendering** - Visual polish (enable FT_LOAD_TARGET_LCD)
 6. **BiDi Support** - Only if RTL language support needed
+7. **Custom Terminal Library** - Long-term solution for proper emoji/grapheme support
 
 ---
 
