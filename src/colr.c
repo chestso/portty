@@ -12,11 +12,20 @@
 #include "common.h"
 #include "font.h"
 #include "font_ft_internal.h"
+#include "png_writer.h"
 #include <freetype2/freetype/ftcolor.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+// Debug layer export prefix (NULL = disabled)
+static const char *colr_debug_prefix = NULL;
+
+void colr_set_debug_prefix(const char *prefix)
+{
+    colr_debug_prefix = prefix;
+}
 
 // Helper: convert 16.16 fixed to double
 static double ft_fixed_to_double(FT_Fixed v)
@@ -83,6 +92,22 @@ static void affine_apply(const Affine *a, double x, double y, double *rx, double
     }
     *rx = x * a->xx + y * a->xy + a->dx;
     *ry = x * a->yx + y * a->yy + a->dy;
+}
+
+// Invert an affine transform. Returns false if the matrix is singular.
+static bool affine_invert(const Affine *a, Affine *out)
+{
+    double det = a->xx * a->yy - a->xy * a->yx;
+    if (fabs(det) < 1e-12)
+        return false;
+    double inv_det = 1.0 / det;
+    out->xx = a->yy * inv_det;
+    out->xy = -a->xy * inv_det;
+    out->yx = -a->yx * inv_det;
+    out->yy = a->xx * inv_det;
+    out->dx = -(out->xx * a->dx + out->xy * a->dy);
+    out->dy = -(out->yx * a->dx + out->yy * a->dy);
+    return true;
 }
 
 // Affine helpers for Translate/Scale/Rotate/Skew with center handling
@@ -311,19 +336,20 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
     case FT_COLR_PAINTFORMAT_RADIAL_GRADIENT:
     {
         // Radial gradient implementation
+        // For non-uniform transforms, we must inverse-transform pixel coordinates
+        // back to gradient space rather than forward-transforming the gradient.
         FT_PaintRadialGradient *rg = &paint.u.radial_gradient;
-        // Convert centers and radii from 16.16 to pixel space and apply affine
         double scale_factor = matrix_maps_font_units ? 1.0 : ft_data->scale;
+
+        // Gradient center and radii in gradient's local coordinate space
         double c0x = ft_fixed_to_double(rg->c0.x) * scale_factor;
         double c0y = ft_fixed_to_double(rg->c0.y) * scale_factor;
-        double c1x = ft_fixed_to_double(rg->c1.x) * scale_factor;
-        double c1y = ft_fixed_to_double(rg->c1.y) * scale_factor;
         double r0 = ft_fixed_to_double(rg->r0) * scale_factor;
         double r1 = ft_fixed_to_double(rg->r1) * scale_factor;
 
-        double tc0x, tc0y, tc1x, tc1y;
-        affine_apply(matrix, c0x, c0y, &tc0x, &tc0y);
-        affine_apply(matrix, c1x, c1y, &tc1x, &tc1y);
+        // Compute inverse transform to map pixel coords back to gradient space
+        Affine inv;
+        bool have_inv = affine_invert(matrix, &inv);
 
         int stop_count = 0;
         Stop *stops = eval_colorline(ft_data, &rg->colorline, fg_r, fg_g, fg_b, &stop_count);
@@ -332,13 +358,22 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
                 free(stops);
             return false;
         }
-
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 double px = (double)(x + dst_x_off);
                 double py = (double)(dst_y_off - y); // Y-flip: convert from pixel Y-down to FreeType Y-up
-                // distance to c0
-                double d = hypot(px - tc0x, py - tc0y);
+
+                // Transform pixel to gradient's local coordinate space
+                double lx, ly;
+                if (have_inv) {
+                    affine_apply(&inv, px, py, &lx, &ly);
+                } else {
+                    lx = px;
+                    ly = py;
+                }
+
+                // Distance to c0 in gradient space
+                double d = hypot(lx - c0x, ly - c0y);
                 double denom = (r1 - r0);
                 double t = denom == 0.0 ? 0.0 : (d - r0) / denom;
                 if (t < 0.0) {
@@ -988,11 +1023,21 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
         FT_PaintColrLayers *pcl = &paint.u.colr_layers;
         FT_LayerIterator it = pcl->layer_iterator; // copy iterator
         FT_OpaquePaint layer_opaque = { NULL, 0 };
+        int layer_num = 0;
         while (FT_Get_Paint_Layers(ft_data->ft_face, &it, &layer_opaque)) {
             uint8_t *tmp = calloc((size_t)w * (size_t)h, 4);
             if (!tmp)
                 return false;
             paint_colr_paint_recursive(ft_data, layer_opaque, matrix, matrix_maps_font_units, tmp, w, h, dst_x_off, dst_y_off, fg_r, fg_g, fg_b);
+
+            // Debug: save layer PNG
+            if (colr_debug_prefix) {
+                char path[256];
+                snprintf(path, sizeof(path), "%s_layer%02d.png", colr_debug_prefix, layer_num);
+                png_write_rgba(path, tmp, w, h);
+                vlog("COLR_LAYERS: saved layer %d to %s\n", layer_num, path);
+            }
+
             // composite tmp over buf (src-over)
             for (int i = 0; i < w * h; i++) {
                 uint8_t *s = &tmp[i * 4];
@@ -1014,7 +1059,17 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
                 d[2] = (uint8_t)round(rb * 255.0f);
                 d[3] = (uint8_t)round(outa * 255.0f);
             }
+
+            // Debug: save accumulated buffer PNG
+            if (colr_debug_prefix) {
+                char path[256];
+                snprintf(path, sizeof(path), "%s_accum%02d.png", colr_debug_prefix, layer_num);
+                png_write_rgba(path, buf, w, h);
+                vlog("COLR_LAYERS: saved accumulated to %s\n", path);
+            }
+
             free(tmp);
+            layer_num++;
         }
         return true;
     }
@@ -1102,14 +1157,8 @@ static bool paint_colr_paint_recursive(FtFontData *ft_data, FT_OpaquePaint opaqu
         return paint_colr_paint_recursive(ft_data, pt->paint, &next, matrix_maps_font_units, buf, w, h, dst_x_off, dst_y_off, fg_r, fg_g, fg_b);
     }
     default:
-        // Unsupported paint types fall back to solid transparent
+        // Unsupported paint types - leave buffer unchanged to preserve prior layers
         vlog("Unsupported FT_COLR paint format: %d\n", paint.format);
-        for (int i = 0; i < w * h; i++) {
-            buf[i * 4 + 0] = 0;
-            buf[i * 4 + 1] = 0;
-            buf[i * 4 + 2] = 0;
-            buf[i * 4 + 3] = 0;
-        }
         return false;
     }
 }
@@ -1201,6 +1250,21 @@ GlyphBitmap *render_colr_paint_glyph(FtFontData *ft_data, FT_UInt glyph_index,
     Affine identity;
     affine_identity(&identity);
     paint_colr_paint_recursive(ft_data, root, &identity, matrix_maps_font_units, out->pixels, out_w, out_h, xoff, yoff, fg_r, fg_g, fg_b);
+
+    // Final check on output
+    int final_nonzero = 0, final_full = 0;
+    uint8_t final_max_a = 0;
+    for (int i = 0; i < out_w * out_h; i++) {
+        uint8_t a = out->pixels[i * 4 + 3];
+        if (a > 0)
+            final_nonzero++;
+        if (a == 255)
+            final_full++;
+        if (a > final_max_a)
+            final_max_a = a;
+    }
+    vlog("render_colr_paint_glyph: glyph %u final output %dx%d: %d pixels, max_alpha=%d, full_255=%d\n",
+         glyph_index, out_w, out_h, final_nonzero, final_max_a, final_full);
 
     return out;
 }

@@ -510,15 +510,13 @@ void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uin
         pa = c.alpha;
     }
 
-    // Apply alpha from FT_F2Dot14
-    double a_scale = 1.0;
-    if (ci.alpha) {
-        a_scale = (double)ci.alpha / (double)(1 << 14);
-        if (a_scale < 0.0)
-            a_scale = 0.0;
-        if (a_scale > 1.0)
-            a_scale = 1.0;
-    }
+    // Apply alpha from FT_F2Dot14 (2.14 fixed point: 0x4000 = 1.0, 0 = 0.0)
+    // Always compute a_scale from ci.alpha - when alpha=0, result should be transparent
+    double a_scale = (double)ci.alpha / (double)(1 << 14);
+    if (a_scale < 0.0)
+        a_scale = 0.0;
+    if (a_scale > 1.0)
+        a_scale = 1.0;
 
     *out_r = pr;
     *out_g = pg;

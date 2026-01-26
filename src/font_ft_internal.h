@@ -64,4 +64,9 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
 GlyphBitmap *render_colr_paint_glyph(FtFontData *ft_data, FT_UInt glyph_index,
                                      uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
+// COLR debug layer export (defined in colr.c)
+// Set a prefix path to save each COLR layer as a PNG (e.g., "/tmp/debug")
+// Pass NULL to disable debug output
+void colr_set_debug_prefix(const char *prefix);
+
 #endif // FONT_FT_INTERNAL_H

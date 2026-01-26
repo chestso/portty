@@ -6,6 +6,7 @@
 #include "common.h"
 #include "font.h"
 #include "font_ft.h"
+#include "font_ft_internal.h"
 #include "font_resolver.h"
 #include "png_writer.h"
 #include "rend.h"
@@ -166,7 +167,8 @@ int main(int argc, char *argv[])
     int ft_hint_target = FT_LOAD_NO_HINTING; // Default: no hinting
     char *png_text = NULL;
     const char *font_name = NULL;
-    float font_size = 12.0f; // Default font size in points
+    const char *colr_debug_path = NULL; // COLR layer debug prefix
+    float font_size = 12.0f;            // Default font size in points
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
 
@@ -176,7 +178,7 @@ int main(int argc, char *argv[])
         { NULL, 0, NULL, 0 }
     };
 
-    while ((opt = getopt_long(argc, argv, "hveds:f:g:P:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hveds:f:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -234,6 +236,9 @@ int main(int argc, char *argv[])
         case 'P':
             png_text = optarg;
             break;
+        case 'D':
+            colr_debug_path = optarg;
+            break;
         case '?':
             print_usage(argv[0]);
             return 1;
@@ -254,6 +259,12 @@ int main(int argc, char *argv[])
         font_resolver_list_monospace();
         font_resolver_cleanup();
         return 0;
+    }
+
+    // Set COLR layer debug prefix if specified (for debugging COLR rendering)
+    if (colr_debug_path) {
+        colr_set_debug_prefix(colr_debug_path);
+        vlog("COLR layer debug enabled, prefix: %s\n", colr_debug_path);
     }
 
     // PNG render mode: skip SDL entirely, render text to PNG and exit
@@ -752,6 +763,7 @@ static void print_usage(const char *progname)
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: none)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
+    printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
     printf("  --          End of options (use before - for stdin)\n");
     printf("\n");
     printf("Input:\n");
