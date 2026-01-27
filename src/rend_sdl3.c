@@ -35,6 +35,9 @@ static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
     if (dst_h <= 0)
         dst_h = 1;
 
+    vlog("Downscale: src=%dx%d max=%dx%d scale=%.3f dst=%dx%d\n",
+         src->width, src->height, max_w, max_h, scale, dst_w, dst_h);
+
     uint8_t *dst_pixels = calloc((size_t)dst_w * dst_h, 4);
     if (!dst_pixels)
         return NULL;
@@ -361,8 +364,11 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
         return entry;
 
     GlyphBitmap *scaled = NULL;
-    if (style == FONT_STYLE_EMOJI)
+    if (style == FONT_STYLE_EMOJI) {
+        vlog("Cache emoji glyph %u: bitmap=%dx%d max=%dx%d\n",
+             glyph_id, bitmap->width, bitmap->height, max_w, max_h);
         scaled = downscale_bitmap(bitmap, max_w, max_h);
+    }
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
                                    scaled ? scaled : bitmap);
     if (scaled) {
@@ -375,7 +381,7 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                        RendSdl3AtlasEntry *entry, FontStyle style,
                        int cell_x, int cell_y, int glyph_x_offset, int glyph_y_offset,
-                       int avail_w, int avail_h, int font_ascent)
+                       int avail_w, int avail_h, int font_ascent, bool is_regional)
 {
     if (!entry || entry->region.w <= 0)
         return;
@@ -386,12 +392,23 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
     if (style == FONT_STYLE_EMOJI) {
         float glyph_w = (float)entry->region.w;
         float glyph_h = (float)entry->region.h;
-        float scale = fminf((float)avail_w / glyph_w, (float)avail_h / glyph_h);
-        float scaled_w = glyph_w * scale;
-        float scaled_h = glyph_h * scale;
+        float scaled_w, scaled_h;
+
+        if (is_regional) {
+            // Regional indicators: scale uniformly to fit within a square,
+            // preserving aspect ratio and centering within the cell
+            float side = fminf((float)avail_w, (float)avail_h);
+            float scale = fminf(side / glyph_w, side / glyph_h);
+            scaled_w = fminf(glyph_w * scale, side);
+            scaled_h = fminf(glyph_h * scale, side);
+        } else {
+            float scale = fminf((float)avail_w / glyph_w, (float)avail_h / glyph_h);
+            scaled_w = glyph_w * scale;
+            scaled_h = glyph_h * scale;
+        }
         dst = (SDL_FRect){
-            (float)cell_x,
-            (float)cell_y + ((float)avail_h - scaled_h) * 0.5f,
+            floorf((float)cell_x + ((float)avail_w - scaled_w) * 0.5f),
+            floorf((float)cell_y + ((float)avail_h - scaled_h) * 0.5f),
             scaled_w, scaled_h
         };
     } else {
@@ -481,6 +498,15 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int avail_h = data->cell_height;
     void *font_data = data->font->font_data[style];
     uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
+
+    // For regional indicators, cache at square size for consistent high-quality scaling
+    int cache_w = avail_w;
+    int cache_h = avail_h;
+    if (is_regional) {
+        int side = avail_w < avail_h ? avail_w : avail_h;
+        cache_w = cache_h = side;
+    }
 
     // Shaped rendering path (multiple codepoints)
     if (cp_count > 1 && data->font->render_shaped) {
@@ -492,11 +518,12 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     continue;
                 RendSdl3AtlasEntry *entry = cache_glyph(&data->atlas, font_data,
                                                         gb->glyph_id, color_key,
-                                                        gb, style, avail_w, avail_h);
+                                                        gb, style, cache_w, cache_h);
                 int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
                 int y_off = entry ? entry->y_offset : 0;
                 blit_glyph(data->renderer, &data->atlas, entry, style,
-                           cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent);
+                           cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
+                           is_regional);
                 data->font->free_glyph_bitmap(data->font, gb);
             }
             free(shaped->bitmaps);
@@ -520,7 +547,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (glyph_bitmap) {
                 uint32_t insert_id = glyph_index ? glyph_index : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
-                                    glyph_bitmap, style, avail_w, avail_h);
+                                    glyph_bitmap, style, cache_w, cache_h);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (glyph_index != 0) {
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, glyph_index, color_key);
@@ -528,7 +555,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         }
         blit_glyph(data->renderer, &data->atlas, entry, style,
                    cell_x, cell_y, entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
-                   avail_w, avail_h, data->font_ascent);
+                   avail_w, avail_h, data->font_ascent, is_regional);
     }
 
 render_cursor:
