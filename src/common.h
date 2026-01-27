@@ -6,7 +6,10 @@
 /* Global verbose flag - defined in main.c */
 extern int verbose;
 
-/* Verbose logging function - prints to stderr only if verbose is true */
-void vlog(const char *format, ...);
+/* Verbose logging implementation - use vlog() macro instead */
+void vlog_impl(const char *file, const char *func, int line, const char *format, ...);
+
+/* Verbose logging macro - captures file, function, and line number */
+#define vlog(fmt, ...) vlog_impl(__FILE__, __func__, __LINE__, fmt, ##__VA_ARGS__)
 
 #endif /* COMMON_H */

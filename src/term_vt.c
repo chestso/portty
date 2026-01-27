@@ -19,6 +19,7 @@ typedef struct TerminalVtData
     bool has_damage;
     VTermPos cursor_pos;
     bool cursor_visible;
+    bool cursor_blink_enabled;
     char *title;
     VTermScreenCell **scrollback;
     int scrollback_lines;
@@ -100,6 +101,7 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     data->cursor_pos.row = 0;
     data->cursor_pos.col = 0;
     data->cursor_visible = true;
+    data->cursor_blink_enabled = true;
     data->title = NULL;
     data->scrollback = NULL;
     data->scrollback_lines = 0;
@@ -269,6 +271,15 @@ static bool vt_get_cursor_visible(TerminalBackend *backend)
     return data->cursor_visible;
 }
 
+static bool vt_get_cursor_blink(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return true;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->cursor_blink_enabled;
+}
+
 static bool vt_needs_redraw(TerminalBackend *backend)
 {
     if (!backend || !backend->backend_data)
@@ -373,6 +384,9 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
         damage_union(data, 0, 0, data->height, data->width);
         break;
     case VTERM_PROP_CURSORBLINK:
+        vlog("Cursor blink %s\n", val->boolean ? "enabled" : "disabled");
+        data->cursor_blink_enabled = val->boolean;
+        break;
     case VTERM_PROP_REVERSE:
     case VTERM_PROP_ALTSCREEN:
         // Full screen damage for display-affecting properties
@@ -535,6 +549,7 @@ TerminalBackend terminal_backend_vt = {
     .get_dimensions = vt_get_dimensions,
     .get_cursor_pos = vt_get_cursor_pos,
     .get_cursor_visible = vt_get_cursor_visible,
+    .get_cursor_blink = vt_get_cursor_blink,
     .get_title = vt_get_title,
     .needs_redraw = vt_needs_redraw,
     .clear_redraw = vt_clear_redraw,

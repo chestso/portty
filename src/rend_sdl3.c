@@ -15,6 +15,12 @@
 
 #define EMOJI_FONT_SCALE 4.0f
 
+// Cursor color: muted purple with slight transparency (RGBA)
+#define CURSOR_COLOR_R 138
+#define CURSOR_COLOR_G 99
+#define CURSOR_COLOR_B 165
+#define CURSOR_COLOR_A 220
+
 // Box-filter downscale a glyph bitmap to fit within max_w x max_h.
 // Returns a newly allocated GlyphBitmap, or NULL if no downscale is needed.
 static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
@@ -556,9 +562,9 @@ render_cursor:
         float cw = (float)data->cell_width;
         float ch = (float)data->cell_height;
 
-        // Muted purple with slight transparency
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(data->renderer, 138, 99, 165, 220);
+        SDL_SetRenderDrawColor(data->renderer, CURSOR_COLOR_R, CURSOR_COLOR_G,
+                               CURSOR_COLOR_B, CURSOR_COLOR_A);
         draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
     }
@@ -567,11 +573,12 @@ render_cursor:
 }
 
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
-                                 int display_rows, int display_cols)
+                                 int display_rows, int display_cols,
+                                 bool cursor_visible)
 {
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
-    // Hide cursor when scrolled back or when terminal says it's not visible
-    bool show_cursor = (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
+    // Hide cursor when scrolled back, when terminal says it's not visible, or when cursor_visible is false
+    bool show_cursor = cursor_visible && (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
 
     for (int row = 0; row < display_rows; row++) {
         for (int col = 0; col < display_cols;) {
@@ -580,7 +587,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
     }
 }
 
-static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
+static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
+                               bool cursor_visible)
 {
     if (!backend || !backend->backend_data || !term)
         return;
@@ -606,7 +614,7 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
     // Clear screen and render all visible cells
     SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
     SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, display_rows, display_cols);
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible);
 
     // Debug grid overlay
     if (data->debug_grid) {

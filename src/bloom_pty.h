@@ -77,4 +77,38 @@ bool pty_is_running(PtyContext *ctx);
  */
 int pty_get_master_fd(PtyContext *ctx);
 
+/**
+ * Initialize SIGCHLD signal handling.
+ *
+ * Sets up a self-pipe for async-signal-safe notification of child exit.
+ * Must be called before pty_create().
+ *
+ * @return 0 on success, -1 on failure
+ */
+int pty_signal_init(void);
+
+/**
+ * Cleanup SIGCHLD signal handling.
+ *
+ * Closes the signal pipe and restores default signal handling.
+ */
+void pty_signal_cleanup(void);
+
+/**
+ * Get the read end of the signal pipe for poll/select.
+ *
+ * When this fd becomes readable, a SIGCHLD was received.
+ * After reading, call pty_signal_drain() to clear the pipe.
+ *
+ * @return File descriptor, or -1 if signal handling not initialized
+ */
+int pty_signal_get_fd(void);
+
+/**
+ * Drain the signal pipe after it becomes readable.
+ *
+ * Call this after poll/select indicates the signal pipe is readable.
+ */
+void pty_signal_drain(void);
+
 #endif /* PTY_H */

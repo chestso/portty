@@ -12,6 +12,100 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+// Self-pipe for SIGCHLD notification
+static int sigchld_pipe[2] = { -1, -1 };
+static struct sigaction old_sigchld_action;
+static bool sigchld_handler_installed = false;
+
+// SIGCHLD handler - writes to pipe (async-signal-safe)
+static void sigchld_handler(int sig)
+{
+    (void)sig;
+    // write() is async-signal-safe
+    char c = 1;
+    int saved_errno = errno;
+    write(sigchld_pipe[1], &c, 1);
+    errno = saved_errno;
+}
+
+int pty_signal_init(void)
+{
+    // Create self-pipe
+    if (pipe(sigchld_pipe) < 0) {
+        fprintf(stderr, "ERROR: pipe() failed: %s\n", strerror(errno));
+        return -1;
+    }
+
+    // Set both ends to non-blocking
+    int flags = fcntl(sigchld_pipe[0], F_GETFL);
+    if (flags >= 0)
+        fcntl(sigchld_pipe[0], F_SETFL, flags | O_NONBLOCK);
+
+    flags = fcntl(sigchld_pipe[1], F_GETFL);
+    if (flags >= 0)
+        fcntl(sigchld_pipe[1], F_SETFL, flags | O_NONBLOCK);
+
+    // Set close-on-exec to avoid leaking to child
+    fcntl(sigchld_pipe[0], F_SETFD, FD_CLOEXEC);
+    fcntl(sigchld_pipe[1], F_SETFD, FD_CLOEXEC);
+
+    // Install SIGCHLD handler
+    struct sigaction sa;
+    sa.sa_handler = sigchld_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART | SA_NOCLDSTOP;
+
+    if (sigaction(SIGCHLD, &sa, &old_sigchld_action) < 0) {
+        fprintf(stderr, "ERROR: sigaction() failed: %s\n", strerror(errno));
+        close(sigchld_pipe[0]);
+        close(sigchld_pipe[1]);
+        sigchld_pipe[0] = sigchld_pipe[1] = -1;
+        return -1;
+    }
+
+    sigchld_handler_installed = true;
+    vlog("SIGCHLD handler installed, signal pipe fd=%d\n", sigchld_pipe[0]);
+    return 0;
+}
+
+void pty_signal_cleanup(void)
+{
+    // Restore old signal handler
+    if (sigchld_handler_installed) {
+        sigaction(SIGCHLD, &old_sigchld_action, NULL);
+        sigchld_handler_installed = false;
+    }
+
+    // Close pipe
+    if (sigchld_pipe[0] >= 0) {
+        close(sigchld_pipe[0]);
+        sigchld_pipe[0] = -1;
+    }
+    if (sigchld_pipe[1] >= 0) {
+        close(sigchld_pipe[1]);
+        sigchld_pipe[1] = -1;
+    }
+
+    vlog("SIGCHLD handler cleaned up\n");
+}
+
+int pty_signal_get_fd(void)
+{
+    return sigchld_pipe[0];
+}
+
+void pty_signal_drain(void)
+{
+    if (sigchld_pipe[0] < 0)
+        return;
+
+    // Drain all bytes from the pipe
+    char buf[64];
+    while (read(sigchld_pipe[0], buf, sizeof(buf)) > 0) {
+        // Keep draining
+    }
+}
+
 PtyContext *pty_create(int rows, int cols, char *const argv[])
 {
     PtyContext *ctx = calloc(1, sizeof(PtyContext));

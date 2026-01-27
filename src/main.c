@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #define DEFAULT_COLS 80
@@ -477,10 +478,17 @@ int main(int argc, char *argv[])
         renderer_resize(rend, win_w, win_h);
         SDL_ShowWindow(window);
 
+        // Initialize signal handling before creating PTY
+        if (pty_signal_init() < 0) {
+            fprintf(stderr, "WARNING: Failed to initialize SIGCHLD handling\n");
+            // Continue without SIGCHLD - will fall back to polling
+        }
+
         // Create PTY and spawn shell (or custom command)
         pty = pty_create(init_rows, init_cols, exec_argv);
         if (!pty) {
             fprintf(stderr, "ERROR: Failed to create PTY\n");
+            pty_signal_cleanup();
             renderer_destroy(rend);
             terminal_destroy(term);
             SDL_DestroyRenderer(sdl_rend);
@@ -547,6 +555,7 @@ int main(int argc, char *argv[])
         event_loop_destroy(event_loop);
     if (pty)
         pty_destroy(pty);
+    pty_signal_cleanup();
     if (rend)
         renderer_destroy(rend);
     if (sdl_rend)
@@ -559,14 +568,26 @@ int main(int argc, char *argv[])
     return 0;
 }
 
-void vlog(const char *format, ...)
+void vlog_impl(const char *file, const char *func, int line, const char *format, ...)
 {
     if (!verbose)
         return;
 
+    // Get current time with milliseconds
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    struct tm tm;
+    localtime_r(&ts.tv_sec, &tm);
+
+    // Extract basename from file path
+    const char *basename = strrchr(file, '/');
+    basename = basename ? basename + 1 : file;
+
     va_list args;
     va_start(args, format);
-    fprintf(stderr, "DEBUG: ");
+    fprintf(stderr, "DEBUG [%02d:%02d:%02d.%03ld] %s:%d %s(): ",
+            tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000,
+            basename, line, func);
     vfprintf(stderr, format, args);
     va_end(args);
 }

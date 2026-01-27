@@ -61,6 +61,13 @@ bool terminal_get_cursor_visible(TerminalBackend *term)
     return term->get_cursor_visible(term);
 }
 
+bool terminal_get_cursor_blink(TerminalBackend *term)
+{
+    if (!term || !term->get_cursor_blink)
+        return true;
+    return term->get_cursor_blink(term);
+}
+
 const char *terminal_get_title(TerminalBackend *term)
 {
     if (!term || !term->get_title)

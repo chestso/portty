@@ -20,7 +20,7 @@ struct RendererBackend
     bool (*init)(RendererBackend *rend, void *window_handle, void *renderer_handle);
     void (*destroy)(RendererBackend *rend);
     int (*load_fonts)(RendererBackend *rend, float font_size, const char *font_name, int ft_hint_target);
-    void (*draw_terminal)(RendererBackend *rend, TerminalBackend *term);
+    void (*draw_terminal)(RendererBackend *rend, TerminalBackend *term, bool cursor_visible);
     void (*present)(RendererBackend *rend);
     void (*resize)(RendererBackend *rend, int width, int height);
     void (*toggle_debug_grid)(RendererBackend *rend);
@@ -35,7 +35,7 @@ struct RendererBackend
 RendererBackend *renderer_init(RendererBackend *rend, void *window, void *renderer);
 void renderer_destroy(RendererBackend *rend);
 int renderer_load_fonts(RendererBackend *rend, float font_size, const char *font_name, int ft_hint_target);
-void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term);
+void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term, bool cursor_visible);
 void renderer_present(RendererBackend *rend);
 void renderer_resize(RendererBackend *rend, int width, int height);
 void renderer_toggle_debug_grid(RendererBackend *rend);

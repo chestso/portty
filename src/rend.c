@@ -26,11 +26,11 @@ int renderer_load_fonts(RendererBackend *rend, float font_size, const char *font
     return rend->load_fonts(rend, font_size, font_name, ft_hint_target);
 }
 
-void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term)
+void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term, bool cursor_visible)
 {
     if (!rend || !rend->draw_terminal)
         return;
-    rend->draw_terminal(rend, term);
+    rend->draw_terminal(rend, term, cursor_visible);
 }
 
 void renderer_present(RendererBackend *rend)
