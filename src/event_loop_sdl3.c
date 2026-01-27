@@ -344,6 +344,9 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
         return;
     }
 
+    // Enable text input for proper Unicode character handling
+    SDL_StartTextInput(ctx->sdl_window);
+
     vlog("Event loop starting (event-driven)\n");
 
     SDL_Event event;
@@ -483,6 +486,9 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
     }
 
     vlog("Event loop exiting\n");
+
+    // Stop text input
+    SDL_StopTextInput(ctx->sdl_window);
 
     // Stop cursor blink timer
     if (ctx->cursor_blink_timer != TIMER_INVALID) {
