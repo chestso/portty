@@ -29,6 +29,7 @@ struct RendererBackend
     void (*scroll)(RendererBackend *rend, TerminalBackend *term, int delta);
     void (*reset_scroll)(RendererBackend *rend);
     int (*get_scroll_offset)(RendererBackend *rend);
+    void (*set_title)(RendererBackend *rend, const char *title);
 };
 
 // Renderer API
@@ -44,5 +45,6 @@ bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_he
 void renderer_scroll(RendererBackend *rend, TerminalBackend *term, int delta);
 void renderer_reset_scroll(RendererBackend *rend);
 int renderer_get_scroll_offset(RendererBackend *rend);
+void renderer_set_title(RendererBackend *rend, const char *title);
 
 #endif /* REND_H */

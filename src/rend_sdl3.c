@@ -170,6 +170,7 @@ typedef struct RendererSdl3Data
     int height;
     int debug_grid;
     int scroll_offset;
+    char *last_title;
 
     RendSdl3Atlas atlas;
 } RendererSdl3Data;
@@ -197,6 +198,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->height = 0;
     data->debug_grid = 0;
     data->scroll_offset = 0;
+    data->last_title = NULL;
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -234,6 +236,7 @@ static void sdl3_destroy(RendererBackend *backend)
         font_destroy(data->font);
     }
 
+    free(data->last_title);
     free(data);
     backend->backend_data = NULL;
 }
@@ -724,6 +727,28 @@ static int sdl3_get_scroll_offset(RendererBackend *backend)
     return data->scroll_offset;
 }
 
+static void sdl3_set_title(RendererBackend *backend, const char *title)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
+    // Skip if title unchanged
+    if (data->last_title && title && strcmp(data->last_title, title) == 0)
+        return;
+    if (!data->last_title && !title)
+        return;
+
+    // Update stored title
+    free(data->last_title);
+    data->last_title = title ? strdup(title) : NULL;
+
+    // Update window title
+    SDL_SetWindowTitle(data->window, title ? title : "bloom-term");
+    vlog("Window title set to: %s\n", title ? title : "(default)");
+}
+
 // SDL3 renderer backend instance
 RendererBackend renderer_backend_sdl3 = {
     .name = "sdl3",
@@ -739,5 +764,6 @@ RendererBackend renderer_backend_sdl3 = {
     .get_cell_size = sdl3_get_cell_size,
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
-    .get_scroll_offset = sdl3_get_scroll_offset
+    .get_scroll_offset = sdl3_get_scroll_offset,
+    .set_title = sdl3_set_title
 };

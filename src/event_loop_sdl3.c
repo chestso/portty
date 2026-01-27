@@ -467,6 +467,9 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
 
         // Render terminal only if needed
         if (terminal_needs_redraw(term) || ctx->force_redraw) {
+            // Update window title if changed
+            renderer_set_title(rend, terminal_get_title(term));
+
             // Cursor visible if: blink disabled OR (blink enabled AND in visible phase)
             bool cursor_vis = !terminal_get_cursor_blink(term) || ctx->cursor_blink_visible;
             renderer_draw_terminal(rend, term, cursor_vis);
