@@ -4,6 +4,8 @@
 
 #include "bloom_pty.h"
 #include "common.h"
+#include "event_loop.h"
+#include "event_loop_sdl3.h"
 #include "font.h"
 #include "font_ft.h"
 #include "font_ft_internal.h"
@@ -15,24 +17,14 @@
 #include "term_vt.h"
 #include "unicode.h"
 #include <SDL3/SDL.h>
-#include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
 #include <limits.h>
-#include <poll.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#ifdef HAVE_X11
-#include <X11/Xlib.h>
-#endif
-
-#ifdef HAVE_WAYLAND
-#include <wayland-client.h>
-#endif
 
 #define DEFAULT_COLS 80
 #define DEFAULT_ROWS 24
@@ -42,111 +34,175 @@ int verbose = 0;
 
 // Function prototypes
 static void print_usage(const char *progname);
-static void process_input_from_source(TerminalBackend *term, const char *source);
 static int png_render_text(const char *text, const char *output_path);
 
-// Display backend types for unified event loop
-typedef enum
-{
-    DISPLAY_BACKEND_UNKNOWN,
-    DISPLAY_BACKEND_X11,
-    DISPLAY_BACKEND_WAYLAND
-} DisplayBackend;
-
-// Display context for unified polling
+// Context passed to event loop callbacks
 typedef struct
 {
-    DisplayBackend backend;
-    int display_fd;
-#ifdef HAVE_X11
-    Display *x11_display;
-#endif
-#ifdef HAVE_WAYLAND
-    struct wl_display *wl_display;
-#endif
-} DisplayContext;
+    TerminalBackend *term;
+    RendererBackend *rend;
+    PtyContext *pty;
+} MainContext;
 
-// Initialize display context for unified event loop
-static void display_context_init(DisplayContext *ctx, SDL_Window *window)
+// Keyboard callback for event loop
+static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_text,
+                                  const char *text)
 {
-    ctx->backend = DISPLAY_BACKEND_UNKNOWN;
-    ctx->display_fd = -1;
-#ifdef HAVE_X11
-    ctx->x11_display = NULL;
-#endif
-#ifdef HAVE_WAYLAND
-    ctx->wl_display = NULL;
-#endif
+    MainContext *ctx = (MainContext *)user_data;
+    KeyboardResult result = { 0 };
 
-    const char *video_driver = SDL_GetCurrentVideoDriver();
-    if (!video_driver) {
-        vlog("Could not get video driver name\n");
-        return;
-    }
-
-    vlog("Video driver: %s\n", video_driver);
-
-    SDL_PropertiesID props = SDL_GetWindowProperties(window);
-    if (!props) {
-        vlog("Could not get window properties\n");
-        return;
-    }
-
-#ifdef HAVE_X11
-    if (strcmp(video_driver, "x11") == 0) {
-        ctx->x11_display = (Display *)SDL_GetPointerProperty(
-            props, SDL_PROP_WINDOW_X11_DISPLAY_POINTER, NULL);
-        if (ctx->x11_display) {
-            ctx->display_fd = ConnectionNumber(ctx->x11_display);
-            ctx->backend = DISPLAY_BACKEND_X11;
-            vlog("X11 display fd: %d\n", ctx->display_fd);
-        } else {
-            vlog("Could not get X11 display pointer\n");
+    // Handle text input for proper Unicode support
+    if (is_text && text) {
+        size_t text_len = strlen(text);
+        if (text_len > 0 && text_len < sizeof(result.data)) {
+            memcpy(result.data, text, text_len);
+            result.len = text_len;
         }
+        return result;
     }
-#endif
 
-#ifdef HAVE_WAYLAND
-    if (strcmp(video_driver, "wayland") == 0) {
-        ctx->wl_display = (struct wl_display *)SDL_GetPointerProperty(
-            props, SDL_PROP_WINDOW_WAYLAND_DISPLAY_POINTER, NULL);
-        if (ctx->wl_display) {
-            ctx->display_fd = wl_display_get_fd(ctx->wl_display);
-            ctx->backend = DISPLAY_BACKEND_WAYLAND;
-            vlog("Wayland display fd: %d\n", ctx->display_fd);
+    // Ctrl+Q: exit
+    if (key == SDLK_Q && (mod & SDL_KMOD_CTRL)) {
+        result.request_quit = true;
+        return result;
+    }
+
+    // Convert SDL key events to terminal input
+    switch (key) {
+    case SDLK_RETURN:
+        result.data[0] = '\r';
+        result.len = 1;
+        break;
+    case SDLK_BACKSPACE:
+        result.data[0] = '\x7f'; // DEL character
+        result.len = 1;
+        break;
+    case SDLK_ESCAPE:
+        result.data[0] = '\x1b'; // ESC character
+        result.len = 1;
+        break;
+    case SDLK_TAB:
+        result.data[0] = '\t';
+        result.len = 1;
+        break;
+    case SDLK_UP:
+        strcpy(result.data, "\x1b[A");
+        result.len = 3;
+        break;
+    case SDLK_DOWN:
+        strcpy(result.data, "\x1b[B");
+        result.len = 3;
+        break;
+    case SDLK_RIGHT:
+        strcpy(result.data, "\x1b[C");
+        result.len = 3;
+        break;
+    case SDLK_LEFT:
+        strcpy(result.data, "\x1b[D");
+        result.len = 3;
+        break;
+    case SDLK_HOME:
+        strcpy(result.data, "\x1b[H");
+        result.len = 3;
+        break;
+    case SDLK_END:
+        strcpy(result.data, "\x1b[F");
+        result.len = 3;
+        break;
+    case SDLK_INSERT:
+        strcpy(result.data, "\x1b[2~");
+        result.len = 4;
+        break;
+    case SDLK_DELETE:
+        strcpy(result.data, "\x1b[3~");
+        result.len = 4;
+        break;
+    case SDLK_PAGEUP:
+        if (mod & SDL_KMOD_SHIFT) {
+            // Shift+PageUp: scroll back one page
+            int rows, cols;
+            terminal_get_dimensions(ctx->term, &rows, &cols);
+            renderer_scroll(ctx->rend, ctx->term, rows);
+            result.force_redraw = true;
+            result.handled = true;
         } else {
-            vlog("Could not get Wayland display pointer\n");
+            strcpy(result.data, "\x1b[5~");
+            result.len = 4;
         }
+        break;
+    case SDLK_PAGEDOWN:
+        if (mod & SDL_KMOD_SHIFT) {
+            // Shift+PageDown: scroll forward one page
+            int rows, cols;
+            terminal_get_dimensions(ctx->term, &rows, &cols);
+            renderer_scroll(ctx->rend, ctx->term, -rows);
+            result.force_redraw = true;
+            result.handled = true;
+        } else {
+            strcpy(result.data, "\x1b[6~");
+            result.len = 4;
+        }
+        break;
+    default:
+        // Handle printable characters
+        if (key >= 32 && key < 127) {
+            // Check for Ctrl+G specifically (debug grid toggle)
+            if (key == 'g' || key == 'G') {
+                if (mod & SDL_KMOD_CTRL) {
+                    if (ctx->rend) {
+                        renderer_toggle_debug_grid(ctx->rend);
+                        result.force_redraw = true;
+                        result.handled = true;
+                    }
+                    vlog("Ctrl+G pressed, debug grid toggled\n");
+                } else {
+                    result.data[0] = (char)key;
+                    result.len = 1;
+                }
+            } else if (mod & SDL_KMOD_CTRL) {
+                // Ctrl+letter: send as control character
+                char ch = (char)key;
+                if (ch >= 'a' && ch <= 'z') {
+                    result.data[0] = (char)(ch - 'a' + 1);
+                    result.len = 1;
+                } else if (ch >= 'A' && ch <= 'Z') {
+                    result.data[0] = (char)(ch - 'A' + 1);
+                    result.len = 1;
+                }
+            } else {
+                result.data[0] = (char)key;
+                result.len = 1;
+            }
+        }
+        break;
     }
-#endif
 
-    if (ctx->display_fd < 0) {
-        vlog("No display fd available, falling back to short timeout polling\n");
+    return result;
+}
+
+// Window resize callback for event loop
+static void on_resize(void *user_data, int pixel_w, int pixel_h)
+{
+    MainContext *ctx = (MainContext *)user_data;
+
+    renderer_resize(ctx->rend, pixel_w, pixel_h);
+
+    int cell_w, cell_h;
+    if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h)) {
+        int cols = pixel_w / cell_w;
+        int rows = pixel_h / cell_h;
+        if (cols > 0 && rows > 0) {
+            terminal_resize(ctx->term, cols, rows);
+            pty_resize(ctx->pty, rows, cols);
+        }
     }
 }
 
-// Flush Wayland display before blocking on poll
-static void display_context_flush(DisplayContext *ctx)
+// Scroll callback for event loop
+static void on_scroll(void *user_data, int delta)
 {
-#ifdef HAVE_WAYLAND
-    if (ctx->backend == DISPLAY_BACKEND_WAYLAND && ctx->wl_display) {
-        wl_display_flush(ctx->wl_display);
-    }
-#else
-    (void)ctx;
-#endif
-}
-
-// Dispatch pending Wayland events after poll returns
-static void display_context_dispatch_pending(DisplayContext *ctx)
-{
-#ifdef HAVE_WAYLAND
-    if (ctx->backend == DISPLAY_BACKEND_WAYLAND && ctx->wl_display) {
-        wl_display_dispatch_pending(ctx->wl_display);
-    }
-#else
-    (void)ctx;
-#endif
+    MainContext *ctx = (MainContext *)user_data;
+    renderer_scroll(ctx->rend, ctx->term, delta);
 }
 
 int main(int argc, char *argv[])
@@ -156,9 +212,8 @@ int main(int argc, char *argv[])
     SDL_Window *window = NULL;
     SDL_Renderer *sdl_rend = NULL;
     PtyContext *pty = NULL;
-    DisplayContext display_ctx = { 0 };
+    EventLoopBackend *event_loop = NULL;
     int running = 1;
-    char *input_source = NULL;
     int opt;
 
     // Parse command line arguments
@@ -245,11 +300,6 @@ int main(int argc, char *argv[])
         }
     }
 
-    // Check for input source argument
-    if (optind < argc) {
-        input_source = argv[optind];
-    }
-
     // List monospace fonts and exit
     if (list_fonts) {
         if (font_resolver_init() != 0) {
@@ -269,12 +319,12 @@ int main(int argc, char *argv[])
 
     // PNG render mode: skip SDL entirely, render text to PNG and exit
     if (png_text) {
-        if (!input_source) {
+        if (optind >= argc) {
             fprintf(stderr, "ERROR: -P requires output PNG path as positional argument\n");
             fprintf(stderr, "Usage: %s -P \"text\" output.png\n", argv[0]);
             return 1;
         }
-        return png_render_text(png_text, input_source);
+        return png_render_text(png_text, argv[optind]);
     }
 
     // Set app metadata before SDL initialization as recommended by SDL3
@@ -433,15 +483,31 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // Initialize display context for unified event loop
-        display_context_init(&display_ctx, window);
-    }
+        // Initialize event loop
+        event_loop = event_loop_init(&event_loop_backend_sdl3, window, sdl_rend);
+        if (!event_loop) {
+            fprintf(stderr, "ERROR: Failed to initialize event loop\n");
+            pty_destroy(pty);
+            renderer_destroy(rend);
+            terminal_destroy(term);
+            SDL_DestroyRenderer(sdl_rend);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
 
-    // Process input if provided (for testing/scripted input before PTY interaction)
-    if (input_source) {
-        vlog("Processing input from: %s\n",
-             strcmp(input_source, "-") == 0 ? "stdin" : input_source);
-        process_input_from_source(term, input_source);
+        // Register PTY with event loop
+        if (!event_loop_register_pty(event_loop, pty)) {
+            fprintf(stderr, "ERROR: Failed to register PTY with event loop\n");
+            event_loop_destroy(event_loop);
+            pty_destroy(pty);
+            renderer_destroy(rend);
+            terminal_destroy(term);
+            SDL_DestroyRenderer(sdl_rend);
+            SDL_DestroyWindow(window);
+            SDL_Quit();
+            return 1;
+        }
     }
 
     // Only enter event loop if running
@@ -452,276 +518,27 @@ int main(int argc, char *argv[])
             vlog("Debug grid enabled via CLI flag\n");
         }
 
-        int force_redraw = 1; // Force initial render
-        int pty_fd = pty_get_master_fd(pty);
+        // Set up context and callbacks for event loop
+        MainContext main_ctx = {
+            .term = term,
+            .rend = rend,
+            .pty = pty,
+        };
 
-        // Main event loop with unified poll on PTY and display fds
-        while (running) {
-            // Set up poll file descriptors
-            struct pollfd pfds[2];
-            int nfds = 0;
+        EventLoopCallbacks callbacks = {
+            .on_keyboard = on_keyboard,
+            .on_resize = on_resize,
+            .on_scroll = on_scroll,
+            .user_data = &main_ctx,
+        };
 
-            // Always poll PTY for shell output
-            pfds[nfds].fd = pty_fd;
-            pfds[nfds].events = POLLIN;
-            pfds[nfds].revents = 0;
-            nfds++;
-
-            // Poll display fd if available (X11 or Wayland)
-            if (display_ctx.display_fd >= 0) {
-                pfds[nfds].fd = display_ctx.display_fd;
-                pfds[nfds].events = POLLIN;
-                pfds[nfds].revents = 0;
-                nfds++;
-            }
-
-            // Flush Wayland display before blocking (required by Wayland protocol)
-            display_context_flush(&display_ctx);
-
-            // Poll with timeout - wake on either PTY or display activity
-            // Use shorter timeout (1ms) if no display fd, longer (16ms) if we have one
-            int timeout_ms = (display_ctx.display_fd >= 0) ? 16 : 1;
-            int poll_ret = poll(pfds, nfds, timeout_ms);
-
-            if (poll_ret < 0 && errno != EINTR) {
-                fprintf(stderr, "ERROR: poll failed: %s\n", strerror(errno));
-                running = 0;
-                break;
-            }
-
-            // Read PTY output if available
-            if (pfds[0].revents & POLLIN) {
-                char buf[4096];
-                ssize_t n = pty_read(pty, buf, sizeof(buf));
-                if (n > 0) {
-                    terminal_process_input(term, buf, n);
-                } else if (n == 0 || (n < 0 && errno != EAGAIN && errno != EINTR)) {
-                    // Shell exited or error
-                    vlog("PTY read returned %zd, shell likely exited\n", n);
-                    running = 0;
-                    break;
-                }
-            }
-
-            // Check if child process is still running
-            if (!pty_is_running(pty)) {
-                vlog("Shell process exited\n");
-                running = 0;
-                break;
-            }
-
-            // Dispatch pending Wayland events (required by Wayland protocol)
-            display_context_dispatch_pending(&display_ctx);
-
-            // Pump SDL events (processes display fd events internally)
-            SDL_PumpEvents();
-
-            // Process SDL events
-            SDL_Event event;
-            while (SDL_PollEvent(&event)) {
-                switch (event.type) {
-                case SDL_EVENT_QUIT:
-                    running = 0;
-                    break;
-
-                case SDL_EVENT_KEY_DOWN:
-                    // Handle key presses and send to PTY
-                    {
-                        char key_buffer[16] = { 0 };
-                        size_t len = 0;
-
-                        // Ctrl+Q: exit
-                        if (event.key.key == SDLK_Q &&
-                            (event.key.mod & SDL_KMOD_CTRL)) {
-                            running = 0;
-                            break;
-                        }
-
-                        // Convert SDL key events to terminal input
-                        switch (event.key.key) {
-                        case SDLK_RETURN:
-                            key_buffer[0] = '\r';
-                            len = 1;
-                            break;
-                        case SDLK_BACKSPACE:
-                            key_buffer[0] = '\x7f'; // DEL character
-                            len = 1;
-                            break;
-                        case SDLK_ESCAPE:
-                            key_buffer[0] = '\x1b'; // ESC character
-                            len = 1;
-                            break;
-                        case SDLK_TAB:
-                            key_buffer[0] = '\t';
-                            len = 1;
-                            break;
-                        case SDLK_UP:
-                            strcpy(key_buffer, "\x1b[A");
-                            len = 3;
-                            break;
-                        case SDLK_DOWN:
-                            strcpy(key_buffer, "\x1b[B");
-                            len = 3;
-                            break;
-                        case SDLK_RIGHT:
-                            strcpy(key_buffer, "\x1b[C");
-                            len = 3;
-                            break;
-                        case SDLK_LEFT:
-                            strcpy(key_buffer, "\x1b[D");
-                            len = 3;
-                            break;
-                        case SDLK_HOME:
-                            strcpy(key_buffer, "\x1b[H");
-                            len = 3;
-                            break;
-                        case SDLK_END:
-                            strcpy(key_buffer, "\x1b[F");
-                            len = 3;
-                            break;
-                        case SDLK_INSERT:
-                            strcpy(key_buffer, "\x1b[2~");
-                            len = 4;
-                            break;
-                        case SDLK_DELETE:
-                            strcpy(key_buffer, "\x1b[3~");
-                            len = 4;
-                            break;
-                        case SDLK_PAGEUP:
-                            if (event.key.mod & SDL_KMOD_SHIFT) {
-                                // Shift+PageUp: scroll back one page
-                                int rows, cols;
-                                terminal_get_dimensions(term, &rows, &cols);
-                                renderer_scroll(rend, term, rows);
-                                force_redraw = 1;
-                                len = 0; // Don't send to PTY
-                            } else {
-                                strcpy(key_buffer, "\x1b[5~");
-                                len = 4;
-                            }
-                            break;
-                        case SDLK_PAGEDOWN:
-                            if (event.key.mod & SDL_KMOD_SHIFT) {
-                                // Shift+PageDown: scroll forward one page
-                                int rows, cols;
-                                terminal_get_dimensions(term, &rows, &cols);
-                                renderer_scroll(rend, term, -rows);
-                                force_redraw = 1;
-                                len = 0; // Don't send to PTY
-                            } else {
-                                strcpy(key_buffer, "\x1b[6~");
-                                len = 4;
-                            }
-                            break;
-                        default:
-                            // Handle printable characters
-                            if (event.key.key >= 32 && event.key.key < 127) {
-                                // Check for Ctrl+G specifically (debug grid toggle)
-                                if (event.key.key == 'g' || event.key.key == 'G') {
-                                    if (event.key.mod & SDL_KMOD_CTRL) {
-                                        if (rend) {
-                                            renderer_toggle_debug_grid(rend);
-                                            force_redraw = 1;
-                                        }
-                                        // Don't send to PTY
-                                        len = 0;
-                                        vlog("Ctrl+G pressed, debug grid toggled\n");
-                                    } else {
-                                        key_buffer[0] = (char)event.key.key;
-                                        len = 1;
-                                    }
-                                } else if (event.key.mod & SDL_KMOD_CTRL) {
-                                    // Ctrl+letter: send as control character
-                                    char ch = (char)event.key.key;
-                                    if (ch >= 'a' && ch <= 'z') {
-                                        key_buffer[0] = (char)(ch - 'a' + 1);
-                                        len = 1;
-                                    } else if (ch >= 'A' && ch <= 'Z') {
-                                        key_buffer[0] = (char)(ch - 'A' + 1);
-                                        len = 1;
-                                    }
-                                } else {
-                                    key_buffer[0] = (char)event.key.key;
-                                    len = 1;
-                                }
-                            }
-                            break;
-                        }
-
-                        // Write to PTY instead of directly to terminal
-                        if (len > 0) {
-                            // Reset scroll position when typing
-                            if (renderer_get_scroll_offset(rend) != 0) {
-                                renderer_reset_scroll(rend);
-                                force_redraw = 1;
-                            }
-                            ssize_t written = pty_write(pty, key_buffer, len);
-                            if (written < 0) {
-                                vlog("PTY write failed: %s\n", strerror(errno));
-                            }
-                        }
-                    }
-                    break;
-
-                case SDL_EVENT_TEXT_INPUT:
-                    // Handle text input for proper Unicode support
-                    {
-                        const char *text = event.text.text;
-                        size_t text_len = strlen(text);
-                        if (text_len > 0) {
-                            // Reset scroll position when typing
-                            if (renderer_get_scroll_offset(rend) != 0) {
-                                renderer_reset_scroll(rend);
-                                force_redraw = 1;
-                            }
-                            pty_write(pty, text, text_len);
-                        }
-                    }
-                    break;
-
-                case SDL_EVENT_WINDOW_RESIZED:
-                {
-                    int pixel_w = event.window.data1;
-                    int pixel_h = event.window.data2;
-                    renderer_resize(rend, pixel_w, pixel_h);
-
-                    int cell_w, cell_h;
-                    if (renderer_get_cell_size(rend, &cell_w, &cell_h)) {
-                        int cols = pixel_w / cell_w;
-                        int rows = pixel_h / cell_h;
-                        if (cols > 0 && rows > 0) {
-                            terminal_resize(term, cols, rows);
-                            pty_resize(pty, rows, cols);
-                        }
-                    }
-                    force_redraw = 1;
-                    break;
-                }
-
-                case SDL_EVENT_MOUSE_WHEEL:
-                    if (event.wheel.y != 0) {
-                        // Scroll 3 lines per tick
-                        renderer_scroll(rend, term, (int)event.wheel.y * 3);
-                        force_redraw = 1;
-                    }
-                    break;
-                }
-            }
-
-            // Render terminal only if needed
-            if (terminal_needs_redraw(term) || force_redraw) {
-                renderer_draw_terminal(rend, term);
-                SDL_RenderPresent(sdl_rend);
-                terminal_clear_redraw(term);
-                force_redraw = 0;
-
-                // Log atlas stats after rendering activity
-                renderer_log_stats(rend);
-            }
-        }
+        // Run the event loop
+        event_loop_run(event_loop, term, rend, &callbacks);
     }
 
     // Cleanup
+    if (event_loop)
+        event_loop_destroy(event_loop);
     if (pty)
         pty_destroy(pty);
     if (rend)
@@ -750,7 +567,7 @@ void vlog(const char *format, ...)
 
 static void print_usage(const char *progname)
 {
-    printf("Usage: %s [OPTIONS] [INPUT_FILE]\n", progname);
+    printf("Usage: %s [OPTIONS]\n", progname);
     printf("Terminal emulator using libvterm and SDL3\n\n");
     printf("Options:\n");
     printf("  -h          Show this help message\n");
@@ -764,61 +581,10 @@ static void print_usage(const char *progname)
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
-    printf("  --          End of options (use before - for stdin)\n");
-    printf("\n");
-    printf("Input:\n");
-    printf("  INPUT_FILE  File containing terminal input to process\n");
-    printf("  -           Read terminal input from stdin\n");
-    printf("  (none)      Run interactively with shell\n");
     printf("\n");
     printf("Runtime controls:\n");
     printf("  Ctrl+G      Toggle debug grid\n");
     printf("  Ctrl+Q      Quit\n");
-}
-
-static void process_input_from_source(TerminalBackend *term, const char *source)
-{
-    FILE *input_file;
-    char buffer[4096];
-    size_t bytes_read;
-    size_t total_bytes = 0;
-
-    if (strcmp(source, "-") == 0) {
-        input_file = stdin;
-        vlog("Reading from stdin\n");
-    } else {
-        input_file = fopen(source, "r");
-        if (!input_file) {
-            fprintf(stderr, "ERROR: Cannot open file '%s': %s\n",
-                    source, strerror(errno));
-            return;
-        }
-        vlog("Opened file: %s\n", source);
-    }
-
-    // Read and process input
-    while ((bytes_read = fread(buffer, 1, sizeof(buffer), input_file)) > 0) {
-        terminal_process_input(term, buffer, bytes_read);
-        total_bytes += bytes_read;
-
-        vlog("Processed %zu bytes (total: %zu)\n",
-             bytes_read, total_bytes);
-    }
-
-    if (input_file != stdin) {
-        fclose(input_file);
-    }
-
-    // Output machine-readable status
-    fprintf(stderr, "STATUS: input_bytes=%zu\n", total_bytes);
-    fprintf(stderr, "STATUS: input_source=%s\n",
-            strcmp(source, "-") == 0 ? "stdin" : source);
-
-    // Get terminal dimensions for debug output
-    int rows, cols;
-    if (terminal_get_dimensions(term, &rows, &cols) == 0) {
-        fprintf(stderr, "STATUS: terminal_dimensions=%dx%d\n", cols, rows);
-    }
 }
 
 static int png_render_text(const char *text, const char *output_path)
