@@ -145,22 +145,17 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         }
         break;
     default:
-        // Handle printable characters
-        if (key >= 32 && key < 127) {
+        // Only handle Ctrl+key combinations here; regular characters come via TEXT_INPUT
+        if (key >= 32 && key < 127 && (mod & SDL_KMOD_CTRL)) {
             // Check for Ctrl+G specifically (debug grid toggle)
             if (key == 'g' || key == 'G') {
-                if (mod & SDL_KMOD_CTRL) {
-                    if (ctx->rend) {
-                        renderer_toggle_debug_grid(ctx->rend);
-                        result.force_redraw = true;
-                        result.handled = true;
-                    }
-                    vlog("Ctrl+G pressed, debug grid toggled\n");
-                } else {
-                    result.data[0] = (char)key;
-                    result.len = 1;
+                if (ctx->rend) {
+                    renderer_toggle_debug_grid(ctx->rend);
+                    result.force_redraw = true;
+                    result.handled = true;
                 }
-            } else if (mod & SDL_KMOD_CTRL) {
+                vlog("Ctrl+G pressed, debug grid toggled\n");
+            } else {
                 // Ctrl+letter: send as control character
                 char ch = (char)key;
                 if (ch >= 'a' && ch <= 'z') {
@@ -170,9 +165,6 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
                     result.data[0] = (char)(ch - 'A' + 1);
                     result.len = 1;
                 }
-            } else {
-                result.data[0] = (char)key;
-                result.len = 1;
             }
         }
         break;
