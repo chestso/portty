@@ -219,7 +219,7 @@ int main(int argc, char *argv[])
     // Parse command line arguments
     int debug_grid_enabled = 0;
     int list_fonts = 0;
-    int ft_hint_target = FT_LOAD_NO_HINTING; // Default: no hinting
+    int ft_hint_target = FT_LOAD_TARGET_LIGHT; // Default: light hinting
     char *png_text = NULL;
     const char *font_name = NULL;
     const char *colr_debug_path = NULL; // COLR layer debug prefix
@@ -583,7 +583,7 @@ static void print_usage(const char *progname)
     printf("  -s SIZE     Font size in points (default: 12.0)\n");
     printf("  -f FONT     Font family name (e.g., \"Adwaita Mono\")\n");
     printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
-    printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: none)\n");
+    printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
