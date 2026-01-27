@@ -223,6 +223,7 @@ int main(int argc, char *argv[])
     char *png_text = NULL;
     const char *font_name = NULL;
     const char *colr_debug_path = NULL; // COLR layer debug prefix
+    char **exec_argv = NULL;            // Command to run (NULL = default shell)
     float font_size = 12.0f;            // Default font size in points
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
@@ -298,6 +299,11 @@ int main(int argc, char *argv[])
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    // After getopt, remaining args (after --) are the command to execute
+    if (optind < argc) {
+        exec_argv = &argv[optind];
     }
 
     // List monospace fonts and exit
@@ -471,8 +477,8 @@ int main(int argc, char *argv[])
         renderer_resize(rend, win_w, win_h);
         SDL_ShowWindow(window);
 
-        // Create PTY and spawn shell
-        pty = pty_create(init_rows, init_cols, NULL);
+        // Create PTY and spawn shell (or custom command)
+        pty = pty_create(init_rows, init_cols, exec_argv);
         if (!pty) {
             fprintf(stderr, "ERROR: Failed to create PTY\n");
             renderer_destroy(rend);
@@ -567,7 +573,7 @@ void vlog(const char *format, ...)
 
 static void print_usage(const char *progname)
 {
-    printf("Usage: %s [OPTIONS]\n", progname);
+    printf("Usage: %s [OPTIONS] [-- COMMAND [ARGS...]]\n", progname);
     printf("Terminal emulator using libvterm and SDL3\n\n");
     printf("Options:\n");
     printf("  -h          Show this help message\n");
@@ -581,6 +587,13 @@ static void print_usage(const char *progname)
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
+    printf("\n");
+    printf("Command execution:\n");
+    printf("  Use -- to separate options from command. Without --, runs default shell.\n");
+    printf("  Examples:\n");
+    printf("    %s                              # Run default shell\n", progname);
+    printf("    %s -- htop                      # Run htop directly\n", progname);
+    printf("    %s -- sh -c 'echo hello'        # Run shell command\n", progname);
     printf("\n");
     printf("Runtime controls:\n");
     printf("  Ctrl+G      Toggle debug grid\n");

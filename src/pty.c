@@ -12,7 +12,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-PtyContext *pty_create(int rows, int cols, const char *shell)
+PtyContext *pty_create(int rows, int cols, char *const argv[])
 {
     PtyContext *ctx = calloc(1, sizeof(PtyContext));
     if (!ctx) {
@@ -42,7 +42,7 @@ PtyContext *pty_create(int rows, int cols, const char *shell)
     }
 
     if (pid == 0) {
-        // Child process - exec shell
+        // Child process - exec command or default shell
 
         // Set TERM environment variable
         setenv("TERM", "xterm-256color", 1);
@@ -50,11 +50,18 @@ PtyContext *pty_create(int rows, int cols, const char *shell)
         // Also set COLORTERM for applications that check it
         setenv("COLORTERM", "truecolor", 1);
 
-        // Determine which shell to run
-        const char *shell_to_exec = shell;
-        if (!shell_to_exec) {
-            shell_to_exec = getenv("SHELL");
+        if (argv && argv[0]) {
+            // Command provided - execute directly
+            vlog("PTY child: execing '%s'\n", argv[0]);
+            execvp(argv[0], argv);
+
+            // If exec fails
+            fprintf(stderr, "ERROR: Failed to exec '%s': %s\n", argv[0], strerror(errno));
+            _exit(127);
         }
+
+        // No command - run default shell
+        const char *shell_to_exec = getenv("SHELL");
         if (!shell_to_exec) {
             shell_to_exec = "/bin/sh";
         }

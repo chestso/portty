@@ -14,14 +14,15 @@ typedef struct PtyContext
 } PtyContext;
 
 /**
- * Create a new PTY and spawn a shell process.
+ * Create a new PTY and spawn a process.
  *
  * @param rows Initial terminal rows
  * @param cols Initial terminal columns
- * @param shell Shell to execute (NULL for default from SHELL env or /bin/sh)
+ * @param argv NULL-terminated argument array (argv[0] is program to execute).
+ *             If NULL, spawns the default shell from $SHELL or /bin/sh.
  * @return PtyContext pointer on success, NULL on failure
  */
-PtyContext *pty_create(int rows, int cols, const char *shell);
+PtyContext *pty_create(int rows, int cols, char *const argv[]);
 
 /**
  * Destroy PTY context and terminate child process.
