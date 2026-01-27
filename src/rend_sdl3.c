@@ -163,10 +163,8 @@ typedef struct RendererSdl3Data
     int width;
     int height;
     int debug_grid;
-    bool full_redraw;
     int scroll_offset;
 
-    SDL_Texture *terminal_texture;
     RendSdl3Atlas atlas;
 } RendererSdl3Data;
 
@@ -192,9 +190,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->width = 0;
     data->height = 0;
     data->debug_grid = 0;
-    data->full_redraw = true;
     data->scroll_offset = 0;
-    data->terminal_texture = NULL;
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -224,11 +220,6 @@ static void sdl3_destroy(RendererBackend *backend)
         return;
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-
-    if (data->terminal_texture) {
-        SDL_DestroyTexture(data->terminal_texture);
-        data->terminal_texture = NULL;
-    }
 
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
@@ -575,34 +566,18 @@ render_cursor:
     return columns_to_consume;
 }
 
-static void render_damage_region(RendererSdl3Data *data, TerminalBackend *term,
-                                 TerminalDamageRect damage)
+static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
+                                 int display_rows, int display_cols)
 {
-    SDL_SetRenderTarget(data->renderer, data->terminal_texture);
-
-    // Clear damaged region backgrounds
-    for (int row = damage.start_row; row < damage.end_row; row++) {
-        SDL_FRect row_rect = {
-            (float)(damage.start_col * data->cell_width),
-            (float)(row * data->cell_height),
-            (float)((damage.end_col - damage.start_col) * data->cell_width),
-            (float)data->cell_height
-        };
-        SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
-        SDL_RenderFillRect(data->renderer, &row_rect);
-    }
-
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
     // Hide cursor when scrolled back or when terminal says it's not visible
     bool show_cursor = (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
 
-    for (int row = damage.start_row; row < damage.end_row; row++) {
-        for (int col = damage.start_col; col < damage.end_col;) {
+    for (int row = 0; row < display_rows; row++) {
+        for (int col = 0; col < display_cols;) {
             col += render_cell(data, term, row, col, cursor_pos, show_cursor);
         }
     }
-
-    SDL_SetRenderTarget(data->renderer, NULL);
 }
 
 static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
@@ -628,47 +603,10 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
     if (display_cols > term_cols)
         display_cols = term_cols;
 
-    // Determine damage rect
-    bool has_damage = true;
-    TerminalDamageRect damage = { 0, 0, display_rows, display_cols };
-    if (!data->full_redraw && data->terminal_texture) {
-        TerminalDamageRect term_damage;
-        if (terminal_get_damage_rect(term, &term_damage)) {
-            damage = term_damage;
-            if (damage.start_row < 0)
-                damage.start_row = 0;
-            if (damage.start_col < 0)
-                damage.start_col = 0;
-            if (damage.end_row > display_rows)
-                damage.end_row = display_rows;
-            if (damage.end_col > display_cols)
-                damage.end_col = display_cols;
-        } else {
-            has_damage = false;
-        }
-    }
-    data->full_redraw = false;
-
-    if (!data->terminal_texture) {
-        data->terminal_texture = SDL_CreateTexture(data->renderer,
-                                                   SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET,
-                                                   data->width, data->height);
-        // Ensure texture uses no blending so opaque pixels stay opaque
-        SDL_SetTextureBlendMode(data->terminal_texture, SDL_BLENDMODE_NONE);
-        damage = (TerminalDamageRect){ 0, 0, display_rows, display_cols };
-        has_damage = true;
-    }
-
-    if (has_damage) {
-        vlog("Damage rect: rows [%d,%d) cols [%d,%d)\n",
-             damage.start_row, damage.end_row, damage.start_col, damage.end_col);
-        render_damage_region(data, term, damage);
-    }
-
-    // Blit terminal texture to screen
+    // Clear screen and render all visible cells
     SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
     SDL_RenderClear(data->renderer);
-    SDL_RenderTexture(data->renderer, data->terminal_texture, NULL, NULL);
+    render_visible_cells(data, term, display_rows, display_cols);
 
     // Debug grid overlay
     if (data->debug_grid) {
@@ -723,14 +661,6 @@ static void sdl3_resize(RendererBackend *backend, int width, int height)
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     data->width = width;
     data->height = height;
-
-    // Recreate persistent render target at new size
-    if (data->terminal_texture)
-        SDL_DestroyTexture(data->terminal_texture);
-    data->terminal_texture = SDL_CreateTexture(data->renderer,
-                                               SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
-    SDL_SetTextureBlendMode(data->terminal_texture, SDL_BLENDMODE_NONE);
-    data->full_redraw = true;
 }
 
 static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *cell_height)
@@ -761,7 +691,6 @@ static void sdl3_scroll(RendererBackend *backend, TerminalBackend *term, int del
 
     if (new_offset != data->scroll_offset) {
         data->scroll_offset = new_offset;
-        data->full_redraw = true;
         vlog("Scroll offset changed to %d (max: %d)\n", data->scroll_offset, scrollback_lines);
     }
 }
@@ -774,7 +703,6 @@ static void sdl3_reset_scroll(RendererBackend *backend)
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     if (data->scroll_offset != 0) {
         data->scroll_offset = 0;
-        data->full_redraw = true;
         vlog("Scroll offset reset to 0\n");
     }
 }
