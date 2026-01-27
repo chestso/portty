@@ -18,6 +18,7 @@ typedef struct TerminalVtData
     TerminalDamageRect damage;
     bool has_damage;
     VTermPos cursor_pos;
+    bool cursor_visible;
     char *title;
     VTermScreenCell **scrollback;
     int scrollback_lines;
@@ -98,6 +99,7 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     data->damage = (TerminalDamageRect){ 0, 0, 0, 0 };
     data->cursor_pos.row = 0;
     data->cursor_pos.col = 0;
+    data->cursor_visible = true;
     data->title = NULL;
     data->scrollback = NULL;
     data->scrollback_lines = 0;
@@ -258,6 +260,15 @@ static const char *vt_get_title(TerminalBackend *backend)
     return data->title;
 }
 
+static bool vt_get_cursor_visible(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return true;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->cursor_visible;
+}
+
 static bool vt_needs_redraw(TerminalBackend *backend)
 {
     if (!backend || !backend->backend_data)
@@ -357,6 +368,10 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
     case VTERM_PROP_ICONNAME:
         break;
     case VTERM_PROP_CURSORVISIBLE:
+        vlog("Cursor visibility changed to: %s\n", val->boolean ? "visible" : "hidden");
+        data->cursor_visible = val->boolean;
+        damage_union(data, 0, 0, data->height, data->width);
+        break;
     case VTERM_PROP_CURSORBLINK:
     case VTERM_PROP_REVERSE:
     case VTERM_PROP_ALTSCREEN:
@@ -519,6 +534,7 @@ TerminalBackend terminal_backend_vt = {
     .get_cell = vt_get_cell,
     .get_dimensions = vt_get_dimensions,
     .get_cursor_pos = vt_get_cursor_pos,
+    .get_cursor_visible = vt_get_cursor_visible,
     .get_title = vt_get_title,
     .needs_redraw = vt_needs_redraw,
     .clear_redraw = vt_clear_redraw,

@@ -100,6 +100,52 @@ static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
     return result;
 }
 
+// Draw a filled rounded rectangle
+static void draw_rounded_rect(SDL_Renderer *renderer, float x, float y,
+                              float w, float h, float radius)
+{
+    if (radius <= 0) {
+        SDL_FRect rect = { x, y, w, h };
+        SDL_RenderFillRect(renderer, &rect);
+        return;
+    }
+
+    // Clamp radius to half of smallest dimension
+    if (radius > w / 2)
+        radius = w / 2;
+    if (radius > h / 2)
+        radius = h / 2;
+
+    // Draw center rectangle (full width, excluding corner rows)
+    SDL_FRect center = { x, y + radius, w, h - 2 * radius };
+    SDL_RenderFillRect(renderer, &center);
+
+    // Draw top and bottom rectangles (excluding corners)
+    SDL_FRect top = { x + radius, y, w - 2 * radius, radius };
+    SDL_FRect bottom = { x + radius, y + h - radius, w - 2 * radius, radius };
+    SDL_RenderFillRect(renderer, &top);
+    SDL_RenderFillRect(renderer, &bottom);
+
+    // Draw corner circles using filled points
+    float r2 = radius * radius;
+    for (int dy = 0; dy < (int)radius; dy++) {
+        for (int dx = 0; dx < (int)radius; dx++) {
+            float dist2 = (radius - dx - 0.5f) * (radius - dx - 0.5f) +
+                          (radius - dy - 0.5f) * (radius - dy - 0.5f);
+            if (dist2 <= r2) {
+                // Top-left
+                SDL_RenderPoint(renderer, x + dx, y + dy);
+                // Top-right
+                SDL_RenderPoint(renderer, x + w - 1 - dx, y + dy);
+                // Bottom-left
+                SDL_RenderPoint(renderer, x + dx, y + h - 1 - dy);
+                // Bottom-right
+                SDL_RenderPoint(renderer, x + w - 1 - dx, y + h - 1 - dy);
+            }
+        }
+    }
+}
+
 typedef struct RendererSdl3Data
 {
     SDL_Renderer *renderer;
@@ -395,13 +441,18 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         SDL_RenderFillRect(data->renderer, &bg_rect);
     }
 
-    if (cell.chars[0] == 0)
-        return 1;
+    // Default to consuming 1 column; updated for wide characters below
+    int columns_to_consume = 1;
+
+    if (cell.chars[0] == 0) {
+        // Empty cell - jump to cursor drawing, then return
+        goto render_cursor;
+    }
 
     // Collect codepoints from cell
     uint32_t cps[TERM_MAX_CHARS_PER_CELL];
     int cp_count = 0;
-    int columns_to_consume = cell.width;
+    columns_to_consume = cell.width;
 
     for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
         cps[cp_count++] = cell.chars[i];
@@ -482,14 +533,16 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
 render_cursor:
     if (show_cursor && row == cursor_pos.row && col == cursor_pos.col) {
-        SDL_FRect cursor_rect = {
-            (float)(col * data->cell_width),
-            (float)(row * data->cell_height),
-            (float)data->cell_width,
-            (float)data->cell_height
-        };
-        SDL_SetRenderDrawColor(data->renderer, r, g, b, 255);
-        SDL_RenderRect(data->renderer, &cursor_rect);
+        float cx = (float)(col * data->cell_width);
+        float cy = (float)(row * data->cell_height);
+        float cw = (float)data->cell_width;
+        float ch = (float)data->cell_height;
+
+        // Muted purple with slight transparency
+        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(data->renderer, 138, 99, 165, 220);
+        draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
+        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
     }
 
     return columns_to_consume;
@@ -513,8 +566,8 @@ static void render_damage_region(RendererSdl3Data *data, TerminalBackend *term,
     }
 
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
-    // Hide cursor when scrolled back
-    bool show_cursor = (data->scroll_offset == 0);
+    // Hide cursor when scrolled back or when terminal says it's not visible
+    bool show_cursor = (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
 
     for (int row = damage.start_row; row < damage.end_row; row++) {
         for (int col = damage.start_col; col < damage.end_col;) {
@@ -573,6 +626,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term)
         data->terminal_texture = SDL_CreateTexture(data->renderer,
                                                    SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET,
                                                    data->width, data->height);
+        // Ensure texture uses no blending so opaque pixels stay opaque
+        SDL_SetTextureBlendMode(data->terminal_texture, SDL_BLENDMODE_NONE);
         damage = (TerminalDamageRect){ 0, 0, display_rows, display_cols };
         has_damage = true;
     }
@@ -647,6 +702,7 @@ static void sdl3_resize(RendererBackend *backend, int width, int height)
         SDL_DestroyTexture(data->terminal_texture);
     data->terminal_texture = SDL_CreateTexture(data->renderer,
                                                SDL_PIXELFORMAT_RGBA8888, SDL_TEXTUREACCESS_TARGET, width, height);
+    SDL_SetTextureBlendMode(data->terminal_texture, SDL_BLENDMODE_NONE);
     data->full_redraw = true;
 }
 

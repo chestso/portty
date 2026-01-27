@@ -54,6 +54,13 @@ TerminalPos terminal_get_cursor_pos(TerminalBackend *term)
     return term->get_cursor_pos(term);
 }
 
+bool terminal_get_cursor_visible(TerminalBackend *term)
+{
+    if (!term || !term->get_cursor_visible)
+        return true;
+    return term->get_cursor_visible(term);
+}
+
 const char *terminal_get_title(TerminalBackend *term)
 {
     if (!term || !term->get_title)
