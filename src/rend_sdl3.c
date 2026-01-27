@@ -565,11 +565,6 @@ render_cursor:
         float cw = (float)data->cell_width;
         float ch = (float)data->cell_height;
 
-        // Add 10% vertical padding
-        float padding = ch * 0.1f;
-        cy += padding;
-        ch -= padding * 2.0f;
-
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
         SDL_SetRenderDrawColor(data->renderer, CURSOR_COLOR_R, CURSOR_COLOR_G,
                                CURSOR_COLOR_B, CURSOR_COLOR_A);
