@@ -8,6 +8,9 @@
 
 #define SCROLLBACK_SIZE 1000
 
+// Forward declaration for callback type
+typedef void (*TerminalOutputCallback)(const char *data, size_t len, void *user);
+
 typedef struct TerminalVtData
 {
     VTerm *vt;
@@ -24,6 +27,12 @@ typedef struct TerminalVtData
     VTermScreenCell **scrollback;
     int scrollback_lines;
     int scrollback_capacity;
+
+    // Alternate screen and mouse mode state
+    bool in_altscreen;
+    int mouse_mode; // 0=none, 1=click, 2=drag, 3=move
+    TerminalOutputCallback output_cb;
+    void *output_cb_user;
 } TerminalVtData;
 
 // Forward declarations
@@ -35,6 +44,7 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user);
 static int term_bell(void *user);
 static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user);
 static int term_sb_popline(int cols, VTermScreenCell *cells, void *user);
+static void term_output_callback(const char *data, size_t len, void *user);
 
 static VTermScreenCallbacks cb = {
     .damage = term_damage,
@@ -106,6 +116,10 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     data->scrollback = NULL;
     data->scrollback_lines = 0;
     data->scrollback_capacity = 0;
+    data->in_altscreen = false;
+    data->mouse_mode = 0;
+    data->output_cb = NULL;
+    data->output_cb_user = NULL;
 
     data->vt = vterm_new(height, width);
     if (!data->vt) {
@@ -121,6 +135,9 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     vterm_screen_set_callbacks(data->screen, &cb, data);
     vterm_screen_set_damage_merge(data->screen, VTERM_DAMAGE_SCROLL);
     vterm_screen_enable_reflow(data->screen, true);
+
+    // Set up output callback for mouse escape sequences
+    vterm_output_set_callback(data->vt, term_output_callback, data);
 
     vterm_screen_reset(data->screen, 1);
 
@@ -388,9 +405,17 @@ static int term_settermprop(VTermProp prop, VTermValue *val, void *user)
         data->cursor_blink_enabled = val->boolean;
         break;
     case VTERM_PROP_REVERSE:
-    case VTERM_PROP_ALTSCREEN:
         // Full screen damage for display-affecting properties
         damage_union(data, 0, 0, data->height, data->width);
+        break;
+    case VTERM_PROP_ALTSCREEN:
+        vlog("Alternate screen %s\n", val->boolean ? "enabled" : "disabled");
+        data->in_altscreen = val->boolean;
+        damage_union(data, 0, 0, data->height, data->width);
+        break;
+    case VTERM_PROP_MOUSE:
+        vlog("Mouse mode changed to: %d\n", val->number);
+        data->mouse_mode = val->number;
         break;
     default:
         break;
@@ -404,6 +429,15 @@ static int term_bell(void *user)
     (void)user;
     fprintf(stderr, "Bell!\n");
     return 1;
+}
+
+// Callback for vterm output (e.g., mouse escape sequences)
+static void term_output_callback(const char *s, size_t len, void *user)
+{
+    TerminalVtData *data = (TerminalVtData *)user;
+    if (data->output_cb) {
+        data->output_cb(s, len, data->output_cb_user);
+    }
 }
 
 static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
@@ -537,6 +571,62 @@ static int vt_get_scrollback_cell(TerminalBackend *backend, int scrollback_row, 
     return 0;
 }
 
+static bool vt_is_altscreen(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return false;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->in_altscreen;
+}
+
+static int vt_get_mouse_mode(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return 0;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    return data->mouse_mode;
+}
+
+static void vt_send_mouse_event(TerminalBackend *backend, int row, int col, int button,
+                                bool pressed, int mod)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    if (!data->vt)
+        return;
+
+    // Map modifier keys to VTermModifier
+    VTermModifier vtmod = VTERM_MOD_NONE;
+    if (mod & 0x01)
+        vtmod |= VTERM_MOD_SHIFT; // SDL_KMOD_SHIFT
+    if (mod & 0x40)
+        vtmod |= VTERM_MOD_CTRL; // SDL_KMOD_CTRL
+    if (mod & 0x100)
+        vtmod |= VTERM_MOD_ALT; // SDL_KMOD_ALT
+
+    // Update mouse position
+    vterm_mouse_move(data->vt, row, col, vtmod);
+
+    // Send button event if applicable
+    if (button > 0) {
+        vterm_mouse_button(data->vt, button, pressed, vtmod);
+    }
+}
+
+static void vt_set_output_callback(TerminalBackend *backend, TerminalOutputCallback cb, void *user)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    data->output_cb = cb;
+    data->output_cb_user = user;
+}
+
 // Global backend instance
 TerminalBackend terminal_backend_vt = {
     .name = "libvterm",
@@ -555,5 +645,9 @@ TerminalBackend terminal_backend_vt = {
     .clear_redraw = vt_clear_redraw,
     .get_damage_rect = vt_get_damage_rect,
     .get_scrollback_lines = vt_get_scrollback_lines,
-    .get_scrollback_cell = vt_get_scrollback_cell
+    .get_scrollback_cell = vt_get_scrollback_cell,
+    .is_altscreen = vt_is_altscreen,
+    .get_mouse_mode = vt_get_mouse_mode,
+    .send_mouse_event = vt_send_mouse_event,
+    .set_output_callback = vt_set_output_callback,
 };

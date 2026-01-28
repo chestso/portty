@@ -11,6 +11,9 @@
 struct TerminalBackend;
 typedef struct TerminalBackend TerminalBackend;
 
+// Callback type for terminal output (e.g., mouse escape sequences to send to PTY)
+typedef void (*TerminalOutputCallback)(const char *data, size_t len, void *user);
+
 typedef struct
 {
     int row;
@@ -76,6 +79,13 @@ struct TerminalBackend
     int (*get_scrollback_lines)(TerminalBackend *term);
     int (*get_scrollback_cell)(TerminalBackend *term, int scrollback_row, int col,
                                TerminalCell *cell);
+
+    // Alternate screen and mouse mode support
+    bool (*is_altscreen)(TerminalBackend *term);
+    int (*get_mouse_mode)(TerminalBackend *term);
+    void (*send_mouse_event)(TerminalBackend *term, int row, int col, int button, bool pressed,
+                             int mod);
+    void (*set_output_callback)(TerminalBackend *term, TerminalOutputCallback cb, void *user);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -94,5 +104,12 @@ bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
 int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
                                  TerminalCell *cell);
+
+// Alternate screen and mouse mode support
+bool terminal_is_altscreen(TerminalBackend *term);
+int terminal_get_mouse_mode(TerminalBackend *term);
+void terminal_send_mouse_event(TerminalBackend *term, int row, int col, int button, bool pressed,
+                               int mod);
+void terminal_set_output_callback(TerminalBackend *term, TerminalOutputCallback cb, void *user);
 
 #endif /* TERM_H */

@@ -119,8 +119,8 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         result.len = 4;
         break;
     case SDLK_PAGEUP:
-        if (mod & SDL_KMOD_SHIFT) {
-            // Shift+PageUp: scroll back one page
+        if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
+            // Shift+PageUp: scroll back one page (only in normal screen)
             int rows, cols;
             terminal_get_dimensions(ctx->term, &rows, &cols);
             renderer_scroll(ctx->rend, ctx->term, rows);
@@ -132,8 +132,8 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         }
         break;
     case SDLK_PAGEDOWN:
-        if (mod & SDL_KMOD_SHIFT) {
-            // Shift+PageDown: scroll forward one page
+        if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
+            // Shift+PageDown: scroll forward one page (only in normal screen)
             int rows, cols;
             terminal_get_dimensions(ctx->term, &rows, &cols);
             renderer_scroll(ctx->rend, ctx->term, -rows);
@@ -196,6 +196,67 @@ static void on_scroll(void *user_data, int delta)
 {
     MainContext *ctx = (MainContext *)user_data;
     renderer_scroll(ctx->rend, ctx->term, delta);
+}
+
+// Output callback for terminal - sends data to PTY
+static void term_output_to_pty(const char *data, size_t len, void *user)
+{
+    PtyContext *pty = (PtyContext *)user;
+    if (pty) {
+        pty_write(pty, data, len);
+    }
+}
+
+// Mouse callback for event loop
+static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool pressed, int mod)
+{
+    MainContext *ctx = (MainContext *)user_data;
+
+    bool in_altscreen = terminal_is_altscreen(ctx->term);
+    int mouse_mode = terminal_get_mouse_mode(ctx->term);
+
+    // Determine if we should forward this event to the terminal
+    bool should_forward = false;
+
+    if (button == 4 || button == 5) {
+        // Wheel events: forward if in altscreen or mouse mode enabled
+        should_forward = in_altscreen || (mouse_mode > 0);
+    } else if (button > 0) {
+        // Button click events: only if mouse mode enabled
+        should_forward = (mouse_mode > 0);
+    } else {
+        // Motion events (button == 0): only for drag (mode 2) or motion (mode 3) tracking
+        should_forward = (mouse_mode >= 2 && pressed) || (mouse_mode >= 3);
+    }
+
+    if (!should_forward) {
+        return false; // Not consumed - let scrollback handle wheel events
+    }
+
+    // Convert pixel coordinates to cell coordinates
+    int cell_w, cell_h;
+    if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0) {
+        return false;
+    }
+    int col = pixel_x / cell_w;
+    int row = pixel_y / cell_h;
+
+    // Clamp to terminal dimensions
+    int term_rows, term_cols;
+    terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
+    if (col >= term_cols)
+        col = term_cols - 1;
+    if (row >= term_rows)
+        row = term_rows - 1;
+    if (col < 0)
+        col = 0;
+    if (row < 0)
+        row = 0;
+
+    // Send mouse event to terminal
+    terminal_send_mouse_event(ctx->term, row, col, button, pressed, mod);
+
+    return true; // Event consumed
 }
 
 int main(int argc, char *argv[])
@@ -535,8 +596,12 @@ int main(int argc, char *argv[])
             .on_keyboard = on_keyboard,
             .on_resize = on_resize,
             .on_scroll = on_scroll,
+            .on_mouse = on_mouse,
             .user_data = &main_ctx,
         };
+
+        // Connect terminal output to PTY (for mouse escape sequences)
+        terminal_set_output_callback(term, term_output_to_pty, pty);
 
         // Run the event loop
         event_loop_run(event_loop, term, rend, &callbacks);

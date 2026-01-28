@@ -110,3 +110,32 @@ int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int 
         return -1;
     return term->get_scrollback_cell(term, scrollback_row, col, cell);
 }
+
+bool terminal_is_altscreen(TerminalBackend *term)
+{
+    if (!term || !term->is_altscreen)
+        return false;
+    return term->is_altscreen(term);
+}
+
+int terminal_get_mouse_mode(TerminalBackend *term)
+{
+    if (!term || !term->get_mouse_mode)
+        return 0;
+    return term->get_mouse_mode(term);
+}
+
+void terminal_send_mouse_event(TerminalBackend *term, int row, int col, int button, bool pressed,
+                               int mod)
+{
+    if (!term || !term->send_mouse_event)
+        return;
+    term->send_mouse_event(term, row, col, button, pressed, mod);
+}
+
+void terminal_set_output_callback(TerminalBackend *term, TerminalOutputCallback cb, void *user)
+{
+    if (!term || !term->set_output_callback)
+        return;
+    term->set_output_callback(term, cb, user);
+}

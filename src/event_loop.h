@@ -30,8 +30,13 @@ typedef struct
     // Handle window resize
     void (*on_resize)(void *user_data, int width, int height);
 
-    // Handle scroll wheel
+    // Handle scroll wheel (fallback for scrollback when mouse mode is disabled)
     void (*on_scroll)(void *user_data, int delta);
+
+    // Handle mouse events - returns true if event was consumed
+    // button: 1=left, 2=middle, 3=right, 4=wheel up, 5=wheel down
+    // mod: SDL modifier flags
+    bool (*on_mouse)(void *user_data, int pixel_x, int pixel_y, int button, bool pressed, int mod);
 
     // User data passed to callbacks
     void *user_data;
