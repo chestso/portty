@@ -12,8 +12,16 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-#define EMOJI_FONT_SCALE 4.0f
+#define EMOJI_FONT_SCALE    4.0f
+#define FALLBACK_CACHE_SIZE 64
+
+typedef struct
+{
+    uint32_t codepoint;
+    char *font_path; // NULL = no font found for this codepoint
+} FallbackCacheEntry;
 
 // Cursor color: muted purple with slight transparency (RGBA)
 #define CURSOR_COLOR_R 138
@@ -173,6 +181,13 @@ typedef struct RendererSdl3Data
     char *last_title;
 
     RendSdl3Atlas atlas;
+
+    // Dynamic font fallback cache
+    FallbackCacheEntry fallback_cache[FALLBACK_CACHE_SIZE];
+    int fallback_cache_count;
+    char *fallback_loaded_path; // path of currently loaded fallback font
+    float font_size;            // saved for loading fallback at same size
+    FontOptions font_options;   // saved for loading fallback with same options
 } RendererSdl3Data;
 
 static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
@@ -199,6 +214,11 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->debug_grid = 0;
     data->scroll_offset = 0;
     data->last_title = NULL;
+    data->fallback_cache_count = 0;
+    data->fallback_loaded_path = NULL;
+    data->font_size = 0;
+    memset(&data->font_options, 0, sizeof(data->font_options));
+    memset(data->fallback_cache, 0, sizeof(data->fallback_cache));
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -235,6 +255,15 @@ static void sdl3_destroy(RendererBackend *backend)
     if (data->font) {
         font_destroy(data->font);
     }
+
+    // Free fallback cache entries
+    for (int i = 0; i < data->fallback_cache_count; i++) {
+        free(data->fallback_cache[i].font_path);
+    }
+    free(data->fallback_loaded_path);
+
+    // Cleanup font resolver (deferred from sdl3_load_fonts)
+    font_resolver_cleanup();
 
     free(data->last_title);
     free(data);
@@ -305,6 +334,10 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         }
     }
 
+    // Save font size and options for dynamic fallback loading later
+    data->font_size = font_size;
+    data->font_options = options;
+
     // Load normal monospace font (required)
     if (!load_font_style(data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
                          font_name, font_size, &options, "Normal")) {
@@ -321,8 +354,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     load_font_style(data->font, FONT_TYPE_EMOJI, FONT_STYLE_EMOJI,
                     NULL, font_size * EMOJI_FONT_SCALE, &options, "Emoji");
 
-    // Cleanup font resolver
-    font_resolver_cleanup();
+    // NOTE: font_resolver_cleanup() is deferred to sdl3_destroy() so the
+    // resolver remains available for runtime dynamic fallback queries.
 
     // Calculate cell dimensions from font metrics using normal font
     const FontMetrics *metrics = font_get_metrics(data->font, FONT_STYLE_NORMAL);
@@ -350,6 +383,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     vlog("  Normal font: %s\n", font_has_style(data->font, FONT_STYLE_NORMAL) ? "Loaded" : "Not loaded");
     vlog("  Bold font: %s\n", font_has_style(data->font, FONT_STYLE_BOLD) ? "Loaded" : "Not loaded");
     vlog("  Emoji font: %s\n", font_has_style(data->font, FONT_STYLE_EMOJI) ? "Loaded" : "Not loaded");
+    vlog("  Fallback font: (loaded on demand)\n");
 
     return 0;
 }
@@ -438,6 +472,71 @@ static int get_cell_with_scroll(RendererSdl3Data *data, TerminalBackend *term, i
     }
 }
 
+// Look up or query fontconfig for a fallback font covering the given codepoint.
+// Returns the cached font_path (may be NULL if no font was found).
+static const char *fallback_cache_lookup(RendererSdl3Data *data, uint32_t codepoint)
+{
+    // Search existing cache
+    for (int i = 0; i < data->fallback_cache_count; i++) {
+        if (data->fallback_cache[i].codepoint == codepoint)
+            return data->fallback_cache[i].font_path;
+    }
+
+    // Query fontconfig
+    FontResolutionResult result;
+    char *path = NULL;
+    if (font_resolver_find_font_for_codepoint(codepoint, &result) == 0) {
+        path = result.font_path;
+        result.font_path = NULL; // take ownership
+        font_resolver_free_result(&result);
+    }
+
+    // Store in cache (evict oldest if full)
+    if (data->fallback_cache_count >= FALLBACK_CACHE_SIZE) {
+        free(data->fallback_cache[0].font_path);
+        memmove(&data->fallback_cache[0], &data->fallback_cache[1],
+                (FALLBACK_CACHE_SIZE - 1) * sizeof(FallbackCacheEntry));
+        data->fallback_cache_count = FALLBACK_CACHE_SIZE - 1;
+    }
+    data->fallback_cache[data->fallback_cache_count].codepoint = codepoint;
+    data->fallback_cache[data->fallback_cache_count].font_path = path;
+    data->fallback_cache_count++;
+
+    return path;
+}
+
+// Ensure the FONT_STYLE_FALLBACK slot is loaded with the font at the given path.
+// Returns true if the fallback font is ready to use.
+static bool ensure_fallback_font(RendererSdl3Data *data, const char *font_path)
+{
+    if (!font_path)
+        return false;
+
+    // Already loaded with the same font?
+    if (data->fallback_loaded_path && strcmp(data->fallback_loaded_path, font_path) == 0)
+        return font_has_style(data->font, FONT_STYLE_FALLBACK);
+
+    // Need to (re)load — destroy existing if any
+    if (font_has_style(data->font, FONT_STYLE_FALLBACK)) {
+        if (data->font->font_data[FONT_STYLE_FALLBACK]) {
+            data->font->destroy_font(data->font, data->font->font_data[FONT_STYLE_FALLBACK]);
+            data->font->font_data[FONT_STYLE_FALLBACK] = NULL;
+            data->font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
+        }
+    }
+
+    free(data->fallback_loaded_path);
+    data->fallback_loaded_path = strdup(font_path);
+
+    bool ok = font_load_font(data->font, FONT_STYLE_FALLBACK, font_path,
+                             data->font_size, &data->font_options);
+    if (ok)
+        vlog("Fallback font loaded: %s\n", font_path);
+    else
+        vlog("Failed to load fallback font: %s\n", font_path);
+    return ok;
+}
+
 static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                        int row, int col, TerminalPos cursor_pos, bool show_cursor)
 {
@@ -511,6 +610,24 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     // Shaped rendering path (multiple codepoints)
     if (cp_count > 1 && data->font->render_shaped) {
         ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+
+        // Fallback: if shaped rendering fails with selected style, try NORMAL
+        if (!shaped && style != FONT_STYLE_NORMAL) {
+            style = FONT_STYLE_NORMAL;
+            font_data = data->font->font_data[style];
+            shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+        }
+
+        // Dynamic fallback: try fontconfig-resolved font for the first codepoint
+        if (!shaped && cp_count > 0) {
+            const char *fb_path = fallback_cache_lookup(data, cps[0]);
+            if (fb_path && ensure_fallback_font(data, fb_path)) {
+                style = FONT_STYLE_FALLBACK;
+                font_data = data->font->font_data[style];
+                shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+            }
+        }
+
         if (shaped) {
             for (int gi = 0; gi < shaped->num_glyphs; gi++) {
                 GlyphBitmap *gb = shaped->bitmaps[gi];
@@ -540,6 +657,24 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         uint32_t codepoint = cps[0];
         uint32_t glyph_index = font_get_glyph_index(data->font, style, codepoint);
         RendSdl3AtlasEntry *entry = NULL;
+
+        // Fallback: if glyph not found in selected style, try NORMAL
+        if (glyph_index == 0 && style != FONT_STYLE_NORMAL) {
+            style = FONT_STYLE_NORMAL;
+            font_data = data->font->font_data[style];
+            glyph_index = font_get_glyph_index(data->font, style, codepoint);
+        }
+
+        // Dynamic fallback: if still missing, query fontconfig for a covering font
+        if (glyph_index == 0) {
+            const char *fb_path = fallback_cache_lookup(data, codepoint);
+            if (fb_path && ensure_fallback_font(data, fb_path)) {
+                style = FONT_STYLE_FALLBACK;
+                font_data = data->font->font_data[style];
+                glyph_index = font_get_glyph_index(data->font, style, codepoint);
+            }
+        }
+
         if (glyph_index != 0)
             entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, glyph_index, color_key);
         if (!entry) {

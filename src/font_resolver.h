@@ -1,12 +1,15 @@
 #ifndef FONT_RESOLVER_H
 #define FONT_RESOLVER_H
 
+#include <stdint.h>
+
 // Font resolution types
 typedef enum
 {
-    FONT_TYPE_NORMAL, // Primary text font (monospace/terminal)
-    FONT_TYPE_BOLD,   // Bold monospace font
-    FONT_TYPE_EMOJI   // Color emoji font
+    FONT_TYPE_NORMAL,  // Primary text font (monospace/terminal)
+    FONT_TYPE_BOLD,    // Bold monospace font
+    FONT_TYPE_EMOJI,   // Color emoji font
+    FONT_TYPE_FALLBACK // Dynamic fallback (not used with font_resolver_find_font)
 } FontType;
 
 // Font resolution result
@@ -26,6 +29,9 @@ int font_resolver_find_font(
     const char *family,          // Font family name (NULL for default)
     FontResolutionResult *result // Output resolution result
 );
+
+// Find a font containing a specific codepoint (for dynamic fallback)
+int font_resolver_find_font_for_codepoint(uint32_t codepoint, FontResolutionResult *result);
 
 // Free resolution result
 void font_resolver_free_result(FontResolutionResult *result);

@@ -142,6 +142,9 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
     case FONT_TYPE_EMOJI:
         pattern = "emoji";
         break;
+    case FONT_TYPE_FALLBACK:
+        vlog("FONT_TYPE_FALLBACK should use font_resolver_find_font_for_codepoint()\n");
+        return -1;
     default:
         vlog("Invalid font type requested\n");
         return -1;
@@ -160,6 +163,64 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
     result->family_name = family_name;
     vlog("font_resolver_find_font: resolved type=%d to path='%s' family='%s'\n", type, result->font_path, result->family_name ? result->family_name : "(null)");
     return 0;
+}
+
+int font_resolver_find_font_for_codepoint(uint32_t codepoint, FontResolutionResult *result)
+{
+    if (!result || !fc_config)
+        return -1;
+
+    result->font_path = NULL;
+    result->family_name = NULL;
+    result->size = 0;
+
+    FcCharSet *cs = FcCharSetCreate();
+    if (!cs)
+        return -1;
+    FcCharSetAddChar(cs, codepoint);
+
+    FcPattern *pat = FcPatternCreate();
+    if (!pat) {
+        FcCharSetDestroy(cs);
+        return -1;
+    }
+    FcPatternAddCharSet(pat, FC_CHARSET, cs);
+    FcPatternAddBool(pat, FC_SCALABLE, FcTrue);
+
+    FcConfigSubstitute(fc_config, pat, FcMatchPattern);
+    FcDefaultSubstitute(pat);
+
+    FcResult fc_result;
+    FcPattern *match = FcFontMatch(fc_config, pat, &fc_result);
+    int ret = -1;
+
+    if (match) {
+        FcChar8 *file = NULL;
+        FcChar8 *family = NULL;
+
+        // Verify the matched font actually contains the codepoint
+        FcCharSet *match_cs = NULL;
+        int has_char = 0;
+        if (FcPatternGetCharSet(match, FC_CHARSET, 0, &match_cs) == FcResultMatch && match_cs)
+            has_char = FcCharSetHasChar(match_cs, codepoint);
+
+        if (has_char &&
+            FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch) {
+            result->font_path = strdup((char *)file);
+            if (FcPatternGetString(match, FC_FAMILY, 0, &family) == FcResultMatch)
+                result->family_name = strdup((char *)family);
+            vlog("Fallback font for U+%04X: %s (%s)\n", codepoint,
+                 result->font_path, result->family_name ? result->family_name : "unknown");
+            ret = 0;
+        } else {
+            vlog("No font found containing U+%04X\n", codepoint);
+        }
+        FcPatternDestroy(match);
+    }
+
+    FcPatternDestroy(pat);
+    FcCharSetDestroy(cs);
+    return ret;
 }
 
 void font_resolver_list_monospace()
