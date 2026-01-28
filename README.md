@@ -83,12 +83,6 @@ build/src/bloom-term
 
 # Run with verbose output (useful to debug font/COLR/emoji handling)
 build/src/bloom-term -v
-
-# Process input from a file
-build/src/bloom-term input.txt
-
-# Process input from stdin
-echo -e "\x1b[31mHello World\x1b[0m" | build/src/bloom-term -
 ```
 
 ## Dependencies

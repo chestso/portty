@@ -26,6 +26,10 @@ _build/
 build-aux/
 .cache/
 
+# Clangd/bear artifacts
+compile_commands.json
+.clangd
+
 # Compiled objects and binaries
 *.o
 *.lo

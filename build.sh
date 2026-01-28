@@ -121,7 +121,7 @@ build_project() {
     
     if [ "$use_bear" = true ]; then
         log_info "Generating compile_commands.json with bear..."
-        bear -- make -j"$PARALLEL_JOBS"
+        bear --output ../compile_commands.json -- make -j"$PARALLEL_JOBS"
     else
         log_info "Running make with $PARALLEL_JOBS parallel jobs"
         make -j"$PARALLEL_JOBS"
