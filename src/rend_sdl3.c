@@ -887,7 +887,7 @@ static void sdl3_set_title(RendererBackend *backend, const char *title)
     data->last_title = title ? strdup(title) : NULL;
 
     // Update window title
-    SDL_SetWindowTitle(data->window, title ? title : "bloom-term");
+    SDL_SetWindowTitle(data->window, title ? title : "bloom-terminal");
     vlog("Window title set to: %s\n", title ? title : "(default)");
 }
 

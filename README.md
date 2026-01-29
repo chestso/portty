@@ -1,4 +1,4 @@
-# bloom-term
+# bloom-terminal
 
 A universal terminal emulator with pluggable backends for terminal emulation, rendering, and fonts.
 
@@ -19,7 +19,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz
 
 ## Architecture
 
-bloom-term uses a modular backend abstraction design:
+bloom-terminal uses a modular backend abstraction design:
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: libvterm (`terminal_backend_vt`)
@@ -79,10 +79,10 @@ Available options:
 
 ```bash
 # Run the terminal emulator
-build/src/bloom-term
+build/src/bloom-terminal
 
 # Run with verbose output (useful to debug font/COLR/emoji handling)
-build/src/bloom-term -v
+build/src/bloom-terminal -v
 ```
 
 ## Dependencies

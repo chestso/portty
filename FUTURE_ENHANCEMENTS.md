@@ -1,6 +1,6 @@
-# Future Enhancements - bloom-term
+# Future Enhancements - bloom-terminal
 
-This document outlines potential future enhancements for the bloom-term terminal emulator, building on the FreeType + HarfBuzz + SDL3 architecture.
+This document outlines potential future enhancements for the bloom-terminal terminal emulator, building on the FreeType + HarfBuzz + SDL3 architecture.
 
 ---
 
@@ -341,7 +341,7 @@ bool ft_set_custom_axis(FtFontData *ft_data, uint32_t tag, float value) {
 
 ### Configuration Interface
 
-**User Config File (e.g., `~/.config/bloom-term/fontrc`):**
+**User Config File (e.g., `~/.config/bloom-terminal/fontrc`):**
 
 ```ini
 [font.axes]
@@ -1049,7 +1049,7 @@ This is a fundamental limitation of libvterm's cell-based model. The terminal em
 ### Alternatives to Evaluate
 
 1. **Fork libvterm**: Modify cell storage to support grapheme clusters
-   - Pros: Minimal architectural changes to bloom-term
+   - Pros: Minimal architectural changes to bloom-terminal
    - Cons: Ongoing maintenance burden, may diverge from upstream
 
 2. **notcurses**: Modern terminal library with better Unicode support

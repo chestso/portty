@@ -1,10 +1,10 @@
 # Event Loop Architecture
 
-This document describes bloom-term's unified event loop design, which efficiently handles both PTY (shell I/O) and display (X11/Wayland) events with minimal latency.
+This document describes bloom-terminal's unified event loop design, which efficiently handles both PTY (shell I/O) and display (X11/Wayland) events with minimal latency.
 
 ## Overview
 
-bloom-term uses a single-threaded event loop that must handle two independent event sources:
+bloom-terminal uses a single-threaded event loop that must handle two independent event sources:
 
 1. **PTY file descriptor** - Shell output (stdout/stderr from the child process)
 2. **Display file descriptor** - User input events (keyboard, mouse, window resize)
@@ -188,10 +188,10 @@ Build configuration:
 
 ```bash
 # Test on X11
-SDL_VIDEODRIVER=x11 ./build/src/bloom-term -v
+SDL_VIDEODRIVER=x11 ./build/src/bloom-terminal -v
 
 # Test on Wayland
-SDL_VIDEODRIVER=wayland ./build/src/bloom-term -v
+SDL_VIDEODRIVER=wayland ./build/src/bloom-terminal -v
 ```
 
 Verify low latency:

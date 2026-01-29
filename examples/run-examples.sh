@@ -3,13 +3,13 @@
 # Enable strict error handling
 set -euo pipefail
 
-# bloom-term Test Runner
+# bloom-terminal Test Runner
 # Run all tests or specific test categories
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
-VTERM_BIN="$PROJECT_ROOT/build/src/bloom-term"
+VTERM_BIN="$PROJECT_ROOT/build/src/bloom-terminal"
 VERBOSE="-v"
 
 # Timeout configuration (in seconds)
@@ -31,7 +31,7 @@ is_shell_script() {
 cd "$SCRIPT_DIR"
 
 if [ ! -f "$VTERM_BIN" ]; then
-	echo "Error: bloom-term not found at $VTERM_BIN"
+	echo "Error: bloom-terminal not found at $VTERM_BIN"
 	echo "Checked absolute path: $VTERM_BIN"
 	echo "Please build the project first:"
 	echo "  From project root: ./build.sh -y"
@@ -71,7 +71,7 @@ run_test() {
 		return 1
 	fi
 
-	# Run the test script and pipe its output to bloom-term with timeout
+	# Run the test script and pipe its output to bloom-terminal with timeout
 	echo "DEBUG: Running pipeline: timeout $TIMEOUT \"$test_file\" | timeout $TIMEOUT "$VTERM_BIN" $VERBOSE -e -" >&2
 	if timeout $TIMEOUT "$test_file" | timeout $TIMEOUT "$VTERM_BIN" $VERBOSE -e -; then
 		# Success
@@ -204,7 +204,7 @@ list_tests() {
 show_help() {
 	echo "Usage: ./run-examples.sh [OPTIONS] [TEST_PATH]"
 	echo
-	echo "Run bloom-term tests"
+	echo "Run bloom-terminal tests"
 	echo
 	echo "Options:"
 	echo "  -h, --help     Show this help message"

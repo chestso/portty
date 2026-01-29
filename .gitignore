@@ -39,8 +39,8 @@ compile_commands.json
 *.a
 *.exe
 *.out
-bloom-term
-src/bloom-term
+bloom-terminal
+src/bloom-terminal
 
 # Test binaries
 tests/*.log
