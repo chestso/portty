@@ -90,6 +90,10 @@ struct TerminalBackend
     // Keyboard input via terminal emulator (handles DECCKM, modifiers, etc.)
     void (*send_key)(TerminalBackend *term, int key, int mod);
     void (*send_char)(TerminalBackend *term, uint32_t codepoint, int mod);
+
+    // Bracketed paste support
+    void (*start_paste)(TerminalBackend *term);
+    void (*end_paste)(TerminalBackend *term);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -145,5 +149,9 @@ enum
 
 void terminal_send_key(TerminalBackend *term, int key, int mod);
 void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod);
+
+// Bracketed paste support
+void terminal_start_paste(TerminalBackend *term);
+void terminal_end_paste(TerminalBackend *term);
 
 #endif /* TERM_H */

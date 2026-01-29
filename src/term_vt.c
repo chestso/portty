@@ -687,6 +687,24 @@ static void vt_send_char(TerminalBackend *backend, uint32_t codepoint, int mod)
     vterm_keyboard_unichar(data->vt, codepoint, (VTermModifier)mod);
 }
 
+static void vt_start_paste(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    vterm_keyboard_start_paste(data->vt);
+}
+
+static void vt_end_paste(TerminalBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    vterm_keyboard_end_paste(data->vt);
+}
+
 // Global backend instance
 TerminalBackend terminal_backend_vt = {
     .name = "libvterm",
@@ -712,4 +730,6 @@ TerminalBackend terminal_backend_vt = {
     .set_output_callback = vt_set_output_callback,
     .send_key = vt_send_key,
     .send_char = vt_send_char,
+    .start_paste = vt_start_paste,
+    .end_paste = vt_end_paste,
 };

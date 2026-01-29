@@ -153,3 +153,17 @@ void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod)
         return;
     term->send_char(term, codepoint, mod);
 }
+
+void terminal_start_paste(TerminalBackend *term)
+{
+    if (!term || !term->start_paste)
+        return;
+    term->start_paste(term);
+}
+
+void terminal_end_paste(TerminalBackend *term)
+{
+    if (!term || !term->end_paste)
+        return;
+    term->end_paste(term);
+}
