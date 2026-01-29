@@ -58,6 +58,39 @@ static int sdl_mod_to_term(int mod)
     return m;
 }
 
+// SDL keycode → terminal key mapping
+static const struct
+{
+    int sdl_key;
+    int term_key;
+} key_map[] = {
+    { SDLK_RETURN, TERM_KEY_ENTER },
+    { SDLK_BACKSPACE, TERM_KEY_BACKSPACE },
+    { SDLK_ESCAPE, TERM_KEY_ESCAPE },
+    { SDLK_TAB, TERM_KEY_TAB },
+    { SDLK_UP, TERM_KEY_UP },
+    { SDLK_DOWN, TERM_KEY_DOWN },
+    { SDLK_RIGHT, TERM_KEY_RIGHT },
+    { SDLK_LEFT, TERM_KEY_LEFT },
+    { SDLK_HOME, TERM_KEY_HOME },
+    { SDLK_END, TERM_KEY_END },
+    { SDLK_INSERT, TERM_KEY_INS },
+    { SDLK_DELETE, TERM_KEY_DEL },
+    { SDLK_PAGEUP, TERM_KEY_PAGEUP },
+    { SDLK_PAGEDOWN, TERM_KEY_PAGEDOWN },
+};
+
+// US keyboard shift map for keys that need Shift resolution before passing to libvterm
+static const struct
+{
+    char unshifted;
+    char shifted;
+} shift_map[] = {
+    { '2', '@' },
+    { '6', '^' },
+    { '-', '_' },
+};
+
 // Keyboard callback for event loop
 static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_text,
                                   const char *text)
@@ -75,116 +108,72 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         return result;
     }
 
-    // Ctrl+Q: exit
+    // Application shortcuts (not terminal input)
     if (key == SDLK_Q && (mod & SDL_KMOD_CTRL)) {
         result.request_quit = true;
         return result;
     }
+    if (key == SDLK_V && (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT)) {
+        char *clipboard = SDL_GetClipboardText();
+        if (clipboard && clipboard[0] != '\0') {
+            terminal_start_paste(ctx->term);
+            pty_write(ctx->pty, clipboard, strlen(clipboard));
+            terminal_end_paste(ctx->term);
+        }
+        SDL_free(clipboard);
+        result.handled = true;
+        return result;
+    }
+    if ((key == SDLK_G) && (mod & SDL_KMOD_CTRL)) {
+        if (ctx->rend) {
+            renderer_toggle_debug_grid(ctx->rend);
+            result.force_redraw = true;
+            result.handled = true;
+        }
+        vlog("Ctrl+G pressed, debug grid toggled\n");
+        return result;
+    }
 
-    // Convert SDL key events to terminal input.
-    // Special keys are sent via terminal_send_key() which handles DECCKM
-    // (application cursor mode) and modifier encoding automatically.
     int tmod = sdl_mod_to_term(mod);
 
-    switch (key) {
-    case SDLK_RETURN:
-        terminal_send_key(ctx->term, TERM_KEY_ENTER, tmod);
-        result.handled = true;
-        break;
-    case SDLK_BACKSPACE:
-        terminal_send_key(ctx->term, TERM_KEY_BACKSPACE, tmod);
-        result.handled = true;
-        break;
-    case SDLK_ESCAPE:
-        terminal_send_key(ctx->term, TERM_KEY_ESCAPE, tmod);
-        result.handled = true;
-        break;
-    case SDLK_TAB:
-        terminal_send_key(ctx->term, TERM_KEY_TAB, tmod);
-        result.handled = true;
-        break;
-    case SDLK_UP:
-        terminal_send_key(ctx->term, TERM_KEY_UP, tmod);
-        result.handled = true;
-        break;
-    case SDLK_DOWN:
-        terminal_send_key(ctx->term, TERM_KEY_DOWN, tmod);
-        result.handled = true;
-        break;
-    case SDLK_RIGHT:
-        terminal_send_key(ctx->term, TERM_KEY_RIGHT, tmod);
-        result.handled = true;
-        break;
-    case SDLK_LEFT:
-        terminal_send_key(ctx->term, TERM_KEY_LEFT, tmod);
-        result.handled = true;
-        break;
-    case SDLK_HOME:
-        terminal_send_key(ctx->term, TERM_KEY_HOME, tmod);
-        result.handled = true;
-        break;
-    case SDLK_END:
-        terminal_send_key(ctx->term, TERM_KEY_END, tmod);
-        result.handled = true;
-        break;
-    case SDLK_INSERT:
-        terminal_send_key(ctx->term, TERM_KEY_INS, tmod);
-        result.handled = true;
-        break;
-    case SDLK_DELETE:
-        terminal_send_key(ctx->term, TERM_KEY_DEL, tmod);
-        result.handled = true;
-        break;
-    case SDLK_PAGEUP:
-        if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
-            // Shift+PageUp: scroll back one page (only in normal screen)
+    // Shift+PageUp/Down: scrollback navigation (normal screen only)
+    if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
+        if (key == SDLK_PAGEUP || key == SDLK_PAGEDOWN) {
             int rows, cols;
             terminal_get_dimensions(ctx->term, &rows, &cols);
-            renderer_scroll(ctx->rend, ctx->term, rows);
+            renderer_scroll(ctx->rend, ctx->term, key == SDLK_PAGEUP ? rows : -rows);
             result.force_redraw = true;
             result.handled = true;
-        } else {
-            terminal_send_key(ctx->term, TERM_KEY_PAGEUP, tmod);
-            result.handled = true;
+            return result;
         }
-        break;
-    case SDLK_PAGEDOWN:
-        if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
-            // Shift+PageDown: scroll forward one page (only in normal screen)
-            int rows, cols;
-            terminal_get_dimensions(ctx->term, &rows, &cols);
-            renderer_scroll(ctx->rend, ctx->term, -rows);
-            result.force_redraw = true;
+    }
+
+    // Special keys via lookup table
+    for (int i = 0; i < (int)(sizeof(key_map) / sizeof(key_map[0])); i++) {
+        if (key_map[i].sdl_key == key) {
+            terminal_send_key(ctx->term, key_map[i].term_key, tmod);
             result.handled = true;
-        } else {
-            terminal_send_key(ctx->term, TERM_KEY_PAGEDOWN, tmod);
-            result.handled = true;
+            return result;
         }
-        break;
-    default:
-        // Only handle Ctrl+key combinations here; regular characters come via TEXT_INPUT
-        if (key >= 32 && key < 127 && (mod & SDL_KMOD_CTRL)) {
-            // Check for Ctrl+G specifically (debug grid toggle)
-            if (key == 'g' || key == 'G') {
-                if (ctx->rend) {
-                    renderer_toggle_debug_grid(ctx->rend);
-                    result.force_redraw = true;
-                    result.handled = true;
-                }
-                vlog("Ctrl+G pressed, debug grid toggled\n");
-            } else {
-                // Ctrl+letter: send as control character
-                char ch = (char)key;
-                if (ch >= 'a' && ch <= 'z') {
-                    result.data[0] = (char)(ch - 'a' + 1);
-                    result.len = 1;
-                } else if (ch >= 'A' && ch <= 'Z') {
-                    result.data[0] = (char)(ch - 'A' + 1);
-                    result.len = 1;
+    }
+
+    // Ctrl+key: route through libvterm which handles control-code mapping
+    if (key >= 32 && key < 127 && (mod & SDL_KMOD_CTRL)) {
+        char effective_char = (char)key;
+
+        // For shifted punctuation (e.g. Ctrl+Shift+- = Ctrl+_), SDL gives the
+        // unshifted keycode. Resolve via US-keyboard shift map.
+        if (mod & SDL_KMOD_SHIFT) {
+            for (int i = 0; i < (int)(sizeof(shift_map) / sizeof(shift_map[0])); i++) {
+                if (shift_map[i].unshifted == effective_char) {
+                    effective_char = shift_map[i].shifted;
+                    break;
                 }
             }
         }
-        break;
+
+        terminal_send_char(ctx->term, (uint32_t)effective_char, tmod);
+        result.handled = true;
     }
 
     return result;
