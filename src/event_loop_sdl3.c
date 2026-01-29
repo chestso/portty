@@ -29,8 +29,8 @@ enum BloomEventCode
 // PTY data event payload
 typedef struct
 {
-    char *data;
     size_t len;
+    char data[];
 } PtyDataPayload;
 
 // Backend-specific context
@@ -158,25 +158,19 @@ static int pty_reader_thread_func(void *data)
             ssize_t n = pty_read(ctx->pty, buf, sizeof(buf));
             if (n > 0) {
                 // Allocate payload and copy data
-                PtyDataPayload *payload = malloc(sizeof(PtyDataPayload));
+                PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
                 if (payload) {
-                    payload->data = malloc(n);
-                    if (payload->data) {
-                        memcpy(payload->data, buf, n);
-                        payload->len = n;
+                    payload->len = n;
+                    memcpy(payload->data, buf, n);
 
-                        // Push event to SDL queue
-                        SDL_Event event = { 0 };
-                        event.type = SDL_EVENT_USER;
-                        event.user.code = EVENT_PTY_DATA;
-                        event.user.data1 = payload;
+                    // Push event to SDL queue
+                    SDL_Event event = { 0 };
+                    event.type = SDL_EVENT_USER;
+                    event.user.code = EVENT_PTY_DATA;
+                    event.user.data1 = payload;
 
-                        if (!SDL_PushEvent(&event)) {
-                            vlog("PTY reader thread: failed to push event: %s\n", SDL_GetError());
-                            free(payload->data);
-                            free(payload);
-                        }
-                    } else {
+                    if (!SDL_PushEvent(&event)) {
+                        vlog("PTY reader thread: failed to push event: %s\n", SDL_GetError());
                         free(payload);
                     }
                 }
@@ -367,7 +361,6 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                     PtyDataPayload *payload = (PtyDataPayload *)event.user.data1;
                     if (payload) {
                         terminal_process_input(term, payload->data, payload->len);
-                        free(payload->data);
                         free(payload);
                     }
                     break;
