@@ -630,20 +630,27 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
         if (shaped) {
             for (int gi = 0; gi < shaped->num_glyphs; gi++) {
-                GlyphBitmap *gb = shaped->bitmaps[gi];
-                if (!gb)
+                uint32_t gid = shaped->glyph_ids[gi];
+                if (gid == 0)
                     continue;
-                RendSdl3AtlasEntry *entry = cache_glyph(&data->atlas, font_data,
-                                                        gb->glyph_id, color_key,
-                                                        gb, style, cache_w, cache_h);
+                RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gid, color_key);
+                if (!entry) {
+                    GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid, r, g, b);
+                    if (gb) {
+                        entry = cache_glyph(&data->atlas, font_data, gid, color_key,
+                                            gb, style, cache_w, cache_h);
+                        data->font->free_glyph_bitmap(data->font, gb);
+                    } else {
+                        rend_sdl3_atlas_insert_empty(&data->atlas, font_data, gid, color_key);
+                    }
+                }
                 int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
                 int y_off = entry ? entry->y_offset : 0;
                 blit_glyph(data->renderer, &data->atlas, entry, style,
                            cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
                            is_regional);
-                data->font->free_glyph_bitmap(data->font, gb);
             }
-            free(shaped->bitmaps);
+            free(shaped->glyph_ids);
             free(shaped->x_positions);
             free(shaped->y_positions);
             free(shaped->x_advances);

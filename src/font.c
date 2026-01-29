@@ -153,6 +153,18 @@ uint32_t font_get_glyph_index(FontBackend *font, FontStyle style, uint32_t codep
     return font->get_glyph_index(font, font->font_data[style], codepoint);
 }
 
+// Render a single glyph by its font glyph index
+GlyphBitmap *font_render_glyph_id(FontBackend *font, FontStyle style,
+                                  uint32_t glyph_id,
+                                  uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
+{
+    if (!font || style >= FONT_STYLE_COUNT ||
+        !(font->loaded_styles & (1u << style)) || !font->render_glyph_id) {
+        return NULL;
+    }
+    return font->render_glyph_id(font, font->font_data[style], glyph_id, fg_r, fg_g, fg_b);
+}
+
 // Check if a style is loaded
 bool font_has_style(FontBackend *font, FontStyle style)
 {

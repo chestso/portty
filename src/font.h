@@ -52,7 +52,8 @@ typedef struct FontOptions
 typedef struct ShapedGlyphs
 {
     int num_glyphs;
-    GlyphBitmap **bitmaps; // Array of rasterized glyph bitmaps (owned by caller)
+    uint32_t *glyph_ids;   // Array of font glyph indices (from HarfBuzz shaping)
+    GlyphBitmap **bitmaps; // Array of rasterized glyph bitmaps (owned by caller), may be NULL
     int *x_positions;      // Pixel x positions for each glyph (relative to run origin)
     int *y_positions;      // Pixel y positions for each glyph (relative to run origin)
     int *x_advances;       // Pixel advances for each glyph
@@ -127,6 +128,11 @@ struct FontBackend
     // Check if a loaded style supports COLR (color glyphs)
     bool (*style_has_colr)(FontBackend *font, void *font_data);
 
+    // Render a single glyph by its font glyph index (for atlas cache misses)
+    GlyphBitmap *(*render_glyph_id)(FontBackend *font, void *font_data,
+                                    uint32_t glyph_id,
+                                    uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
+
     // Get glyph index for a codepoint without rasterizing
     uint32_t (*get_glyph_index)(FontBackend *font, void *font_data, uint32_t codepoint);
 };
@@ -156,6 +162,9 @@ bool font_set_variation_axes(FontBackend *font, FontStyle style,
 
 bool font_has_style(FontBackend *font, FontStyle style);
 uint32_t font_get_glyph_index(FontBackend *font, FontStyle style, uint32_t codepoint);
+GlyphBitmap *font_render_glyph_id(FontBackend *font, FontStyle style,
+                                  uint32_t glyph_id,
+                                  uint8_t fg_r, uint8_t fg_g, uint8_t fg_b);
 
 // NEW: Check if a loaded style supports COLR (color glyphs)
 bool font_style_has_colr(FontBackend *font, FontStyle style);

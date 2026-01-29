@@ -5,6 +5,7 @@
 #include <freetype2/freetype/ftcolor.h>
 #include FT_MULTIPLE_MASTERS_H
 #include FT_SFNT_NAMES_H
+#include FT_SYNTHESIS_H
 #include FT_TRUETYPE_TABLES_H
 #include "common.h"
 #include "font.h"
@@ -648,6 +649,29 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
     // Apply font variations based on style
     apply_font_variations(ft_data, style);
 
+    // Detect whether synthetic bold is needed: if we requested bold but the
+    // font isn't actually bold (no variable weight axis was applied, and the
+    // OS/2 weight class is below semi-bold threshold of 600).
+    if (style == FONT_STYLE_BOLD) {
+        bool has_weight_axis = false;
+        if (ft_data->mm_var) {
+            for (FT_UInt i = 0; i < ft_data->mm_var->num_axis; i++) {
+                if (ft_data->mm_var->axis[i].tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
+                    has_weight_axis = true;
+                    break;
+                }
+            }
+        }
+        if (!has_weight_axis) {
+            TT_OS2 *os2 = (TT_OS2 *)FT_Get_Sfnt_Table(ft_data->ft_face, FT_SFNT_OS2);
+            if (os2 && os2->usWeightClass < 600) {
+                ft_data->synthetic_bold = true;
+                vlog("Enabling synthetic bold for %s (weight class %d, no variable weight axis)\n",
+                     font_path, os2->usWeightClass);
+            }
+        }
+    }
+
     vlog("Created FreeType font from %s\n", font_path);
 
     return ft_data;
@@ -757,105 +781,16 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
     uint32_t codepoint = codepoints[0];
     vlog("Rendering glyph U+%04X with direct FreeType (style=%d)\n", codepoint, ft_data->style);
 
-    FT_Face face = ft_data->ft_face;
-
     // Load the glyph index for this codepoint
-    FT_UInt glyph_index = FT_Get_Char_Index(face, codepoint);
+    FT_UInt glyph_index = FT_Get_Char_Index(ft_data->ft_face, codepoint);
     if (glyph_index == 0) {
         vlog("No glyph index found for U+%04X\n", codepoint);
         return NULL;
     }
 
-    // If this is a COLR face, try the COLR paint/layer render path first (rasterize_glyph_index implements this)
-    if (ft_data->has_colr && FT_HAS_COLOR(face)) {
-        GlyphBitmap *colr_gb = rasterize_glyph_index(ft_data, glyph_index, fg_r, fg_g, fg_b);
-        if (colr_gb)
-            return colr_gb;
-        // If COLR render failed, continue to attempt grayscale/outlines below
-        vlog("COLR render path failed for U+%04X, falling back to outline/grayscale rendering\n", codepoint);
-    }
-
-    // Load glyph with hinting flags
-    FT_Int32 load_flags = ft_data->ft_hint_target;
-
-    FT_Error error = FT_Load_Glyph(face, glyph_index, load_flags);
-    if (error) {
-        vlog("Failed to load glyph for U+%04X: error %d\n", codepoint, error);
-        return NULL;
-    }
-
-    // Render the glyph to a bitmap
-    error = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
-    if (error) {
-        vlog("Failed to render glyph for U+%04X: error %d\n", codepoint, error);
-        return NULL;
-    }
-
-    FT_GlyphSlot slot = face->glyph;
-    FT_Bitmap *bitmap = &slot->bitmap;
-
-    if (bitmap->width == 0 || bitmap->rows == 0)
-        return NULL;
-
-    // Allocate glyph bitmap
-    GlyphBitmap *glyph_bitmap = malloc(sizeof(GlyphBitmap));
-    if (!glyph_bitmap) {
-        return NULL;
-    }
-
-    glyph_bitmap->width = bitmap->width;
-    glyph_bitmap->height = bitmap->rows;
-    glyph_bitmap->x_offset = slot->bitmap_left;
-    glyph_bitmap->y_offset = slot->bitmap_top;
-    glyph_bitmap->advance = (int)(slot->advance.x >> 6); // Convert from 26.6 fixed point
-    glyph_bitmap->glyph_id = glyph_index;
-
-    // Allocate RGBA pixels
-    glyph_bitmap->pixels = malloc(glyph_bitmap->width * glyph_bitmap->height * 4);
-    if (!glyph_bitmap->pixels) {
-        free(glyph_bitmap);
-        return NULL;
-    }
-
-    // Convert FreeType bitmap to RGBA
-    if (bitmap->pixel_mode == FT_PIXEL_MODE_GRAY) {
-        // Grayscale bitmap
-        for (int y = 0; y < (int)bitmap->rows; y++) {
-            unsigned char *src_row = bitmap->buffer + y * bitmap->pitch;
-            unsigned char *dst_row = glyph_bitmap->pixels + y * glyph_bitmap->width * 4;
-            for (int x = 0; x < (int)bitmap->width; x++) {
-                unsigned char alpha = src_row[x];
-                dst_row[x * 4 + 0] = fg_r;  // R
-                dst_row[x * 4 + 1] = fg_g;  // G
-                dst_row[x * 4 + 2] = fg_b;  // B
-                dst_row[x * 4 + 3] = alpha; // A
-            }
-        }
-    } else if (bitmap->pixel_mode == FT_PIXEL_MODE_MONO) {
-        // Monochrome bitmap
-        for (int y = 0; y < (int)bitmap->rows; y++) {
-            unsigned char *src_row = bitmap->buffer + y * bitmap->pitch;
-            unsigned char *dst_row = glyph_bitmap->pixels + y * glyph_bitmap->width * 4;
-            for (int x = 0; x < (int)bitmap->width; x++) {
-                unsigned char byte = src_row[x >> 3];
-                unsigned char bit = (byte >> (7 - (x & 7))) & 1;
-                unsigned char alpha = bit ? 255 : 0;
-                dst_row[x * 4 + 0] = fg_r;  // R
-                dst_row[x * 4 + 1] = fg_g;  // G
-                dst_row[x * 4 + 2] = fg_b;  // B
-                dst_row[x * 4 + 3] = alpha; // A
-            }
-        }
-    } else {
-        vlog("Unsupported pixel mode: %d\n", bitmap->pixel_mode);
-        free(glyph_bitmap->pixels);
-        free(glyph_bitmap);
-        return NULL;
-    }
-
-    vlog("Successfully rendered glyph U+%04X with direct FreeType: %dx%d pixels, x_offset=%d, y_offset=%d, advance=%d\n",
-         codepoint, glyph_bitmap->width, glyph_bitmap->height, glyph_bitmap->x_offset, glyph_bitmap->y_offset, glyph_bitmap->advance);
-    return glyph_bitmap;
+    // Delegate to rasterize_glyph_index which handles COLR, grayscale,
+    // and synthetic bold in a single path
+    return rasterize_glyph_index(ft_data, glyph_index, fg_r, fg_g, fg_b);
 }
 
 // Helper: rasterize a glyph by glyph index
@@ -951,6 +886,9 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
     }
 
+    if (ft_data->synthetic_bold)
+        FT_GlyphSlot_Embolden(face->glyph);
+
     // Render glyph to bitmap
     error = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
     if (error) {
@@ -1017,12 +955,28 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     return glyph_bitmap;
 }
 
-// Render a shaped run: shape with HarfBuzz, rasterize each glyph with FreeType
+// Render a single glyph by its font glyph index (for atlas cache misses)
+static GlyphBitmap *ft_render_glyph_by_id(FontBackend *font, void *font_data,
+                                          uint32_t glyph_id,
+                                          uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
+{
+    (void)font;
+    FtFontData *ft_data = (FtFontData *)font_data;
+    if (!ft_data || glyph_id == 0)
+        return NULL;
+    return rasterize_glyph_index(ft_data, (FT_UInt)glyph_id, fg_r, fg_g, fg_b);
+}
+
+// Shape a run with HarfBuzz, returning glyph IDs and positions without rasterizing.
+// The caller is responsible for rendering individual glyphs (e.g. after checking an atlas cache).
 static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
                                       uint32_t *codepoints, int codepoint_count,
                                       uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
 {
     (void)font;
+    (void)fg_r;
+    (void)fg_g;
+    (void)fg_b;
     FtFontData *ft_data = (FtFontData *)font_data;
     if (!ft_data || !ft_data->hb_font || !ft_data->hb_buf || !codepoints || codepoint_count <= 0)
         return NULL;
@@ -1047,7 +1001,8 @@ static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
         return NULL;
 
     run->num_glyphs = (int)glyph_count;
-    run->bitmaps = calloc(glyph_count, sizeof(GlyphBitmap *));
+    run->glyph_ids = calloc(glyph_count, sizeof(uint32_t));
+    run->bitmaps = NULL;
     run->x_positions = calloc(glyph_count, sizeof(int));
     run->y_positions = calloc(glyph_count, sizeof(int));
     run->x_advances = calloc(glyph_count, sizeof(int));
@@ -1055,11 +1010,7 @@ static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
 
     int32_t cursor_x = 0, cursor_y = 0;
     for (unsigned int i = 0; i < glyph_count; i++) {
-        FT_UInt glyph_index = (FT_UInt)glyph_info[i].codepoint; // glyph id
-
-        // Rasterize glyph
-        GlyphBitmap *gb = rasterize_glyph_index(ft_data, glyph_index, fg_r, fg_g, fg_b);
-        run->bitmaps[i] = gb;
+        run->glyph_ids[i] = (uint32_t)glyph_info[i].codepoint;
 
         // Positions/advances are in 26.6 fixed point from HarfBuzz
         int x_pos = (int)((cursor_x + glyph_pos[i].x_offset) >> 6);
@@ -1220,6 +1171,7 @@ FontBackend font_backend_ft = {
     .render_shaped = ft_render_shaped,           // HarfBuzz-shaped multi-codepoint runs
     .set_variation_axis = ft_set_variation_axis, // Variable font control
     .set_variation_axes = ft_set_variation_axes, // Set multiple axes
+    .render_glyph_id = ft_render_glyph_by_id,
     .get_glyph_info = ft_get_glyph_info,
     .free_glyph_bitmap = ft_free_glyph_bitmap,
     .load_font = font_load_font,
