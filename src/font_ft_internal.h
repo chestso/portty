@@ -16,6 +16,7 @@ typedef struct
 {
     FT_Face ft_face;          // FreeType face
     hb_font_t *hb_font;       // HarfBuzz font wrapper
+    hb_buffer_t *hb_buf;      // Reusable HarfBuzz shaping buffer
     float font_size;          // Requested font size in pixels (default 14pt)
     float scale;              // Scale factor for this font size
     unsigned char *font_data; // Raw font file data (if loaded from memory)
@@ -37,6 +38,7 @@ typedef struct
         float max_value;
         float current_value;
     } *axes;
+    FT_Fixed *coords_scratch; // Reusable buffer for variation coordinates
 
     bool has_colr;     // Whether the font has COLR table
     FT_Color *palette; // COLR palette data (if any)

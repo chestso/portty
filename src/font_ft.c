@@ -93,6 +93,16 @@ static void cache_mm_var(FtFontData *ft_data)
         return;
     }
 
+    ft_data->coords_scratch = malloc(mm_var->num_axis * sizeof(FT_Fixed));
+    if (!ft_data->coords_scratch) {
+        free(ft_data->axes);
+        ft_data->axes = NULL;
+        FT_Done_MM_Var(ft_data->ft_face->glyph->library, mm_var);
+        ft_data->mm_var = NULL;
+        ft_data->num_axes = 0;
+        return;
+    }
+
     for (FT_UInt i = 0; i < mm_var->num_axis; i++) {
         ft_data->axes[i].tag = mm_var->axis[i].tag;
         ft_data->axes[i].min_value = (float)mm_var->axis[i].minimum / 65536.0f;
@@ -133,8 +143,8 @@ static void apply_font_variations(FtFontData *ft_data, FontStyle style)
         }
     }
 
-    // Create an array of design coordinates for all axes
-    FT_Fixed *coords = malloc(mm_var->num_axis * sizeof(FT_Fixed));
+    // Use pre-allocated coords buffer
+    FT_Fixed *coords = ft_data->coords_scratch;
     if (!coords) {
         vlog("Failed to allocate memory for font variations\n");
         return;
@@ -177,8 +187,6 @@ static void apply_font_variations(FtFontData *ft_data, FontStyle style)
     } else {
         vlog("Failed to apply FreeType design coordinates: error %d\n", ft_error);
     }
-
-    free(coords);
 }
 
 // Check for COLR table in the font
@@ -249,8 +257,15 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
         int top;
         FT_Color color;
     } LayerBmp;
-    LayerBmp *layers = NULL;
+    enum
+    {
+        COLR_STACK_LAYERS = 32
+    };
+    LayerBmp stack_layers[COLR_STACK_LAYERS];
+    LayerBmp *layers = stack_layers;
     int layer_count = 0;
+    int layer_capacity = COLR_STACK_LAYERS;
+    bool layers_on_heap = false;
 
     while (FT_Get_Color_Glyph_Layer(face, glyph_index, &layer_glyph, &layer_color_index, &iterator)) {
         if (layer_glyph == 0)
@@ -265,10 +280,22 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
         int left = face->glyph->bitmap_left;
         int top = face->glyph->bitmap_top;
 
-        LayerBmp *nl = realloc(layers, sizeof(LayerBmp) * (layer_count + 1));
-        if (!nl)
-            break;
-        layers = nl;
+        if (layer_count >= layer_capacity) {
+            int new_capacity = layer_capacity * 2;
+            LayerBmp *nl;
+            if (layers_on_heap) {
+                nl = realloc(layers, sizeof(LayerBmp) * new_capacity);
+            } else {
+                nl = malloc(sizeof(LayerBmp) * new_capacity);
+                if (nl)
+                    memcpy(nl, stack_layers, sizeof(LayerBmp) * layer_count);
+            }
+            if (!nl)
+                break;
+            layers = nl;
+            layer_capacity = new_capacity;
+            layers_on_heap = true;
+        }
 
         LayerBmp *lb = &layers[layer_count];
         memset(lb, 0, sizeof(LayerBmp));
@@ -297,11 +324,10 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
         layer_count++;
     }
 
-    if (layer_count == 0) {
-        if (layers)
-            free(layers);
-        return NULL;
-    }
+    GlyphBitmap *out = NULL;
+
+    if (layer_count == 0)
+        goto cleanup;
 
     // Compute bounding box
     int min_x = INT_MAX, min_y = INT_MAX, max_x = INT_MIN, max_y = INT_MIN;
@@ -323,20 +349,12 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
 
     int out_w = max_x - min_x;
     int out_h = max_y - min_y;
-    if (out_w <= 0 || out_h <= 0) {
-        for (int i = 0; i < layer_count; i++)
-            free(layers[i].bmp.buffer);
-        free(layers);
-        return NULL;
-    }
+    if (out_w <= 0 || out_h <= 0)
+        goto cleanup;
 
-    GlyphBitmap *out = malloc(sizeof(GlyphBitmap));
-    if (!out) {
-        for (int i = 0; i < layer_count; i++)
-            free(layers[i].bmp.buffer);
-        free(layers);
-        return NULL;
-    }
+    out = malloc(sizeof(GlyphBitmap));
+    if (!out)
+        goto cleanup;
     out->width = out_w;
     out->height = out_h;
     out->x_offset = min_x;
@@ -346,10 +364,8 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
     out->glyph_id = glyph_index;
     if (!out->pixels) {
         free(out);
-        for (int i = 0; i < layer_count; i++)
-            free(layers[i].bmp.buffer);
-        free(layers);
-        return NULL;
+        out = NULL;
+        goto cleanup;
     }
 
     // Composite layers (palette FT_Color is BGRA)
@@ -403,9 +419,11 @@ static GlyphBitmap *render_colr_glyph(FtFontData *ft_data, FT_UInt glyph_index,
         }
     }
 
+cleanup:
     for (int i = 0; i < layer_count; i++)
         free(layers[i].bmp.buffer);
-    free(layers);
+    if (layers_on_heap)
+        free(layers);
 
     return out;
 }
@@ -611,6 +629,12 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
         vlog("Warning: failed to create HarfBuzz font for %s\n", font_path);
     }
 
+    // Create reusable HarfBuzz shaping buffer
+    ft_data->hb_buf = hb_buffer_create();
+    if (!ft_data->hb_buf) {
+        vlog("Warning: failed to create HarfBuzz buffer for %s\n", font_path);
+    }
+
     // Check for COLR table
     ft_data->has_colr = check_colr_table(ft_data->ft_face);
     if (ft_data->has_colr) {
@@ -638,6 +662,11 @@ static void ft_destroy_font(FontBackend *font, void *font_data)
     if (!ft_data)
         return;
 
+    if (ft_data->hb_buf) {
+        hb_buffer_destroy(ft_data->hb_buf);
+        ft_data->hb_buf = NULL;
+    }
+
     if (ft_data->hb_font) {
         hb_font_destroy(ft_data->hb_font);
         ft_data->hb_font = NULL;
@@ -652,6 +681,8 @@ static void ft_destroy_font(FontBackend *font, void *font_data)
         free(ft_data->axes);
         ft_data->axes = NULL;
     }
+    free(ft_data->coords_scratch);
+    ft_data->coords_scratch = NULL;
 
     if (ft_data->ft_face) {
         FT_Done_Face(ft_data->ft_face);
@@ -825,75 +856,6 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
     vlog("Successfully rendered glyph U+%04X with direct FreeType: %dx%d pixels, x_offset=%d, y_offset=%d, advance=%d\n",
          codepoint, glyph_bitmap->width, glyph_bitmap->height, glyph_bitmap->x_offset, glyph_bitmap->y_offset, glyph_bitmap->advance);
     return glyph_bitmap;
-
-    // COLR rendering not yet implemented with FreeType directly; fall back to simple grayscale rendering
-    vlog("COLR glyph rendering requested for U+%04X but COLR support is not implemented; attempting grayscale fallback\n", codepoint);
-    // Try to render a grayscale glyph as a fallback (may lose color information)
-    FT_Error colr_err = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
-    if (colr_err) {
-        vlog("Fallback grayscale render failed for U+%04X: error %d\n", codepoint, colr_err);
-        return NULL;
-    }
-
-    FT_GlyphSlot slot2 = face->glyph;
-    FT_Bitmap *bitmap2 = &slot2->bitmap;
-
-    GlyphBitmap *glyph_bitmap_fallback = malloc(sizeof(GlyphBitmap));
-    if (!glyph_bitmap_fallback) {
-        return NULL;
-    }
-
-    glyph_bitmap_fallback->width = bitmap2->width;
-    glyph_bitmap_fallback->height = bitmap2->rows;
-    glyph_bitmap_fallback->x_offset = slot2->bitmap_left;
-    glyph_bitmap_fallback->y_offset = slot2->bitmap_top;
-    glyph_bitmap_fallback->advance = (int)(slot2->advance.x >> 6);
-
-    if (glyph_bitmap_fallback->width <= 0 || glyph_bitmap_fallback->height <= 0) {
-        glyph_bitmap_fallback->pixels = NULL;
-        return glyph_bitmap_fallback;
-    }
-
-    glyph_bitmap_fallback->pixels = malloc(glyph_bitmap_fallback->width * glyph_bitmap_fallback->height * 4);
-    if (!glyph_bitmap_fallback->pixels) {
-        free(glyph_bitmap_fallback);
-        return NULL;
-    }
-
-    if (bitmap2->pixel_mode == FT_PIXEL_MODE_GRAY) {
-        for (int y = 0; y < (int)bitmap2->rows; y++) {
-            unsigned char *src_row = bitmap2->buffer + y * bitmap2->pitch;
-            unsigned char *dst_row = glyph_bitmap_fallback->pixels + y * glyph_bitmap_fallback->width * 4;
-            for (int x = 0; x < (int)bitmap2->width; x++) {
-                unsigned char alpha = src_row[x];
-                dst_row[x * 4 + 0] = fg_r;
-                dst_row[x * 4 + 1] = fg_g;
-                dst_row[x * 4 + 2] = fg_b;
-                dst_row[x * 4 + 3] = alpha;
-            }
-        }
-    } else if (bitmap2->pixel_mode == FT_PIXEL_MODE_MONO) {
-        for (int y = 0; y < (int)bitmap2->rows; y++) {
-            unsigned char *src_row = bitmap2->buffer + y * bitmap2->pitch;
-            unsigned char *dst_row = glyph_bitmap_fallback->pixels + y * glyph_bitmap_fallback->width * 4;
-            for (int x = 0; x < (int)bitmap2->width; x++) {
-                unsigned char byte = src_row[x >> 3];
-                unsigned char bit = (byte >> (7 - (x & 7))) & 1;
-                unsigned char alpha = bit ? 255 : 0;
-                dst_row[x * 4 + 0] = fg_r;
-                dst_row[x * 4 + 1] = fg_g;
-                dst_row[x * 4 + 2] = fg_b;
-                dst_row[x * 4 + 3] = alpha;
-            }
-        }
-    } else {
-        free(glyph_bitmap_fallback->pixels);
-        free(glyph_bitmap_fallback);
-        return NULL;
-    }
-
-    vlog("Rendered grayscale fallback for COLR glyph U+%04X: %dx%d\n", codepoint, glyph_bitmap_fallback->width, glyph_bitmap_fallback->height);
-    return glyph_bitmap_fallback;
 }
 
 // Helper: rasterize a glyph by glyph index
@@ -1062,12 +1024,11 @@ static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
 {
     (void)font;
     FtFontData *ft_data = (FtFontData *)font_data;
-    if (!ft_data || !ft_data->hb_font || !codepoints || codepoint_count <= 0)
+    if (!ft_data || !ft_data->hb_font || !ft_data->hb_buf || !codepoints || codepoint_count <= 0)
         return NULL;
 
-    hb_buffer_t *buf = hb_buffer_create();
-    if (!buf)
-        return NULL;
+    hb_buffer_t *buf = ft_data->hb_buf;
+    hb_buffer_clear_contents(buf);
 
     hb_buffer_add_utf32(buf, codepoints, codepoint_count, 0, codepoint_count);
     hb_buffer_guess_segment_properties(buf);
@@ -1078,16 +1039,12 @@ static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
     hb_glyph_info_t *glyph_info = hb_buffer_get_glyph_infos(buf, &glyph_count);
     hb_glyph_position_t *glyph_pos = hb_buffer_get_glyph_positions(buf, &glyph_count);
 
-    if (!glyph_info || glyph_count == 0) {
-        hb_buffer_destroy(buf);
+    if (!glyph_info || glyph_count == 0)
         return NULL;
-    }
 
     ShapedGlyphs *run = calloc(1, sizeof(ShapedGlyphs));
-    if (!run) {
-        hb_buffer_destroy(buf);
+    if (!run)
         return NULL;
-    }
 
     run->num_glyphs = (int)glyph_count;
     run->bitmaps = calloc(glyph_count, sizeof(GlyphBitmap *));
@@ -1119,7 +1076,6 @@ static ShapedGlyphs *ft_render_shaped(FontBackend *font, void *font_data,
         cursor_y += glyph_pos[i].y_advance;
     }
 
-    hb_buffer_destroy(buf);
     return run;
 }
 
@@ -1136,7 +1092,7 @@ static bool ft_set_variation_axis(FontBackend *font, void *font_data, const char
         return false;
 
     FT_MM_Var *mm_var = ft_data->mm_var;
-    FT_Fixed *coords = malloc(mm_var->num_axis * sizeof(FT_Fixed));
+    FT_Fixed *coords = ft_data->coords_scratch;
     if (!coords)
         return false;
 
@@ -1155,7 +1111,6 @@ static bool ft_set_variation_axis(FontBackend *font, void *font_data, const char
     }
 
     FT_Error err = FT_Set_Var_Design_Coordinates(ft_data->ft_face, mm_var->num_axis, coords);
-    free(coords);
 
     if (err == 0) {
         if (ft_data->hb_font)
@@ -1179,7 +1134,7 @@ static bool ft_set_variation_axes(FontBackend *font, void *font_data, float *coo
 
     FT_MM_Var *mm_var = ft_data->mm_var;
     int axes = mm_var->num_axis;
-    FT_Fixed *coords = malloc(axes * sizeof(FT_Fixed));
+    FT_Fixed *coords = ft_data->coords_scratch;
     if (!coords)
         return false;
 
@@ -1192,7 +1147,6 @@ static bool ft_set_variation_axes(FontBackend *font, void *font_data, float *coo
     }
 
     FT_Error err = FT_Set_Var_Design_Coordinates(ft_data->ft_face, axes, coords);
-    free(coords);
 
     if (err == 0) {
         if (ft_data->hb_font)
