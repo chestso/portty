@@ -45,6 +45,34 @@ typedef struct
     PtyContext *pty;
 } MainContext;
 
+// Compute xterm-style modifier parameter from SDL modifier flags.
+// Returns 0 if no modifiers are held, otherwise 1 + (shift*1 + alt*2 + ctrl*4).
+static int xterm_mod_param(int mod)
+{
+    int p = 0;
+    if (mod & SDL_KMOD_SHIFT)
+        p |= 1;
+    if (mod & SDL_KMOD_ALT)
+        p |= 2;
+    if (mod & SDL_KMOD_CTRL)
+        p |= 4;
+    return p ? 1 + p : 0;
+}
+
+// Format a CSI sequence with optional modifier parameter.
+// For keys like arrows/Home/End that use \x1b[X format:
+//   unmodified: \x1b[X        modified: \x1b[1;{mod}X
+// For keys like Insert/Delete/PageUp/PageDown that use \x1b[N~ format:
+//   unmodified: \x1b[N~       modified: \x1b[N;{mod}~
+static int format_csi_key(char *buf, int modparam, const char *base_num, char suffix)
+{
+    if (modparam) {
+        return sprintf(buf, "\x1b[%s;%d%c", base_num, modparam, suffix);
+    } else {
+        return sprintf(buf, "\x1b[%s%c", base_num, suffix);
+    }
+}
+
 // Keyboard callback for event loop
 static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_text,
                                   const char *text)
@@ -87,36 +115,28 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         result.len = 1;
         break;
     case SDLK_UP:
-        strcpy(result.data, "\x1b[A");
-        result.len = 3;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'A');
         break;
     case SDLK_DOWN:
-        strcpy(result.data, "\x1b[B");
-        result.len = 3;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'B');
         break;
     case SDLK_RIGHT:
-        strcpy(result.data, "\x1b[C");
-        result.len = 3;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'C');
         break;
     case SDLK_LEFT:
-        strcpy(result.data, "\x1b[D");
-        result.len = 3;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'D');
         break;
     case SDLK_HOME:
-        strcpy(result.data, "\x1b[H");
-        result.len = 3;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'H');
         break;
     case SDLK_END:
-        strcpy(result.data, "\x1b[F");
-        result.len = 3;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'F');
         break;
     case SDLK_INSERT:
-        strcpy(result.data, "\x1b[2~");
-        result.len = 4;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "2", '~');
         break;
     case SDLK_DELETE:
-        strcpy(result.data, "\x1b[3~");
-        result.len = 4;
+        result.len = format_csi_key(result.data, xterm_mod_param(mod), "3", '~');
         break;
     case SDLK_PAGEUP:
         if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
@@ -127,8 +147,7 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
             result.force_redraw = true;
             result.handled = true;
         } else {
-            strcpy(result.data, "\x1b[5~");
-            result.len = 4;
+            result.len = format_csi_key(result.data, xterm_mod_param(mod), "5", '~');
         }
         break;
     case SDLK_PAGEDOWN:
@@ -140,8 +159,7 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
             result.force_redraw = true;
             result.handled = true;
         } else {
-            strcpy(result.data, "\x1b[6~");
-            result.len = 4;
+            result.len = format_csi_key(result.data, xterm_mod_param(mod), "6", '~');
         }
         break;
     default:
