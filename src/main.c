@@ -68,8 +68,12 @@ static int format_csi_key(char *buf, int modparam, const char *base_num, char su
 {
     if (modparam) {
         return sprintf(buf, "\x1b[%s;%d%c", base_num, modparam, suffix);
-    } else {
+    } else if (suffix == '~') {
+        // Tilde-style keys always include the number: \x1b[N~
         return sprintf(buf, "\x1b[%s%c", base_num, suffix);
+    } else {
+        // Letter-suffix keys omit the number when unmodified: \x1b[A not \x1b[1A
+        return sprintf(buf, "\x1b[%c", suffix);
     }
 }
 
