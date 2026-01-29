@@ -45,36 +45,17 @@ typedef struct
     PtyContext *pty;
 } MainContext;
 
-// Compute xterm-style modifier parameter from SDL modifier flags.
-// Returns 0 if no modifiers are held, otherwise 1 + (shift*1 + alt*2 + ctrl*4).
-static int xterm_mod_param(int mod)
+// Convert SDL modifier flags to TERM_MOD_* flags
+static int sdl_mod_to_term(int mod)
 {
-    int p = 0;
+    int m = TERM_MOD_NONE;
     if (mod & SDL_KMOD_SHIFT)
-        p |= 1;
+        m |= TERM_MOD_SHIFT;
     if (mod & SDL_KMOD_ALT)
-        p |= 2;
+        m |= TERM_MOD_ALT;
     if (mod & SDL_KMOD_CTRL)
-        p |= 4;
-    return p ? 1 + p : 0;
-}
-
-// Format a CSI sequence with optional modifier parameter.
-// For keys like arrows/Home/End that use \x1b[X format:
-//   unmodified: \x1b[X        modified: \x1b[1;{mod}X
-// For keys like Insert/Delete/PageUp/PageDown that use \x1b[N~ format:
-//   unmodified: \x1b[N~       modified: \x1b[N;{mod}~
-static int format_csi_key(char *buf, int modparam, const char *base_num, char suffix)
-{
-    if (modparam) {
-        return sprintf(buf, "\x1b[%s;%d%c", base_num, modparam, suffix);
-    } else if (suffix == '~') {
-        // Tilde-style keys always include the number: \x1b[N~
-        return sprintf(buf, "\x1b[%s%c", base_num, suffix);
-    } else {
-        // Letter-suffix keys omit the number when unmodified: \x1b[A not \x1b[1A
-        return sprintf(buf, "\x1b[%c", suffix);
-    }
+        m |= TERM_MOD_CTRL;
+    return m;
 }
 
 // Keyboard callback for event loop
@@ -100,47 +81,59 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         return result;
     }
 
-    // Convert SDL key events to terminal input
+    // Convert SDL key events to terminal input.
+    // Special keys are sent via terminal_send_key() which handles DECCKM
+    // (application cursor mode) and modifier encoding automatically.
+    int tmod = sdl_mod_to_term(mod);
+
     switch (key) {
     case SDLK_RETURN:
-        result.data[0] = '\r';
-        result.len = 1;
+        terminal_send_key(ctx->term, TERM_KEY_ENTER, tmod);
+        result.handled = true;
         break;
     case SDLK_BACKSPACE:
-        result.data[0] = '\x7f'; // DEL character
-        result.len = 1;
+        terminal_send_key(ctx->term, TERM_KEY_BACKSPACE, tmod);
+        result.handled = true;
         break;
     case SDLK_ESCAPE:
-        result.data[0] = '\x1b'; // ESC character
-        result.len = 1;
+        terminal_send_key(ctx->term, TERM_KEY_ESCAPE, tmod);
+        result.handled = true;
         break;
     case SDLK_TAB:
-        result.data[0] = '\t';
-        result.len = 1;
+        terminal_send_key(ctx->term, TERM_KEY_TAB, tmod);
+        result.handled = true;
         break;
     case SDLK_UP:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'A');
+        terminal_send_key(ctx->term, TERM_KEY_UP, tmod);
+        result.handled = true;
         break;
     case SDLK_DOWN:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'B');
+        terminal_send_key(ctx->term, TERM_KEY_DOWN, tmod);
+        result.handled = true;
         break;
     case SDLK_RIGHT:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'C');
+        terminal_send_key(ctx->term, TERM_KEY_RIGHT, tmod);
+        result.handled = true;
         break;
     case SDLK_LEFT:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'D');
+        terminal_send_key(ctx->term, TERM_KEY_LEFT, tmod);
+        result.handled = true;
         break;
     case SDLK_HOME:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'H');
+        terminal_send_key(ctx->term, TERM_KEY_HOME, tmod);
+        result.handled = true;
         break;
     case SDLK_END:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "1", 'F');
+        terminal_send_key(ctx->term, TERM_KEY_END, tmod);
+        result.handled = true;
         break;
     case SDLK_INSERT:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "2", '~');
+        terminal_send_key(ctx->term, TERM_KEY_INS, tmod);
+        result.handled = true;
         break;
     case SDLK_DELETE:
-        result.len = format_csi_key(result.data, xterm_mod_param(mod), "3", '~');
+        terminal_send_key(ctx->term, TERM_KEY_DEL, tmod);
+        result.handled = true;
         break;
     case SDLK_PAGEUP:
         if ((mod & SDL_KMOD_SHIFT) && !terminal_is_altscreen(ctx->term)) {
@@ -151,7 +144,8 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
             result.force_redraw = true;
             result.handled = true;
         } else {
-            result.len = format_csi_key(result.data, xterm_mod_param(mod), "5", '~');
+            terminal_send_key(ctx->term, TERM_KEY_PAGEUP, tmod);
+            result.handled = true;
         }
         break;
     case SDLK_PAGEDOWN:
@@ -163,7 +157,8 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
             result.force_redraw = true;
             result.handled = true;
         } else {
-            result.len = format_csi_key(result.data, xterm_mod_param(mod), "6", '~');
+            terminal_send_key(ctx->term, TERM_KEY_PAGEDOWN, tmod);
+            result.handled = true;
         }
         break;
     default:

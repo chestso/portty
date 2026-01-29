@@ -86,6 +86,10 @@ struct TerminalBackend
     void (*send_mouse_event)(TerminalBackend *term, int row, int col, int button, bool pressed,
                              int mod);
     void (*set_output_callback)(TerminalBackend *term, TerminalOutputCallback cb, void *user);
+
+    // Keyboard input via terminal emulator (handles DECCKM, modifiers, etc.)
+    void (*send_key)(TerminalBackend *term, int key, int mod);
+    void (*send_char)(TerminalBackend *term, uint32_t codepoint, int mod);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -111,5 +115,35 @@ int terminal_get_mouse_mode(TerminalBackend *term);
 void terminal_send_mouse_event(TerminalBackend *term, int row, int col, int button, bool pressed,
                                int mod);
 void terminal_set_output_callback(TerminalBackend *term, TerminalOutputCallback cb, void *user);
+
+// Keyboard input via terminal emulator (handles DECCKM, modifiers, etc.)
+// Modifier flags (match VTermModifier values)
+#define TERM_MOD_NONE  0x00
+#define TERM_MOD_SHIFT 0x01
+#define TERM_MOD_ALT   0x02
+#define TERM_MOD_CTRL  0x04
+
+// Key codes for special keys (match VTermKey values)
+enum
+{
+    TERM_KEY_NONE = 0,
+    TERM_KEY_ENTER,
+    TERM_KEY_TAB,
+    TERM_KEY_BACKSPACE,
+    TERM_KEY_ESCAPE,
+    TERM_KEY_UP,
+    TERM_KEY_DOWN,
+    TERM_KEY_LEFT,
+    TERM_KEY_RIGHT,
+    TERM_KEY_INS,
+    TERM_KEY_DEL,
+    TERM_KEY_HOME,
+    TERM_KEY_END,
+    TERM_KEY_PAGEUP,
+    TERM_KEY_PAGEDOWN,
+};
+
+void terminal_send_key(TerminalBackend *term, int key, int mod);
+void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod);
 
 #endif /* TERM_H */

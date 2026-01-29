@@ -627,6 +627,66 @@ static void vt_set_output_callback(TerminalBackend *backend, TerminalOutputCallb
     data->output_cb_user = user;
 }
 
+// Map TERM_KEY_* to VTermKey
+static VTermKey term_key_to_vterm(int key)
+{
+    switch (key) {
+    case TERM_KEY_ENTER:
+        return VTERM_KEY_ENTER;
+    case TERM_KEY_TAB:
+        return VTERM_KEY_TAB;
+    case TERM_KEY_BACKSPACE:
+        return VTERM_KEY_BACKSPACE;
+    case TERM_KEY_ESCAPE:
+        return VTERM_KEY_ESCAPE;
+    case TERM_KEY_UP:
+        return VTERM_KEY_UP;
+    case TERM_KEY_DOWN:
+        return VTERM_KEY_DOWN;
+    case TERM_KEY_LEFT:
+        return VTERM_KEY_LEFT;
+    case TERM_KEY_RIGHT:
+        return VTERM_KEY_RIGHT;
+    case TERM_KEY_INS:
+        return VTERM_KEY_INS;
+    case TERM_KEY_DEL:
+        return VTERM_KEY_DEL;
+    case TERM_KEY_HOME:
+        return VTERM_KEY_HOME;
+    case TERM_KEY_END:
+        return VTERM_KEY_END;
+    case TERM_KEY_PAGEUP:
+        return VTERM_KEY_PAGEUP;
+    case TERM_KEY_PAGEDOWN:
+        return VTERM_KEY_PAGEDOWN;
+    default:
+        return VTERM_KEY_NONE;
+    }
+}
+
+static void vt_send_key(TerminalBackend *backend, int key, int mod)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    VTermKey vk = term_key_to_vterm(key);
+    if (vk == VTERM_KEY_NONE)
+        return;
+
+    // TERM_MOD_* values match VTermModifier values by design
+    vterm_keyboard_key(data->vt, vk, (VTermModifier)mod);
+}
+
+static void vt_send_char(TerminalBackend *backend, uint32_t codepoint, int mod)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    vterm_keyboard_unichar(data->vt, codepoint, (VTermModifier)mod);
+}
+
 // Global backend instance
 TerminalBackend terminal_backend_vt = {
     .name = "libvterm",
@@ -650,4 +710,6 @@ TerminalBackend terminal_backend_vt = {
     .get_mouse_mode = vt_get_mouse_mode,
     .send_mouse_event = vt_send_mouse_event,
     .set_output_callback = vt_set_output_callback,
+    .send_key = vt_send_key,
+    .send_char = vt_send_char,
 };

@@ -408,7 +408,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                         SDL_SetAtomicInt(&ctx->quit_requested, 1);
                     } else if (result.force_redraw) {
                         ctx->force_redraw = 1;
-                    } else if (result.len > 0 && !result.handled) {
+                    } else if (result.handled || (result.len > 0)) {
                         // Reset scroll position when typing
                         if (renderer_get_scroll_offset(rend) != 0) {
                             renderer_reset_scroll(rend);
@@ -420,9 +420,14 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                         timer_reset(ctx->timers, ctx->cursor_blink_timer);
                         ctx->force_redraw = 1;
 
-                        ssize_t written = pty_write(ctx->pty, result.data, result.len);
-                        if (written < 0) {
-                            vlog("PTY write failed: %s\n", strerror(errno));
+                        // Write to PTY if callback provided raw data (not already sent
+                        // via terminal backend)
+                        if (result.len > 0 && !result.handled) {
+                            ssize_t written =
+                                pty_write(ctx->pty, result.data, result.len);
+                            if (written < 0) {
+                                vlog("PTY write failed: %s\n", strerror(errno));
+                            }
                         }
                     }
                 }

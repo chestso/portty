@@ -139,3 +139,17 @@ void terminal_set_output_callback(TerminalBackend *term, TerminalOutputCallback 
         return;
     term->set_output_callback(term, cb, user);
 }
+
+void terminal_send_key(TerminalBackend *term, int key, int mod)
+{
+    if (!term || !term->send_key)
+        return;
+    term->send_key(term, key, mod);
+}
+
+void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod)
+{
+    if (!term || !term->send_char)
+        return;
+    term->send_char(term, codepoint, mod);
+}
