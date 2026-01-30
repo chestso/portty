@@ -14,14 +14,21 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define EMOJI_FONT_SCALE    4.0f
-#define FALLBACK_CACHE_SIZE 64
+#define EMOJI_FONT_SCALE     4.0f
+#define FALLBACK_CACHE_SIZE  64
+#define MAX_LOADED_FALLBACKS 8
 
 typedef struct
 {
     uint32_t codepoint;
     char *font_path; // NULL = no font found for this codepoint
 } FallbackCacheEntry;
+
+typedef struct
+{
+    char *font_path;
+    void *font_data; // FtFontData*, kept alive for pointer stability
+} LoadedFallbackFont;
 
 // Cursor color: muted purple with slight transparency (RGBA)
 #define CURSOR_COLOR_R 138
@@ -185,9 +192,13 @@ typedef struct RendererSdl3Data
     // Dynamic font fallback cache
     FallbackCacheEntry fallback_cache[FALLBACK_CACHE_SIZE];
     int fallback_cache_count;
-    char *fallback_loaded_path; // path of currently loaded fallback font
-    float font_size;            // saved for loading fallback at same size
-    FontOptions font_options;   // saved for loading fallback with same options
+    float font_size;          // saved for loading fallback at same size
+    FontOptions font_options; // saved for loading fallback with same options
+
+    // Loaded fallback font cache — keeps multiple fallback fonts alive
+    // so their font_data pointers remain stable for atlas cache keys
+    LoadedFallbackFont loaded_fallbacks[MAX_LOADED_FALLBACKS];
+    int loaded_fallback_count;
 } RendererSdl3Data;
 
 static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
@@ -215,10 +226,11 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->scroll_offset = 0;
     data->last_title = NULL;
     data->fallback_cache_count = 0;
-    data->fallback_loaded_path = NULL;
     data->font_size = 0;
     memset(&data->font_options, 0, sizeof(data->font_options));
     memset(data->fallback_cache, 0, sizeof(data->fallback_cache));
+    data->loaded_fallback_count = 0;
+    memset(data->loaded_fallbacks, 0, sizeof(data->loaded_fallbacks));
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -252,6 +264,20 @@ static void sdl3_destroy(RendererBackend *backend)
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
 
+    // Destroy all cached loaded fallback fonts
+    for (int i = 0; i < data->loaded_fallback_count; i++) {
+        if (data->loaded_fallbacks[i].font_data) {
+            data->font->destroy_font(data->font, data->loaded_fallbacks[i].font_data);
+        }
+        free(data->loaded_fallbacks[i].font_path);
+    }
+    data->loaded_fallback_count = 0;
+
+    // Clear the fallback slot pointer so font_destroy() doesn't double-free it
+    // (the actual font_data was already destroyed above from the cache)
+    data->font->font_data[FONT_STYLE_FALLBACK] = NULL;
+    data->font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
+
     if (data->font) {
         font_destroy(data->font);
     }
@@ -260,7 +286,6 @@ static void sdl3_destroy(RendererBackend *backend)
     for (int i = 0; i < data->fallback_cache_count; i++) {
         free(data->fallback_cache[i].font_path);
     }
-    free(data->fallback_loaded_path);
 
     // Cleanup font resolver (deferred from sdl3_load_fonts)
     font_resolver_cleanup();
@@ -506,39 +531,75 @@ static const char *fallback_cache_lookup(RendererSdl3Data *data, uint32_t codepo
 }
 
 // Ensure the FONT_STYLE_FALLBACK slot is loaded with the font at the given path.
-// Returns true if the fallback font is ready to use.
+// Uses a cache of loaded fallback fonts to keep pointers stable (important for
+// atlas cache keys). Never destroys/reloads a font that's already cached.
 static bool ensure_fallback_font(RendererSdl3Data *data, const char *font_path)
 {
     if (!font_path)
         return false;
 
-    // Already loaded with the same font?
-    if (data->fallback_loaded_path && strcmp(data->fallback_loaded_path, font_path) == 0)
-        return font_has_style(data->font, FONT_STYLE_FALLBACK);
-
-    // Need to (re)load — destroy existing if any
-    if (font_has_style(data->font, FONT_STYLE_FALLBACK)) {
-        if (data->font->font_data[FONT_STYLE_FALLBACK]) {
-            data->font->destroy_font(data->font, data->font->font_data[FONT_STYLE_FALLBACK]);
-            data->font->font_data[FONT_STYLE_FALLBACK] = NULL;
-            data->font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
+    // Search the loaded fallback cache for a match
+    for (int i = 0; i < data->loaded_fallback_count; i++) {
+        if (strcmp(data->loaded_fallbacks[i].font_path, font_path) == 0) {
+            // Found — swap into the fallback slot without destroying anything
+            data->font->font_data[FONT_STYLE_FALLBACK] = data->loaded_fallbacks[i].font_data;
+            data->font->loaded_styles |= (1u << FONT_STYLE_FALLBACK);
+            return true;
         }
     }
 
-    free(data->fallback_loaded_path);
-    data->fallback_loaded_path = strdup(font_path);
+    // Not cached — need to load. Evict oldest entry if cache is full.
+    if (data->loaded_fallback_count >= MAX_LOADED_FALLBACKS) {
+        LoadedFallbackFont *victim = &data->loaded_fallbacks[0];
+        vlog("Fallback cache full, evicting: %s\n", victim->font_path);
+        // If the evicted font is currently in the fallback slot, clear it
+        if (data->font->font_data[FONT_STYLE_FALLBACK] == victim->font_data) {
+            data->font->font_data[FONT_STYLE_FALLBACK] = NULL;
+            data->font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
+        }
+        data->font->destroy_font(data->font, victim->font_data);
+        free(victim->font_path);
+        memmove(&data->loaded_fallbacks[0], &data->loaded_fallbacks[1],
+                (MAX_LOADED_FALLBACKS - 1) * sizeof(LoadedFallbackFont));
+        data->loaded_fallback_count--;
+    }
 
-    bool ok = font_load_font(data->font, FONT_STYLE_FALLBACK, font_path,
-                             data->font_size, &data->font_options);
-    if (ok)
-        vlog("Fallback font loaded: %s\n", font_path);
-    else
+    // Load directly via init_font (bypass font_load_font which auto-destroys
+    // whatever is in the slot — we manage the slot ourselves)
+    void *new_font_data = data->font->init_font(data->font, font_path,
+                                                data->font_size, FONT_STYLE_FALLBACK,
+                                                &data->font_options);
+    if (!new_font_data) {
         vlog("Failed to load fallback font: %s\n", font_path);
-    return ok;
+        return false;
+    }
+
+    // Get metrics for the new font
+    if (!data->font->get_metrics(data->font, new_font_data,
+                                 &data->font->metrics[FONT_STYLE_FALLBACK])) {
+        data->font->destroy_font(data->font, new_font_data);
+        vlog("Failed to get metrics for fallback font: %s\n", font_path);
+        return false;
+    }
+
+    // Store in cache
+    LoadedFallbackFont *entry = &data->loaded_fallbacks[data->loaded_fallback_count];
+    entry->font_path = strdup(font_path);
+    entry->font_data = new_font_data;
+    data->loaded_fallback_count++;
+
+    // Set the fallback slot
+    data->font->font_data[FONT_STYLE_FALLBACK] = new_font_data;
+    data->font->loaded_styles |= (1u << FONT_STYLE_FALLBACK);
+
+    vlog("Fallback font loaded and cached (%d/%d): %s\n",
+         data->loaded_fallback_count, MAX_LOADED_FALLBACKS, font_path);
+    return true;
 }
 
 static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
-                       int row, int col, TerminalPos cursor_pos, bool show_cursor)
+                       int row, int col, TerminalPos cursor_pos, bool show_cursor,
+                       bool populate_only)
 {
     TerminalCell cell;
     if (get_cell_with_scroll(data, term, row, col, &cell) < 0)
@@ -546,7 +607,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     // Draw background if non-default
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
-    if (!cell.bg.is_default) {
+    if (!populate_only && !cell.bg.is_default) {
         SDL_FRect bg_rect = {
             (float)(col * data->cell_width),
             (float)(row * data->cell_height),
@@ -644,11 +705,13 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                         rend_sdl3_atlas_insert_empty(&data->atlas, font_data, gid, color_key);
                     }
                 }
-                int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
-                int y_off = entry ? entry->y_offset : 0;
-                blit_glyph(data->renderer, &data->atlas, entry, style,
-                           cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
-                           is_regional);
+                if (!populate_only) {
+                    int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
+                    int y_off = entry ? entry->y_offset : 0;
+                    blit_glyph(data->renderer, &data->atlas, entry, style,
+                               cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
+                               is_regional);
+                }
             }
             free(shaped->glyph_ids);
             free(shaped->x_positions);
@@ -695,13 +758,14 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, glyph_index, color_key);
             }
         }
-        blit_glyph(data->renderer, &data->atlas, entry, style,
-                   cell_x, cell_y, entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
-                   avail_w, avail_h, data->font_ascent, is_regional);
+        if (!populate_only)
+            blit_glyph(data->renderer, &data->atlas, entry, style,
+                       cell_x, cell_y, entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
+                       avail_w, avail_h, data->font_ascent, is_regional);
     }
 
 render_cursor:
-    if (show_cursor && row == cursor_pos.row && col == cursor_pos.col) {
+    if (!populate_only && show_cursor && row == cursor_pos.row && col == cursor_pos.col) {
         float cx = (float)(col * data->cell_width);
         float cy = (float)(row * data->cell_height);
         float cw = (float)data->cell_width;
@@ -719,7 +783,7 @@ render_cursor:
 
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
-                                 bool cursor_visible)
+                                 bool cursor_visible, bool populate_only)
 {
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
     // Hide cursor when scrolled back, when terminal says it's not visible, or when cursor_visible is false
@@ -727,7 +791,7 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
 
     for (int row = 0; row < display_rows; row++) {
         for (int col = 0; col < display_cols;) {
-            col += render_cell(data, term, row, col, cursor_pos, show_cursor);
+            col += render_cell(data, term, row, col, cursor_pos, show_cursor, populate_only);
         }
     }
 }
@@ -756,10 +820,21 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     if (display_cols > term_cols)
         display_cols = term_cols;
 
-    // Clear screen and render all visible cells
+    // Two-phase render: populate atlas first (no draw calls), then flush
+    // staging buffers to GPU while the render queue is empty, then draw.
+    // This avoids the implicit render queue flush inside SDL_UpdateTexture
+    // interfering with in-flight draw commands.
+
+    // Phase 1: Populate atlas (insert missing glyphs, no draws)
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, true);
+
+    // Phase 2: Flush staging buffers to GPU (render queue is empty)
+    rend_sdl3_atlas_flush(&data->atlas);
+
+    // Phase 3: Draw (all glyphs cached, texture data is current)
     SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
     SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, display_rows, display_cols, cursor_visible);
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
 
     // Debug grid overlay
     if (data->debug_grid) {

@@ -1,5 +1,6 @@
 #include "rend_sdl3_atlas.h"
 #include "common.h"
+#include <stdlib.h>
 #include <string.h>
 
 // FNV-1a hash combining font_data pointer, glyph_id, and color
@@ -25,25 +26,32 @@ static uint32_t atlas_hash(void *font_data, int glyph_id, uint32_t color)
 
 static void atlas_page_clear(RendSdl3AtlasPage *page, int page_index)
 {
-    void *pixels;
-    int pitch;
-    if (SDL_LockTexture(page->texture, NULL, &pixels, &pitch)) {
-        for (int y = 0; y < REND_SDL3_ATLAS_TEXTURE_SIZE; y++) {
-            memset((uint8_t *)pixels + y * pitch, 0, REND_SDL3_ATLAS_TEXTURE_SIZE * 4);
-        }
-        SDL_UnlockTexture(page->texture);
-        vlog("Atlas[%d]: page cleared (had %d shelves)\n", page_index, page->num_shelves);
-    }
+    memset(page->staging, 0,
+           (size_t)REND_SDL3_ATLAS_TEXTURE_SIZE * REND_SDL3_ATLAS_TEXTURE_SIZE * 4);
+    page->dirty = true;
+    page->dirty_rect = (SDL_Rect){ 0, 0, REND_SDL3_ATLAS_TEXTURE_SIZE,
+                                   REND_SDL3_ATLAS_TEXTURE_SIZE };
+    vlog("Atlas[%d]: page cleared (had %d shelves)\n", page_index, page->num_shelves);
 }
 
 static bool atlas_page_init(RendSdl3AtlasPage *page, SDL_Renderer *renderer, int page_index)
 {
+    page->staging = calloc((size_t)REND_SDL3_ATLAS_TEXTURE_SIZE * REND_SDL3_ATLAS_TEXTURE_SIZE, 4);
+    if (!page->staging) {
+        vlog("Atlas[%d]: failed to allocate staging buffer\n", page_index);
+        return false;
+    }
+    page->dirty = false;
+    page->dirty_rect = (SDL_Rect){ 0, 0, 0, 0 };
+
     page->texture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32,
                                       SDL_TEXTUREACCESS_STREAMING,
                                       REND_SDL3_ATLAS_TEXTURE_SIZE,
                                       REND_SDL3_ATLAS_TEXTURE_SIZE);
     if (!page->texture) {
         vlog("Atlas[%d]: failed to create atlas texture: %s\n", page_index, SDL_GetError());
+        free(page->staging);
+        page->staging = NULL;
         return false;
     }
     SDL_SetTextureBlendMode(page->texture, SDL_BLENDMODE_BLEND);
@@ -140,6 +148,8 @@ void rend_sdl3_atlas_destroy(RendSdl3Atlas *atlas)
             SDL_DestroyTexture(atlas->pages[i].texture);
             atlas->pages[i].texture = NULL;
         }
+        free(atlas->pages[i].staging);
+        atlas->pages[i].staging = NULL;
     }
     memset(atlas->entries, 0, sizeof(atlas->entries));
     atlas->entry_count = 0;
@@ -214,14 +224,24 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
         }
     }
 
-    // Upload pixels to atlas texture
-    SDL_Rect dst_rect = { region.x, region.y, region.w, region.h };
-    int pitch = bmp->width * 4;
-    if (!SDL_UpdateTexture(page->texture, &dst_rect, bmp->pixels, pitch)) {
-        vlog("Atlas[%d]: SDL_UpdateTexture failed: %s\n", page_index, SDL_GetError());
-        return NULL;
+    // Copy pixels to staging buffer
+    int staging_pitch = REND_SDL3_ATLAS_TEXTURE_SIZE * 4;
+    int src_pitch = bmp->width * 4;
+    for (int y = 0; y < bmp->height; y++) {
+        uint8_t *dst = page->staging + (region.y + y) * staging_pitch + region.x * 4;
+        uint8_t *src = bmp->pixels + y * src_pitch;
+        memcpy(dst, src, src_pitch);
     }
-    vlog("Atlas[%d]: uploaded glyph %d to region (%d,%d %dx%d)\n",
+
+    // Expand dirty rect to include this region
+    SDL_Rect glyph_rect = { region.x, region.y, region.w, region.h };
+    if (page->dirty) {
+        SDL_GetRectUnion(&page->dirty_rect, &glyph_rect, &page->dirty_rect);
+    } else {
+        page->dirty_rect = glyph_rect;
+        page->dirty = true;
+    }
+    vlog("Atlas[%d]: staged glyph %d to region (%d,%d %dx%d)\n",
          page_index, glyph_id, region.x, region.y, region.w, region.h);
 
     // Find a hash table slot (open addressing with linear probing)
@@ -291,6 +311,26 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert_empty(RendSdl3Atlas *atlas, void *fon
     atlas->entry_count++;
 
     return slot;
+}
+
+void rend_sdl3_atlas_flush(RendSdl3Atlas *atlas)
+{
+    int staging_pitch = REND_SDL3_ATLAS_TEXTURE_SIZE * 4;
+    for (int i = 0; i < 2; i++) {
+        RendSdl3AtlasPage *page = &atlas->pages[i];
+        if (!page->dirty)
+            continue;
+        uint8_t *src = page->staging + page->dirty_rect.y * staging_pitch +
+                       page->dirty_rect.x * 4;
+        if (!SDL_UpdateTexture(page->texture, &page->dirty_rect, src, staging_pitch)) {
+            vlog("Atlas[%d]: flush SDL_UpdateTexture failed: %s\n", i, SDL_GetError());
+        } else {
+            vlog("Atlas[%d]: flushed dirty rect (%d,%d %dx%d)\n", i,
+                 page->dirty_rect.x, page->dirty_rect.y,
+                 page->dirty_rect.w, page->dirty_rect.h);
+        }
+        page->dirty = false;
+    }
 }
 
 void rend_sdl3_atlas_log_stats(RendSdl3Atlas *atlas)

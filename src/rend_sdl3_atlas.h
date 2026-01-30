@@ -26,6 +26,9 @@ typedef struct
 typedef struct
 {
     SDL_Texture *texture;
+    uint8_t *staging;
+    bool dirty;
+    SDL_Rect dirty_rect;
     RendSdl3AtlasShelf shelves[REND_SDL3_ATLAS_MAX_SHELVES];
     int num_shelves;
     int next_shelf_y;
@@ -62,6 +65,7 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
                                            GlyphBitmap *bmp);
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert_empty(RendSdl3Atlas *atlas, void *font_data,
                                                  int glyph_id, uint32_t color);
+void rend_sdl3_atlas_flush(RendSdl3Atlas *atlas);
 void rend_sdl3_atlas_log_stats(RendSdl3Atlas *atlas);
 
 #endif // REND_SDL3_ATLAS_H
