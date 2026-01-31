@@ -24,8 +24,8 @@ typedef struct
 typedef struct
 {
     // Handle keyboard input, return data to write to PTY
-    KeyboardResult (*on_keyboard)(void *user_data, int key, int mod, bool is_text,
-                                  const char *text);
+    KeyboardResult (*on_keyboard)(void *user_data, int key, int mod, int scancode,
+                                  bool is_text, const char *text);
 
     // Handle window resize
     void (*on_resize)(void *user_data, int width, int height);

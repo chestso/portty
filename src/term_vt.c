@@ -659,6 +659,66 @@ static VTermKey term_key_to_vterm(int key)
         return VTERM_KEY_PAGEUP;
     case TERM_KEY_PAGEDOWN:
         return VTERM_KEY_PAGEDOWN;
+    case TERM_KEY_F1:
+        return VTERM_KEY_FUNCTION(1);
+    case TERM_KEY_F2:
+        return VTERM_KEY_FUNCTION(2);
+    case TERM_KEY_F3:
+        return VTERM_KEY_FUNCTION(3);
+    case TERM_KEY_F4:
+        return VTERM_KEY_FUNCTION(4);
+    case TERM_KEY_F5:
+        return VTERM_KEY_FUNCTION(5);
+    case TERM_KEY_F6:
+        return VTERM_KEY_FUNCTION(6);
+    case TERM_KEY_F7:
+        return VTERM_KEY_FUNCTION(7);
+    case TERM_KEY_F8:
+        return VTERM_KEY_FUNCTION(8);
+    case TERM_KEY_F9:
+        return VTERM_KEY_FUNCTION(9);
+    case TERM_KEY_F10:
+        return VTERM_KEY_FUNCTION(10);
+    case TERM_KEY_F11:
+        return VTERM_KEY_FUNCTION(11);
+    case TERM_KEY_F12:
+        return VTERM_KEY_FUNCTION(12);
+    case TERM_KEY_KP_0:
+        return VTERM_KEY_KP_0;
+    case TERM_KEY_KP_1:
+        return VTERM_KEY_KP_1;
+    case TERM_KEY_KP_2:
+        return VTERM_KEY_KP_2;
+    case TERM_KEY_KP_3:
+        return VTERM_KEY_KP_3;
+    case TERM_KEY_KP_4:
+        return VTERM_KEY_KP_4;
+    case TERM_KEY_KP_5:
+        return VTERM_KEY_KP_5;
+    case TERM_KEY_KP_6:
+        return VTERM_KEY_KP_6;
+    case TERM_KEY_KP_7:
+        return VTERM_KEY_KP_7;
+    case TERM_KEY_KP_8:
+        return VTERM_KEY_KP_8;
+    case TERM_KEY_KP_9:
+        return VTERM_KEY_KP_9;
+    case TERM_KEY_KP_MULTIPLY:
+        return VTERM_KEY_KP_MULT;
+    case TERM_KEY_KP_PLUS:
+        return VTERM_KEY_KP_PLUS;
+    case TERM_KEY_KP_COMMA:
+        return VTERM_KEY_KP_COMMA;
+    case TERM_KEY_KP_MINUS:
+        return VTERM_KEY_KP_MINUS;
+    case TERM_KEY_KP_PERIOD:
+        return VTERM_KEY_KP_PERIOD;
+    case TERM_KEY_KP_DIVIDE:
+        return VTERM_KEY_KP_DIVIDE;
+    case TERM_KEY_KP_ENTER:
+        return VTERM_KEY_KP_ENTER;
+    case TERM_KEY_KP_EQUAL:
+        return VTERM_KEY_KP_EQUAL;
     default:
         return VTERM_KEY_NONE;
     }

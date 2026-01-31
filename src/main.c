@@ -78,28 +78,51 @@ static const struct
     { SDLK_DELETE, TERM_KEY_DEL },
     { SDLK_PAGEUP, TERM_KEY_PAGEUP },
     { SDLK_PAGEDOWN, TERM_KEY_PAGEDOWN },
-};
-
-// US keyboard shift map for keys that need Shift resolution before passing to libvterm
-static const struct
-{
-    char unshifted;
-    char shifted;
-} shift_map[] = {
-    { '2', '@' },
-    { '6', '^' },
-    { '-', '_' },
+    { SDLK_F1, TERM_KEY_F1 },
+    { SDLK_F2, TERM_KEY_F2 },
+    { SDLK_F3, TERM_KEY_F3 },
+    { SDLK_F4, TERM_KEY_F4 },
+    { SDLK_F5, TERM_KEY_F5 },
+    { SDLK_F6, TERM_KEY_F6 },
+    { SDLK_F7, TERM_KEY_F7 },
+    { SDLK_F8, TERM_KEY_F8 },
+    { SDLK_F9, TERM_KEY_F9 },
+    { SDLK_F10, TERM_KEY_F10 },
+    { SDLK_F11, TERM_KEY_F11 },
+    { SDLK_F12, TERM_KEY_F12 },
+    { SDLK_KP_0, TERM_KEY_KP_0 },
+    { SDLK_KP_1, TERM_KEY_KP_1 },
+    { SDLK_KP_2, TERM_KEY_KP_2 },
+    { SDLK_KP_3, TERM_KEY_KP_3 },
+    { SDLK_KP_4, TERM_KEY_KP_4 },
+    { SDLK_KP_5, TERM_KEY_KP_5 },
+    { SDLK_KP_6, TERM_KEY_KP_6 },
+    { SDLK_KP_7, TERM_KEY_KP_7 },
+    { SDLK_KP_8, TERM_KEY_KP_8 },
+    { SDLK_KP_9, TERM_KEY_KP_9 },
+    { SDLK_KP_MULTIPLY, TERM_KEY_KP_MULTIPLY },
+    { SDLK_KP_PLUS, TERM_KEY_KP_PLUS },
+    { SDLK_KP_COMMA, TERM_KEY_KP_COMMA },
+    { SDLK_KP_MINUS, TERM_KEY_KP_MINUS },
+    { SDLK_KP_PERIOD, TERM_KEY_KP_PERIOD },
+    { SDLK_KP_DIVIDE, TERM_KEY_KP_DIVIDE },
+    { SDLK_KP_ENTER, TERM_KEY_KP_ENTER },
+    { SDLK_KP_EQUALS, TERM_KEY_KP_EQUAL },
 };
 
 // Keyboard callback for event loop
-static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_text,
-                                  const char *text)
+static KeyboardResult on_keyboard(void *user_data, int key, int mod, int scancode,
+                                  bool is_text, const char *text)
 {
     MainContext *ctx = (MainContext *)user_data;
     KeyboardResult result = { 0 };
 
     // Handle text input for proper Unicode support
     if (is_text && text) {
+        // Skip if Ctrl or Alt is held — already handled in KEY_DOWN
+        if (SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) {
+            return result;
+        }
         size_t text_len = strlen(text);
         if (text_len > 0 && text_len < sizeof(result.data)) {
             memcpy(result.data, text, text_len);
@@ -157,23 +180,21 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, bool is_tex
         }
     }
 
-    // Ctrl+key: route through libvterm which handles control-code mapping
-    if (key >= 32 && key < 127 && (mod & SDL_KMOD_CTRL)) {
-        char effective_char = (char)key;
-
-        // For shifted punctuation (e.g. Ctrl+Shift+- = Ctrl+_), SDL gives the
-        // unshifted keycode. Resolve via US-keyboard shift map.
-        if (mod & SDL_KMOD_SHIFT) {
-            for (int i = 0; i < (int)(sizeof(shift_map) / sizeof(shift_map[0])); i++) {
-                if (shift_map[i].unshifted == effective_char) {
-                    effective_char = shift_map[i].shifted;
-                    break;
-                }
+    // Ctrl or Alt with printable key: resolve shifted character and route through libvterm
+    if ((mod & (SDL_KMOD_CTRL | SDL_KMOD_ALT)) && scancode != 0) {
+        // Use SDL to resolve the shifted character from the scancode
+        SDL_Keycode resolved = SDL_GetKeyFromScancode(scancode, mod & SDL_KMOD_SHIFT, false);
+        if (resolved >= 32 && resolved < 127) {
+            char ch = (char)resolved;
+            // SDL_GetKeyFromScancode returns uppercase for letters; lowercase if Shift not held
+            if (ch >= 'A' && ch <= 'Z' && !(mod & SDL_KMOD_SHIFT)) {
+                ch = ch - 'A' + 'a';
             }
+            // Pass Ctrl and Alt to libvterm but not Shift (already baked into resolved char)
+            int tmod_no_shift = tmod & ~TERM_MOD_SHIFT;
+            terminal_send_char(ctx->term, (uint32_t)ch, tmod_no_shift);
+            result.handled = true;
         }
-
-        terminal_send_char(ctx->term, (uint32_t)effective_char, tmod);
-        result.handled = true;
     }
 
     return result;

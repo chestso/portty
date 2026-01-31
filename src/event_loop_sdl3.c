@@ -394,6 +394,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                         callbacks->user_data,
                         event.key.key,
                         event.key.mod,
+                        event.key.scancode,
                         false,
                         NULL);
 
@@ -428,6 +429,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                 if (callbacks && callbacks->on_keyboard) {
                     KeyboardResult result = callbacks->on_keyboard(
                         callbacks->user_data,
+                        0,
                         0,
                         0,
                         true,
