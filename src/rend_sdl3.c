@@ -30,10 +30,10 @@ typedef struct
     void *font_data; // FtFontData*, kept alive for pointer stability
 } LoadedFallbackFont;
 
-// Cursor color: muted purple with slight transparency (RGBA)
-#define CURSOR_COLOR_R 138
-#define CURSOR_COLOR_G 99
-#define CURSOR_COLOR_B 165
+// Cursor color: Charm signature purple with slight transparency (RGBA)
+#define CURSOR_COLOR_R 0x7D
+#define CURSOR_COLOR_G 0x56
+#define CURSOR_COLOR_B 0xF4
 #define CURSOR_COLOR_A 220
 
 // Box-filter downscale a glyph bitmap to fit within max_w x max_h.
@@ -832,7 +832,7 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     rend_sdl3_atlas_flush(&data->atlas);
 
     // Phase 3: Draw (all glyphs cached, texture data is current)
-    SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
+    SDL_SetRenderDrawColor(data->renderer, 0x17, 0x17, 0x17, 255);
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
 

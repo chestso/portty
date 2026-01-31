@@ -88,3 +88,7 @@ profile-test-data.txt
 
 # Opencode configuration
 opencode.jsonc
+
+# Crush configuration
+crush.json
+.crushignore

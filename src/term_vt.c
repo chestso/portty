@@ -8,6 +8,31 @@
 
 #define SCROLLBACK_SIZE 1000
 
+// Default ANSI 16-color palette based on charmbracelet/vhs theme
+// clang-format off
+static const uint8_t default_palette[16][3] = {
+    [0]  = { 0x28, 0x2a, 0x2e }, // Black
+    [1]  = { 0xd7, 0x4e, 0x6f }, // Red
+    [2]  = { 0x31, 0xbb, 0x71 }, // Green
+    [3]  = { 0xd3, 0xe5, 0x61 }, // Yellow
+    [4]  = { 0x80, 0x56, 0xff }, // Blue (Charm purple)
+    [5]  = { 0xed, 0x61, 0xd7 }, // Magenta
+    [6]  = { 0x04, 0xd7, 0xd7 }, // Cyan
+    [7]  = { 0xbf, 0xbf, 0xbf }, // White
+    [8]  = { 0x4d, 0x4d, 0x4d }, // Bright Black
+    [9]  = { 0xfe, 0x5f, 0x86 }, // Bright Red
+    [10] = { 0x00, 0xd7, 0x87 }, // Bright Green
+    [11] = { 0xeb, 0xff, 0x71 }, // Bright Yellow
+    [12] = { 0x9b, 0x79, 0xff }, // Bright Blue (lavender)
+    [13] = { 0xff, 0x7a, 0xea }, // Bright Magenta
+    [14] = { 0x00, 0xfe, 0xfe }, // Bright Cyan
+    [15] = { 0xe6, 0xe6, 0xe6 }, // Bright White
+};
+// clang-format on
+
+static const uint8_t default_fg[3] = { 0xdd, 0xdd, 0xdd };
+static const uint8_t default_bg[3] = { 0x17, 0x17, 0x17 };
+
 // Forward declaration for callback type
 typedef void (*TerminalOutputCallback)(const char *data, size_t len, void *user);
 
@@ -64,13 +89,13 @@ static TerminalColor convert_vterm_color(const VTermColor *vcol, VTermState *sta
     if (is_bg ? VTERM_COLOR_IS_DEFAULT_BG(vcol) : VTERM_COLOR_IS_DEFAULT_FG(vcol)) {
         result.is_default = true;
         if (is_bg) {
-            result.r = 0;
-            result.g = 0;
-            result.b = 0;
+            result.r = default_bg[0];
+            result.g = default_bg[1];
+            result.b = default_bg[2];
         } else {
-            result.r = 255;
-            result.g = 255;
-            result.b = 255;
+            result.r = default_fg[0];
+            result.g = default_fg[1];
+            result.b = default_fg[2];
         }
         return result;
     }
@@ -88,9 +113,9 @@ static TerminalColor convert_vterm_color(const VTermColor *vcol, VTermState *sta
         result.b = resolved.rgb.blue;
     } else {
         // Fallback
-        result.r = is_bg ? 0 : 255;
-        result.g = is_bg ? 0 : 255;
-        result.b = is_bg ? 0 : 255;
+        result.r = is_bg ? default_bg[0] : default_fg[0];
+        result.g = is_bg ? default_bg[1] : default_fg[1];
+        result.b = is_bg ? default_bg[2] : default_fg[2];
     }
 
     return result;
@@ -140,6 +165,19 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     vterm_output_set_callback(data->vt, term_output_callback, data);
 
     vterm_screen_reset(data->screen, 1);
+
+    // Apply default palette
+    for (int i = 0; i < 16; i++) {
+        VTermColor col;
+        vterm_color_rgb(&col, default_palette[i][0], default_palette[i][1], default_palette[i][2]);
+        vterm_state_set_palette_color(data->state, i, &col);
+    }
+
+    // Apply default foreground and background
+    VTermColor fg, bg;
+    vterm_color_rgb(&fg, default_fg[0], default_fg[1], default_fg[2]);
+    vterm_color_rgb(&bg, default_bg[0], default_bg[1], default_bg[2]);
+    vterm_screen_set_default_colors(data->screen, &fg, &bg);
 
     // Store in backend
     backend->backend_data = data;
