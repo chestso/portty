@@ -832,7 +832,7 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     rend_sdl3_atlas_flush(&data->atlas);
 
     // Phase 3: Draw (all glyphs cached, texture data is current)
-    SDL_SetRenderDrawColor(data->renderer, 0x17, 0x17, 0x17, 255);
+    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
 
