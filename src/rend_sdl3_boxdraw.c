@@ -1,5 +1,7 @@
 #include "rend_sdl3_boxdraw.h"
 
+#include <math.h>
+
 // Encode direction weights into a byte: (up << 6) | (down << 4) | (left << 2) | right
 // Weight values: 0=none, 1=light, 2=heavy, 3=double
 #define BDE(u, d, l, r) (uint8_t)(((u) << 6) | ((d) << 4) | ((l) << 2) | (r))
@@ -129,9 +131,9 @@ static const uint8_t box_table_ext[48] = {
     BDE(0,1,1,0), // U+256E ╮  [arc, drawn as corner]
     BDE(1,0,1,0), // U+256F ╯  [arc, drawn as corner]
     BDE(1,0,0,1), // U+2570 ╰  [arc, drawn as corner]
-    BDE(1,1,1,1), // U+2571 ╱  [diagonal, drawn as cross]
-    BDE(1,1,1,1), // U+2572 ╲  [diagonal, drawn as cross]
-    BDE(1,1,1,1), // U+2573 ╳  [diagonal, drawn as cross]
+    BDE(0,0,0,0), // U+2571 ╱  [diagonal, handled separately]
+    BDE(0,0,0,0), // U+2572 ╲  [diagonal, handled separately]
+    BDE(0,0,0,0), // U+2573 ╳  [diagonal, handled separately]
     BDE(0,0,1,0), // U+2574 ╴  light left
     BDE(1,0,0,0), // U+2575 ╵  light up
     BDE(0,0,0,1), // U+2576 ╶  light right
@@ -536,13 +538,116 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
     }
 }
 
+// Draw a single-pixel anti-aliased line using Xiaolin Wu's algorithm.
+// Caller must set blend mode to SDL_BLENDMODE_BLEND before calling.
+static void draw_aa_line(SDL_Renderer *renderer,
+                         float x0, float y0, float x1, float y1,
+                         uint8_t r, uint8_t g, uint8_t b)
+{
+    bool steep = fabsf(y1 - y0) > fabsf(x1 - x0);
+    if (steep) {
+        float t;
+        t = x0;
+        x0 = y0;
+        y0 = t;
+        t = x1;
+        x1 = y1;
+        y1 = t;
+    }
+    if (x0 > x1) {
+        float t;
+        t = x0;
+        x0 = x1;
+        x1 = t;
+        t = y0;
+        y0 = y1;
+        y1 = t;
+    }
+
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float gradient = (dx < 0.001f) ? 1.0f : dy / dx;
+
+    int xpxl1 = (int)roundf(x0);
+    int xpxl2 = (int)roundf(x1);
+    float intery = y0 + gradient * ((float)xpxl1 - x0);
+
+    for (int x = xpxl1; x <= xpxl2; x++) {
+        int iy = (int)floorf(intery);
+        float frac = intery - (float)iy;
+        uint8_t a1 = (uint8_t)(255.0f * (1.0f - frac) + 0.5f);
+        uint8_t a2 = (uint8_t)(255.0f * frac + 0.5f);
+
+        if (steep) {
+            if (a1 > 0) {
+                SDL_SetRenderDrawColor(renderer, r, g, b, a1);
+                SDL_RenderPoint(renderer, (float)iy, (float)x);
+            }
+            if (a2 > 0) {
+                SDL_SetRenderDrawColor(renderer, r, g, b, a2);
+                SDL_RenderPoint(renderer, (float)(iy + 1), (float)x);
+            }
+        } else {
+            if (a1 > 0) {
+                SDL_SetRenderDrawColor(renderer, r, g, b, a1);
+                SDL_RenderPoint(renderer, (float)x, (float)iy);
+            }
+            if (a2 > 0) {
+                SDL_SetRenderDrawColor(renderer, r, g, b, a2);
+                SDL_RenderPoint(renderer, (float)x, (float)(iy + 1));
+            }
+        }
+        intery += gradient;
+    }
+}
+
+// Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
+// Uses anti-aliased line rendering with thickness matching the light line width.
+static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
+                                int x, int y, int w, int h,
+                                uint8_t r, uint8_t g, uint8_t b)
+{
+    int thickness = w / 5;
+    if (thickness < 1)
+        thickness = 1;
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+    // Draw bottom-left to top-right diagonal (╱)
+    if (cp == 0x2571 || cp == 0x2573) {
+        float x0 = (float)x;
+        float y0 = (float)(y + h - 1);
+        float x1 = (float)(x + w - 1);
+        float y1 = (float)y;
+        for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
+            draw_aa_line(renderer, x0 + (float)i, y0, x1 + (float)i, y1,
+                         r, g, b);
+    }
+
+    // Draw top-left to bottom-right diagonal (╲)
+    if (cp == 0x2572 || cp == 0x2573) {
+        float x0 = (float)x;
+        float y0 = (float)y;
+        float x1 = (float)(x + w - 1);
+        float y1 = (float)(y + h - 1);
+        for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
+            draw_aa_line(renderer, x0 + (float)i, y0, x1 + (float)i, y1,
+                         r, g, b);
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
 void rend_sdl3_boxdraw_draw(SDL_Renderer *renderer, uint32_t cp,
                             int cell_x, int cell_y, int cell_w, int cell_h,
                             uint8_t r, uint8_t g, uint8_t b)
 {
     SDL_SetRenderDrawColor(renderer, r, g, b, 255);
 
-    if (cp >= 0x2500 && cp <= 0x257F) {
+    if (cp >= 0x2571 && cp <= 0x2573) {
+        draw_diagonal_lines(renderer, cp, cell_x, cell_y, cell_w, cell_h,
+                            r, g, b);
+    } else if (cp >= 0x2500 && cp <= 0x257F) {
         uint8_t enc = get_box_encoding(cp);
         if (enc != 0)
             draw_box_lines(renderer, enc, cell_x, cell_y, cell_w, cell_h);
