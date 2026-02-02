@@ -127,10 +127,10 @@ static const uint8_t box_table_ext[48] = {
     BDE(1,1,3,3), // U+256A ╪
     BDE(3,3,1,1), // U+256B ╫
     BDE(3,3,3,3), // U+256C ╬
-    BDE(0,1,0,1), // U+256D ╭  [arc, drawn as corner]
-    BDE(0,1,1,0), // U+256E ╮  [arc, drawn as corner]
-    BDE(1,0,1,0), // U+256F ╯  [arc, drawn as corner]
-    BDE(1,0,0,1), // U+2570 ╰  [arc, drawn as corner]
+    BDE(0,0,0,0), // U+256D ╭  [arc, handled separately]
+    BDE(0,0,0,0), // U+256E ╮  [arc, handled separately]
+    BDE(0,0,0,0), // U+256F ╯  [arc, handled separately]
+    BDE(0,0,0,0), // U+2570 ╰  [arc, handled separately]
     BDE(0,0,0,0), // U+2571 ╱  [diagonal, handled separately]
     BDE(0,0,0,0), // U+2572 ╲  [diagonal, handled separately]
     BDE(0,0,0,0), // U+2573 ╳  [diagonal, handled separately]
@@ -601,6 +601,105 @@ static void draw_aa_line(SDL_Renderer *renderer,
     }
 }
 
+// Draw a rounded corner arc for U+256D-U+2570 (╭╮╯╰).
+// Uses a quarter-circle arc (radius = w/2) centered so that the arc is tangent
+// to the cell-center vertical (cx) and horizontal (cy) lines. A straight stub
+// at cx extends from the arc to the top/bottom cell edge when h > w.
+static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
+                                int x, int y, int w, int h,
+                                uint8_t r, uint8_t g, uint8_t b)
+{
+    int thickness = w / 5;
+    if (thickness < 1)
+        thickness = 1;
+    int half = thickness / 2;
+
+    float radius = (float)w / 2.0f;
+
+    int cx = x + w / 2;
+    int cy = y + h / 2;
+
+    // Arc center, angles, and stub endpoints per codepoint.
+    // The arc is tangent to x=cx and y=cy, so it naturally meets horizontal
+    // lines at (left/right edge, cy) and vertical stubs at (cx, arc endpoint).
+    float ex, ey, t_start, t_end;
+    int stub_y0 = 0, stub_y1 = 0;
+    bool need_stub = (h != w);
+
+    switch (cp) {
+    case 0x256D: // ╭ down+right: arc in bottom-right, stub goes down
+        ex = (float)(x + w);
+        ey = (float)cy + radius;
+        t_start = (float)M_PI / 2.0f;
+        t_end = (float)M_PI;
+        stub_y0 = cy + w / 2;
+        stub_y1 = y + h;
+        break;
+    case 0x256E: // ╮ down+left: arc in bottom-left, stub goes down
+        ex = (float)x;
+        ey = (float)cy + radius;
+        t_start = 0.0f;
+        t_end = (float)M_PI / 2.0f;
+        stub_y0 = cy + w / 2;
+        stub_y1 = y + h;
+        break;
+    case 0x256F: // ╯ up+left: arc in top-left, stub goes up
+        ex = (float)x;
+        ey = (float)cy - radius;
+        t_start = 3.0f * (float)M_PI / 2.0f;
+        t_end = 2.0f * (float)M_PI;
+        stub_y0 = y;
+        stub_y1 = cy - w / 2;
+        break;
+    case 0x2570: // ╰ up+right: arc in top-right, stub goes up
+        ex = (float)(x + w);
+        ey = (float)cy - radius;
+        t_start = (float)M_PI;
+        t_end = 3.0f * (float)M_PI / 2.0f;
+        stub_y0 = y;
+        stub_y1 = cy - w / 2;
+        break;
+    default:
+        return;
+    }
+
+    int num_segments = 2 * (w + h);
+    if (num_segments < 16)
+        num_segments = 16;
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+
+    // Draw concentric arcs for thickness
+    for (int t = -half; t < thickness - half; t++) {
+        float offset = (float)t;
+        float cr = radius + offset;
+        if (cr < 0.5f)
+            continue;
+
+        float dt = (t_end - t_start) / (float)num_segments;
+        float prev_x = ex + cr * cosf(t_start);
+        float prev_y = ey - cr * sinf(t_start);
+
+        for (int i = 1; i <= num_segments; i++) {
+            float angle = t_start + dt * (float)i;
+            float cur_x = ex + cr * cosf(angle);
+            float cur_y = ey - cr * sinf(angle);
+            draw_aa_line(renderer, prev_x, prev_y, cur_x, cur_y, r, g, b);
+            prev_x = cur_x;
+            prev_y = cur_y;
+        }
+    }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+
+    // Draw vertical stub at cx connecting arc endpoint to cell edge
+    if (need_stub && stub_y1 > stub_y0) {
+        SDL_FRect stub = { (float)(cx - half), (float)stub_y0,
+                           (float)thickness, (float)(stub_y1 - stub_y0) };
+        SDL_RenderFillRect(renderer, &stub);
+    }
+}
+
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
 // Uses anti-aliased line rendering with thickness matching the light line width.
 static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
@@ -644,7 +743,10 @@ void rend_sdl3_boxdraw_draw(SDL_Renderer *renderer, uint32_t cp,
 {
     SDL_SetRenderDrawColor(renderer, r, g, b, 255);
 
-    if (cp >= 0x2571 && cp <= 0x2573) {
+    if (cp >= 0x256D && cp <= 0x2570) {
+        draw_rounded_corner(renderer, cp, cell_x, cell_y, cell_w, cell_h,
+                            r, g, b);
+    } else if (cp >= 0x2571 && cp <= 0x2573) {
         draw_diagonal_lines(renderer, cp, cell_x, cell_y, cell_w, cell_h,
                             r, g, b);
     } else if (cp >= 0x2500 && cp <= 0x257F) {
