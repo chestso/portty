@@ -3,6 +3,7 @@
 #include "font.h"
 #include "font_ft.h"
 #include "font_resolver.h"
+#include "png_writer.h"
 #include "rend.h"
 #include "rend_sdl3_atlas.h"
 #include "rend_sdl3_boxdraw.h"
@@ -977,6 +978,111 @@ static void sdl3_set_title(RendererBackend *backend, const char *title)
     vlog("Window title set to: %s\n", title ? title : "(default)");
 }
 
+static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
+                              const char *output_path)
+{
+    if (!backend || !backend->backend_data || !term || !output_path)
+        return -1;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
+    if (!font_has_style(data->font, FONT_STYLE_NORMAL)) {
+        fprintf(stderr, "ERROR: No font loaded for PNG render\n");
+        return -1;
+    }
+
+    // Get terminal dimensions
+    int term_rows, term_cols;
+    terminal_get_dimensions(term, &term_rows, &term_cols);
+
+    // Find last non-empty column on the first row to avoid trailing whitespace
+    int last_col = 0;
+    for (int col = 0; col < term_cols; col++) {
+        TerminalCell cell;
+        if (terminal_get_cell(term, 0, col, &cell) == 0 && cell.chars[0] != 0) {
+            last_col = col + cell.width;
+        }
+    }
+    if (last_col <= 0)
+        last_col = 1;
+
+    int render_cols = last_col;
+    int render_rows = term_rows;
+
+    int img_w = render_cols * data->cell_width;
+    int img_h = render_rows * data->cell_height;
+
+    vlog("PNG render: %d cols x %d rows = %dx%d pixels\n",
+         render_cols, render_rows, img_w, img_h);
+
+    // Create offscreen render target texture
+    SDL_Texture *target = SDL_CreateTexture(data->renderer,
+                                            SDL_PIXELFORMAT_RGBA32,
+                                            SDL_TEXTUREACCESS_TARGET,
+                                            img_w, img_h);
+    if (!target) {
+        fprintf(stderr, "ERROR: Failed to create offscreen texture: %s\n", SDL_GetError());
+        return -1;
+    }
+
+    // Redirect rendering to offscreen texture
+    if (!SDL_SetRenderTarget(data->renderer, target)) {
+        fprintf(stderr, "ERROR: Failed to set render target: %s\n", SDL_GetError());
+        SDL_DestroyTexture(target);
+        return -1;
+    }
+
+    rend_sdl3_atlas_begin_frame(&data->atlas);
+
+    // Phase 1: Populate atlas (no draw calls)
+    render_visible_cells(data, term, render_rows, render_cols, false, true);
+
+    // Phase 2: Flush staging buffers to GPU
+    rend_sdl3_atlas_flush(&data->atlas);
+
+    // Phase 3: Clear and draw
+    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
+    SDL_RenderClear(data->renderer);
+    render_visible_cells(data, term, render_rows, render_cols, false, false);
+
+    // Read pixels back from the render target
+    SDL_Surface *surface = SDL_RenderReadPixels(data->renderer, NULL);
+
+    // Restore default render target
+    SDL_SetRenderTarget(data->renderer, NULL);
+
+    if (!surface) {
+        fprintf(stderr, "ERROR: Failed to read pixels: %s\n", SDL_GetError());
+        SDL_DestroyTexture(target);
+        return -1;
+    }
+
+    // Convert surface to RGBA32 if needed
+    SDL_Surface *rgba_surface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
+
+    if (!rgba_surface) {
+        fprintf(stderr, "ERROR: Failed to convert surface to RGBA: %s\n", SDL_GetError());
+        SDL_DestroyTexture(target);
+        return -1;
+    }
+
+    // Write PNG
+    int rc = png_write_rgba(output_path, (const uint8_t *)rgba_surface->pixels,
+                            rgba_surface->w, rgba_surface->h);
+
+    SDL_DestroySurface(rgba_surface);
+    SDL_DestroyTexture(target);
+
+    if (rc == 0) {
+        fprintf(stderr, "STATUS: png_output=%s (%dx%d)\n", output_path, img_w, img_h);
+    } else {
+        fprintf(stderr, "ERROR: Failed to write PNG to %s\n", output_path);
+    }
+
+    return rc;
+}
+
 // SDL3 renderer backend instance
 RendererBackend renderer_backend_sdl3 = {
     .name = "sdl3",
@@ -993,5 +1099,6 @@ RendererBackend renderer_backend_sdl3 = {
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,
-    .set_title = sdl3_set_title
+    .set_title = sdl3_set_title,
+    .render_to_png = sdl3_render_to_png
 };

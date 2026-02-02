@@ -95,3 +95,11 @@ void renderer_set_title(RendererBackend *rend, const char *title)
         return;
     rend->set_title(rend, title);
 }
+
+int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
+                           const char *output_path)
+{
+    if (!rend || !rend->render_to_png)
+        return -1;
+    return rend->render_to_png(rend, term, output_path);
+}

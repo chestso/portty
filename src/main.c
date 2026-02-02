@@ -10,12 +10,10 @@
 #include "font_ft.h"
 #include "font_ft_internal.h"
 #include "font_resolver.h"
-#include "png_writer.h"
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
 #include "term_vt.h"
-#include "unicode.h"
 #include <SDL3/SDL.h>
 #include <fcntl.h>
 #include <getopt.h>
@@ -35,7 +33,8 @@ int verbose = 0;
 
 // Function prototypes
 static void print_usage(const char *progname);
-static int png_render_text(const char *text, const char *output_path);
+static int png_render_text(const char *text, const char *output_path,
+                           float font_size, const char *font_name, int ft_hint_target);
 
 // Context passed to event loop callbacks
 typedef struct
@@ -411,7 +410,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Usage: %s -P \"text\" output.png\n", argv[0]);
             return 1;
         }
-        return png_render_text(png_text, argv[optind]);
+        return png_render_text(png_text, argv[optind], font_size, font_name, ft_hint_target);
     }
 
     // Set app metadata before SDL initialization as recommended by SDL3
@@ -705,159 +704,76 @@ static void print_usage(const char *progname)
     printf("  Ctrl+Q      Quit\n");
 }
 
-static int png_render_text(const char *text, const char *output_path)
+static int png_render_text(const char *text, const char *output_path,
+                           float font_size, const char *font_name, int ft_hint_target)
 {
-    const float font_size = 128.0f;
+    int ret = 1;
+    SDL_Window *window = NULL;
+    SDL_Renderer *sdl_rend = NULL;
+    TerminalBackend *term = NULL;
+    RendererBackend *rend = NULL;
 
-    /* Convert UTF-8 text to codepoints */
-    uint32_t codepoints[256];
-    int cp_count = utf8_to_codepoints(text, codepoints, 256);
-    if (cp_count <= 0) {
-        fprintf(stderr, "ERROR: Failed to decode UTF-8 text\n");
+    vlog("PNG mode: text=\"%s\", output=%s\n", text, output_path);
+
+    // Initialize SDL (needed for render target even in headless mode)
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fprintf(stderr, "ERROR: Failed to initialize SDL: %s\n", SDL_GetError());
         return 1;
     }
 
-    vlog("PNG mode: %d codepoints, output=%s\n", cp_count, output_path);
-
-    /* Initialize font backend */
-    if (!font_init(&font_backend_ft)) {
-        fprintf(stderr, "ERROR: Failed to initialize font backend\n");
-        return 1;
+    // Create a hidden window + renderer for offscreen rendering
+    window = SDL_CreateWindow("bloom-png", 1, 1, SDL_WINDOW_HIDDEN);
+    if (!window) {
+        fprintf(stderr, "ERROR: Failed to create hidden window: %s\n", SDL_GetError());
+        goto cleanup;
     }
 
-    /* Initialize font resolver (fontconfig) */
-    if (font_resolver_init() != 0) {
-        fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
-        font_destroy(&font_backend_ft);
-        return 1;
+    sdl_rend = SDL_CreateRenderer(window, NULL);
+    if (!sdl_rend) {
+        fprintf(stderr, "ERROR: Failed to create renderer: %s\n", SDL_GetError());
+        goto cleanup;
     }
 
-    /* Setup font options (72 DPI matches hb-view default) */
-    FontOptions options = { 0 };
-    options.ft_hint_target = FT_LOAD_TARGET_LIGHT;
-    options.dpi_x = 72;
-    options.dpi_y = 72;
+    // Use a generous column count — we trim to actual content later
+    int cols = (int)strlen(text) + 4;
+    if (cols < 10)
+        cols = 10;
+    int rows = 1;
 
-    /* Load emoji font */
-    FontResolutionResult result;
-    if (font_resolver_find_font(FONT_TYPE_EMOJI, NULL, &result) != 0) {
-        fprintf(stderr, "ERROR: Failed to find emoji font\n");
-        font_resolver_cleanup();
-        font_destroy(&font_backend_ft);
-        return 1;
+    // Initialize terminal and feed text
+    term = terminal_init(&terminal_backend_vt, cols, rows);
+    if (!term) {
+        fprintf(stderr, "ERROR: Failed to initialize terminal for PNG\n");
+        goto cleanup;
     }
 
-    if (!font_load_font(&font_backend_ft, FONT_STYLE_EMOJI, result.font_path, font_size, &options)) {
-        fprintf(stderr, "ERROR: Failed to load emoji font from %s\n", result.font_path);
-        font_resolver_free_result(&result);
-        font_resolver_cleanup();
-        font_destroy(&font_backend_ft);
-        return 1;
+    terminal_process_input(term, text, strlen(text));
+
+    // Initialize renderer backend
+    rend = renderer_init(&renderer_backend_sdl3, window, sdl_rend);
+    if (!rend) {
+        fprintf(stderr, "ERROR: Failed to initialize renderer for PNG\n");
+        goto cleanup;
     }
 
-    vlog("Loaded emoji font: %s\n", result.font_path);
-    font_resolver_free_result(&result);
-    font_resolver_cleanup();
-
-    /* Shape and render */
-    ShapedGlyphs *shaped = font_render_shaped_text(&font_backend_ft, FONT_STYLE_EMOJI,
-                                                   codepoints, cp_count,
-                                                   255, 255, 255);
-    if (!shaped || shaped->num_glyphs == 0) {
-        fprintf(stderr, "ERROR: font_render_shaped_text returned no glyphs\n");
-        font_destroy(&font_backend_ft);
-        return 1;
+    // Load fonts using the same pipeline as interactive mode
+    if (renderer_load_fonts(rend, font_size, font_name, ft_hint_target) < 0) {
+        fprintf(stderr, "ERROR: Failed to load fonts for PNG\n");
+        goto cleanup;
     }
 
-    vlog("Shaped %d glyphs, total_advance=%d\n", shaped->num_glyphs, shaped->total_advance);
+    // Render to PNG via the backend
+    ret = renderer_render_to_png(rend, term, output_path);
 
-    /* Use font metrics to determine image size (matches hb-view behavior) */
-    const FontMetrics *metrics = font_get_metrics(&font_backend_ft, FONT_STYLE_EMOJI);
-    if (!metrics) {
-        fprintf(stderr, "ERROR: Failed to get font metrics\n");
-        font_destroy(&font_backend_ft);
-        return 1;
-    }
-
-    int baseline = metrics->ascent;
-    int img_w = shaped->total_advance;
-    int img_h = metrics->ascent + metrics->descent;
-
-    if (img_w <= 0 || img_h <= 0) {
-        fprintf(stderr, "ERROR: Computed image has zero size (%dx%d)\n", img_w, img_h);
-        font_destroy(&font_backend_ft);
-        return 1;
-    }
-
-    vlog("Output image: %dx%d (advance=%d, ascent=%d, descent=%d)\n",
-         img_w, img_h, shaped->total_advance, metrics->ascent, metrics->descent);
-
-    /* Allocate output buffer (transparent black) */
-    uint8_t *pixels = calloc(img_w * img_h * 4, 1);
-    if (!pixels) {
-        fprintf(stderr, "ERROR: Failed to allocate %dx%d pixel buffer\n", img_w, img_h);
-        font_destroy(&font_backend_ft);
-        return 1;
-    }
-
-    /* Composite each glyph bitmap into the output */
-    for (int i = 0; i < shaped->num_glyphs; i++) {
-        GlyphBitmap *gb = shaped->bitmaps[i];
-        if (!gb || !gb->pixels)
-            continue;
-
-        int dst_x = shaped->x_positions[i] + gb->x_offset;
-        int dst_y = baseline - gb->y_offset;
-
-        for (int row = 0; row < gb->height; row++) {
-            int dy = dst_y + row;
-            if (dy < 0 || dy >= img_h)
-                continue;
-            for (int col = 0; col < gb->width; col++) {
-                int dx = dst_x + col;
-                if (dx < 0 || dx >= img_w)
-                    continue;
-
-                int src_idx = (row * gb->width + col) * 4;
-                int dst_idx = (dy * img_w + dx) * 4;
-
-                uint8_t sr = gb->pixels[src_idx + 0];
-                uint8_t sg = gb->pixels[src_idx + 1];
-                uint8_t sb = gb->pixels[src_idx + 2];
-                uint8_t sa = gb->pixels[src_idx + 3];
-
-                if (sa == 0)
-                    continue;
-
-                /* Alpha-over compositing (source over destination) */
-                uint8_t da = pixels[dst_idx + 3];
-                if (da == 0 || sa == 255) {
-                    pixels[dst_idx + 0] = sr;
-                    pixels[dst_idx + 1] = sg;
-                    pixels[dst_idx + 2] = sb;
-                    pixels[dst_idx + 3] = sa;
-                } else {
-                    uint16_t out_a = sa + da * (255 - sa) / 255;
-                    if (out_a > 0) {
-                        pixels[dst_idx + 0] = (uint8_t)((sr * sa + pixels[dst_idx + 0] * da * (255 - sa) / 255) / out_a);
-                        pixels[dst_idx + 1] = (uint8_t)((sg * sa + pixels[dst_idx + 1] * da * (255 - sa) / 255) / out_a);
-                        pixels[dst_idx + 2] = (uint8_t)((sb * sa + pixels[dst_idx + 2] * da * (255 - sa) / 255) / out_a);
-                        pixels[dst_idx + 3] = (uint8_t)out_a;
-                    }
-                }
-            }
-        }
-    }
-
-    /* Write PNG */
-    int rc = png_write_rgba(output_path, pixels, img_w, img_h);
-    if (rc == 0) {
-        fprintf(stderr, "STATUS: png_output=%s (%dx%d)\n", output_path, img_w, img_h);
-    } else {
-        fprintf(stderr, "ERROR: Failed to write PNG to %s\n", output_path);
-    }
-
-    free(pixels);
-    font_destroy(&font_backend_ft);
-    return rc == 0 ? 0 : 1;
+cleanup:
+    if (rend)
+        renderer_destroy(rend);
+    if (sdl_rend)
+        SDL_DestroyRenderer(sdl_rend);
+    if (window)
+        SDL_DestroyWindow(window);
+    if (term)
+        terminal_destroy(term);
+    SDL_Quit();
+    return ret;
 }

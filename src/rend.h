@@ -30,6 +30,8 @@ struct RendererBackend
     void (*reset_scroll)(RendererBackend *rend);
     int (*get_scroll_offset)(RendererBackend *rend);
     void (*set_title)(RendererBackend *rend, const char *title);
+    int (*render_to_png)(RendererBackend *rend, TerminalBackend *term,
+                         const char *output_path);
 };
 
 // Renderer API
@@ -46,5 +48,7 @@ void renderer_scroll(RendererBackend *rend, TerminalBackend *term, int delta);
 void renderer_reset_scroll(RendererBackend *rend);
 int renderer_get_scroll_offset(RendererBackend *rend);
 void renderer_set_title(RendererBackend *rend, const char *title);
+int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
+                           const char *output_path);
 
 #endif /* REND_H */
