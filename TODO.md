@@ -558,21 +558,82 @@ This is a fundamental limitation of libvterm's cell-based model.
    - Pros: Minimal architectural changes to bloom-terminal
    - Cons: Ongoing maintenance burden, may diverge from upstream
 
-2. **notcurses**: Modern terminal library with better Unicode support
-   - Pros: Active development, good emoji support
-   - Cons: Different API model, may require significant refactoring
+2. **Custom cell layer**: Keep libvterm for escape sequence parsing, replace its cell storage with a custom layer that preserves grapheme clusters
+   - Pros: Minimal scope, reuses libvterm's mature escape sequence handling
+   - Cons: Tight coupling to libvterm internals
 
-3. **VTE (GNOME)**: GTK terminal widget library
-   - Pros: Mature, well-tested
-   - Cons: GTK dependency, designed as a widget not library
-
-4. **Custom implementation**: Build terminal emulation from scratch
+3. **Custom implementation**: Build terminal emulation from scratch
    - Pros: Full control over cell model and grapheme handling
    - Cons: Massive undertaking, many edge cases
+
+### How Other Terminals Solve This
+
+All three major GPU-accelerated terminals (foot, kitty, alacritty) wrote their own VT
+parsers from scratch rather than using libvterm. None of their implementations are
+available as reusable C libraries.
+
+#### kitty: Indexed Grapheme Storage
+
+The core problem: a terminal grid stores one cell per column, but a single visible
+character like 👨‍👩‍👧 (family emoji) is actually 5 codepoints joined by zero-width joiners.
+A naive cell model either truncates this to one codepoint or scatters it across cells.
+
+kitty solves this by splitting each cell into two structs. The first (`CPUCell`) holds
+the text content — but instead of storing codepoints directly, it stores either a single
+codepoint (the common case for ASCII/Latin) or an index into a separate shared table
+called `TextCache`. The second struct (`GPUCell`) holds only rendering attributes (colors,
+style flags, sprite index into the texture atlas).
+
+`TextCache` is a reference-counted, deduplicated store for multi-codepoint sequences.
+When kitty encounters a ZWJ emoji or combining character sequence, it inserts the full
+codepoint sequence into the `TextCache` and stores just the index in the cell. Multiple
+cells can reference the same entry (e.g., if the same emoji appears twice on screen),
+and entries are freed when their reference count drops to zero.
+
+This means:
+
+- Simple ASCII characters cost no extra memory (codepoint stored inline in the cell).
+- Complex grapheme clusters are stored once and referenced by index.
+- The GPU-facing struct stays small and fixed-size (no variable-length data).
+
+kitty also performs full UAX#29 grapheme cluster segmentation (the Unicode algorithm that
+defines where one "user-perceived character" ends and the next begins). When processing
+PTY input, it checks whether each incoming codepoint forms a grapheme boundary with the
+previous cell. If not, the codepoint is appended to the previous cell's content rather
+than advancing to a new cell.
+
+#### foot: libutf8proc for Grapheme Segmentation
+
+foot takes a different approach. Instead of building its own Unicode segmentation, it
+uses **libutf8proc** — a small C library (originally from the Julia language project)
+that implements Unicode algorithms including grapheme cluster boundary detection
+(UAX#29), normalization, and character properties.
+
+When foot receives terminal output, it uses libutf8proc's `utf8proc_grapheme_break()`
+to decide whether consecutive codepoints belong to the same grapheme cluster. If they
+do, they are kept together as a single unit for rendering.
+
+For the actual rasterization, foot uses **fcft** (a standalone C font library by foot's
+author) which has a `fcft_grapheme_rasterize()` function that takes an entire grapheme
+cluster and renders it as one glyph via HarfBuzz shaping.
+
+foot's grapheme clustering is an optional build-time feature. The biggest unsolved
+problem is width: `wcswidth()` (the standard C function for string display width) gives
+wrong answers for many grapheme clusters, so foot offers a config toggle between
+`wcswidth` (stays in sync with the shell but adds extra spacing) and `double-width`
+(looks better but risks cursor desync with the application).
+
+#### alacritty: Minimal Approach
+
+alacritty (Rust) stores each cell as a base `char` plus an optional `Vec<char>` for
+zero-width combining characters. It does not do full UAX#29 grapheme segmentation —
+combining marks are appended to the base character, but complex sequences like ZWJ
+emoji may not be treated as atomic clusters. Its VT parser (`vte` crate) is a widely
+used standalone Rust library but has no C API.
 
 ### Before Starting
 
 1. Benchmark current emoji rendering to establish baseline
-2. Survey other terminal emulators (kitty, alacritty, wezterm) for their approaches
-3. Create proof-of-concept with simplest alternative first
-4. Consider hybrid approach: keep libvterm for escape sequences, custom layer for cell management
+2. Create proof-of-concept with simplest alternative first
+3. Consider hybrid approach: keep libvterm for escape sequences, custom layer for cell management
+4. Evaluate libutf8proc for grapheme segmentation (small, C, permissive license)
