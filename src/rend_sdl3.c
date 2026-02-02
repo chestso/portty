@@ -5,6 +5,7 @@
 #include "font_resolver.h"
 #include "rend.h"
 #include "rend_sdl3_atlas.h"
+#include "rend_sdl3_boxdraw.h"
 #include "unicode.h"
 #include <SDL3/SDL.h>
 #include <stdint.h>
@@ -633,6 +634,16 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
         cps[cp_count++] = cell.chars[i];
+
+    // Procedural box drawing / block elements — bypass font pipeline
+    if (cp_count == 1 && rend_sdl3_boxdraw_is_supported(cps[0])) {
+        if (!populate_only) {
+            rend_sdl3_boxdraw_draw(data->renderer, cps[0],
+                                   col * data->cell_width, row * data->cell_height,
+                                   data->cell_width, data->cell_height, r, g, b);
+        }
+        goto render_cursor;
+    }
 
     // Select font style
     FontStyle style = FONT_STYLE_NORMAL;
