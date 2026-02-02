@@ -715,8 +715,8 @@ static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
     // Draw bottom-left to top-right diagonal (╱)
     if (cp == 0x2571 || cp == 0x2573) {
         float x0 = (float)x;
-        float y0 = (float)(y + h - 1);
-        float x1 = (float)(x + w - 1);
+        float y0 = (float)(y + h);
+        float x1 = (float)(x + w);
         float y1 = (float)y;
         for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
             draw_aa_line(renderer, x0 + (float)i, y0, x1 + (float)i, y1,
@@ -727,8 +727,8 @@ static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
     if (cp == 0x2572 || cp == 0x2573) {
         float x0 = (float)x;
         float y0 = (float)y;
-        float x1 = (float)(x + w - 1);
-        float y1 = (float)(y + h - 1);
+        float x1 = (float)(x + w);
+        float y1 = (float)(y + h);
         for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
             draw_aa_line(renderer, x0 + (float)i, y0, x1 + (float)i, y1,
                          r, g, b);
