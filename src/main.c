@@ -34,7 +34,7 @@ int verbose = 0;
 // Function prototypes
 static void print_usage(const char *progname);
 static int png_render_text(const char *text, const char *output_path,
-                           float font_size, const char *font_name, int ft_hint_target);
+                           const char *font_name, int ft_hint_target);
 
 // Context passed to event loop callbacks
 typedef struct
@@ -304,7 +304,7 @@ int main(int argc, char *argv[])
     const char *font_name = NULL;
     const char *colr_debug_path = NULL; // COLR layer debug prefix
     char **exec_argv = NULL;            // Command to run (NULL = default shell)
-    float font_size = 12.0f;            // Default font size in points
+    const float font_size = 12.0f;      // Default font size in points
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
 
@@ -314,7 +314,7 @@ int main(int argc, char *argv[])
         { NULL, 0, NULL, 0 }
     };
 
-    while ((opt = getopt_long(argc, argv, "hveds:f:g:P:D:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvedf:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -329,13 +329,6 @@ int main(int argc, char *argv[])
         case 'd':
             debug_grid_enabled = 1;
             fprintf(stderr, "STATUS: debug grid enabled via CLI flag\n");
-            break;
-        case 's':
-            font_size = atof(optarg);
-            if (font_size <= 0.0f) {
-                fprintf(stderr, "ERROR: Invalid font size: %s\n", optarg);
-                return 1;
-            }
             break;
         case 'f':
             font_name = optarg;
@@ -410,7 +403,7 @@ int main(int argc, char *argv[])
             fprintf(stderr, "Usage: %s -P \"text\" output.png\n", argv[0]);
             return 1;
         }
-        return png_render_text(png_text, argv[optind], font_size, font_name, ft_hint_target);
+        return png_render_text(png_text, argv[optind], font_name, ft_hint_target);
     }
 
     // Set app metadata before SDL initialization as recommended by SDL3
@@ -684,8 +677,9 @@ static void print_usage(const char *progname)
     printf("  -v          Verbose output (debug information)\n");
     printf("  -e          Exit immediately (for testing)\n");
     printf("  -d          Enable debug grid (for testing)\n");
-    printf("  -s SIZE     Font size in points (default: 12.0)\n");
-    printf("  -f FONT     Font family name (e.g., \"Adwaita Mono\")\n");
+    printf("  -f PATTERN  Font (fontconfig pattern, default: monospace)\n");
+    printf("              Size is part of the pattern, e.g. -f monospace-16\n");
+    printf("              Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
     printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
@@ -705,8 +699,9 @@ static void print_usage(const char *progname)
 }
 
 static int png_render_text(const char *text, const char *output_path,
-                           float font_size, const char *font_name, int ft_hint_target)
+                           const char *font_name, int ft_hint_target)
 {
+    const float font_size = 12.0f;
     int ret = 1;
     SDL_Window *window = NULL;
     SDL_Renderer *sdl_rend = NULL;

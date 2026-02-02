@@ -299,11 +299,15 @@ static void sdl3_destroy(RendererBackend *backend)
 
 static bool load_font_style(FontBackend *font, FontType type, FontStyle style,
                             const char *font_name, float font_size,
-                            const FontOptions *options, const char *label)
+                            const FontOptions *options, const char *label,
+                            float *out_size)
 {
     FontResolutionResult result;
     if (font_resolver_find_font(type, font_name, &result) != 0)
         return false;
+
+    if (out_size && result.size > 0)
+        *out_size = result.size;
 
     bool ok = font_load_font(font, style, result.font_path, font_size, options);
     if (ok)
@@ -361,25 +365,34 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         }
     }
 
-    // Save font size and options for dynamic fallback loading later
-    data->font_size = font_size;
-    data->font_options = options;
-
     // Load normal monospace font (required)
+    // Pattern size (e.g. "-f monospace-24") overrides the default font_size
+    float resolved_size = 0;
     if (!load_font_style(data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
-                         font_name, font_size, &options, "Normal")) {
+                         font_name, font_size, &options, "Normal", &resolved_size)) {
         fprintf(stderr, "Failed to load or find normal font\n");
         font_resolver_cleanup();
         return -1;
     }
+    if (resolved_size > 0) {
+        vlog("Font pattern specifies size %.1f, overriding default %.1f\n", resolved_size, font_size);
+        font_size = resolved_size;
+        // Reload normal font at the pattern-specified size
+        load_font_style(data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
+                        font_name, font_size, &options, "Normal", NULL);
+    }
+
+    // Save font size and options for dynamic fallback loading later
+    data->font_size = font_size;
+    data->font_options = options;
 
     // Load bold font (optional)
     load_font_style(data->font, FONT_TYPE_BOLD, FONT_STYLE_BOLD,
-                    font_name, font_size, &options, "Bold");
+                    font_name, font_size, &options, "Bold", NULL);
 
     // Load emoji font (optional)
     load_font_style(data->font, FONT_TYPE_EMOJI, FONT_STYLE_EMOJI,
-                    NULL, font_size * EMOJI_FONT_SCALE, &options, "Emoji");
+                    NULL, font_size * EMOJI_FONT_SCALE, &options, "Emoji", NULL);
 
     // NOTE: font_resolver_cleanup() is deferred to sdl3_destroy() so the
     // resolver remains available for runtime dynamic fallback queries.

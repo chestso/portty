@@ -9,14 +9,14 @@
 #include <strings.h>
 
 // Forward declarations
-static char *find_font_with_pattern(const char *pattern, char **family_name);
+static char *find_font_with_pattern(const char *pattern, char **family_name, float *out_size);
 static int is_fixed_width_font(const char *font_path);
 
 // Global fontconfig configuration
 static FcConfig *fc_config = NULL;
 
 // Helper function to find font using fontconfig
-static char *find_font_with_pattern(const char *pattern, char **family_name)
+static char *find_font_with_pattern(const char *pattern, char **family_name, float *out_size)
 {
     FcPattern *pat;
     char *font_path = NULL;
@@ -27,6 +27,13 @@ static char *find_font_with_pattern(const char *pattern, char **family_name)
     if (!pat) {
         vlog("Failed to parse font pattern: '%s'\n", pattern);
         return NULL;
+    }
+
+    // Extract size from parsed pattern before substitution overwrites it
+    if (out_size) {
+        double parsed_size = 0;
+        if (FcPatternGetDouble(pat, FC_SIZE, 0, &parsed_size) == FcResultMatch && parsed_size > 0)
+            *out_size = (float)parsed_size;
     }
 
     FcConfigSubstitute(fc_config, pat, FcMatchPattern);
@@ -123,7 +130,7 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
     // Initialize result
     result->font_path = NULL;
     result->family_name = NULL;
-    result->size = 24.0f; // Default size
+    result->size = 0; // 0 = not specified in pattern
 
     const char *pattern = NULL;
     char bold_pattern[256];
@@ -153,7 +160,7 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
     char *font_path = NULL;
     char *family_name = NULL;
 
-    font_path = find_font_with_pattern(pattern, &family_name);
+    font_path = find_font_with_pattern(pattern, &family_name, &result->size);
     if (!font_path) {
         vlog("Failed to find font for pattern: %s\n", pattern);
         return -1;

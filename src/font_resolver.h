@@ -26,7 +26,7 @@ int font_resolver_init();
 // Resolve a specific font type with fallback strategies
 int font_resolver_find_font(
     FontType type,               // Font type to resolve
-    const char *family,          // Font family name (NULL for default)
+    const char *pattern,         // Font pattern (NULL for default)
     FontResolutionResult *result // Output resolution result
 );
 
