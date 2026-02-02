@@ -9,7 +9,8 @@
 #include "font.h"
 #include "font_ft.h"
 #include "font_ft_internal.h"
-#include "font_resolver.h"
+#include "font_resolve.h"
+#include "font_resolve_fc.h"
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
@@ -381,12 +382,13 @@ int main(int argc, char *argv[])
 
     // List monospace fonts and exit
     if (list_fonts) {
-        if (font_resolver_init() != 0) {
+        FontResolveBackend *resolve = font_resolve_init(&font_resolve_backend_fc);
+        if (!resolve) {
             fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
             return 1;
         }
-        font_resolver_list_monospace();
-        font_resolver_cleanup();
+        font_resolve_list_monospace(resolve);
+        font_resolve_destroy(resolve);
         return 0;
     }
 

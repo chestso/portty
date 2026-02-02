@@ -1,4 +1,4 @@
-#include "font_resolver.h"
+#include "font_resolve_fc.h"
 #include "common.h"
 #include <fontconfig/fontconfig.h>
 #include <ft2build.h>
@@ -9,14 +9,13 @@
 #include <strings.h>
 
 // Forward declarations
-static char *find_font_with_pattern(const char *pattern, char **family_name, float *out_size);
+static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
+                                    char **family_name, float *out_size);
 static int is_fixed_width_font(const char *font_path);
 
-// Global fontconfig configuration
-static FcConfig *fc_config = NULL;
-
 // Helper function to find font using fontconfig
-static char *find_font_with_pattern(const char *pattern, char **family_name, float *out_size)
+static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
+                                    char **family_name, float *out_size)
 {
     FcPattern *pat;
     char *font_path = NULL;
@@ -102,30 +101,39 @@ static int is_fixed_width_font(const char *font_path)
     return fixed;
 }
 
-int font_resolver_init()
+static bool fc_init(FontResolveBackend *resolve)
 {
-    // Initialize fontconfig
     FcBool result = FcInit();
     if (!result) {
         vlog("Failed to initialize fontconfig\n");
-        return -1;
+        return false;
     }
 
-    // Get the default config
-    fc_config = FcConfigGetCurrent();
+    FcConfig *fc_config = FcConfigGetCurrent();
     if (!fc_config) {
         vlog("Failed to get fontconfig current config\n");
-        return -1;
+        return false;
     }
 
-    return 0;
+    resolve->backend_data = fc_config;
+    return true;
 }
 
-int font_resolver_find_font(FontType type, const char *family, FontResolutionResult *result)
+static void fc_destroy(FontResolveBackend *resolve)
 {
-    if (!result) {
-        return -1;
+    if (resolve->backend_data) {
+        FcFini();
+        resolve->backend_data = NULL;
     }
+}
+
+static int fc_find_font(FontResolveBackend *resolve, FontType type,
+                        const char *family, FontResolutionResult *result)
+{
+    if (!result)
+        return -1;
+
+    FcConfig *fc_config = (FcConfig *)resolve->backend_data;
 
     // Initialize result
     result->font_path = NULL;
@@ -150,7 +158,7 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
         pattern = "emoji";
         break;
     case FONT_TYPE_FALLBACK:
-        vlog("FONT_TYPE_FALLBACK should use font_resolver_find_font_for_codepoint()\n");
+        vlog("FONT_TYPE_FALLBACK should use font_resolve_find_font_for_codepoint()\n");
         return -1;
     default:
         vlog("Invalid font type requested\n");
@@ -160,7 +168,7 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
     char *font_path = NULL;
     char *family_name = NULL;
 
-    font_path = find_font_with_pattern(pattern, &family_name, &result->size);
+    font_path = find_font_with_pattern(fc_config, pattern, &family_name, &result->size);
     if (!font_path) {
         vlog("Failed to find font for pattern: %s\n", pattern);
         return -1;
@@ -168,14 +176,17 @@ int font_resolver_find_font(FontType type, const char *family, FontResolutionRes
 
     result->font_path = font_path;
     result->family_name = family_name;
-    vlog("font_resolver_find_font: resolved type=%d to path='%s' family='%s'\n", type, result->font_path, result->family_name ? result->family_name : "(null)");
+    vlog("font_resolve_find_font: resolved type=%d to path='%s' family='%s'\n", type, result->font_path, result->family_name ? result->family_name : "(null)");
     return 0;
 }
 
-int font_resolver_find_font_for_codepoint(uint32_t codepoint, FontResolutionResult *result)
+static int fc_find_font_for_codepoint(FontResolveBackend *resolve,
+                                      uint32_t codepoint, FontResolutionResult *result)
 {
-    if (!result || !fc_config)
+    if (!result || !resolve->backend_data)
         return -1;
+
+    FcConfig *fc_config = (FcConfig *)resolve->backend_data;
 
     result->font_path = NULL;
     result->family_name = NULL;
@@ -230,70 +241,52 @@ int font_resolver_find_font_for_codepoint(uint32_t codepoint, FontResolutionResu
     return ret;
 }
 
-void font_resolver_list_monospace()
+static void fc_list_monospace(FontResolveBackend *resolve)
 {
-    // Substitute "monospace" to expand into all aliased families
-    FcPattern *pat = FcNameParse((FcChar8 *)"monospace");
+    FcConfig *fc_config = (FcConfig *)resolve->backend_data;
+
+    // List all installed fonts, then filter to monospace
+    FcPattern *pat = FcPatternCreate();
     if (!pat)
         return;
 
-    FcConfigSubstitute(fc_config, pat, FcMatchPattern);
-
-    // Extract all family names from the substituted pattern
-    int capacity = 64;
-    char **names = malloc(sizeof(char *) * capacity);
-    int count = 0;
-    if (!names) {
+    FcObjectSet *os = FcObjectSetBuild(FC_FAMILY, FC_FILE, FC_CHARSET, NULL);
+    if (!os) {
         FcPatternDestroy(pat);
         return;
     }
 
-    FcChar8 *family = NULL;
-    for (int i = 0; FcPatternGetString(pat, FC_FAMILY, i, &family) == FcResultMatch; i++) {
-        // Skip the generic "monospace" alias itself
-        if (strcasecmp((char *)family, "monospace") == 0)
-            continue;
+    FcFontSet *fs = FcFontList(fc_config, pat, os);
+    FcObjectSetDestroy(os);
+    FcPatternDestroy(pat);
+    if (!fs)
+        return;
 
-        // Verify the font is actually installed (resolves to itself)
-        FcPattern *check = FcNameParse(family);
-        if (!check)
-            continue;
-        FcConfigSubstitute(fc_config, check, FcMatchPattern);
-        FcDefaultSubstitute(check);
+    int capacity = 64;
+    char **names = malloc(sizeof(char *) * capacity);
+    int count = 0;
+    if (!names) {
+        FcFontSetDestroy(fs);
+        return;
+    }
 
-        FcResult res;
-        FcPattern *match = FcFontMatch(fc_config, check, &res);
-        FcPatternDestroy(check);
-        if (!match)
-            continue;
-
-        // Check that resolved family matches what we asked for
-        FcChar8 *matched_family = NULL;
-        int family_matches = 0;
-        if (FcPatternGetString(match, FC_FAMILY, 0, &matched_family) == FcResultMatch) {
-            family_matches = (strcasecmp((char *)family, (char *)matched_family) == 0);
-        }
-
-        // Check charset for Latin 'A'
-        FcCharSet *cs = NULL;
-        int has_latin = 0;
-        if (family_matches && FcPatternGetCharSet(match, FC_CHARSET, 0, &cs) == FcResultMatch && cs) {
-            has_latin = FcCharSetHasChar(cs, 0x0041);
-        }
-
-        // Verify the font is actually fixed-width
-        int is_mono = 0;
+    for (int i = 0; i < fs->nfont; i++) {
+        FcChar8 *family = NULL;
         FcChar8 *file = NULL;
-        if (family_matches && has_latin &&
-            FcPatternGetString(match, FC_FILE, 0, &file) == FcResultMatch && file) {
-            is_mono = is_fixed_width_font((const char *)file);
-        }
-        FcPatternDestroy(match);
+        FcCharSet *cs = NULL;
 
-        if (!family_matches || !has_latin || !is_mono)
+        if (FcPatternGetString(fs->fonts[i], FC_FAMILY, 0, &family) != FcResultMatch)
+            continue;
+        if (FcPatternGetString(fs->fonts[i], FC_FILE, 0, &file) != FcResultMatch)
             continue;
 
-        // Deduplicate
+        // Must contain Latin 'A' (U+0041)
+        if (FcPatternGetCharSet(fs->fonts[i], FC_CHARSET, 0, &cs) != FcResultMatch || !cs)
+            continue;
+        if (!FcCharSetHasChar(cs, 0x0041))
+            continue;
+
+        // Deduplicate by family name before expensive FreeType check
         int dup = 0;
         for (int j = 0; j < count; j++) {
             if (strcasecmp(names[j], (char *)family) == 0) {
@@ -301,19 +294,28 @@ void font_resolver_list_monospace()
                 break;
             }
         }
-        if (!dup) {
-            if (count >= capacity) {
-                capacity *= 2;
-                names = realloc(names, sizeof(char *) * capacity);
-                if (!names) {
-                    FcPatternDestroy(pat);
-                    return;
-                }
+        if (dup)
+            continue;
+
+        // Verify the font is actually fixed-width
+        if (!is_fixed_width_font((const char *)file))
+            continue;
+
+        if (count >= capacity) {
+            capacity *= 2;
+            char **tmp = realloc(names, sizeof(char *) * capacity);
+            if (!tmp) {
+                for (int j = 0; j < count; j++)
+                    free(names[j]);
+                free(names);
+                FcFontSetDestroy(fs);
+                return;
             }
-            names[count++] = strdup((char *)family);
+            names = tmp;
         }
+        names[count++] = strdup((char *)family);
     }
-    FcPatternDestroy(pat);
+    FcFontSetDestroy(fs);
 
     // Sort alphabetically
     for (int i = 0; i < count - 1; i++) {
@@ -333,24 +335,12 @@ void font_resolver_list_monospace()
     free(names);
 }
 
-void font_resolver_free_result(FontResolutionResult *result)
-{
-    if (result) {
-        if (result->font_path) {
-            free(result->font_path);
-            result->font_path = NULL;
-        }
-        if (result->family_name) {
-            free(result->family_name);
-            result->family_name = NULL;
-        }
-    }
-}
-
-void font_resolver_cleanup()
-{
-    if (fc_config) {
-        FcFini();
-        fc_config = NULL;
-    }
-}
+FontResolveBackend font_resolve_backend_fc = {
+    .name = "fontconfig",
+    .backend_data = NULL,
+    .init = fc_init,
+    .destroy = fc_destroy,
+    .find_font = fc_find_font,
+    .find_font_for_codepoint = fc_find_font_for_codepoint,
+    .list_monospace = fc_list_monospace,
+};

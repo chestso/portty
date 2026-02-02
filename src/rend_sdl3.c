@@ -2,7 +2,8 @@
 #include "common.h"
 #include "font.h"
 #include "font_ft.h"
-#include "font_resolver.h"
+#include "font_resolve.h"
+#include "font_resolve_fc.h"
 #include "png_writer.h"
 #include "rend.h"
 #include "rend_sdl3_atlas.h"
@@ -191,6 +192,9 @@ typedef struct RendererSdl3Data
 
     RendSdl3Atlas atlas;
 
+    // Font resolver backend (kept alive for runtime fallback queries)
+    FontResolveBackend *resolve;
+
     // Dynamic font fallback cache
     FallbackCacheEntry fallback_cache[FALLBACK_CACHE_SIZE];
     int fallback_cache_count;
@@ -227,6 +231,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->debug_grid = 0;
     data->scroll_offset = 0;
     data->last_title = NULL;
+    data->resolve = NULL;
     data->fallback_cache_count = 0;
     data->font_size = 0;
     memset(&data->font_options, 0, sizeof(data->font_options));
@@ -290,20 +295,24 @@ static void sdl3_destroy(RendererBackend *backend)
     }
 
     // Cleanup font resolver (deferred from sdl3_load_fonts)
-    font_resolver_cleanup();
+    if (data->resolve) {
+        font_resolve_destroy(data->resolve);
+        data->resolve = NULL;
+    }
 
     free(data->last_title);
     free(data);
     backend->backend_data = NULL;
 }
 
-static bool load_font_style(FontBackend *font, FontType type, FontStyle style,
+static bool load_font_style(FontResolveBackend *resolve, FontBackend *font,
+                            FontType type, FontStyle style,
                             const char *font_name, float font_size,
                             const FontOptions *options, const char *label,
                             float *out_size)
 {
     FontResolutionResult result;
-    if (font_resolver_find_font(type, font_name, &result) != 0)
+    if (font_resolve_find_font(resolve, type, font_name, &result) != 0)
         return false;
 
     if (out_size && result.size > 0)
@@ -315,7 +324,7 @@ static bool load_font_style(FontBackend *font, FontType type, FontStyle style,
     else
         vlog("Failed to load %s font from %s\n", label, result.font_path);
 
-    font_resolver_free_result(&result);
+    font_resolve_free_result(&result);
     return ok;
 }
 
@@ -336,7 +345,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     vlog("Loading fonts with size %.1f, hinting=%s\n", font_size, hint_name);
 
     // Initialize font resolver
-    if (font_resolver_init() != 0) {
+    data->resolve = font_resolve_init(&font_resolve_backend_fc);
+    if (!data->resolve) {
         fprintf(stderr, "Failed to initialize font resolver\n");
         return -1;
     }
@@ -368,17 +378,18 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     // Load normal monospace font (required)
     // Pattern size (e.g. "-f monospace-24") overrides the default font_size
     float resolved_size = 0;
-    if (!load_font_style(data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
+    if (!load_font_style(data->resolve, data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
                          font_name, font_size, &options, "Normal", &resolved_size)) {
         fprintf(stderr, "Failed to load or find normal font\n");
-        font_resolver_cleanup();
+        font_resolve_destroy(data->resolve);
+        data->resolve = NULL;
         return -1;
     }
     if (resolved_size > 0) {
         vlog("Font pattern specifies size %.1f, overriding default %.1f\n", resolved_size, font_size);
         font_size = resolved_size;
         // Reload normal font at the pattern-specified size
-        load_font_style(data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
+        load_font_style(data->resolve, data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
                         font_name, font_size, &options, "Normal", NULL);
     }
 
@@ -387,11 +398,11 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     data->font_options = options;
 
     // Load bold font (optional)
-    load_font_style(data->font, FONT_TYPE_BOLD, FONT_STYLE_BOLD,
+    load_font_style(data->resolve, data->font, FONT_TYPE_BOLD, FONT_STYLE_BOLD,
                     font_name, font_size, &options, "Bold", NULL);
 
     // Load emoji font (optional)
-    load_font_style(data->font, FONT_TYPE_EMOJI, FONT_STYLE_EMOJI,
+    load_font_style(data->resolve, data->font, FONT_TYPE_EMOJI, FONT_STYLE_EMOJI,
                     NULL, font_size * EMOJI_FONT_SCALE, &options, "Emoji", NULL);
 
     // NOTE: font_resolver_cleanup() is deferred to sdl3_destroy() so the
@@ -522,13 +533,13 @@ static const char *fallback_cache_lookup(RendererSdl3Data *data, uint32_t codepo
             return data->fallback_cache[i].font_path;
     }
 
-    // Query fontconfig
+    // Query font resolver
     FontResolutionResult result;
     char *path = NULL;
-    if (font_resolver_find_font_for_codepoint(codepoint, &result) == 0) {
+    if (font_resolve_find_font_for_codepoint(data->resolve, codepoint, &result) == 0) {
         path = result.font_path;
         result.font_path = NULL; // take ownership
-        font_resolver_free_result(&result);
+        font_resolve_free_result(&result);
     }
 
     // Store in cache (evict oldest if full)
