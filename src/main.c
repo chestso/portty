@@ -208,9 +208,11 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
     renderer_resize(ctx->rend, pixel_w, pixel_h);
 
     int cell_w, cell_h;
+    int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
     if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h)) {
-        int cols = pixel_w / cell_w;
-        int rows = pixel_h / cell_h;
+        renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
+        int cols = (pixel_w - pad_l - pad_r) / cell_w;
+        int rows = (pixel_h - pad_t - pad_b) / cell_h;
         if (cols > 0 && rows > 0) {
             terminal_resize(ctx->term, cols, rows);
             pty_resize(ctx->pty, rows, cols);
@@ -260,13 +262,15 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
         return false; // Not consumed - let scrollback handle wheel events
     }
 
-    // Convert pixel coordinates to cell coordinates
+    // Convert pixel coordinates to cell coordinates (accounting for padding)
     int cell_w, cell_h;
+    int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
     if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0) {
         return false;
     }
-    int col = pixel_x / cell_w;
-    int row = pixel_y / cell_h;
+    renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
+    int col = (pixel_x - pad_l) / cell_w;
+    int row = (pixel_y - pad_t) / cell_h;
 
     // Clamp to terminal dimensions
     int term_rows, term_cols;
@@ -313,10 +317,12 @@ int main(int argc, char *argv[])
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
         { "reflow", no_argument, NULL, 'R' },
+        { "no-padding", no_argument, NULL, 'N' },
         { NULL, 0, NULL, 0 }
     };
 
     int reflow_enabled = 0;
+    int no_padding = 0;
 
     while ((opt = getopt_long(argc, argv, "hvedf:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
@@ -374,6 +380,9 @@ int main(int argc, char *argv[])
             break;
         case 'R':
             reflow_enabled = 1;
+            break;
+        case 'N':
+            no_padding = 1;
             break;
         case '?':
             print_usage(argv[0]);
@@ -551,14 +560,21 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // Derive window size from font cell dimensions
+        // Disable padding if requested via --no-padding
+        if (no_padding) {
+            renderer_set_padding(rend, 0, 0, 0, 0);
+        }
+
+        // Derive window size from font cell dimensions plus padding
         int cell_w, cell_h;
+        int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
         int win_w = 800, win_h = 600;
         if (renderer_get_cell_size(rend, &cell_w, &cell_h)) {
-            win_w = init_cols * cell_w;
-            win_h = init_rows * cell_h;
-            vlog("Derived window size from font: %dx%d (%d cols * %d px, %d rows * %d px)\n",
-                 win_w, win_h, init_cols, cell_w, init_rows, cell_h);
+            renderer_get_padding(rend, &pad_l, &pad_t, &pad_r, &pad_b);
+            win_w = init_cols * cell_w + pad_l + pad_r;
+            win_h = init_rows * cell_h + pad_t + pad_b;
+            vlog("Derived window size from font: %dx%d (%d cols * %d px + %d pad, %d rows * %d px + %d pad)\n",
+                 win_w, win_h, init_cols, cell_w, pad_l + pad_r, init_rows, cell_h, pad_t + pad_b);
         }
         SDL_SetWindowSize(window, win_w, win_h);
         renderer_resize(rend, win_w, win_h);
@@ -697,6 +713,7 @@ static void print_usage(const char *progname)
     printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
+    printf("  --no-padding  Disable padding around terminal content\n");
     printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
     printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");

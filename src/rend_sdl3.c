@@ -704,6 +704,12 @@ typedef struct RendererSdl3Data
     int scroll_offset;
     char *last_title;
 
+    // Padding around the terminal content area
+    int pad_left;
+    int pad_right;
+    int pad_top;
+    int pad_bottom;
+
     RendSdl3Atlas atlas;
 
     // Font resolver backend (kept alive for runtime fallback queries)
@@ -745,6 +751,10 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->debug_grid = 0;
     data->scroll_offset = 0;
     data->last_title = NULL;
+    data->pad_left = 0;
+    data->pad_right = 0;
+    data->pad_top = 0;
+    data->pad_bottom = 0;
     data->resolve = NULL;
     data->fallback_cache_count = 0;
     data->font_size = 0;
@@ -936,12 +946,20 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     data->cell_width = metrics->cell_width;
     data->cell_height = metrics->cell_height;
 
+    // Initialize padding values (1px left/right, half cell height top/bottom)
+    data->pad_left = 1;
+    data->pad_right = 1;
+    data->pad_top = data->cell_height / 2;
+    data->pad_bottom = data->cell_height / 2;
+
     vlog("Font metrics - ascent: %d, descent: %d\n",
          data->font_ascent, data->font_descent);
     vlog("Character dimensions - width: %d, height: %d\n",
          data->char_width, data->char_height);
     vlog("Cell dimensions - width: %d, height: %d\n",
          data->cell_width, data->cell_height);
+    vlog("Padding - left: %d, right: %d, top: %d, bottom: %d\n",
+         data->pad_left, data->pad_right, data->pad_top, data->pad_bottom);
 
     // Log which fonts were successfully loaded
     vlog("Font loading summary:\n");
@@ -1149,8 +1167,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
     if (!populate_only && !cell.bg.is_default) {
         SDL_FRect bg_rect = {
-            (float)(col * data->cell_width),
-            (float)(row * data->cell_height),
+            (float)(data->pad_left + col * data->cell_width),
+            (float)(data->pad_top + row * data->cell_height),
             (float)data->cell_width,
             (float)data->cell_height
         };
@@ -1182,7 +1200,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (cp_count == 1 && rend_sdl3_boxdraw_is_supported(cps[0])) {
         if (!populate_only) {
             rend_sdl3_boxdraw_draw(data->renderer, cps[0],
-                                   col * data->cell_width, row * data->cell_height,
+                                   data->pad_left + col * data->cell_width,
+                                   data->pad_top + row * data->cell_height,
                                    data->cell_width, data->cell_height, r, g, b);
         }
         goto render_cursor;
@@ -1206,8 +1225,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             style = FONT_STYLE_EMOJI;
     }
 
-    int cell_x = col * data->cell_width;
-    int cell_y = row * data->cell_height;
+    int cell_x = data->pad_left + col * data->cell_width;
+    int cell_y = data->pad_top + row * data->cell_height;
     int avail_w = columns_to_consume * data->cell_width;
     int avail_h = data->cell_height;
     void *font_data = data->font->font_data[style];
@@ -1320,8 +1339,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
 render_cursor:
     if (!populate_only && show_cursor && row == cursor_pos.row && col == cursor_pos.col) {
-        float cx = (float)(col * data->cell_width);
-        float cy = (float)(row * data->cell_height);
+        float cx = (float)(data->pad_left + col * data->cell_width);
+        float cy = (float)(data->pad_top + row * data->cell_height);
         float cw = (float)data->cell_width;
         float ch = (float)data->cell_height;
 
@@ -1371,8 +1390,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
 
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
-    int display_rows = data->height / data->cell_height;
-    int display_cols = data->width / data->cell_width;
+    int display_rows = (data->height - data->pad_top - data->pad_bottom) / data->cell_height;
+    int display_cols = (data->width - data->pad_left - data->pad_right) / data->cell_width;
     if (display_rows > term_rows)
         display_rows = term_rows;
     if (display_cols > term_cols)
@@ -1399,11 +1418,13 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
         SDL_SetRenderDrawColor(data->renderer, 255, 255, 255, 200);
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
         for (int col = 0; col <= display_cols; col++) {
-            SDL_FRect vline = { (float)(col * data->cell_width), 0.0f, 2.0f, (float)data->height };
+            SDL_FRect vline = { (float)(data->pad_left + col * data->cell_width), (float)data->pad_top,
+                                2.0f, (float)(display_rows * data->cell_height) };
             SDL_RenderFillRect(data->renderer, &vline);
         }
         for (int row = 0; row <= display_rows; row++) {
-            SDL_FRect hline = { 0.0f, (float)(row * data->cell_height), (float)data->width, 2.0f };
+            SDL_FRect hline = { (float)data->pad_left, (float)(data->pad_top + row * data->cell_height),
+                                (float)(display_cols * data->cell_width), 2.0f };
             SDL_RenderFillRect(data->renderer, &hline);
         }
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
@@ -1459,6 +1480,31 @@ static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *c
     *cell_width = data->cell_width;
     *cell_height = data->cell_height;
     return true;
+}
+
+static bool sdl3_get_padding(RendererBackend *backend, int *left, int *top, int *right, int *bottom)
+{
+    if (!backend || !backend->backend_data)
+        return false;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    *left = data->pad_left;
+    *top = data->pad_top;
+    *right = data->pad_right;
+    *bottom = data->pad_bottom;
+    return true;
+}
+
+static void sdl3_set_padding(RendererBackend *backend, int left, int top, int right, int bottom)
+{
+    if (!backend || !backend->backend_data)
+        return;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    data->pad_left = left;
+    data->pad_top = top;
+    data->pad_right = right;
+    data->pad_bottom = bottom;
+    vlog("Padding set to - left: %d, right: %d, top: %d, bottom: %d\n",
+         left, right, top, bottom);
 }
 
 static void sdl3_scroll(RendererBackend *backend, TerminalBackend *term, int delta)
@@ -1642,6 +1688,8 @@ RendererBackend renderer_backend_sdl3 = {
     .toggle_debug_grid = sdl3_toggle_debug_grid,
     .log_stats = sdl3_log_stats,
     .get_cell_size = sdl3_get_cell_size,
+    .get_padding = sdl3_get_padding,
+    .set_padding = sdl3_set_padding,
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,
