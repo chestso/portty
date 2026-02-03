@@ -312,8 +312,11 @@ int main(int argc, char *argv[])
     static struct option long_options[] = {
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
+        { "reflow", no_argument, NULL, 'R' },
         { NULL, 0, NULL, 0 }
     };
+
+    int reflow_enabled = 0;
 
     while ((opt = getopt_long(argc, argv, "hvedf:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
@@ -368,6 +371,9 @@ int main(int argc, char *argv[])
             break;
         case 'D':
             colr_debug_path = optarg;
+            break;
+        case 'R':
+            reflow_enabled = 1;
             break;
         case '?':
             print_usage(argv[0]);
@@ -467,6 +473,12 @@ int main(int argc, char *argv[])
         fprintf(stderr, "Failed to initialize terminal\n");
         SDL_Quit();
         return 1;
+    }
+
+    // Enable reflow if requested (disabled by default due to libvterm bug)
+    if (reflow_enabled) {
+        terminal_set_reflow(term, true);
+        vlog("Text reflow enabled (UNSTABLE: may crash on extreme resize)\n");
     }
 
     // Only create window and renderer if we're going to run the event loop
@@ -685,6 +697,8 @@ static void print_usage(const char *progname)
     printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
+    printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
+    printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
     printf("\n");

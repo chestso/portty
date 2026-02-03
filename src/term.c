@@ -167,3 +167,10 @@ void terminal_end_paste(TerminalBackend *term)
         return;
     term->end_paste(term);
 }
+
+void terminal_set_reflow(TerminalBackend *term, bool enabled)
+{
+    if (!term || !term->set_reflow)
+        return;
+    term->set_reflow(term, enabled);
+}

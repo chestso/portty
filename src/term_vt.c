@@ -8,6 +8,13 @@
 
 #define SCROLLBACK_SIZE 1000
 
+// Scrollback line entry - stores cells with original column count
+typedef struct
+{
+    VTermScreenCell *cells;
+    int cols;
+} ScrollbackLine;
+
 // Default ANSI 16-color palette based on charmbracelet/vhs theme
 // clang-format off
 static const uint8_t default_palette[16][3] = {
@@ -49,7 +56,7 @@ typedef struct TerminalVtData
     bool cursor_visible;
     bool cursor_blink_enabled;
     char *title;
-    VTermScreenCell **scrollback;
+    ScrollbackLine *scrollback;
     int scrollback_lines;
     int scrollback_capacity;
 
@@ -159,7 +166,10 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     vterm_screen_enable_altscreen(data->screen, 1);
     vterm_screen_set_callbacks(data->screen, &cb, data);
     vterm_screen_set_damage_merge(data->screen, VTERM_DAMAGE_SCROLL);
-    vterm_screen_enable_reflow(data->screen, true);
+    // Reflow disabled by default due to libvterm bug that can cause crashes
+    // during extreme resizes. Enable via --reflow CLI flag.
+    // See: https://github.com/neovim/neovim/issues/25234
+    vterm_screen_enable_reflow(data->screen, false);
 
     // Set up output callback for mouse escape sequences
     vterm_output_set_callback(data->vt, term_output_callback, data);
@@ -198,7 +208,7 @@ static void vt_destroy(TerminalBackend *backend)
         free(data->title);
     if (data->scrollback) {
         for (int i = 0; i < data->scrollback_lines; i++)
-            free(data->scrollback[i]);
+            free(data->scrollback[i].cells);
         free(data->scrollback);
     }
 
@@ -484,7 +494,7 @@ static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
 
     // Initialize scrollback buffer if needed
     if (!data->scrollback) {
-        data->scrollback = malloc(SCROLLBACK_SIZE * sizeof(VTermScreenCell *));
+        data->scrollback = malloc(SCROLLBACK_SIZE * sizeof(ScrollbackLine));
         if (!data->scrollback)
             return 0;
         data->scrollback_capacity = SCROLLBACK_SIZE;
@@ -493,23 +503,25 @@ static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
 
     // Expand scrollback buffer if needed
     if (data->scrollback_lines >= data->scrollback_capacity) {
-        VTermScreenCell **new_scrollback = realloc(
+        ScrollbackLine *new_scrollback = realloc(
             data->scrollback,
-            (data->scrollback_capacity + SCROLLBACK_SIZE) * sizeof(VTermScreenCell *));
+            (data->scrollback_capacity + SCROLLBACK_SIZE) * sizeof(ScrollbackLine));
         if (!new_scrollback)
             return 0;
         data->scrollback = new_scrollback;
         data->scrollback_capacity += SCROLLBACK_SIZE;
     }
 
-    // Allocate and copy the line
-    VTermScreenCell *line = malloc(cols * sizeof(VTermScreenCell));
-    if (!line)
+    // Allocate and copy the line, storing original column count
+    VTermScreenCell *line_cells = malloc(cols * sizeof(VTermScreenCell));
+    if (!line_cells)
         return 0;
 
-    memcpy(line, cells, cols * sizeof(VTermScreenCell));
+    memcpy(line_cells, cells, cols * sizeof(VTermScreenCell));
 
-    data->scrollback[data->scrollback_lines] = line;
+    ScrollbackLine *entry = &data->scrollback[data->scrollback_lines];
+    entry->cells = line_cells;
+    entry->cols = cols;
     data->scrollback_lines++;
 
     return 1;
@@ -524,26 +536,27 @@ static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
 
     // Get the last line from scrollback
     data->scrollback_lines--;
-    VTermScreenCell *line = data->scrollback[data->scrollback_lines];
+    ScrollbackLine *entry = &data->scrollback[data->scrollback_lines];
 
-    // Copy cells to output
-    int copy_cols = (cols < data->width) ? cols : data->width;
-    memcpy(cells, line, copy_cols * sizeof(VTermScreenCell));
+    // Copy cells to output, using the stored column count (not current width)
+    int stored_cols = entry->cols;
+    int copy_cols = (cols < stored_cols) ? cols : stored_cols;
+    memcpy(cells, entry->cells, copy_cols * sizeof(VTermScreenCell));
 
     // Fill remaining cells with default cells if needed
     if (copy_cols < cols) {
         VTermScreenCell default_cell;
-        VTermPos pos = { .row = 0, .col = 0 };
-        vterm_screen_get_cell(data->screen, pos, &default_cell);
-        default_cell.chars[0] = 0;
+        memset(&default_cell, 0, sizeof(default_cell));
+        default_cell.width = 1; // Must be 1 for valid empty cell
         for (int i = copy_cols; i < cols; i++) {
             cells[i] = default_cell;
         }
     }
 
     // Free the line
-    free(line);
-    data->scrollback[data->scrollback_lines] = NULL;
+    free(entry->cells);
+    entry->cells = NULL;
+    entry->cols = 0;
 
     return 1;
 }
@@ -569,14 +582,16 @@ static int vt_get_scrollback_cell(TerminalBackend *backend, int scrollback_row, 
     int internal_row = data->scrollback_lines - 1 - scrollback_row;
     if (internal_row < 0 || internal_row >= data->scrollback_lines)
         return -1;
-    if (col < 0 || col >= data->width)
+
+    ScrollbackLine *entry = &data->scrollback[internal_row];
+    if (!entry->cells)
         return -1;
 
-    VTermScreenCell *line = data->scrollback[internal_row];
-    if (!line)
+    // Check column bounds against stored line width
+    if (col < 0 || col >= entry->cols)
         return -1;
 
-    VTermScreenCell *vcell = &line[col];
+    VTermScreenCell *vcell = &entry->cells[col];
 
     // Copy character data
     int i;
@@ -803,6 +818,16 @@ static void vt_end_paste(TerminalBackend *backend)
     vterm_keyboard_end_paste(data->vt);
 }
 
+static void vt_set_reflow(TerminalBackend *backend, bool enabled)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+    if (data->screen)
+        vterm_screen_enable_reflow(data->screen, enabled);
+}
+
 // Global backend instance
 TerminalBackend terminal_backend_vt = {
     .name = "libvterm",
@@ -830,4 +855,5 @@ TerminalBackend terminal_backend_vt = {
     .send_char = vt_send_char,
     .start_paste = vt_start_paste,
     .end_paste = vt_end_paste,
+    .set_reflow = vt_set_reflow,
 };
