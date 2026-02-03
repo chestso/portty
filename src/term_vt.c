@@ -228,6 +228,13 @@ static void vt_resize(TerminalBackend *backend, int width, int height)
         data->height = height;
         vterm_set_size(data->vt, height, width);
         vterm_screen_flush_damage(data->screen);
+
+        // Sync cursor position directly from libvterm state after resize
+        // The movecursor callback may not fire during resize, causing desync
+        VTermPos cursorpos;
+        vterm_state_get_cursorpos(data->state, &cursorpos);
+        data->cursor_pos = cursorpos;
+
         // Full redraw needed after resize
         damage_union(data, 0, 0, height, width);
     }
@@ -479,7 +486,7 @@ static int term_bell(void *user)
     return 1;
 }
 
-// Callback for vterm output (e.g., mouse escape sequences)
+// Callback for vterm output (e.g., mouse escape sequences, keyboard input)
 static void term_output_callback(const char *s, size_t len, void *user)
 {
     TerminalVtData *data = (TerminalVtData *)user;

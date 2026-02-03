@@ -822,8 +822,12 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  bool cursor_visible, bool populate_only)
 {
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
-    // Hide cursor when scrolled back, when terminal says it's not visible, or when cursor_visible is false
-    bool show_cursor = cursor_visible && (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
+    // Hide cursor when scrolled back, when terminal says it's not visible, when cursor_visible is false,
+    // or when cursor is outside visible bounds (can happen during resize before shell repositions cursor)
+    bool cursor_in_bounds = cursor_pos.row >= 0 && cursor_pos.row < display_rows &&
+                            cursor_pos.col >= 0 && cursor_pos.col < display_cols;
+    bool show_cursor = cursor_visible && cursor_in_bounds &&
+                       (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
 
     for (int row = 0; row < display_rows; row++) {
         for (int col = 0; col < display_cols;) {
