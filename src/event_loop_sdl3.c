@@ -517,9 +517,6 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
             SDL_RenderPresent(ctx->sdl_renderer);
             terminal_clear_redraw(term);
             ctx->force_redraw = 0;
-
-            // Log atlas stats after rendering activity
-            renderer_log_stats(rend);
         }
     }
 
