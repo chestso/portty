@@ -37,7 +37,7 @@ static const uint8_t default_palette[16][3] = {
 };
 // clang-format on
 
-static const uint8_t default_fg[3] = { 0xdd, 0xdd, 0xdd };
+static const uint8_t default_fg[3] = { 0xf8, 0xf8, 0xf2 };
 static const uint8_t default_bg[3] = { 0x00, 0x00, 0x00 };
 
 // Forward declaration for callback type
