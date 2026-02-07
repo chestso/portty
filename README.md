@@ -16,6 +16,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz
 - Configurable color schemes
 - Proper terminal resize handling with reflow
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
+- Custom terminfo entry (`TERM=bloom-terminal`) with truecolor, cursor style, bracketed paste, and strikethrough support
 
 ## Architecture
 
@@ -83,6 +84,16 @@ build/src/bloom-terminal
 
 # Run with verbose output (useful to debug font/COLR/emoji handling)
 build/src/bloom-terminal -v
+```
+
+## Terminfo
+
+bloom-terminal ships a custom terminfo entry (`bloom-terminal`) based on `xterm-256color`. It is compiled and installed automatically by `./build.sh --install` via `tic`. The child shell's `TERMINFO_DIRS` is set to `~/.local/share/terminfo` so the entry is found without system-wide installation.
+
+If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
+
+```bash
+infocmp bloom-terminal | ssh remote-host 'tic -x -'
 ```
 
 ## Dependencies

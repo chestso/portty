@@ -10,3 +10,11 @@ icon256_DATA = icons/hicolor/256x256/apps/bloom-terminal.png
 
 desktopdir = $(datadir)/applications
 desktop_DATA = applications/bloom-terminal.desktop
+
+EXTRA_DIST = bloom-terminal.ti
+
+install-data-local:
+	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti
+
+uninstall-local:
+	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal

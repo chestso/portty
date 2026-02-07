@@ -139,7 +139,21 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         // Child process - exec command or default shell
 
         // Set TERM environment variable
-        setenv("TERM", "xterm-256color", 1);
+        setenv("TERM", "bloom-terminal", 1);
+
+        // Point to our installed terminfo database
+        const char *home = getenv("HOME");
+        if (home) {
+            char buf[4096];
+            const char *existing = getenv("TERMINFO_DIRS");
+            if (existing) {
+                snprintf(buf, sizeof(buf), "%s/.local/share/terminfo:%s",
+                         home, existing);
+            } else {
+                snprintf(buf, sizeof(buf), "%s/.local/share/terminfo:", home);
+            }
+            setenv("TERMINFO_DIRS", buf, 1);
+        }
 
         // Also set COLORTERM for applications that check it
         setenv("COLORTERM", "truecolor", 1);
