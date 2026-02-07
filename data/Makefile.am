@@ -11,7 +11,10 @@ icon256_DATA = icons/hicolor/256x256/apps/bloom-terminal.png
 desktopdir = $(datadir)/applications
 desktop_DATA = applications/bloom-terminal.desktop
 
-EXTRA_DIST = bloom-terminal.ti
+emacsdir = $(datadir)/emacs/site-lisp/term
+emacs_DATA = bloom-terminal.el
+
+EXTRA_DIST = bloom-terminal.ti bloom-terminal.el
 
 install-data-local:
 	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti

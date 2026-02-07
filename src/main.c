@@ -489,12 +489,12 @@ int main(int argc, char *argv[])
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
         { "reflow", no_argument, NULL, 'R' },
-        { "no-padding", no_argument, NULL, 'N' },
+        { "padding", no_argument, NULL, 'N' },
         { NULL, 0, NULL, 0 }
     };
 
     int reflow_enabled = 0;
-    int no_padding = 0;
+    int padding = 0;
 
     while ((opt = getopt_long(argc, argv, "hvef:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
@@ -550,7 +550,7 @@ int main(int argc, char *argv[])
             reflow_enabled = 1;
             break;
         case 'N':
-            no_padding = 1;
+            padding = 1;
             break;
         case '?':
             print_usage(argv[0]);
@@ -731,8 +731,8 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        // Disable padding if requested via --no-padding
-        if (no_padding) {
+        // Disable padding unless --padding is passed
+        if (!padding) {
             renderer_set_padding(rend, 0, 0, 0, 0);
         }
 
@@ -877,7 +877,7 @@ static void print_usage(const char *progname)
     printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
-    printf("  --no-padding  Disable padding around terminal content\n");
+    printf("  --padding     Enable padding around terminal content\n");
     printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
     printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");

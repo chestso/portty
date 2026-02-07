@@ -155,6 +155,21 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
             setenv("TERMINFO_DIRS", buf, 1);
         }
 
+        // Help emacs find our term/*.el file
+        if (home) {
+            char buf[4096];
+            const char *existing = getenv("EMACSLOADPATH");
+            if (existing) {
+                snprintf(buf, sizeof(buf),
+                         "%s/.local/share/emacs/site-lisp:%s", home,
+                         existing);
+            } else {
+                snprintf(buf, sizeof(buf),
+                         "%s/.local/share/emacs/site-lisp:", home);
+            }
+            setenv("EMACSLOADPATH", buf, 1);
+        }
+
         // Also set COLORTERM for applications that check it
         setenv("COLORTERM", "truecolor", 1);
 
