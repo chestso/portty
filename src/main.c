@@ -136,6 +136,19 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, int scancod
         result.request_quit = true;
         return result;
     }
+    if (key == SDLK_C && (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT)) {
+        if (terminal_selection_active(ctx->term)) {
+            char *text = terminal_selection_get_text(ctx->term);
+            if (text) {
+                SDL_SetClipboardText(text);
+                free(text);
+            }
+            terminal_selection_clear(ctx->term);
+            result.force_redraw = true;
+        }
+        result.handled = true;
+        return result;
+    }
     if (key == SDLK_V && (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT)) {
         char *clipboard = SDL_GetClipboardText();
         if (clipboard && clipboard[0] != '\0') {
@@ -357,14 +370,24 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
         return true;
     }
 
-    // Right button press — copy to clipboard and clear
-    if (button == 3 && pressed && terminal_selection_active(ctx->term)) {
-        char *text = terminal_selection_get_text(ctx->term);
-        if (text) {
-            SDL_SetClipboardText(text);
-            free(text);
+    // Right button press — copy selection if active, otherwise paste
+    if (button == 3 && pressed) {
+        if (terminal_selection_active(ctx->term)) {
+            char *text = terminal_selection_get_text(ctx->term);
+            if (text) {
+                SDL_SetClipboardText(text);
+                free(text);
+            }
+            terminal_selection_clear(ctx->term);
+        } else {
+            char *clipboard = SDL_GetClipboardText();
+            if (clipboard && clipboard[0] != '\0') {
+                terminal_start_paste(ctx->term);
+                pty_write(ctx->pty, clipboard, strlen(clipboard));
+                terminal_end_paste(ctx->term);
+            }
+            SDL_free(clipboard);
         }
-        terminal_selection_clear(ctx->term);
         return true;
     }
 
