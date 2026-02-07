@@ -1173,6 +1173,29 @@ static bool ensure_fallback_font(RendererSdl3Data *data, const char *font_path)
     return true;
 }
 
+// Draw cell background only; returns columns consumed
+static int render_cell_bg(RendererSdl3Data *data, TerminalBackend *term, int row, int col)
+{
+    TerminalCell cell;
+    if (get_cell_with_scroll(data, term, row, col, &cell) < 0)
+        return 1;
+
+    if (!cell.bg.is_default) {
+        int columns_to_consume = cell.width > 0 ? cell.width : 1;
+        SDL_FRect bg_rect = {
+            (float)(data->pad_left + col * data->cell_width),
+            (float)(data->pad_top + row * data->cell_height),
+            (float)(columns_to_consume * data->cell_width),
+            (float)data->cell_height
+        };
+        SDL_SetRenderDrawColor(data->renderer, cell.bg.r, cell.bg.g, cell.bg.b, 255);
+        SDL_RenderFillRect(data->renderer, &bg_rect);
+        return columns_to_consume;
+    }
+
+    return cell.width > 0 ? cell.width : 1;
+}
+
 static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                        int row, int col, TerminalPos cursor_pos, bool show_cursor,
                        bool populate_only)
@@ -1181,18 +1204,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (get_cell_with_scroll(data, term, row, col, &cell) < 0)
         return 1;
 
-    // Draw background if non-default
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
-    if (!populate_only && !cell.bg.is_default) {
-        SDL_FRect bg_rect = {
-            (float)(data->pad_left + col * data->cell_width),
-            (float)(data->pad_top + row * data->cell_height),
-            (float)data->cell_width,
-            (float)data->cell_height
-        };
-        SDL_SetRenderDrawColor(data->renderer, cell.bg.r, cell.bg.g, cell.bg.b, 255);
-        SDL_RenderFillRect(data->renderer, &bg_rect);
-    }
 
     // Default to consuming 1 column; updated for wide characters below
     int columns_to_consume = 1;
@@ -1405,6 +1417,13 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                        (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
 
     for (int row = 0; row < display_rows; row++) {
+        // Pass 1: draw all cell backgrounds for this row
+        if (!populate_only) {
+            for (int col = 0; col < display_cols;) {
+                col += render_cell_bg(data, term, row, col);
+            }
+        }
+        // Pass 2: draw glyphs, cursors, and selection overlays
         for (int col = 0; col < display_cols;) {
             col += render_cell(data, term, row, col, cursor_pos, show_cursor, populate_only);
         }
