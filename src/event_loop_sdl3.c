@@ -473,7 +473,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                             float mx, my;
                             SDL_GetMouseState(&mx, &my);
                             consumed = callbacks->on_mouse(callbacks->user_data, (int)mx, (int)my,
-                                                           button, true, SDL_GetModState());
+                                                           button, true, 0, SDL_GetModState());
                         }
                     }
                     // Fall back to scrollback scrolling if not consumed
@@ -487,9 +487,10 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                 if (callbacks && callbacks->on_mouse) {
                     bool pressed = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
                     int button = event.button.button; // SDL: 1=left, 2=middle, 3=right
+                    int clicks = pressed ? event.button.clicks : 0;
                     if (callbacks->on_mouse(callbacks->user_data, (int)event.button.x,
                                             (int)event.button.y, button, pressed,
-                                            SDL_GetModState())) {
+                                            clicks, SDL_GetModState())) {
                         ctx->force_redraw = 1;
                     }
                 }
@@ -499,7 +500,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                     bool any_button_pressed = (event.motion.state != 0);
                     if (callbacks->on_mouse(callbacks->user_data, (int)event.motion.x,
                                             (int)event.motion.y, 0, any_button_pressed,
-                                            SDL_GetModState())) {
+                                            0, SDL_GetModState())) {
                         ctx->force_redraw = 1;
                     }
                 }

@@ -35,8 +35,10 @@ typedef struct
 
     // Handle mouse events - returns true if event was consumed
     // button: 1=left, 2=middle, 3=right, 4=wheel up, 5=wheel down
+    // clicks: SDL click count (1=single, 2=double, 3=triple; 0 for motion/wheel)
     // mod: SDL modifier flags
-    bool (*on_mouse)(void *user_data, int pixel_x, int pixel_y, int button, bool pressed, int mod);
+    bool (*on_mouse)(void *user_data, int pixel_x, int pixel_y, int button, bool pressed,
+                     int clicks, int mod);
 
     // User data passed to callbacks
     void *user_data;

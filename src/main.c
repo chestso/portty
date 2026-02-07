@@ -205,6 +205,7 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
 {
     MainContext *ctx = (MainContext *)user_data;
 
+    terminal_selection_clear(ctx->term);
     renderer_resize(ctx->rend, pixel_w, pixel_h);
 
     int cell_w, cell_h;
@@ -236,58 +237,138 @@ static void term_output_to_pty(const char *data, size_t len, void *user)
     }
 }
 
+// Convert pixel coordinates to display row/col (accounting for padding)
+static bool pixel_to_cell(MainContext *ctx, int pixel_x, int pixel_y, int *out_row, int *out_col)
+{
+    int cell_w, cell_h;
+    int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
+    if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0)
+        return false;
+    renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
+    *out_col = (pixel_x - pad_l) / cell_w;
+    *out_row = (pixel_y - pad_t) / cell_h;
+    return true;
+}
+
+// Convert display row to unified row (scrollback rows are negative)
+static int display_row_to_unified(RendererBackend *rend, int display_row)
+{
+    int scroll_offset = renderer_get_scroll_offset(rend);
+    int scrollback_row = scroll_offset - 1 - display_row;
+    if (scrollback_row >= 0) {
+        // In scrollback: unified row is -(scrollback_index + 1)
+        return -(scrollback_row + 1);
+    } else {
+        // Visible terminal: unified row is display_row - scroll_offset
+        return display_row - scroll_offset;
+    }
+}
+
 // Mouse callback for event loop
-static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool pressed, int mod)
+static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool pressed,
+                     int clicks, int mod)
 {
     MainContext *ctx = (MainContext *)user_data;
 
-    bool in_altscreen = terminal_is_altscreen(ctx->term);
     int mouse_mode = terminal_get_mouse_mode(ctx->term);
+    bool shift_held = (mod & SDL_KMOD_SHIFT) != 0;
 
-    // Determine if we should forward this event to the terminal
-    bool should_forward = false;
+    // Forward to terminal if mouse mode is active and Shift is not held
+    if (mouse_mode > 0 && !shift_held) {
+        bool should_forward = false;
+        bool in_altscreen = terminal_is_altscreen(ctx->term);
 
-    if (button == 4 || button == 5) {
-        // Wheel events: forward if in altscreen or mouse mode enabled
-        should_forward = in_altscreen || (mouse_mode > 0);
-    } else if (button > 0) {
-        // Button click events: only if mouse mode enabled
-        should_forward = (mouse_mode > 0);
-    } else {
-        // Motion events (button == 0): only for drag (mode 2) or motion (mode 3) tracking
-        should_forward = (mouse_mode >= 2 && pressed) || (mouse_mode >= 3);
+        if (button == 4 || button == 5) {
+            should_forward = in_altscreen || (mouse_mode > 0);
+        } else if (button > 0) {
+            should_forward = true;
+        } else {
+            should_forward = (mouse_mode >= 2 && pressed) || (mouse_mode >= 3);
+        }
+
+        if (should_forward) {
+            int cell_w, cell_h;
+            int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
+            if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 ||
+                cell_h <= 0)
+                return false;
+            renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
+            int col = (pixel_x - pad_l) / cell_w;
+            int row = (pixel_y - pad_t) / cell_h;
+
+            int term_rows, term_cols;
+            terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
+            if (col >= term_cols)
+                col = term_cols - 1;
+            if (row >= term_rows)
+                row = term_rows - 1;
+            if (col < 0)
+                col = 0;
+            if (row < 0)
+                row = 0;
+
+            terminal_send_mouse_event(ctx->term, row, col, button, pressed, mod);
+            return true;
+        }
+
+        if (button == 4 || button == 5)
+            return false; // Let scrollback handle wheel events
     }
 
-    if (!should_forward) {
-        return false; // Not consumed - let scrollback handle wheel events
-    }
-
-    // Convert pixel coordinates to cell coordinates (accounting for padding)
-    int cell_w, cell_h;
-    int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
-    if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0) {
+    // Wheel events not consumed by terminal — don't handle as selection
+    if (button == 4 || button == 5)
         return false;
-    }
-    renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
-    int col = (pixel_x - pad_l) / cell_w;
-    int row = (pixel_y - pad_t) / cell_h;
+
+    int display_row, display_col;
+    if (!pixel_to_cell(ctx, pixel_x, pixel_y, &display_row, &display_col))
+        return false;
 
     // Clamp to terminal dimensions
     int term_rows, term_cols;
     terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
-    if (col >= term_cols)
-        col = term_cols - 1;
-    if (row >= term_rows)
-        row = term_rows - 1;
-    if (col < 0)
-        col = 0;
-    if (row < 0)
-        row = 0;
+    if (display_col >= term_cols)
+        display_col = term_cols - 1;
+    if (display_col < 0)
+        display_col = 0;
+    if (display_row >= term_rows)
+        display_row = term_rows - 1;
+    if (display_row < 0)
+        display_row = 0;
 
-    // Send mouse event to terminal
-    terminal_send_mouse_event(ctx->term, row, col, button, pressed, mod);
+    int unified_row = display_row_to_unified(ctx->rend, display_row);
 
-    return true; // Event consumed
+    // Left button press — start selection
+    if (button == 1 && pressed) {
+        if (clicks >= 3) {
+            terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_LINE);
+        } else if (clicks == 2) {
+            terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_WORD);
+        } else if (terminal_selection_active(ctx->term)) {
+            terminal_selection_clear(ctx->term);
+        } else {
+            terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_CHAR);
+        }
+        return true;
+    }
+
+    // Motion with button held — drag to update selection
+    if (button == 0 && pressed && terminal_selection_active(ctx->term)) {
+        terminal_selection_update(ctx->term, unified_row, display_col);
+        return true;
+    }
+
+    // Right button press — copy to clipboard and clear
+    if (button == 3 && pressed && terminal_selection_active(ctx->term)) {
+        char *text = terminal_selection_get_text(ctx->term);
+        if (text) {
+            SDL_SetClipboardText(text);
+            free(text);
+        }
+        terminal_selection_clear(ctx->term);
+        return true;
+    }
+
+    return false;
 }
 
 int main(int argc, char *argv[])

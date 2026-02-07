@@ -26,6 +26,24 @@ typedef struct
     int end_row, end_col;
 } TerminalDamageRect;
 
+typedef enum
+{
+    TERM_SELECT_NONE = 0,
+    TERM_SELECT_CHAR, // click-drag
+    TERM_SELECT_WORD, // double-click
+    TERM_SELECT_LINE, // triple-click
+} TerminalSelectMode;
+
+typedef struct
+{
+    bool active;
+    TerminalSelectMode mode;
+    TerminalPos anchor; // original click point
+    TerminalPos start;  // normalized start (always <= end)
+    TerminalPos end;    // normalized end (always >= start)
+    char *word_chars;   // configurable word character set
+} TerminalSelection;
+
 typedef struct
 {
     uint8_t r, g, b;
@@ -61,6 +79,9 @@ struct TerminalBackend
 
     // Backend-specific data
     void *backend_data;
+
+    // Application-level selection state (not backend-specific)
+    TerminalSelection selection;
 
     // Backend function pointers
     bool (*init)(TerminalBackend *term, int width, int height);
@@ -189,5 +210,14 @@ void terminal_end_paste(TerminalBackend *term);
 
 // Reflow setting
 void terminal_set_reflow(TerminalBackend *term, bool enabled);
+
+// Selection API
+void terminal_selection_start(TerminalBackend *term, int row, int col, TerminalSelectMode mode);
+void terminal_selection_update(TerminalBackend *term, int row, int col);
+void terminal_selection_clear(TerminalBackend *term);
+bool terminal_selection_active(TerminalBackend *term);
+bool terminal_cell_in_selection(TerminalBackend *term, int row, int col);
+char *terminal_selection_get_text(TerminalBackend *term);
+void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars);
 
 #endif /* TERM_H */

@@ -39,6 +39,12 @@ typedef struct
 #define CURSOR_COLOR_B 0xF4
 #define CURSOR_COLOR_A 220
 
+// Selection highlight color: muted Dracula comment-style (RGBA)
+#define SELECTION_COLOR_R 0x44
+#define SELECTION_COLOR_G 0x47
+#define SELECTION_COLOR_B 0x5A
+#define SELECTION_COLOR_A 180
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================
@@ -1349,6 +1355,26 @@ render_cursor:
                                CURSOR_COLOR_B, CURSOR_COLOR_A);
         draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
         SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+    }
+
+    // Selection highlight
+    if (!populate_only) {
+        int scroll_offset = data->scroll_offset;
+        int scrollback_row = scroll_offset - 1 - row;
+        int unified_row = (scrollback_row >= 0) ? -(scrollback_row + 1) : (row - scroll_offset);
+        if (terminal_cell_in_selection(term, unified_row, col)) {
+            float sx = (float)(data->pad_left + col * data->cell_width);
+            float sy = (float)(data->pad_top + row * data->cell_height);
+            float sw = (float)(columns_to_consume * data->cell_width);
+            float sh = (float)data->cell_height;
+
+            SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+            SDL_SetRenderDrawColor(data->renderer, SELECTION_COLOR_R, SELECTION_COLOR_G,
+                                   SELECTION_COLOR_B, SELECTION_COLOR_A);
+            SDL_FRect sel_rect = { sx, sy, sw, sh };
+            SDL_RenderFillRect(data->renderer, &sel_rect);
+            SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+        }
     }
 
     return columns_to_consume;
