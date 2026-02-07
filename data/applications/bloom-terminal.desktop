@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Bloom Terminal
+Comment=Terminal emulator
+Exec=bloom-terminal
+Icon=bloom-terminal
+Terminal=false
+Categories=System;TerminalEmulator;

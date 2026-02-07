@@ -11,6 +11,7 @@
 #include "font_ft_internal.h"
 #include "font_resolve.h"
 #include "font_resolve_fc.h"
+#include "png_reader.h"
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
@@ -36,6 +37,88 @@ int verbose = 0;
 static void print_usage(const char *progname);
 static int png_render_text(const char *text, const char *output_path,
                            const char *font_name, int ft_hint_target);
+
+// Find the icon file by probing several paths relative to the executable
+static const char *find_icon_path(void)
+{
+    static char path[PATH_MAX];
+    const char *base = SDL_GetBasePath();
+    const char *icon_rel = "icons/hicolor/256x256/apps/bloom-terminal.png";
+
+    struct
+    {
+        const char *fmt;
+    } probes[] = {
+        /* Dev build: exe is build/src/bloom-terminal, data is at project root */
+        { "%s../../data/%s" },
+        /* Installed: exe is $PREFIX/bin/, data is $PREFIX/share/ */
+        { "%s../share/%s" },
+    };
+
+    if (base) {
+        for (int i = 0; i < (int)(sizeof(probes) / sizeof(probes[0])); i++) {
+            snprintf(path, sizeof(path), probes[i].fmt, base, icon_rel);
+            if (access(path, R_OK) == 0) {
+                vlog("Found icon at %s\n", path);
+                return path;
+            }
+        }
+    }
+
+#ifdef DATADIR
+    /* Autotools compile-time datadir */
+    snprintf(path, sizeof(path), "%s/%s", DATADIR, icon_rel);
+    if (access(path, R_OK) == 0) {
+        vlog("Found icon at %s (DATADIR)\n", path);
+        return path;
+    }
+#endif
+
+    /* CWD fallback */
+    snprintf(path, sizeof(path), "data/%s", icon_rel);
+    if (access(path, R_OK) == 0) {
+        vlog("Found icon at %s (CWD)\n", path);
+        return path;
+    }
+
+    return NULL;
+}
+
+// Load and set the window icon from a PNG file
+static void set_window_icon(SDL_Window *win)
+{
+    const char *icon_path = find_icon_path();
+    if (!icon_path) {
+        vlog("No icon file found, skipping window icon\n");
+        return;
+    }
+
+    uint8_t *pixels = NULL;
+    int w = 0, h = 0;
+    if (png_read_rgba(icon_path, &pixels, &w, &h) != 0) {
+        fprintf(stderr, "WARNING: Failed to read icon %s\n", icon_path);
+        return;
+    }
+
+    SDL_Surface *surface =
+        SDL_CreateSurfaceFrom(w, h, SDL_PIXELFORMAT_RGBA32, pixels, w * 4);
+    if (!surface) {
+        fprintf(stderr, "WARNING: Failed to create icon surface: %s\n",
+                SDL_GetError());
+        free(pixels);
+        return;
+    }
+
+    if (!SDL_SetWindowIcon(win, surface)) {
+        /* Expected on Wayland — icon comes from .desktop + hicolor theme */
+        vlog("SDL_SetWindowIcon skipped: %s\n", SDL_GetError());
+    } else {
+        vlog("Window icon set from %s (%dx%d)\n", icon_path, w, h);
+    }
+
+    SDL_DestroySurface(surface);
+    free(pixels);
+}
 
 // Context passed to event loop callbacks
 typedef struct
@@ -531,7 +614,7 @@ int main(int argc, char *argv[])
     if (verbose) {
         fprintf(stderr, "DEBUG: Setting SDL app metadata\n");
     }
-    if (!SDL_SetAppMetadata("bloom-terminal", "1.0.0", "org.bloom.terminal")) {
+    if (!SDL_SetAppMetadata("bloom-terminal", "1.0.0", "bloom-terminal")) {
         fprintf(stderr, "WARNING: Failed to set SDL app metadata: %s\n", SDL_GetError());
     }
 
@@ -616,6 +699,9 @@ int main(int argc, char *argv[])
             return 1;
         }
         vlog("Window created successfully\n");
+
+        // Set window icon (non-fatal if missing)
+        set_window_icon(window);
 
         // Create renderer with flags
         vlog("Creating renderer\n");
