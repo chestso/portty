@@ -15,7 +15,7 @@ typedef struct
 {
     char data[16];
     size_t len;
-    bool handled;      // If true, event was consumed (e.g., Ctrl+G for debug grid)
+    bool handled;      // If true, event was consumed by an app-level shortcut
     bool request_quit; // If true, request event loop to quit
     bool force_redraw; // If true, request a redraw after this event
 } KeyboardResult;

@@ -5,7 +5,10 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "sixel.h"
+
 #define TERM_MAX_CHARS_PER_CELL 6
+#define TERM_MAX_SIXEL_IMAGES   64
 
 // Forward declarations
 struct TerminalBackend;
@@ -82,6 +85,10 @@ struct TerminalBackend
 
     // Application-level selection state (not backend-specific)
     TerminalSelection selection;
+
+    // Application-level sixel image storage
+    SixelImage *sixel_images[TERM_MAX_SIXEL_IMAGES];
+    int sixel_image_count;
 
     // Backend function pointers
     bool (*init)(TerminalBackend *term, int width, int height);
@@ -219,5 +226,10 @@ bool terminal_selection_active(TerminalBackend *term);
 bool terminal_cell_in_selection(TerminalBackend *term, int row, int col);
 char *terminal_selection_get_text(TerminalBackend *term);
 void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars);
+
+// Sixel image API
+void terminal_add_sixel_image(TerminalBackend *term, SixelImage *image);
+void terminal_clear_sixel_images(TerminalBackend *term);
+void terminal_scroll_sixel_images(TerminalBackend *term, int delta);
 
 #endif /* TERM_H */

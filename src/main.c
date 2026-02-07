@@ -215,10 +215,6 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, int scancod
     }
 
     // Application shortcuts (not terminal input)
-    if (key == SDLK_Q && (mod & SDL_KMOD_CTRL)) {
-        result.request_quit = true;
-        return result;
-    }
     if (key == SDLK_C && (mod & SDL_KMOD_CTRL) && (mod & SDL_KMOD_SHIFT)) {
         if (terminal_selection_active(ctx->term)) {
             char *text = terminal_selection_get_text(ctx->term);
@@ -243,16 +239,6 @@ static KeyboardResult on_keyboard(void *user_data, int key, int mod, int scancod
         result.handled = true;
         return result;
     }
-    if ((key == SDLK_G) && (mod & SDL_KMOD_CTRL)) {
-        if (ctx->rend) {
-            renderer_toggle_debug_grid(ctx->rend);
-            result.force_redraw = true;
-            result.handled = true;
-        }
-        vlog("Ctrl+G pressed, debug grid toggled\n");
-        return result;
-    }
-
     int tmod = sdl_mod_to_term(mod);
 
     // Shift+PageUp/Down: scrollback navigation (normal screen only)
@@ -489,7 +475,6 @@ int main(int argc, char *argv[])
     int opt;
 
     // Parse command line arguments
-    int debug_grid_enabled = 0;
     int list_fonts = 0;
     int ft_hint_target = FT_LOAD_TARGET_LIGHT; // Default: light hinting
     char *png_text = NULL;
@@ -511,7 +496,7 @@ int main(int argc, char *argv[])
     int reflow_enabled = 0;
     int no_padding = 0;
 
-    while ((opt = getopt_long(argc, argv, "hvedf:g:P:D:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvef:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -522,10 +507,6 @@ int main(int argc, char *argv[])
         case 'e':
             running = 0; // Set running to false to exit event loop
             fprintf(stderr, "STATUS: exit_flag_set=1\n");
-            break;
-        case 'd':
-            debug_grid_enabled = 1;
-            fprintf(stderr, "STATUS: debug grid enabled via CLI flag\n");
             break;
         case 'f':
             font_name = optarg;
@@ -818,12 +799,6 @@ int main(int argc, char *argv[])
 
     // Only enter event loop if running
     if (running) {
-        // Enable debug grid if requested via CLI
-        if (debug_grid_enabled && rend) {
-            renderer_toggle_debug_grid(rend);
-            vlog("Debug grid enabled via CLI flag\n");
-        }
-
         // Set up context and callbacks for event loop
         MainContext main_ctx = {
             .term = term,
@@ -896,7 +871,6 @@ static void print_usage(const char *progname)
     printf("  -h          Show this help message\n");
     printf("  -v          Verbose output (debug information)\n");
     printf("  -e          Exit immediately (for testing)\n");
-    printf("  -d          Enable debug grid (for testing)\n");
     printf("  -f PATTERN  Font (fontconfig pattern, default: monospace)\n");
     printf("              Size is part of the pattern, e.g. -f monospace-16\n");
     printf("              Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
@@ -917,8 +891,6 @@ static void print_usage(const char *progname)
     printf("    %s -- sh -c 'echo hello'        # Run shell command\n", progname);
     printf("\n");
     printf("Runtime controls:\n");
-    printf("  Ctrl+G      Toggle debug grid\n");
-    printf("  Ctrl+Q      Quit\n");
 }
 
 static int png_render_text(const char *text, const char *output_path,

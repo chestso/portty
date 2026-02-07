@@ -1,5 +1,6 @@
 #include "term_vt.h"
 #include "common.h"
+#include "sixel.h"
 #include "term.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -65,6 +66,10 @@ typedef struct TerminalVtData
     int mouse_mode; // 0=none, 1=click, 2=drag, 3=move
     TerminalOutputCallback output_cb;
     void *output_cb_user;
+
+    // Sixel support
+    TerminalBackend *backend; // back-pointer to owning backend
+    SixelParser *sixel_parser;
 } TerminalVtData;
 
 // Forward declarations
@@ -128,6 +133,37 @@ static TerminalColor convert_vterm_color(const VTermColor *vcol, VTermState *sta
     return result;
 }
 
+// DCS callback for sixel sequences
+static int vt_dcs_callback(const char *command, size_t commandlen, VTermStringFragment frag,
+                           void *user)
+{
+    TerminalVtData *data = (TerminalVtData *)user;
+
+    // Check if command is "q" (sixel introducer)
+    if (commandlen == 1 && command[0] == 'q') {
+        if (frag.initial) {
+            sixel_parser_begin(data->sixel_parser);
+        }
+        sixel_parser_feed(data->sixel_parser, frag.str, frag.len);
+        if (frag.final) {
+            SixelImage *img = sixel_parser_finish(data->sixel_parser);
+            if (img) {
+                img->cursor_row = data->cursor_pos.row;
+                img->cursor_col = data->cursor_pos.col;
+                terminal_add_sixel_image(data->backend, img);
+                // Force a full redraw so the image appears
+                damage_union(data, 0, 0, data->height, data->width);
+            }
+        }
+        return 1; // consumed
+    }
+    return 0; // not handled
+}
+
+static const VTermStateFallbacks vt_fallbacks = {
+    .dcs = vt_dcs_callback,
+};
+
 static bool vt_init(TerminalBackend *backend, int width, int height)
 {
     // Allocate libvterm-specific data
@@ -152,6 +188,8 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     data->mouse_mode = 0;
     data->output_cb = NULL;
     data->output_cb_user = NULL;
+    data->backend = backend;
+    data->sixel_parser = sixel_parser_create();
 
     data->vt = vterm_new(height, width);
     if (!data->vt) {
@@ -175,6 +213,9 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     vterm_output_set_callback(data->vt, term_output_callback, data);
 
     vterm_screen_reset(data->screen, 1);
+
+    // Set up sixel DCS fallback handler
+    vterm_screen_set_unrecognised_fallbacks(data->screen, &vt_fallbacks, data);
 
     // Apply default palette
     for (int i = 0; i < 16; i++) {
@@ -211,6 +252,8 @@ static void vt_destroy(TerminalBackend *backend)
             free(data->scrollback[i].cells);
         free(data->scrollback);
     }
+    sixel_parser_destroy(data->sixel_parser);
+    terminal_clear_sixel_images(backend);
 
     free(data);
     backend->backend_data = NULL;
@@ -530,6 +573,10 @@ static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
     entry->cells = line_cells;
     entry->cols = cols;
     data->scrollback_lines++;
+
+    // Scroll sixel images up by one row when content scrolls
+    if (data->backend)
+        terminal_scroll_sixel_images(data->backend, 1);
 
     return 1;
 }

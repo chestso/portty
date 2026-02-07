@@ -706,7 +706,6 @@ typedef struct RendererSdl3Data
     int font_descent;
     int width;
     int height;
-    int debug_grid;
     int scroll_offset;
     char *last_title;
 
@@ -731,7 +730,18 @@ typedef struct RendererSdl3Data
     // so their font_data pointers remain stable for atlas cache keys
     LoadedFallbackFont loaded_fallbacks[MAX_LOADED_FALLBACKS];
     int loaded_fallback_count;
+
+    // Sixel texture cache
+    struct
+    {
+        SDL_Texture *texture;
+        SixelImage *source; // pointer identity check
+    } sixel_cache[TERM_MAX_SIXEL_IMAGES];
+    int sixel_cache_count;
 } RendererSdl3Data;
+
+// Forward declaration for sixel cache cleanup (used in sdl3_destroy)
+static void sixel_cache_clear(RendererSdl3Data *data);
 
 static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
 {
@@ -754,7 +764,6 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->font_descent = 0;
     data->width = 0;
     data->height = 0;
-    data->debug_grid = 0;
     data->scroll_offset = 0;
     data->last_title = NULL;
     data->pad_left = 0;
@@ -797,6 +806,9 @@ static void sdl3_destroy(RendererBackend *backend)
         return;
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+
+    // Destroy sixel texture cache
+    sixel_cache_clear(data);
 
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
@@ -1399,6 +1411,87 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
     }
 }
 
+// Destroy all cached sixel textures
+static void sixel_cache_clear(RendererSdl3Data *data)
+{
+    for (int i = 0; i < data->sixel_cache_count; i++) {
+        if (data->sixel_cache[i].texture)
+            SDL_DestroyTexture(data->sixel_cache[i].texture);
+        data->sixel_cache[i].texture = NULL;
+        data->sixel_cache[i].source = NULL;
+    }
+    data->sixel_cache_count = 0;
+}
+
+// Find or create an SDL_Texture for a sixel image (by pointer identity)
+static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, SixelImage *img)
+{
+    // Check cache
+    for (int i = 0; i < data->sixel_cache_count; i++) {
+        if (data->sixel_cache[i].source == img)
+            return data->sixel_cache[i].texture;
+    }
+
+    // Create new texture
+    SDL_Texture *tex =
+        SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
+                          img->width, img->height);
+    if (!tex)
+        return NULL;
+
+    SDL_UpdateTexture(tex, NULL, img->pixels, img->width * 4);
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+
+    if (data->sixel_cache_count < TERM_MAX_SIXEL_IMAGES) {
+        data->sixel_cache[data->sixel_cache_count].texture = tex;
+        data->sixel_cache[data->sixel_cache_count].source = img;
+        data->sixel_cache_count++;
+    }
+
+    return tex;
+}
+
+// Render sixel images overlaid on the terminal
+static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
+{
+    if (term->sixel_image_count == 0)
+        return;
+
+    int term_rows, term_cols;
+    terminal_get_dimensions(term, &term_rows, &term_cols);
+    (void)term_cols;
+
+    for (int i = 0; i < term->sixel_image_count; i++) {
+        SixelImage *img = term->sixel_images[i];
+        if (!img || !img->valid)
+            continue;
+
+        // Compute screen position accounting for scroll offset
+        int screen_row = img->cursor_row + data->scroll_offset;
+
+        // Pixel position on screen
+        int px = data->pad_left + img->cursor_col * data->cell_width;
+        int py = data->pad_top + screen_row * data->cell_height;
+
+        // Skip if completely off-screen
+        if (py + img->height <= data->pad_top)
+            continue;
+        if (py >= data->height - data->pad_bottom)
+            continue;
+        if (px + img->width <= data->pad_left)
+            continue;
+        if (px >= data->width - data->pad_right)
+            continue;
+
+        SDL_Texture *tex = sixel_get_texture(data, img);
+        if (!tex)
+            continue;
+
+        SDL_FRect dst = { (float)px, (float)py, (float)img->width, (float)img->height };
+        SDL_RenderTexture(data->renderer, tex, NULL, &dst);
+    }
+}
+
 static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
                                bool cursor_visible)
 {
@@ -1439,22 +1532,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
 
-    // Debug grid overlay
-    if (data->debug_grid) {
-        SDL_SetRenderDrawColor(data->renderer, 255, 255, 255, 200);
-        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-        for (int col = 0; col <= display_cols; col++) {
-            SDL_FRect vline = { (float)(data->pad_left + col * data->cell_width), (float)data->pad_top,
-                                2.0f, (float)(display_rows * data->cell_height) };
-            SDL_RenderFillRect(data->renderer, &vline);
-        }
-        for (int row = 0; row <= display_rows; row++) {
-            SDL_FRect hline = { (float)data->pad_left, (float)(data->pad_top + row * data->cell_height),
-                                (float)(display_cols * data->cell_width), 2.0f };
-            SDL_RenderFillRect(data->renderer, &hline);
-        }
-        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
-    }
+    // Phase 4: Overlay sixel images
+    render_sixel_images(data, term);
 }
 
 static void sdl3_present(RendererBackend *backend)
@@ -1464,17 +1543,6 @@ static void sdl3_present(RendererBackend *backend)
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     SDL_RenderPresent(data->renderer);
-}
-
-static void sdl3_toggle_debug_grid(RendererBackend *backend)
-{
-    if (!backend || !backend->backend_data)
-        return;
-
-    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-    data->debug_grid = !data->debug_grid;
-    vlog("Debug grid toggled to %s\n", data->debug_grid ? "ON" : "OFF");
-    vlog("Current debug_grid value: %d\n", data->debug_grid);
 }
 
 static void sdl3_log_stats(RendererBackend *backend)
@@ -1711,7 +1779,6 @@ RendererBackend renderer_backend_sdl3 = {
     .draw_terminal = sdl3_draw_terminal,
     .present = sdl3_present,
     .resize = sdl3_resize,
-    .toggle_debug_grid = sdl3_toggle_debug_grid,
     .log_stats = sdl3_log_stats,
     .get_cell_size = sdl3_get_cell_size,
     .get_padding = sdl3_get_padding,

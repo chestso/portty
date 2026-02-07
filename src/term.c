@@ -1,4 +1,5 @@
 #include "term.h"
+#include "sixel.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -470,4 +471,44 @@ char *terminal_selection_get_text(TerminalBackend *term)
 
     buf[pos] = '\0';
     return buf;
+}
+
+// --- Sixel Image API ---
+
+void terminal_add_sixel_image(TerminalBackend *term, SixelImage *image)
+{
+    if (!term || !image)
+        return;
+
+    // Drop oldest if at capacity
+    if (term->sixel_image_count >= TERM_MAX_SIXEL_IMAGES) {
+        sixel_image_free(term->sixel_images[0]);
+        memmove(&term->sixel_images[0], &term->sixel_images[1],
+                (TERM_MAX_SIXEL_IMAGES - 1) * sizeof(SixelImage *));
+        term->sixel_image_count = TERM_MAX_SIXEL_IMAGES - 1;
+    }
+
+    term->sixel_images[term->sixel_image_count++] = image;
+}
+
+void terminal_clear_sixel_images(TerminalBackend *term)
+{
+    if (!term)
+        return;
+
+    for (int i = 0; i < term->sixel_image_count; i++) {
+        sixel_image_free(term->sixel_images[i]);
+        term->sixel_images[i] = NULL;
+    }
+    term->sixel_image_count = 0;
+}
+
+void terminal_scroll_sixel_images(TerminalBackend *term, int delta)
+{
+    if (!term)
+        return;
+
+    for (int i = 0; i < term->sixel_image_count; i++) {
+        term->sixel_images[i]->cursor_row -= delta;
+    }
 }

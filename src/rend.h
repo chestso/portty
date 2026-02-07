@@ -23,7 +23,6 @@ struct RendererBackend
     void (*draw_terminal)(RendererBackend *rend, TerminalBackend *term, bool cursor_visible);
     void (*present)(RendererBackend *rend);
     void (*resize)(RendererBackend *rend, int width, int height);
-    void (*toggle_debug_grid)(RendererBackend *rend);
     void (*log_stats)(RendererBackend *rend);
     bool (*get_cell_size)(RendererBackend *rend, int *cell_width, int *cell_height);
     bool (*get_padding)(RendererBackend *rend, int *left, int *top, int *right, int *bottom);
@@ -43,7 +42,6 @@ int renderer_load_fonts(RendererBackend *rend, float font_size, const char *font
 void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term, bool cursor_visible);
 void renderer_present(RendererBackend *rend);
 void renderer_resize(RendererBackend *rend, int width, int height);
-void renderer_toggle_debug_grid(RendererBackend *rend);
 void renderer_log_stats(RendererBackend *rend);
 bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_height);
 bool renderer_get_padding(RendererBackend *rend, int *left, int *top, int *right, int *bottom);

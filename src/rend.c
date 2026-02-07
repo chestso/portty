@@ -47,13 +47,6 @@ void renderer_resize(RendererBackend *rend, int width, int height)
     rend->resize(rend, width, height);
 }
 
-void renderer_toggle_debug_grid(RendererBackend *rend)
-{
-    if (!rend || !rend->toggle_debug_grid)
-        return;
-    rend->toggle_debug_grid(rend);
-}
-
 void renderer_log_stats(RendererBackend *rend)
 {
     if (!rend || !rend->log_stats)
