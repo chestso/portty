@@ -6,8 +6,6 @@
 #include "common.h"
 #include "event_loop.h"
 #include "event_loop_sdl3.h"
-#include "font.h"
-#include "font_ft.h"
 #include "font_ft_internal.h"
 #include "font_resolve.h"
 #include "font_resolve_fc.h"
