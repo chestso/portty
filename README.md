@@ -13,9 +13,14 @@ Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Variable-font support (MM_Var) and axis control
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
-- Configurable color schemes
-- Proper terminal resize handling with reflow
+- Sixel graphics protocol support
+- Procedural box drawing and block element rendering (U+2500–U+257F)
+- Text selection with clipboard support (Ctrl+Shift+C to copy, right-click copy/paste)
+- Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
+- Reverse video attribute rendering
+- Nerd Fonts v2 to v3 codepoint translation
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
+- Terminal resize handling with optional reflow (`--reflow`)
 - Custom terminfo entry (`TERM=bloom-terminal`) with truecolor, cursor style, bracketed paste, and strikethrough support
 
 ## Architecture
@@ -38,7 +43,13 @@ bloom-terminal uses a modular backend abstraction design:
   - Supports solid fills, linear/radial/sweep gradients, transforms, glyph masking, and basic composite modes
   - Some paint semantics (extend modes, all composite operators, transform edge-cases) are best-effort
 
-Each backend defines a standard interface (`TerminalBackend`, `RendererBackend`, `FontBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
+- **Event Loop Backend**: Handles SDL event polling and PTY I/O integration
+  - Current implementation: SDL3 (`event_loop_backend_sdl3`)
+
+- **Font Resolver Backend**: Handles font discovery and selection
+  - Current implementation: Fontconfig (`font_resolve_backend_fc`)
+
+Each backend defines a standard interface (`TerminalBackend`, `RendererBackend`, `FontBackend`, `EventLoopBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
 
 ## Building
 
@@ -103,6 +114,7 @@ infocmp bloom-terminal | ssh remote-host 'tic -x -'
 - fontconfig
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz
+- libpng
 
 ## Development
 
