@@ -128,7 +128,11 @@ void main() {
 
 ## 2. Variable Font Axes
 
-Remaining axes beyond weight (wght), which is already implemented.
+The variation axis infrastructure is fully implemented: `cache_mm_var()` caches axis
+metadata, `ft_set_variation_axis()` / `ft_set_variation_axes()` set values, and
+`apply_font_variations()` applies per-style overrides. Currently only the weight (wght)
+axis is used in practice. Remaining work is to wire up additional axes at the
+application level.
 
 ### Slant Axis (slnt)
 
@@ -363,7 +367,9 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ## 4. Subpixel Rendering and LCD Filtering
 
-`FT_CONFIG_OPTION_SUBPIXEL_RENDERING` is defined but `FT_LOAD_TARGET_LCD` is not used.
+`FtFontData` has `subpixel_order` and `lcd_filter` fields (populated from `FontOptions`),
+but `FT_LOAD_TARGET_LCD` and `FT_Library_SetLcdFilter()` are never called — rendering
+always uses `FT_RENDER_MODE_NORMAL`.
 
 ### Goals
 
@@ -465,71 +471,20 @@ SubpixelOrder detect_subpixel_order(FcPattern *pattern) {
 
 ### Current State
 
-- Single font per style (normal, bold, emoji) via `font_resolver.c`
-- No fallback chain mechanism
-- Missing glyphs render as □ (tofu)
+Dynamic per-codepoint font fallback is implemented in `rend_sdl3.c`:
 
-### Goals
+- `fallback_cache_lookup()` queries fontconfig for a font covering a given codepoint,
+  cached in a 64-entry FIFO (`FallbackCacheEntry`) to avoid repeated fontconfig queries
+- `ensure_fallback_font()` loads the resolved font and caches it in a separate LRU pool
+  of up to 8 loaded fonts (`LoadedFallbackFont`), keeping pointers stable for atlas keys
+- The fallback font is swapped into the `FONT_STYLE_FALLBACK` slot for rendering
+- Used for both HarfBuzz-shaped runs and single-glyph rendering paths
 
-- Multiple fallback fonts
-- Automatic fallback selection per codepoint
-- Coverage cache to avoid repeated lookups
+### Possible Improvements
 
-### Technical Design
-
-```c
-#define MAX_FALLBACK_FONTS 8
-
-typedef struct FontFallbackChain {
-    FtFontData *fonts[MAX_FALLBACK_FONTS];
-    int count;
-
-    struct {
-        uint32_t codepoint;
-        int font_index;
-    } *coverage_cache;
-    int coverage_cache_size;
-} FontFallbackChain;
-
-int find_font_for_codepoint(FontFallbackChain *chain, uint32_t codepoint) {
-    // Check cache first
-    // ... cache lookup code ...
-
-    for (int i = 0; i < chain->count; i++) {
-        FT_UInt glyph_index = FT_Get_Char_Index(chain->fonts[i]->ft_face, codepoint);
-        if (glyph_index != 0) {
-            // Cache result
-            // ... cache insert code ...
-            return i;
-        }
-    }
-
-    return -1;
-}
-
-GlyphBitmap *render_with_fallback(FontFallbackChain *chain, uint32_t codepoint,
-                                   uint8_t r, uint8_t g, uint8_t b) {
-    int font_idx = find_font_for_codepoint(chain, codepoint);
-    if (font_idx >= 0) {
-        return rasterize_glyph(chain->fonts[font_idx],
-                               FT_Get_Char_Index(chain->fonts[font_idx]->ft_face, codepoint),
-                               r, g, b);
-    }
-
-    return render_missing_glyph(r, g, b);
-}
-```
-
-**Default Fallback Chain Example:**
-
-```
-1. JetBrains Mono (primary, good ASCII/Latin coverage)
-2. DejaVu Sans Mono (extended Latin, Greek, Cyrillic)
-3. Noto Sans Mono CJK (Chinese, Japanese, Korean)
-4. Noto Sans Mono Arabic (Arabic script)
-5. Noto Color Emoji (emoji)
-6. Symbola (Unicode symbols)
-```
+- User-configurable fallback chain (static list instead of fontconfig per-codepoint)
+- Larger or unbounded fallback cache for terminals displaying many scripts
+- Pre-warm cache for common Unicode blocks at startup
 
 ---
 
