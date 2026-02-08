@@ -9,10 +9,19 @@
 
 #define SCROLLBACK_SIZE 1000
 
+// Per-cell extension attributes not tracked by libvterm
+typedef struct
+{
+    uint8_t underline_style; // 0-5
+    uint8_t ul_color[3];     // RGB
+    bool has_ul_color;       // false = use default constant
+} CellExtAttrs;
+
 // Scrollback line entry - stores cells with original column count
 typedef struct
 {
     VTermScreenCell *cells;
+    CellExtAttrs *ext_cells; // extension attributes per cell (may be NULL for old lines)
     int cols;
 } ScrollbackLine;
 
@@ -71,10 +80,12 @@ typedef struct TerminalVtData
     TerminalBackend *backend; // back-pointer to owning backend
     SixelParser *sixel_parser;
 
-    // Extended underline tracking (SGR 4:4=dotted, 4:5=dashed)
-    // libvterm only supports 0-3 in its 2-bit field; we track 4-5 separately.
-    uint8_t ext_underline_pen;   // current pen state (0-5)
-    uint8_t *ext_underline_grid; // per-cell grid [height * width], 0 = use vterm value
+    // Extension attribute tracking (SGR 4:4/4:5 underline style, SGR 58/59 underline color)
+    // libvterm only supports underline 0-3; we track styles 4-5 and underline color.
+    uint8_t ext_ul_style;    // current pen underline style (0-5)
+    uint8_t ext_ul_color[3]; // current pen underline color RGB
+    bool ext_has_ul_color;   // current pen has explicit underline color
+    CellExtAttrs *ext_grid;  // per-cell grid [height * width]
     TerminalDamageRect grid_damage;
     bool has_grid_damage;
 
@@ -175,19 +186,71 @@ static const VTermStateFallbacks vt_fallbacks = {
     .dcs = vt_dcs_callback,
 };
 
-// Record of an underline pen change at a byte offset in the input buffer.
-#define MAX_UL_TRANSITIONS 64
+// Record of an extension attribute change at a byte offset in the input buffer.
+#define MAX_EXT_TRANSITIONS 64
 typedef struct
 {
-    size_t pos;  // byte offset of the ESC that starts this SGR
-    uint8_t pen; // new ext_underline_pen value
-} UlTransition;
+    size_t pos;              // byte offset of the ESC that starts this SGR
+    uint8_t underline_style; // new underline style (0-5)
+    uint8_t ul_color[3];     // new underline color RGB
+    bool has_ul_color;       // whether explicit underline color is set
+} SgrExtTransition;
+
+// Resolve a 256-color index to RGB
+static void resolve_color_index(uint8_t index, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    if (index < 16) {
+        *r = default_palette[index][0];
+        *g = default_palette[index][1];
+        *b = default_palette[index][2];
+    } else if (index < 232) {
+        // 6x6x6 color cube (indices 16-231)
+        int ci = index - 16;
+        int ri = ci / 36;
+        int gi = (ci % 36) / 6;
+        int bi = ci % 6;
+        *r = ri ? (uint8_t)(ri * 40 + 55) : 0;
+        *g = gi ? (uint8_t)(gi * 40 + 55) : 0;
+        *b = bi ? (uint8_t)(bi * 40 + 55) : 0;
+    } else {
+        // Grayscale ramp (indices 232-255)
+        uint8_t v = (uint8_t)(8 + (index - 232) * 10);
+        *r = v;
+        *g = v;
+        *b = v;
+    }
+}
+
+// Parse a colon-separated sub-parameter value starting at buf[*p].
+// Advances *p past the value. Returns the parsed integer or -1 if empty.
+static long parse_colon_subparam(const char *buf, size_t len, size_t *p)
+{
+    if (*p >= len || buf[*p] == ':' || buf[*p] == ';' || buf[*p] == 'm')
+        return -1;
+    long val = 0;
+    while (*p < len && buf[*p] >= '0' && buf[*p] <= '9') {
+        val = val * 10 + (buf[*p] - '0');
+        (*p)++;
+    }
+    return val;
+}
+
+// Skip to the next colon sub-parameter. Returns false if at ';' or 'm' or end.
+static bool skip_to_next_colon(const char *buf, size_t len, size_t *p)
+{
+    if (*p < len && buf[*p] == ':') {
+        (*p)++;
+        return true;
+    }
+    return false;
+}
 
 // Scan input for CSI SGR sequences (ESC [ ... m).
 // Rewrite 4:4→4:1 and 4:5→4:1 so libvterm stores underline=1.
-// Record underline pen transitions so the caller can split processing.
-static int parse_sgr_underline(TerminalVtData *data, char *buf, size_t len,
-                               UlTransition *transitions, int max_trans)
+// Parse SGR 58 (underline color) and SGR 59 (reset underline color).
+// Record extension attribute transitions so the caller can split processing.
+static int parse_sgr_extensions(TerminalVtData *data, char *buf, size_t len,
+                                SgrExtTransition *transitions, int max_trans)
 {
     int count = 0;
     for (size_t i = 0; i + 2 < len; i++) {
@@ -202,11 +265,16 @@ static int parse_sgr_underline(TerminalVtData *data, char *buf, size_t len,
             continue;
         size_t params_end = i;
 
-        uint8_t old_pen = data->ext_underline_pen;
+        uint8_t old_style = data->ext_ul_style;
+        uint8_t old_color[3] = { data->ext_ul_color[0], data->ext_ul_color[1],
+                                 data->ext_ul_color[2] };
+        bool old_has_color = data->ext_has_ul_color;
 
         size_t p = params_start;
         if (p == params_end) {
-            data->ext_underline_pen = 0;
+            // ESC[m = full reset
+            data->ext_ul_style = 0;
+            data->ext_has_ul_color = false;
         } else {
             while (p < params_end) {
                 long val = 0;
@@ -215,9 +283,11 @@ static int parse_sgr_underline(TerminalVtData *data, char *buf, size_t len,
                     p++;
                 }
                 if (val == 0) {
-                    data->ext_underline_pen = 0;
+                    // SGR 0 = full reset
+                    data->ext_ul_style = 0;
+                    data->ext_has_ul_color = false;
                 } else if (val == 24) {
-                    data->ext_underline_pen = 0;
+                    data->ext_ul_style = 0;
                 } else if (val == 4) {
                     if (p < params_end && buf[p] == ':') {
                         p++;
@@ -228,13 +298,123 @@ static int parse_sgr_underline(TerminalVtData *data, char *buf, size_t len,
                             p++;
                         }
                         if (sub >= 0 && sub <= 5)
-                            data->ext_underline_pen = (uint8_t)sub;
+                            data->ext_ul_style = (uint8_t)sub;
                         if (sub == 4 || sub == 5)
                             buf[sub_start] = '1';
                     } else {
                         // Plain ESC[4m defaults to dotted style
-                        data->ext_underline_pen = 4;
+                        data->ext_ul_style = 4;
                     }
+                } else if (val == 58) {
+                    // SGR 58 - set underline color
+                    if (p < params_end && buf[p] == ':') {
+                        p++;
+                        long color_type = parse_colon_subparam(buf, params_end, &p);
+                        if (color_type == 2) {
+                            // 58:2[:CS]:R:G:B — truecolor
+                            // Read up to 4 colon-separated values, then
+                            // interpret based on count:
+                            //   3 values → R:G:B (no colorspace)
+                            //   4 values → CS:R:G:B (CS ignored)
+                            long v[4] = { -1, -1, -1, -1 };
+                            int nvals = 0;
+                            for (int vi = 0; vi < 4; vi++) {
+                                if (!skip_to_next_colon(buf, params_end, &p))
+                                    break;
+                                v[nvals] = parse_colon_subparam(buf, params_end, &p);
+                                nvals++;
+                            }
+                            if (nvals >= 4) {
+                                // 58:2:CS:R:G:B — v[0]=CS, v[1]=R, v[2]=G, v[3]=B
+                                data->ext_ul_color[0] =
+                                    (uint8_t)(v[1] < 0 ? 0 : v[1] > 255 ? 255
+                                                                        : v[1]);
+                                data->ext_ul_color[1] =
+                                    (uint8_t)(v[2] < 0 ? 0 : v[2] > 255 ? 255
+                                                                        : v[2]);
+                                data->ext_ul_color[2] =
+                                    (uint8_t)(v[3] < 0 ? 0 : v[3] > 255 ? 255
+                                                                        : v[3]);
+                                data->ext_has_ul_color = true;
+                            } else if (nvals >= 3) {
+                                // 58:2:R:G:B — no colorspace
+                                data->ext_ul_color[0] =
+                                    (uint8_t)(v[0] < 0 ? 0 : v[0] > 255 ? 255
+                                                                        : v[0]);
+                                data->ext_ul_color[1] =
+                                    (uint8_t)(v[1] < 0 ? 0 : v[1] > 255 ? 255
+                                                                        : v[1]);
+                                data->ext_ul_color[2] =
+                                    (uint8_t)(v[2] < 0 ? 0 : v[2] > 255 ? 255
+                                                                        : v[2]);
+                                data->ext_has_ul_color = true;
+                            }
+                        } else if (color_type == 5) {
+                            // 58:5:INDEX — 256-color
+                            if (skip_to_next_colon(buf, params_end, &p)) {
+                                long idx = parse_colon_subparam(buf, params_end, &p);
+                                if (idx >= 0 && idx <= 255) {
+                                    resolve_color_index((uint8_t)idx, &data->ext_ul_color[0],
+                                                        &data->ext_ul_color[1],
+                                                        &data->ext_ul_color[2]);
+                                    data->ext_has_ul_color = true;
+                                }
+                            }
+                        }
+                    } else if (p < params_end && buf[p] == ';') {
+                        // SGR 58;2;R;G;B or 58;5;INDEX (semicolon-separated form)
+                        p++;
+                        long color_type = 0;
+                        while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                            color_type = color_type * 10 + (buf[p] - '0');
+                            p++;
+                        }
+                        if (color_type == 2 && p < params_end && buf[p] == ';') {
+                            p++;
+                            long r = 0;
+                            while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                                r = r * 10 + (buf[p] - '0');
+                                p++;
+                            }
+                            if (p < params_end && buf[p] == ';') {
+                                p++;
+                                long g = 0;
+                                while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                                    g = g * 10 + (buf[p] - '0');
+                                    p++;
+                                }
+                                if (p < params_end && buf[p] == ';') {
+                                    p++;
+                                    long b = 0;
+                                    while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                                        b = b * 10 + (buf[p] - '0');
+                                        p++;
+                                    }
+                                    data->ext_ul_color[0] = (uint8_t)(r > 255 ? 255 : r);
+                                    data->ext_ul_color[1] = (uint8_t)(g > 255 ? 255 : g);
+                                    data->ext_ul_color[2] = (uint8_t)(b > 255 ? 255 : b);
+                                    data->ext_has_ul_color = true;
+                                }
+                            }
+                        } else if (color_type == 5 && p < params_end && buf[p] == ';') {
+                            p++;
+                            long idx = 0;
+                            while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                                idx = idx * 10 + (buf[p] - '0');
+                                p++;
+                            }
+                            if (idx >= 0 && idx <= 255) {
+                                resolve_color_index((uint8_t)idx, &data->ext_ul_color[0],
+                                                    &data->ext_ul_color[1],
+                                                    &data->ext_ul_color[2]);
+                                data->ext_has_ul_color = true;
+                            }
+                        }
+                        continue; // already advanced past params
+                    }
+                } else if (val == 59) {
+                    // SGR 59 - reset underline color to default
+                    data->ext_has_ul_color = false;
                 }
                 while (p < params_end && buf[p] != ';')
                     p++;
@@ -243,19 +423,27 @@ static int parse_sgr_underline(TerminalVtData *data, char *buf, size_t len,
             }
         }
 
-        if (data->ext_underline_pen != old_pen && count < max_trans) {
+        bool changed = (data->ext_ul_style != old_style) ||
+                       (data->ext_has_ul_color != old_has_color) ||
+                       (data->ext_has_ul_color &&
+                        (data->ext_ul_color[0] != old_color[0] ||
+                         data->ext_ul_color[1] != old_color[1] ||
+                         data->ext_ul_color[2] != old_color[2]));
+        if (changed && count < max_trans) {
             transitions[count].pos = sgr_start;
-            transitions[count].pen = data->ext_underline_pen;
+            transitions[count].underline_style = data->ext_ul_style;
+            memcpy(transitions[count].ul_color, data->ext_ul_color, 3);
+            transitions[count].has_ul_color = data->ext_has_ul_color;
             count++;
         }
     }
     return count;
 }
 
-// Update ext_underline_grid for cells damaged since last clear.
-static void update_ext_underline_grid(TerminalVtData *data)
+// Update ext_grid for cells damaged since last clear.
+static void update_ext_grid(TerminalVtData *data)
 {
-    if (!data->has_grid_damage || !data->ext_underline_grid)
+    if (!data->has_grid_damage || !data->ext_grid)
         return;
     for (int row = data->grid_damage.start_row; row < data->grid_damage.end_row; row++) {
         for (int col = data->grid_damage.start_col; col < data->grid_damage.end_col; col++) {
@@ -264,10 +452,12 @@ static void update_ext_underline_grid(TerminalVtData *data)
             VTermScreenCell vcell;
             vterm_screen_get_cell(data->screen, (VTermPos){ .row = row, .col = col }, &vcell);
             int idx = row * data->width + col;
-            if (vcell.attrs.underline > 0 && data->ext_underline_pen >= 4)
-                data->ext_underline_grid[idx] = data->ext_underline_pen;
+            if (vcell.attrs.underline > 0 && data->ext_ul_style >= 4)
+                data->ext_grid[idx].underline_style = data->ext_ul_style;
             else
-                data->ext_underline_grid[idx] = vcell.attrs.underline;
+                data->ext_grid[idx].underline_style = vcell.attrs.underline;
+            data->ext_grid[idx].has_ul_color = data->ext_has_ul_color;
+            memcpy(data->ext_grid[idx].ul_color, data->ext_ul_color, 3);
         }
     }
 }
@@ -298,8 +488,10 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     data->output_cb_user = NULL;
     data->backend = backend;
     data->sixel_parser = sixel_parser_create();
-    data->ext_underline_pen = 0;
-    data->ext_underline_grid = calloc(width * height, sizeof(uint8_t));
+    data->ext_ul_style = 0;
+    data->ext_ul_color[0] = data->ext_ul_color[1] = data->ext_ul_color[2] = 0;
+    data->ext_has_ul_color = false;
+    data->ext_grid = calloc(width * height, sizeof(CellExtAttrs));
     data->has_grid_damage = false;
     data->grid_damage = (TerminalDamageRect){ 0, 0, 0, 0 };
     data->sgr_buf = NULL;
@@ -362,13 +554,15 @@ static void vt_destroy(TerminalBackend *backend)
     if (data->title)
         free(data->title);
     if (data->scrollback) {
-        for (int i = 0; i < data->scrollback_lines; i++)
+        for (int i = 0; i < data->scrollback_lines; i++) {
             free(data->scrollback[i].cells);
+            free(data->scrollback[i].ext_cells);
+        }
         free(data->scrollback);
     }
     sixel_parser_destroy(data->sixel_parser);
     terminal_clear_sixel_images(backend);
-    free(data->ext_underline_grid);
+    free(data->ext_grid);
     free(data->sgr_buf);
 
     free(data);
@@ -388,9 +582,9 @@ static void vt_resize(TerminalBackend *backend, int width, int height)
         vterm_set_size(data->vt, height, width);
         vterm_screen_flush_damage(data->screen);
 
-        // Reallocate extended underline grid for new dimensions
-        free(data->ext_underline_grid);
-        data->ext_underline_grid = calloc(width * height, sizeof(uint8_t));
+        // Reallocate extension grid for new dimensions
+        free(data->ext_grid);
+        data->ext_grid = calloc(width * height, sizeof(CellExtAttrs));
 
         // Sync cursor position directly from libvterm state after resize
         // The movecursor callback may not fire during resize, causing desync
@@ -423,15 +617,21 @@ static int vt_process_input(TerminalBackend *backend, const char *input, size_t 
         }
         memcpy(data->sgr_buf, input, len);
 
-        // Parse SGR sequences: rewrite buffer and record underline pen transitions
-        uint8_t saved_pen = data->ext_underline_pen;
-        UlTransition transitions[MAX_UL_TRANSITIONS];
-        int ntrans = parse_sgr_underline(data, data->sgr_buf, len, transitions, MAX_UL_TRANSITIONS);
+        // Parse SGR sequences: rewrite buffer and record extension transitions
+        uint8_t saved_style = data->ext_ul_style;
+        uint8_t saved_color[3] = { data->ext_ul_color[0], data->ext_ul_color[1],
+                                   data->ext_ul_color[2] };
+        bool saved_has_color = data->ext_has_ul_color;
+        SgrExtTransition transitions[MAX_EXT_TRANSITIONS];
+        int ntrans =
+            parse_sgr_extensions(data, data->sgr_buf, len, transitions, MAX_EXT_TRANSITIONS);
         // Restore pen — we'll advance it segment by segment below
-        data->ext_underline_pen = saved_pen;
+        data->ext_ul_style = saved_style;
+        memcpy(data->ext_ul_color, saved_color, 3);
+        data->ext_has_ul_color = saved_has_color;
 
-        // Process input in segments, splitting at underline pen transitions
-        // so each segment's grid update uses the correct pen value.
+        // Process input in segments, splitting at extension transitions
+        // so each segment's grid update uses the correct pen values.
         int total_written = 0;
         size_t offset = 0;
         for (int t = 0; t <= ntrans; t++) {
@@ -442,11 +642,14 @@ static int vt_process_input(TerminalBackend *backend, const char *input, size_t 
                 data->has_grid_damage = false;
                 total_written += vterm_input_write(data->vt, data->sgr_buf + offset, chunk_len);
                 vterm_screen_flush_damage(data->screen);
-                update_ext_underline_grid(data);
+                update_ext_grid(data);
             }
 
-            if (t < ntrans)
-                data->ext_underline_pen = transitions[t].pen;
+            if (t < ntrans) {
+                data->ext_ul_style = transitions[t].underline_style;
+                memcpy(data->ext_ul_color, transitions[t].ul_color, 3);
+                data->ext_has_ul_color = transitions[t].has_ul_color;
+            }
             offset = end;
         }
 
@@ -486,6 +689,7 @@ static void convert_vterm_screen_cell(const VTermScreenCell *vcell, VTermState *
     // Convert colors
     cell->fg = convert_vterm_color(&vcell->fg, state, false);
     cell->bg = convert_vterm_color(&vcell->bg, state, true);
+    cell->ul_color = (TerminalColor){ 0, 0, 0, true }; // default until ext_grid overrides
 
     // Apply reverse video: swap fg/bg so renderer sees visual colors
     if (cell->attrs.reverse) {
@@ -516,11 +720,17 @@ static int vt_get_cell(TerminalBackend *backend, int row, int col, TerminalCell 
 
     convert_vterm_screen_cell(&vcell, data->state, cell);
 
-    // Apply extended underline from grid (values 4-5 not storable in vterm's 2-bit field)
-    if (data->ext_underline_grid) {
-        uint8_t ext = data->ext_underline_grid[row * data->width + col];
-        if (ext > 0)
-            cell->attrs.underline = ext;
+    // Apply extension attributes from grid
+    if (data->ext_grid) {
+        CellExtAttrs *ext = &data->ext_grid[row * data->width + col];
+        if (ext->underline_style > 0)
+            cell->attrs.underline = ext->underline_style;
+        if (ext->has_ul_color) {
+            cell->ul_color.r = ext->ul_color[0];
+            cell->ul_color.g = ext->ul_color[1];
+            cell->ul_color.b = ext->ul_color[2];
+            cell->ul_color.is_default = false;
+        }
     }
 
     return 0;
@@ -659,22 +869,22 @@ static int term_moverect(VTermRect dest, VTermRect src, void *user)
 {
     TerminalVtData *data = (TerminalVtData *)user;
 
-    // Shift extended underline grid to follow content movement
-    if (data->ext_underline_grid && src.start_col == 0 && dest.start_col == 0 &&
+    // Shift extension grid to follow content movement
+    if (data->ext_grid && src.start_col == 0 && dest.start_col == 0 &&
         src.end_col == data->width && dest.end_col == data->width) {
         int dy = dest.start_row - src.start_row;
         if (dy < 0) {
             // Content moves up (scroll up)
             for (int row = dest.start_row; row < dest.end_row; row++)
-                memcpy(&data->ext_underline_grid[row * data->width],
-                       &data->ext_underline_grid[(row - dy) * data->width],
-                       data->width * sizeof(uint8_t));
+                memcpy(&data->ext_grid[row * data->width],
+                       &data->ext_grid[(row - dy) * data->width],
+                       data->width * sizeof(CellExtAttrs));
         } else if (dy > 0) {
             // Content moves down (scroll down)
             for (int row = dest.end_row - 1; row >= dest.start_row; row--)
-                memcpy(&data->ext_underline_grid[row * data->width],
-                       &data->ext_underline_grid[(row - dy) * data->width],
-                       data->width * sizeof(uint8_t));
+                memcpy(&data->ext_grid[row * data->width],
+                       &data->ext_grid[(row - dy) * data->width],
+                       data->width * sizeof(CellExtAttrs));
         }
     }
 
@@ -788,8 +998,22 @@ static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
 
     memcpy(line_cells, cells, cols * sizeof(VTermScreenCell));
 
+    // Copy extension attributes from row 0 of ext_grid (the line being pushed)
+    CellExtAttrs *ext_cells = NULL;
+    if (data->ext_grid) {
+        int copy_cols = cols < data->width ? cols : data->width;
+        ext_cells = malloc(cols * sizeof(CellExtAttrs));
+        if (ext_cells) {
+            memcpy(ext_cells, data->ext_grid, copy_cols * sizeof(CellExtAttrs));
+            // Zero-fill any extra columns
+            if (copy_cols < cols)
+                memset(&ext_cells[copy_cols], 0, (cols - copy_cols) * sizeof(CellExtAttrs));
+        }
+    }
+
     ScrollbackLine *entry = &data->scrollback[data->scrollback_lines];
     entry->cells = line_cells;
+    entry->ext_cells = ext_cells;
     entry->cols = cols;
     data->scrollback_lines++;
 
@@ -828,7 +1052,9 @@ static int term_sb_popline(int cols, VTermScreenCell *cells, void *user)
 
     // Free the line
     free(entry->cells);
+    free(entry->ext_cells);
     entry->cells = NULL;
+    entry->ext_cells = NULL;
     entry->cols = 0;
 
     return 1;
@@ -865,6 +1091,19 @@ static int vt_get_scrollback_cell(TerminalBackend *backend, int scrollback_row, 
         return -1;
 
     convert_vterm_screen_cell(&entry->cells[col], data->state, cell);
+
+    // Apply extension attributes from scrollback
+    if (entry->ext_cells) {
+        CellExtAttrs *ext = &entry->ext_cells[col];
+        if (ext->underline_style > 0)
+            cell->attrs.underline = ext->underline_style;
+        if (ext->has_ul_color) {
+            cell->ul_color.r = ext->ul_color[0];
+            cell->ul_color.g = ext->ul_color[1];
+            cell->ul_color.b = ext->ul_color[2];
+            cell->ul_color.is_default = false;
+        }
+    }
     return 0;
 }
 

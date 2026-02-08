@@ -73,6 +73,7 @@ typedef struct
     TerminalCellAttr attrs;
     TerminalColor fg;
     TerminalColor bg;
+    TerminalColor ul_color; // per-cell underline color (is_default=true → use theme default)
 } TerminalCell;
 
 // Backend interface definition

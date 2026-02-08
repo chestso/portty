@@ -729,7 +729,7 @@ static void draw_underline_double(SDL_Renderer *renderer, int x, int y, int widt
 }
 
 static void draw_underline_curly(SDL_Renderer *renderer, int x, int y, int width,
-                                 float pixel_density)
+                                 float pixel_density, Uint8 cr, Uint8 cg, Uint8 cb)
 {
     float amplitude = 1.5f * pixel_density;
     if (amplitude < 1.0f)
@@ -756,9 +756,8 @@ static void draw_underline_curly(SDL_Renderer *renderer, int x, int y, int width
                 alpha = 1.0f - (dist - thickness);
             else
                 continue;
-            Uint8 a = (Uint8)(alpha * (float)UNDERLINE_COLOR_A);
-            SDL_SetRenderDrawColor(renderer, UNDERLINE_COLOR_R, UNDERLINE_COLOR_G,
-                                   UNDERLINE_COLOR_B, a);
+            Uint8 a = (Uint8)(alpha * 255.0f);
+            SDL_SetRenderDrawColor(renderer, cr, cg, cb, a);
             SDL_RenderPoint(renderer, (float)(x + px), (float)iy);
         }
     }
@@ -1567,13 +1566,21 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 }
                 // Start of an underline run
                 unsigned int style = cell.attrs.underline;
+                Uint8 ul_r = cell.ul_color.is_default ? UNDERLINE_COLOR_R : cell.ul_color.r;
+                Uint8 ul_g = cell.ul_color.is_default ? UNDERLINE_COLOR_G : cell.ul_color.g;
+                Uint8 ul_b = cell.ul_color.is_default ? UNDERLINE_COLOR_B : cell.ul_color.b;
                 int run_start = col;
                 col += cell.width > 1 ? cell.width : 1;
-                // Extend run while next cell has the same underline style
+                // Extend run while next cell has same underline style and color
                 while (col < display_cols) {
                     TerminalCell next;
                     if (get_cell_with_scroll(data, term, row, col, &next) < 0 ||
                         next.attrs.underline != style)
+                        break;
+                    Uint8 nr = next.ul_color.is_default ? UNDERLINE_COLOR_R : next.ul_color.r;
+                    Uint8 ng = next.ul_color.is_default ? UNDERLINE_COLOR_G : next.ul_color.g;
+                    Uint8 nb = next.ul_color.is_default ? UNDERLINE_COLOR_B : next.ul_color.b;
+                    if (nr != ul_r || ng != ul_g || nb != ul_b)
                         break;
                     col += next.width > 1 ? next.width : 1;
                 }
@@ -1589,8 +1596,7 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 int run_x = data->pad_left + run_start * data->cell_width;
                 int run_w = (col - run_start) * data->cell_width;
 
-                SDL_SetRenderDrawColor(data->renderer, UNDERLINE_COLOR_R, UNDERLINE_COLOR_G,
-                                       UNDERLINE_COLOR_B, UNDERLINE_COLOR_A);
+                SDL_SetRenderDrawColor(data->renderer, ul_r, ul_g, ul_b, UNDERLINE_COLOR_A);
                 switch (style) {
                 case 1:
                     draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
@@ -1599,7 +1605,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
                     break;
                 case 3:
-                    draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd);
+                    draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd, ul_r,
+                                         ul_g, ul_b);
                     break;
                 case 4:
                     draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
