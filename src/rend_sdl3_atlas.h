@@ -6,7 +6,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define REND_SDL3_ATLAS_HASH_SIZE       4096
+#define REND_SDL3_ATLAS_HASH_SIZE       8192
 #define REND_SDL3_ATLAS_TEXTURE_SIZE    2048
 #define REND_SDL3_ATLAS_LARGE_THRESHOLD 48
 #define REND_SDL3_ATLAS_MAX_SHELVES     128
@@ -50,6 +50,7 @@ typedef struct
 {
     RendSdl3AtlasPage pages[2];
     RendSdl3AtlasEntry entries[REND_SDL3_ATLAS_HASH_SIZE];
+    RendSdl3AtlasEntry *evict_scratch;
     int entry_count;
     uint64_t current_frame;
     SDL_Renderer *renderer;

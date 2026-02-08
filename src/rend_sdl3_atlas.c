@@ -125,12 +125,22 @@ bool rend_sdl3_atlas_init(RendSdl3Atlas *atlas, SDL_Renderer *renderer)
     atlas->current_frame = 0;
     atlas->entry_count = 0;
 
+    atlas->evict_scratch =
+        calloc(REND_SDL3_ATLAS_HASH_SIZE, sizeof(RendSdl3AtlasEntry));
+    if (!atlas->evict_scratch) {
+        return false;
+    }
+
     if (!atlas_page_init(&atlas->pages[0], renderer, 0)) {
+        free(atlas->evict_scratch);
+        atlas->evict_scratch = NULL;
         return false;
     }
     if (!atlas_page_init(&atlas->pages[1], renderer, 1)) {
         SDL_DestroyTexture(atlas->pages[0].texture);
         atlas->pages[0].texture = NULL;
+        free(atlas->evict_scratch);
+        atlas->evict_scratch = NULL;
         return false;
     }
 
@@ -153,6 +163,8 @@ void rend_sdl3_atlas_destroy(RendSdl3Atlas *atlas)
     }
     memset(atlas->entries, 0, sizeof(atlas->entries));
     atlas->entry_count = 0;
+    free(atlas->evict_scratch);
+    atlas->evict_scratch = NULL;
 }
 
 void rend_sdl3_atlas_begin_frame(RendSdl3Atlas *atlas)
@@ -179,20 +191,46 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_lookup(RendSdl3Atlas *atlas, void *font_data
     return NULL;
 }
 
-// Evict all entries belonging to a given page index
+// Evict all entries belonging to a given page index.
+// Rebuilds the hash table to preserve linear probe chains.
 static void atlas_evict_page(RendSdl3Atlas *atlas, int page_index)
 {
+    // Collect surviving entries into scratch buffer
+    int survivors = 0;
     int evicted = 0;
     for (int i = 0; i < REND_SDL3_ATLAS_HASH_SIZE; i++) {
         RendSdl3AtlasEntry *e = &atlas->entries[i];
-        if (e->occupied && e->page_index == page_index) {
-            e->occupied = false;
-            atlas->entry_count--;
-            evicted++;
+        if (e->occupied) {
+            if (e->page_index == page_index) {
+                evicted++;
+            } else {
+                atlas->evict_scratch[survivors++] = *e;
+            }
         }
     }
-    vlog("Atlas[%d]: evicted page (%d entries removed, %d total remaining)\n",
-         page_index, evicted, atlas->entry_count);
+
+    // Clear the entire hash table
+    memset(atlas->entries, 0, sizeof(atlas->entries));
+    atlas->entry_count = 0;
+
+    // Re-insert survivors with proper linear probing
+    for (int i = 0; i < survivors; i++) {
+        RendSdl3AtlasEntry *src = &atlas->evict_scratch[i];
+        uint32_t h = atlas_hash(src->font_data, src->glyph_id, src->color);
+        uint32_t idx = h & (REND_SDL3_ATLAS_HASH_SIZE - 1);
+
+        for (int probe = 0; probe < REND_SDL3_ATLAS_HASH_SIZE; probe++) {
+            uint32_t slot = (idx + probe) & (REND_SDL3_ATLAS_HASH_SIZE - 1);
+            if (!atlas->entries[slot].occupied) {
+                atlas->entries[slot] = *src;
+                atlas->entry_count++;
+                break;
+            }
+        }
+    }
+
+    vlog("Atlas[%d]: evicted page (%d entries removed, %d survivors rehashed)\n",
+         page_index, evicted, survivors);
     atlas_page_reset(&atlas->pages[page_index], page_index);
 }
 
