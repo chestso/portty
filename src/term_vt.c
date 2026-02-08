@@ -70,6 +70,17 @@ typedef struct TerminalVtData
     // Sixel support
     TerminalBackend *backend; // back-pointer to owning backend
     SixelParser *sixel_parser;
+
+    // Extended underline tracking (SGR 4:4=dotted, 4:5=dashed)
+    // libvterm only supports 0-3 in its 2-bit field; we track 4-5 separately.
+    uint8_t ext_underline_pen;   // current pen state (0-5)
+    uint8_t *ext_underline_grid; // per-cell grid [height * width], 0 = use vterm value
+    TerminalDamageRect grid_damage;
+    bool has_grid_damage;
+
+    // Reusable buffer for SGR rewriting in process_input
+    char *sgr_buf;
+    size_t sgr_buf_cap;
 } TerminalVtData;
 
 // Forward declarations
@@ -164,6 +175,103 @@ static const VTermStateFallbacks vt_fallbacks = {
     .dcs = vt_dcs_callback,
 };
 
+// Record of an underline pen change at a byte offset in the input buffer.
+#define MAX_UL_TRANSITIONS 64
+typedef struct
+{
+    size_t pos;  // byte offset of the ESC that starts this SGR
+    uint8_t pen; // new ext_underline_pen value
+} UlTransition;
+
+// Scan input for CSI SGR sequences (ESC [ ... m).
+// Rewrite 4:4→4:1 and 4:5→4:1 so libvterm stores underline=1.
+// Record underline pen transitions so the caller can split processing.
+static int parse_sgr_underline(TerminalVtData *data, char *buf, size_t len,
+                               UlTransition *transitions, int max_trans)
+{
+    int count = 0;
+    for (size_t i = 0; i + 2 < len; i++) {
+        if (buf[i] != '\x1b' || buf[i + 1] != '[')
+            continue;
+        size_t sgr_start = i;
+        i += 2;
+        size_t params_start = i;
+        while (i < len && (unsigned char)buf[i] < 0x40)
+            i++;
+        if (i >= len || buf[i] != 'm')
+            continue;
+        size_t params_end = i;
+
+        uint8_t old_pen = data->ext_underline_pen;
+
+        size_t p = params_start;
+        if (p == params_end) {
+            data->ext_underline_pen = 0;
+        } else {
+            while (p < params_end) {
+                long val = 0;
+                while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                    val = val * 10 + (buf[p] - '0');
+                    p++;
+                }
+                if (val == 0) {
+                    data->ext_underline_pen = 0;
+                } else if (val == 24) {
+                    data->ext_underline_pen = 0;
+                } else if (val == 4) {
+                    if (p < params_end && buf[p] == ':') {
+                        p++;
+                        long sub = 0;
+                        size_t sub_start = p;
+                        while (p < params_end && buf[p] >= '0' && buf[p] <= '9') {
+                            sub = sub * 10 + (buf[p] - '0');
+                            p++;
+                        }
+                        if (sub >= 0 && sub <= 5)
+                            data->ext_underline_pen = (uint8_t)sub;
+                        if (sub == 4 || sub == 5)
+                            buf[sub_start] = '1';
+                    } else {
+                        // Plain ESC[4m defaults to dotted style
+                        data->ext_underline_pen = 4;
+                    }
+                }
+                while (p < params_end && buf[p] != ';')
+                    p++;
+                if (p < params_end)
+                    p++;
+            }
+        }
+
+        if (data->ext_underline_pen != old_pen && count < max_trans) {
+            transitions[count].pos = sgr_start;
+            transitions[count].pen = data->ext_underline_pen;
+            count++;
+        }
+    }
+    return count;
+}
+
+// Update ext_underline_grid for cells damaged since last clear.
+static void update_ext_underline_grid(TerminalVtData *data)
+{
+    if (!data->has_grid_damage || !data->ext_underline_grid)
+        return;
+    for (int row = data->grid_damage.start_row; row < data->grid_damage.end_row; row++) {
+        for (int col = data->grid_damage.start_col; col < data->grid_damage.end_col; col++) {
+            if (row < 0 || row >= data->height || col < 0 || col >= data->width)
+                continue;
+            VTermScreenCell vcell;
+            vterm_screen_get_cell(data->screen, (VTermPos){ .row = row, .col = col }, &vcell);
+            int idx = row * data->width + col;
+            if (vcell.attrs.underline > 0 && data->ext_underline_pen >= 4)
+                data->ext_underline_grid[idx] = data->ext_underline_pen;
+            else
+                data->ext_underline_grid[idx] = vcell.attrs.underline;
+        }
+    }
+}
+
 static bool vt_init(TerminalBackend *backend, int width, int height)
 {
     // Allocate libvterm-specific data
@@ -190,6 +298,12 @@ static bool vt_init(TerminalBackend *backend, int width, int height)
     data->output_cb_user = NULL;
     data->backend = backend;
     data->sixel_parser = sixel_parser_create();
+    data->ext_underline_pen = 0;
+    data->ext_underline_grid = calloc(width * height, sizeof(uint8_t));
+    data->has_grid_damage = false;
+    data->grid_damage = (TerminalDamageRect){ 0, 0, 0, 0 };
+    data->sgr_buf = NULL;
+    data->sgr_buf_cap = 0;
 
     data->vt = vterm_new(height, width);
     if (!data->vt) {
@@ -254,6 +368,8 @@ static void vt_destroy(TerminalBackend *backend)
     }
     sixel_parser_destroy(data->sixel_parser);
     terminal_clear_sixel_images(backend);
+    free(data->ext_underline_grid);
+    free(data->sgr_buf);
 
     free(data);
     backend->backend_data = NULL;
@@ -271,6 +387,10 @@ static void vt_resize(TerminalBackend *backend, int width, int height)
         data->height = height;
         vterm_set_size(data->vt, height, width);
         vterm_screen_flush_damage(data->screen);
+
+        // Reallocate extended underline grid for new dimensions
+        free(data->ext_underline_grid);
+        data->ext_underline_grid = calloc(width * height, sizeof(uint8_t));
 
         // Sync cursor position directly from libvterm state after resize
         // The movecursor callback may not fire during resize, causing desync
@@ -291,9 +411,46 @@ static int vt_process_input(TerminalBackend *backend, const char *input, size_t 
     TerminalVtData *data = (TerminalVtData *)backend->backend_data;
 
     if (data->vt) {
-        int written = vterm_input_write(data->vt, input, len);
-        vterm_screen_flush_damage(data->screen);
-        return written;
+        // Copy input so we can rewrite SGR 4:4/4:5 → 4:1
+        if (len > data->sgr_buf_cap) {
+            free(data->sgr_buf);
+            data->sgr_buf = malloc(len);
+            if (!data->sgr_buf) {
+                data->sgr_buf_cap = 0;
+                return -1;
+            }
+            data->sgr_buf_cap = len;
+        }
+        memcpy(data->sgr_buf, input, len);
+
+        // Parse SGR sequences: rewrite buffer and record underline pen transitions
+        uint8_t saved_pen = data->ext_underline_pen;
+        UlTransition transitions[MAX_UL_TRANSITIONS];
+        int ntrans = parse_sgr_underline(data, data->sgr_buf, len, transitions, MAX_UL_TRANSITIONS);
+        // Restore pen — we'll advance it segment by segment below
+        data->ext_underline_pen = saved_pen;
+
+        // Process input in segments, splitting at underline pen transitions
+        // so each segment's grid update uses the correct pen value.
+        int total_written = 0;
+        size_t offset = 0;
+        for (int t = 0; t <= ntrans; t++) {
+            size_t end = (t < ntrans) ? transitions[t].pos : len;
+            size_t chunk_len = end - offset;
+
+            if (chunk_len > 0) {
+                data->has_grid_damage = false;
+                total_written += vterm_input_write(data->vt, data->sgr_buf + offset, chunk_len);
+                vterm_screen_flush_damage(data->screen);
+                update_ext_underline_grid(data);
+            }
+
+            if (t < ntrans)
+                data->ext_underline_pen = transitions[t].pen;
+            offset = end;
+        }
+
+        return total_written;
     }
 
     return -1;
@@ -358,6 +515,14 @@ static int vt_get_cell(TerminalBackend *backend, int row, int col, TerminalCell 
         return -1;
 
     convert_vterm_screen_cell(&vcell, data->state, cell);
+
+    // Apply extended underline from grid (values 4-5 not storable in vterm's 2-bit field)
+    if (data->ext_underline_grid) {
+        uint8_t ext = data->ext_underline_grid[row * data->width + col];
+        if (ext > 0)
+            cell->attrs.underline = ext;
+    }
+
     return 0;
 }
 
@@ -467,12 +632,52 @@ static int term_damage(VTermRect rect, void *user)
 {
     TerminalVtData *data = (TerminalVtData *)user;
     damage_union(data, rect.start_row, rect.start_col, rect.end_row, rect.end_col);
+
+    // Track cell-content damage separately (excludes cursor movement)
+    // for extended underline grid updates
+    if (!data->has_grid_damage) {
+        data->grid_damage.start_row = rect.start_row;
+        data->grid_damage.start_col = rect.start_col;
+        data->grid_damage.end_row = rect.end_row;
+        data->grid_damage.end_col = rect.end_col;
+        data->has_grid_damage = true;
+    } else {
+        if (rect.start_row < data->grid_damage.start_row)
+            data->grid_damage.start_row = rect.start_row;
+        if (rect.start_col < data->grid_damage.start_col)
+            data->grid_damage.start_col = rect.start_col;
+        if (rect.end_row > data->grid_damage.end_row)
+            data->grid_damage.end_row = rect.end_row;
+        if (rect.end_col > data->grid_damage.end_col)
+            data->grid_damage.end_col = rect.end_col;
+    }
+
     return 1;
 }
 
 static int term_moverect(VTermRect dest, VTermRect src, void *user)
 {
     TerminalVtData *data = (TerminalVtData *)user;
+
+    // Shift extended underline grid to follow content movement
+    if (data->ext_underline_grid && src.start_col == 0 && dest.start_col == 0 &&
+        src.end_col == data->width && dest.end_col == data->width) {
+        int dy = dest.start_row - src.start_row;
+        if (dy < 0) {
+            // Content moves up (scroll up)
+            for (int row = dest.start_row; row < dest.end_row; row++)
+                memcpy(&data->ext_underline_grid[row * data->width],
+                       &data->ext_underline_grid[(row - dy) * data->width],
+                       data->width * sizeof(uint8_t));
+        } else if (dy > 0) {
+            // Content moves down (scroll down)
+            for (int row = dest.end_row - 1; row >= dest.start_row; row--)
+                memcpy(&data->ext_underline_grid[row * data->width],
+                       &data->ext_underline_grid[(row - dy) * data->width],
+                       data->width * sizeof(uint8_t));
+        }
+    }
+
     damage_union(data, src.start_row, src.start_col, src.end_row, src.end_col);
     damage_union(data, dest.start_row, dest.start_col, dest.end_row, dest.end_col);
     return 1;

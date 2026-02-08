@@ -56,7 +56,7 @@ typedef struct
 typedef struct
 {
     unsigned int bold : 1;
-    unsigned int underline : 1;
+    unsigned int underline : 3;
     unsigned int italic : 1;
     unsigned int blink : 1;
     unsigned int reverse : 1;

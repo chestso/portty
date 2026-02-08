@@ -45,6 +45,12 @@ typedef struct
 #define SELECTION_COLOR_B 0x5A
 #define SELECTION_COLOR_A 180
 
+// Underline color: matches cursor color
+#define UNDERLINE_COLOR_R CURSOR_COLOR_R
+#define UNDERLINE_COLOR_G CURSOR_COLOR_G
+#define UNDERLINE_COLOR_B CURSOR_COLOR_B
+#define UNDERLINE_COLOR_A 255
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================
@@ -693,6 +699,123 @@ static void draw_rounded_rect(SDL_Renderer *renderer, float x, float y,
     }
 }
 
+// ---------------------------------------------------------------------------
+// Underline drawing helpers (DPI-aware)
+// ---------------------------------------------------------------------------
+
+static void draw_underline_single(SDL_Renderer *renderer, int x, int y, int width,
+                                  float pixel_density)
+{
+    int thickness = (int)roundf(1.0f * pixel_density);
+    if (thickness < 1)
+        thickness = 1;
+    SDL_FRect rect = { (float)x, (float)y, (float)width, (float)thickness };
+    SDL_RenderFillRect(renderer, &rect);
+}
+
+static void draw_underline_double(SDL_Renderer *renderer, int x, int y, int width,
+                                  float pixel_density)
+{
+    int thickness = (int)roundf(1.0f * pixel_density);
+    if (thickness < 1)
+        thickness = 1;
+    int gap = (int)roundf(1.0f * pixel_density);
+    if (gap < 1)
+        gap = 1;
+    SDL_FRect top = { (float)x, (float)y, (float)width, (float)thickness };
+    SDL_RenderFillRect(renderer, &top);
+    SDL_FRect bot = { (float)x, (float)(y + thickness + gap), (float)width, (float)thickness };
+    SDL_RenderFillRect(renderer, &bot);
+}
+
+static void draw_underline_curly(SDL_Renderer *renderer, int x, int y, int width,
+                                 float pixel_density)
+{
+    float amplitude = 1.5f * pixel_density;
+    if (amplitude < 1.0f)
+        amplitude = 1.0f;
+    float wavelength = 8.0f * pixel_density;
+    if (wavelength < 4.0f)
+        wavelength = 4.0f;
+    float thickness = 0.5f * pixel_density;
+    if (thickness < 0.5f)
+        thickness = 0.5f;
+    float center_y = (float)y + amplitude;
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    for (int px = 0; px < width; px++) {
+        float sine_y = center_y + amplitude * sinf((float)px / wavelength * 2.0f * (float)M_PI);
+        int y_min = (int)floorf(sine_y - thickness);
+        int y_max = (int)ceilf(sine_y + thickness);
+        for (int iy = y_min; iy <= y_max; iy++) {
+            float dist = fabsf((float)iy + 0.5f - sine_y);
+            float alpha;
+            if (dist <= thickness)
+                alpha = 1.0f;
+            else if (dist <= thickness + 1.0f)
+                alpha = 1.0f - (dist - thickness);
+            else
+                continue;
+            Uint8 a = (Uint8)(alpha * (float)UNDERLINE_COLOR_A);
+            SDL_SetRenderDrawColor(renderer, UNDERLINE_COLOR_R, UNDERLINE_COLOR_G,
+                                   UNDERLINE_COLOR_B, a);
+            SDL_RenderPoint(renderer, (float)(x + px), (float)iy);
+        }
+    }
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+}
+
+static void draw_underline_dotted(SDL_Renderer *renderer, int x, int y, int width,
+                                  float pixel_density)
+{
+    float radius = 0.5f * pixel_density;
+    if (radius < 0.5f)
+        radius = 0.5f;
+    float gap = roundf(2.0f * pixel_density);
+    if (gap < 2.0f)
+        gap = 2.0f;
+    float stride = radius * 2.0f + gap;
+    float cy = (float)y + radius;
+
+    if (radius < 1.0f) {
+        // Low DPI: single-pixel dots
+        for (float cx = (float)x; cx < (float)(x + width); cx += stride)
+            SDL_RenderPoint(renderer, cx, (float)y);
+    } else {
+        // HiDPI: filled circles via scanlines
+        float r2 = radius * radius;
+        for (float cx = (float)x + radius; cx < (float)(x + width); cx += stride) {
+            for (float dy = -radius; dy <= radius; dy += 1.0f) {
+                float half_w = sqrtf(r2 - dy * dy);
+                SDL_FRect span = { cx - half_w, cy + dy, half_w * 2.0f, 1.0f };
+                SDL_RenderFillRect(renderer, &span);
+            }
+        }
+    }
+}
+
+static void draw_underline_dashed(SDL_Renderer *renderer, int x, int y, int width,
+                                  float pixel_density)
+{
+    int thickness = (int)roundf(1.0f * pixel_density);
+    if (thickness < 1)
+        thickness = 1;
+    int dash_w = (int)roundf(3.0f * pixel_density);
+    if (dash_w < 1)
+        dash_w = 1;
+    int gap = (int)roundf(2.0f * pixel_density);
+    if (gap < 1)
+        gap = 1;
+    int stride = dash_w + gap;
+    for (int px = x; px < x + width; px += stride) {
+        int w = dash_w;
+        if (px + w > x + width)
+            w = x + width - px;
+        SDL_FRect rect = { (float)px, (float)y, (float)w, (float)thickness };
+        SDL_RenderFillRect(renderer, &rect);
+    }
+}
+
 typedef struct RendererSdl3Data
 {
     SDL_Renderer *renderer;
@@ -730,6 +853,9 @@ typedef struct RendererSdl3Data
     // so their font_data pointers remain stable for atlas cache keys
     LoadedFallbackFont loaded_fallbacks[MAX_LOADED_FALLBACKS];
     int loaded_fallback_count;
+
+    // Display pixel density for DPI-aware rendering
+    float pixel_density;
 
     // Sixel texture cache
     struct
@@ -777,6 +903,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     memset(data->fallback_cache, 0, sizeof(data->fallback_cache));
     data->loaded_fallback_count = 0;
     memset(data->loaded_fallbacks, 0, sizeof(data->loaded_fallbacks));
+    data->pixel_density = 1.0f;
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -905,6 +1032,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     if (data->window) {
         float pixel_density = SDL_GetWindowPixelDensity(data->window);
         if (pixel_density > 0.0f) {
+            data->pixel_density = pixel_density;
             // Calculate DPI based on pixel density (assuming 96 DPI as base)
             // This is a reasonable approximation for HiDPI displays
             int dpi = (int)(96.0f * pixel_density);
@@ -1426,6 +1554,61 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
         // Pass 2: draw glyphs, cursors, and selection overlays
         for (int col = 0; col < display_cols;) {
             col += render_cell(data, term, row, col, cursor_pos, show_cursor, populate_only);
+        }
+        // Pass 3: draw underlines as continuous spans across consecutive cells
+        if (!populate_only) {
+            int col = 0;
+            while (col < display_cols) {
+                TerminalCell cell;
+                if (get_cell_with_scroll(data, term, row, col, &cell) < 0 ||
+                    !cell.attrs.underline) {
+                    col++;
+                    continue;
+                }
+                // Start of an underline run
+                unsigned int style = cell.attrs.underline;
+                int run_start = col;
+                col += cell.width > 1 ? cell.width : 1;
+                // Extend run while next cell has the same underline style
+                while (col < display_cols) {
+                    TerminalCell next;
+                    if (get_cell_with_scroll(data, term, row, col, &next) < 0 ||
+                        next.attrs.underline != style)
+                        break;
+                    col += next.width > 1 ? next.width : 1;
+                }
+                // Render the full run
+                float pd = data->pixel_density;
+                int thickness = (int)roundf(1.0f * pd);
+                if (thickness < 1)
+                    thickness = 1;
+                int cell_y = data->pad_top + row * data->cell_height;
+                int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
+                if (underline_y + thickness > cell_y + data->cell_height)
+                    underline_y = cell_y + data->cell_height - thickness;
+                int run_x = data->pad_left + run_start * data->cell_width;
+                int run_w = (col - run_start) * data->cell_width;
+
+                SDL_SetRenderDrawColor(data->renderer, UNDERLINE_COLOR_R, UNDERLINE_COLOR_G,
+                                       UNDERLINE_COLOR_B, UNDERLINE_COLOR_A);
+                switch (style) {
+                case 1:
+                    draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
+                    break;
+                case 2:
+                    draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
+                    break;
+                case 3:
+                    draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd);
+                    break;
+                case 4:
+                    draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
+                    break;
+                case 5:
+                    draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
+                    break;
+                }
+            }
         }
     }
 }
