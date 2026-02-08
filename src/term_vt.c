@@ -299,6 +299,46 @@ static int vt_process_input(TerminalBackend *backend, const char *input, size_t 
     return -1;
 }
 
+static void convert_vterm_screen_cell(const VTermScreenCell *vcell, VTermState *state,
+                                      TerminalCell *cell)
+{
+    // Copy character data
+    int i;
+    for (i = 0; i < VTERM_MAX_CHARS_PER_CELL && i < TERM_MAX_CHARS_PER_CELL && vcell->chars[i] != 0;
+         i++) {
+        cell->chars[i] = vcell->chars[i];
+    }
+    if (i < TERM_MAX_CHARS_PER_CELL) {
+        cell->chars[i] = 0;
+    }
+
+    // Copy width
+    cell->width = vcell->width;
+
+    // Copy attributes
+    cell->attrs.bold = vcell->attrs.bold;
+    cell->attrs.underline = vcell->attrs.underline;
+    cell->attrs.italic = vcell->attrs.italic;
+    cell->attrs.blink = vcell->attrs.blink;
+    cell->attrs.reverse = vcell->attrs.reverse;
+    cell->attrs.strikethrough = vcell->attrs.strike;
+    cell->attrs.font = vcell->attrs.font;
+    cell->attrs.dwl = vcell->attrs.dwl;
+    cell->attrs.dhl = vcell->attrs.dhl;
+
+    // Convert colors
+    cell->fg = convert_vterm_color(&vcell->fg, state, false);
+    cell->bg = convert_vterm_color(&vcell->bg, state, true);
+
+    // Apply reverse video: swap fg/bg so renderer sees visual colors
+    if (cell->attrs.reverse) {
+        TerminalColor tmp = cell->fg;
+        cell->fg = cell->bg;
+        cell->bg = tmp;
+        cell->bg.is_default = false;
+    }
+}
+
 static int vt_get_cell(TerminalBackend *backend, int row, int col, TerminalCell *cell)
 {
     if (!backend || !backend->backend_data || !cell)
@@ -317,33 +357,7 @@ static int vt_get_cell(TerminalBackend *backend, int row, int col, TerminalCell 
     if (vterm_screen_get_cell(data->screen, (VTermPos){ .row = row, .col = col }, &vcell) < 0)
         return -1;
 
-    // Copy character data
-    int i;
-    for (i = 0; i < VTERM_MAX_CHARS_PER_CELL && i < TERM_MAX_CHARS_PER_CELL && vcell.chars[i] != 0; i++) {
-        cell->chars[i] = vcell.chars[i];
-    }
-    if (i < TERM_MAX_CHARS_PER_CELL) {
-        cell->chars[i] = 0;
-    }
-
-    // Copy width
-    cell->width = vcell.width;
-
-    // Copy attributes
-    cell->attrs.bold = vcell.attrs.bold;
-    cell->attrs.underline = vcell.attrs.underline;
-    cell->attrs.italic = vcell.attrs.italic;
-    cell->attrs.blink = vcell.attrs.blink;
-    cell->attrs.reverse = vcell.attrs.reverse;
-    cell->attrs.strikethrough = vcell.attrs.strike;
-    cell->attrs.font = vcell.attrs.font;
-    cell->attrs.dwl = vcell.attrs.dwl;
-    cell->attrs.dhl = vcell.attrs.dhl;
-
-    // Convert colors
-    cell->fg = convert_vterm_color(&vcell.fg, data->state, false);
-    cell->bg = convert_vterm_color(&vcell.bg, data->state, true);
-
+    convert_vterm_screen_cell(&vcell, data->state, cell);
     return 0;
 }
 
@@ -645,36 +659,7 @@ static int vt_get_scrollback_cell(TerminalBackend *backend, int scrollback_row, 
     if (col < 0 || col >= entry->cols)
         return -1;
 
-    VTermScreenCell *vcell = &entry->cells[col];
-
-    // Copy character data
-    int i;
-    for (i = 0; i < VTERM_MAX_CHARS_PER_CELL && i < TERM_MAX_CHARS_PER_CELL && vcell->chars[i] != 0;
-         i++) {
-        cell->chars[i] = vcell->chars[i];
-    }
-    if (i < TERM_MAX_CHARS_PER_CELL) {
-        cell->chars[i] = 0;
-    }
-
-    // Copy width
-    cell->width = vcell->width;
-
-    // Copy attributes
-    cell->attrs.bold = vcell->attrs.bold;
-    cell->attrs.underline = vcell->attrs.underline;
-    cell->attrs.italic = vcell->attrs.italic;
-    cell->attrs.blink = vcell->attrs.blink;
-    cell->attrs.reverse = vcell->attrs.reverse;
-    cell->attrs.strikethrough = vcell->attrs.strike;
-    cell->attrs.font = vcell->attrs.font;
-    cell->attrs.dwl = vcell->attrs.dwl;
-    cell->attrs.dhl = vcell->attrs.dhl;
-
-    // Convert colors
-    cell->fg = convert_vterm_color(&vcell->fg, data->state, false);
-    cell->bg = convert_vterm_color(&vcell->bg, data->state, true);
-
+    convert_vterm_screen_cell(&entry->cells[col], data->state, cell);
     return 0;
 }
 
