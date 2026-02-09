@@ -232,6 +232,7 @@ static void atlas_evict_page(RendSdl3Atlas *atlas, int page_index)
     vlog("Atlas[%d]: evicted page (%d entries removed, %d survivors rehashed)\n",
          page_index, evicted, survivors);
     atlas_page_reset(&atlas->pages[page_index], page_index);
+    atlas->eviction_occurred = true;
 }
 
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data,

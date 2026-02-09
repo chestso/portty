@@ -1731,7 +1731,17 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     // interfering with in-flight draw commands.
 
     // Phase 1: Populate atlas (insert missing glyphs, no draws)
+    data->atlas.eviction_occurred = false;
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, true);
+
+    // If eviction occurred during Phase 1, flush the partial staging data and
+    // re-populate so glyphs that were destroyed by eviction get re-rasterized
+    // into staging before the final flush uploads to GPU.
+    if (data->atlas.eviction_occurred) {
+        rend_sdl3_atlas_flush(&data->atlas);
+        data->atlas.eviction_occurred = false;
+        render_visible_cells(data, term, display_rows, display_cols, cursor_visible, true);
+    }
 
     // Phase 2: Flush staging buffers to GPU (render queue is empty)
     rend_sdl3_atlas_flush(&data->atlas);
@@ -1930,7 +1940,15 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     rend_sdl3_atlas_begin_frame(&data->atlas);
 
     // Phase 1: Populate atlas (no draw calls)
+    data->atlas.eviction_occurred = false;
     render_visible_cells(data, term, render_rows, render_cols, false, true);
+
+    // If eviction occurred during Phase 1, flush and re-populate
+    if (data->atlas.eviction_occurred) {
+        rend_sdl3_atlas_flush(&data->atlas);
+        data->atlas.eviction_occurred = false;
+        render_visible_cells(data, term, render_rows, render_cols, false, true);
+    }
 
     // Phase 2: Flush staging buffers to GPU
     rend_sdl3_atlas_flush(&data->atlas);

@@ -54,6 +54,7 @@ typedef struct
     int entry_count;
     uint64_t current_frame;
     SDL_Renderer *renderer;
+    bool eviction_occurred;
 } RendSdl3Atlas;
 
 bool rend_sdl3_atlas_init(RendSdl3Atlas *atlas, SDL_Renderer *renderer);
