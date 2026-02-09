@@ -47,6 +47,8 @@ tests/*.log
 tests/*.trs
 tests/*.exe
 tests/test_*
+!tests/test_*.c
+!tests/test_*.h
 
 # Dependency files
 *.d
