@@ -6,10 +6,9 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define REND_SDL3_ATLAS_HASH_SIZE       8192
-#define REND_SDL3_ATLAS_TEXTURE_SIZE    2048
-#define REND_SDL3_ATLAS_LARGE_THRESHOLD 48
-#define REND_SDL3_ATLAS_MAX_SHELVES     128
+#define REND_SDL3_ATLAS_HASH_SIZE    8192
+#define REND_SDL3_ATLAS_TEXTURE_SIZE 2048
+#define REND_SDL3_ATLAS_MAX_SHELVES  128
 
 typedef struct
 {
@@ -25,21 +24,9 @@ typedef struct
 
 typedef struct
 {
-    SDL_Texture *texture;
-    uint8_t *staging;
-    bool dirty;
-    SDL_Rect dirty_rect;
-    RendSdl3AtlasShelf shelves[REND_SDL3_ATLAS_MAX_SHELVES];
-    int num_shelves;
-    int next_shelf_y;
-} RendSdl3AtlasPage;
-
-typedef struct
-{
     void *font_data;
     int glyph_id;
     uint32_t color;
-    int page_index;
     RendSdl3AtlasRegion region;
     int x_offset, y_offset;
     uint64_t last_used_frame;
@@ -48,9 +35,14 @@ typedef struct
 
 typedef struct
 {
-    RendSdl3AtlasPage pages[2];
+    SDL_Texture *texture;
+    uint8_t *staging;
+    bool dirty;
+    SDL_Rect dirty_rect;
+    RendSdl3AtlasShelf shelves[REND_SDL3_ATLAS_MAX_SHELVES];
+    int num_shelves;
+    int next_shelf_y;
     RendSdl3AtlasEntry entries[REND_SDL3_ATLAS_HASH_SIZE];
-    RendSdl3AtlasEntry *evict_scratch;
     int entry_count;
     uint64_t current_frame;
     SDL_Renderer *renderer;

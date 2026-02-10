@@ -32,9 +32,8 @@ bloom-terminal uses a modular backend abstraction design:
 
 - **Renderer Backend**: Handles graphics output and windowing
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
-  - Uses a two-page texture atlas with shelf packing and FNV-1a hash-based lookup
-  - Page 0 handles small glyphs (≤48px), page 1 handles large glyphs
-  - LRU eviction occurs when pages fill
+  - Uses a texture atlas with shelf packing and FNV-1a hash-based lookup
+  - LRU eviction occurs when the atlas fills
 
 - **Font Backend**: Handles font loading, shaping, and glyph rasterization
   - Current implementation: FreeType/HarfBuzz (`font_backend_ft`)

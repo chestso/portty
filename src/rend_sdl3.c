@@ -1186,7 +1186,7 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
             (float)entry->region.w, (float)entry->region.h
         };
     }
-    SDL_RenderTexture(renderer, atlas->pages[entry->page_index].texture, &src, &dst);
+    SDL_RenderTexture(renderer, atlas->texture, &src, &dst);
 }
 
 // Helper to get a cell considering scroll offset
