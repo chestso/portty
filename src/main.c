@@ -2,6 +2,7 @@
 #include "config.h"
 #endif
 
+#include "bloom_conf.h"
 #include "bloom_pty.h"
 #include "common.h"
 #include "event_loop.h"
@@ -494,6 +495,29 @@ int main(int argc, char *argv[])
     int reflow_enabled = 0;
     int padding = 0;
 
+    /* Load config file (CLI flags below will override) */
+    BloomConf conf;
+    bloom_conf_init(&conf);
+    bloom_conf_load(&conf);
+
+    if (conf.verbose == 1)
+        verbose = 1;
+    if (conf.font)
+        font_name = conf.font;
+    if (conf.cols > 0)
+        init_cols = conf.cols;
+    if (conf.rows > 0)
+        init_rows = conf.rows;
+    if (conf.hinting != BLOOM_HINT_UNSET) {
+        static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
+                                        FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
+        ft_hint_target = hint_map[conf.hinting];
+    }
+    if (conf.reflow == 1)
+        reflow_enabled = 1;
+    if (conf.padding == 1)
+        padding = 1;
+
     while ((opt = getopt_long(argc, argv, "hvef:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
@@ -832,6 +856,7 @@ int main(int argc, char *argv[])
     if (window)
         SDL_DestroyWindow(window);
     terminal_destroy(term);
+    bloom_conf_free(&conf);
     SDL_Quit();
 
     return 0;

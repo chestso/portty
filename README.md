@@ -97,6 +97,45 @@ build/src/bloom-terminal
 build/src/bloom-terminal -v
 ```
 
+## Configuration
+
+bloom-terminal can be configured with an INI-style config file called `bloom.conf`. CLI flags always take precedence over config file values.
+
+### File Locations
+
+The first file found is used:
+
+1. `./bloom.conf` (project-level, current working directory)
+2. `$XDG_CONFIG_HOME/bloom/bloom.conf` (defaults to `~/.config/bloom/bloom.conf`)
+
+### Example
+
+```ini
+# bloom.conf
+[terminal]
+font = Cascadia Code-14
+geometry = 120x40
+hinting = light
+reflow = true
+padding = false
+verbose = false
+```
+
+### Available Keys
+
+All keys are optional. Only the `[terminal]` section is recognized.
+
+| Key        | Values                            | Default     | Description                                |
+| ---------- | --------------------------------- | ----------- | ------------------------------------------ |
+| `font`     | Fontconfig pattern                | `monospace` | Font family and size (e.g. `monospace-16`) |
+| `geometry` | `COLSxROWS`                       | `80x24`     | Initial terminal dimensions                |
+| `hinting`  | `none`, `light`, `normal`, `mono` | `light`     | FreeType hinting mode                      |
+| `reflow`   | `true`/`false`                    | `false`     | Text reflow on resize                      |
+| `padding`  | `true`/`false`                    | `false`     | Padding around terminal content            |
+| `verbose`  | `true`/`false`                    | `false`     | Debug output                               |
+
+Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
+
 ## Terminfo
 
 bloom-terminal ships a custom terminfo entry (`bloom-terminal`) based on `xterm-256color`. It is compiled and installed automatically by `./build.sh --install` via `tic`. The child shell's `TERMINFO_DIRS` is set to `~/.local/share/terminfo` so the entry is found without system-wide installation.
