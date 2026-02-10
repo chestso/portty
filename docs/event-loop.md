@@ -36,19 +36,19 @@ The main thread uses `SDL_WaitEvent()` to wait for events from either source:
 ## Event Flow
 
 ```
-┌─────────────────┐    ┌─────────────────┐
+┌────────────────┐    ┌────────────────┐
 │   PTY Reader   │    │   Main Thread  │
-│    Thread       │    │     (SDL)      │
-└────────┬────────┘    └────────┬────────┘
+│    Thread      │    │     (SDL)      │
+└────────┬───────┘    └────────┬───────┘
          │                     │
          │ 1. poll(pty_fd, -1) │
          │     (blocks until   │
          │      PTY data)      │
          │                     │
-         │ 2. pty_read()        │
+         │ 2. pty_read()       │
          │     (reads data)    │
          │                     │
-         │ 3. Push SDL_EVENT_   │
+         │ 3. Push SDL_EVENT_  │
          │    USER event       │
          │                     │
          └─────────────────────┘
