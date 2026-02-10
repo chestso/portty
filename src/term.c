@@ -5,7 +5,7 @@
 
 // Default set of characters considered part of a "word" for double-click selection
 static const char *default_word_chars =
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-";
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-/";
 
 // Compare two positions: -1 if a < b, 0 if equal, 1 if a > b
 static int selpos_cmp(TerminalPos a, TerminalPos b)

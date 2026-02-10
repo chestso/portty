@@ -680,6 +680,9 @@ int main(int argc, char *argv[])
         vlog("Text reflow enabled (UNSTABLE: may crash on extreme resize)\n");
     }
 
+    if (conf.word_chars)
+        terminal_selection_set_word_chars(term, conf.word_chars);
+
     // Only create window and renderer if we're going to run the event loop
     if (running) {
         // Create window at placeholder size; will be resized after font loading

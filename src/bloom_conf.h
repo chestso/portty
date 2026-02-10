@@ -21,6 +21,7 @@ typedef struct
     int reflow;            /* -1 = not set, 0 = false, 1 = true */
     int padding;           /* -1 = not set, 0 = false, 1 = true */
     int verbose;           /* -1 = not set, 0 = false, 1 = true */
+    char *word_chars;      /* NULL = not set */
 } BloomConf;
 
 void bloom_conf_init(BloomConf *conf);
