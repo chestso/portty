@@ -360,7 +360,21 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                     // Process PTY data
                     PtyDataPayload *payload = (PtyDataPayload *)event.user.data1;
                     if (payload) {
+                        int scroll_off = renderer_get_scroll_offset(rend);
+                        int old_sb = 0;
+                        if (scroll_off > 0)
+                            old_sb = terminal_get_scrollback_lines(term);
+
                         terminal_process_input(term, payload->data, payload->len);
+
+                        // If user is scrolled up, compensate for new scrollback
+                        // lines so the view stays on the same content
+                        if (scroll_off > 0) {
+                            int delta = terminal_get_scrollback_lines(term) - old_sb;
+                            if (delta > 0)
+                                renderer_scroll(rend, term, delta);
+                        }
+
                         free(payload);
                     }
                     break;
