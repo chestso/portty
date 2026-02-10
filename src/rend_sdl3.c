@@ -1045,22 +1045,27 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     }
 
     // Load normal monospace font (required)
-    // Pattern size (e.g. "-f monospace-24") overrides the default font_size
-    float resolved_size = 0;
-    if (!load_font_style(data->resolve, data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
-                         font_name, font_size, &options, "Normal", &resolved_size)) {
+    // Resolve path first, then check for pattern-specified size before loading
+    FontResolutionResult result;
+    if (font_resolve_find_font(data->resolve, FONT_TYPE_NORMAL, font_name, &result) != 0) {
         fprintf(stderr, "Failed to load or find normal font\n");
         font_resolve_destroy(data->resolve);
         data->resolve = NULL;
         return -1;
     }
-    if (resolved_size > 0) {
-        vlog("Font pattern specifies size %.1f, overriding default %.1f\n", resolved_size, font_size);
-        font_size = resolved_size;
-        // Reload normal font at the pattern-specified size
-        load_font_style(data->resolve, data->font, FONT_TYPE_NORMAL, FONT_STYLE_NORMAL,
-                        font_name, font_size, &options, "Normal", NULL);
+    if (result.size > 0) {
+        vlog("Font pattern specifies size %.1f, overriding default %.1f\n", result.size, font_size);
+        font_size = result.size;
     }
+    if (!font_load_font(data->font, FONT_STYLE_NORMAL, result.font_path, font_size, &options)) {
+        fprintf(stderr, "Failed to load normal font from %s\n", result.font_path);
+        font_resolve_free_result(&result);
+        font_resolve_destroy(data->resolve);
+        data->resolve = NULL;
+        return -1;
+    }
+    vlog("Normal font loaded successfully from %s\n", result.font_path);
+    font_resolve_free_result(&result);
 
     // Save font size and options for dynamic fallback loading later
     data->font_size = font_size;
