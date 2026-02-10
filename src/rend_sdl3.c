@@ -1010,7 +1010,6 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         hint_name = "normal";
     else if (ft_hint_target == FT_LOAD_TARGET_MONO)
         hint_name = "mono";
-    vlog("Loading fonts with size %.1f, hinting=%s\n", font_size, hint_name);
 
     // Initialize font resolver
     data->resolve = font_resolve_init(&font_resolve_backend_fc);
@@ -1064,7 +1063,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         data->resolve = NULL;
         return -1;
     }
-    vlog("Normal font loaded successfully from %s\n", result.font_path);
+    vlog("Normal font loaded: %s size=%.1f hinting=%s\n", result.font_path, font_size, hint_name);
     font_resolve_free_result(&result);
 
     // Save font size and options for dynamic fallback loading later
