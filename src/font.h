@@ -10,6 +10,7 @@ typedef struct FontMetrics
     int ascent;  // Distance from baseline to top
     int descent; // Distance from baseline to bottom
     int line_gap;
+    int cap_height;   // Actual top of 'X' above baseline (for visual centering)
     int glyph_width;  // Typical glyph advance width
     int glyph_height; // Typical glyph bounding height
     int cell_width;   // Cell width including padding

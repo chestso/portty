@@ -1089,7 +1089,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     }
 
     int line_gap = metrics->line_gap;
-    data->font_ascent = metrics->ascent + line_gap / 2;
+    int visual_offset = (metrics->ascent - metrics->cap_height) / 2;
+    data->font_ascent = metrics->ascent + line_gap / 2 + visual_offset;
     data->font_descent = metrics->descent;
     data->char_width = metrics->glyph_width;
     data->char_height = metrics->glyph_height;

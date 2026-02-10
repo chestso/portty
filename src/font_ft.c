@@ -753,13 +753,26 @@ m_done:;
     // Cell height = font's recommended baseline-to-baseline distance (height metric)
     metrics->cell_height = face->size->metrics.height >> 6;
 
+    // Measure actual cap height from 'X' for visual centering
+    metrics->cap_height = metrics->ascent; // fallback: use declared ascent
+    FT_UInt x_index = FT_Get_Char_Index(face, 'X');
+    if (x_index != 0) {
+        FT_Error x_err = FT_Load_Glyph(face, x_index, ft_data->ft_hint_target);
+        if (x_err == 0) {
+            FT_Error r_err = FT_Render_Glyph(face->glyph,
+                                             FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
+            if (r_err == 0)
+                metrics->cap_height = face->glyph->bitmap_top;
+        }
+    }
+
     // For glyph dimensions, we'll use the actual metrics from the face
     // This is a simplified approach - in a full implementation we'd measure actual glyphs
     metrics->glyph_width = metrics->cell_width;   // Approximation for now
     metrics->glyph_height = metrics->cell_height; // Approximation for now
 
-    vlog("FreeType metrics (26.6 fixed-point): asc=%d, des=%d, line_gap=%d, glyph=%dx%d, cell=%dx%d\n",
-         metrics->ascent, metrics->descent, metrics->line_gap,
+    vlog("FreeType metrics (26.6 fixed-point): asc=%d, des=%d, line_gap=%d, cap_height=%d, glyph=%dx%d, cell=%dx%d\n",
+         metrics->ascent, metrics->descent, metrics->line_gap, metrics->cap_height,
          metrics->glyph_width, metrics->glyph_height,
          metrics->cell_width, metrics->cell_height);
 
