@@ -118,20 +118,22 @@ hinting = light
 reflow = true
 padding = false
 verbose = false
+word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
 ```
 
 ### Available Keys
 
 All keys are optional. Only the `[terminal]` section is recognized.
 
-| Key        | Values                            | Default     | Description                                |
-| ---------- | --------------------------------- | ----------- | ------------------------------------------ |
-| `font`     | Fontconfig pattern                | `monospace` | Font family and size (e.g. `monospace-16`) |
-| `geometry` | `COLSxROWS`                       | `80x24`     | Initial terminal dimensions                |
-| `hinting`  | `none`, `light`, `normal`, `mono` | `light`     | FreeType hinting mode                      |
-| `reflow`   | `true`/`false`                    | `false`     | Text reflow on resize                      |
-| `padding`  | `true`/`false`                    | `false`     | Padding around terminal content            |
-| `verbose`  | `true`/`false`                    | `false`     | Debug output                               |
+| Key          | Values                            | Default           | Description                                 |
+| ------------ | --------------------------------- | ----------------- | ------------------------------------------- |
+| `font`       | Fontconfig pattern                | `monospace`       | Font family and size (e.g. `monospace-16`)  |
+| `geometry`   | `COLSxROWS`                       | `80x24`           | Initial terminal dimensions                 |
+| `hinting`    | `none`, `light`, `normal`, `mono` | `light`           | FreeType hinting mode                       |
+| `reflow`     | `true`/`false`                    | `false`           | Text reflow on resize                       |
+| `padding`    | `true`/`false`                    | `false`           | Padding around terminal content             |
+| `verbose`    | `true`/`false`                    | `false`           | Debug output                                |
+| `word_chars` | Character string                  | `A-Za-z0-9` `_-/` | Characters treated as word for double-click |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
