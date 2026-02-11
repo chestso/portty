@@ -183,6 +183,13 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
 
     RendSdl3AtlasRegion region;
 
+    // Evict if hash table is getting full (75% load factor)
+    if (atlas->entry_count >= REND_SDL3_ATLAS_HASH_SIZE * 3 / 4) {
+        vlog("Atlas: hash table load factor exceeded (%d/%d), evicting\n",
+             atlas->entry_count, REND_SDL3_ATLAS_HASH_SIZE);
+        atlas_evict(atlas);
+    }
+
     // Try to allocate space
     if (!atlas_alloc(atlas, bmp->width, bmp->height, &region)) {
         // Atlas is full — evict and retry
@@ -252,6 +259,13 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert_empty(RendSdl3Atlas *atlas, void *font_data,
                                                  int glyph_id, uint32_t color)
 {
+    // Evict if hash table is getting full (75% load factor)
+    if (atlas->entry_count >= REND_SDL3_ATLAS_HASH_SIZE * 3 / 4) {
+        vlog("Atlas: hash table load factor exceeded (%d/%d), evicting\n",
+             atlas->entry_count, REND_SDL3_ATLAS_HASH_SIZE);
+        atlas_evict(atlas);
+    }
+
     uint32_t h = atlas_hash(font_data, glyph_id, color);
     uint32_t idx = h & (REND_SDL3_ATLAS_HASH_SIZE - 1);
     RendSdl3AtlasEntry *slot = NULL;

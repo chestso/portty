@@ -1146,10 +1146,16 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
     return entry;
 }
 
+static bool is_color_font(FontBackend *font, FontStyle style)
+{
+    return style == FONT_STYLE_EMOJI || font_style_has_colr(font, style);
+}
+
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                        RendSdl3AtlasEntry *entry, FontStyle style,
                        int cell_x, int cell_y, int glyph_x_offset, int glyph_y_offset,
-                       int avail_w, int avail_h, int font_ascent, bool is_regional)
+                       int avail_w, int avail_h, int font_ascent, bool is_regional,
+                       bool color_baked, uint8_t mod_r, uint8_t mod_g, uint8_t mod_b)
 {
     if (!entry || entry->region.w <= 0)
         return;
@@ -1186,7 +1192,11 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
             (float)entry->region.w, (float)entry->region.h
         };
     }
+    if (!color_baked)
+        SDL_SetTextureColorMod(atlas->texture, mod_r, mod_g, mod_b);
     SDL_RenderTexture(renderer, atlas->texture, &src, &dst);
+    if (!color_baked)
+        SDL_SetTextureColorMod(atlas->texture, 255, 255, 255);
 }
 
 // Helper to get a cell considering scroll offset
@@ -1393,7 +1403,12 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int avail_w = columns_to_consume * data->cell_width;
     int avail_h = data->cell_height;
     void *font_data = data->font->font_data[style];
-    uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b;
+    bool color_baked = is_color_font(data->font, style);
+    uint8_t render_r = color_baked ? r : 255;
+    uint8_t render_g = color_baked ? g : 255;
+    uint8_t render_b = color_baked ? b : 255;
+    uint32_t color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                     : 0xFFFFFF;
     bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
 
     // For regional indicators, cache at square size for consistent high-quality scaling
@@ -1406,13 +1421,21 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     // Shaped rendering path (multiple codepoints)
     if (cp_count > 1 && data->font->render_shaped) {
-        ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+        ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count,
+                                                       render_r, render_g, render_b);
 
         // Fallback: if shaped rendering fails with selected style, try NORMAL
         if (!shaped && style != FONT_STYLE_NORMAL) {
             style = FONT_STYLE_NORMAL;
             font_data = data->font->font_data[style];
-            shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+            color_baked = is_color_font(data->font, style);
+            render_r = color_baked ? r : 255;
+            render_g = color_baked ? g : 255;
+            render_b = color_baked ? b : 255;
+            color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                    : 0xFFFFFF;
+            shaped = font_render_shaped_text(data->font, style, cps, cp_count,
+                                             render_r, render_g, render_b);
         }
 
         // Dynamic fallback: try fontconfig-resolved font for the first codepoint
@@ -1421,7 +1444,14 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (fb_path && ensure_fallback_font(data, fb_path)) {
                 style = FONT_STYLE_FALLBACK;
                 font_data = data->font->font_data[style];
-                shaped = font_render_shaped_text(data->font, style, cps, cp_count, r, g, b);
+                color_baked = is_color_font(data->font, style);
+                render_r = color_baked ? r : 255;
+                render_g = color_baked ? g : 255;
+                render_b = color_baked ? b : 255;
+                color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                        : 0xFFFFFF;
+                shaped = font_render_shaped_text(data->font, style, cps, cp_count,
+                                                 render_r, render_g, render_b);
             }
         }
 
@@ -1432,7 +1462,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     continue;
                 RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gid, color_key);
                 if (!entry) {
-                    GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid, r, g, b);
+                    GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
+                                                           render_r, render_g, render_b);
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, gid, color_key,
                                             gb, style, cache_w, cache_h);
@@ -1446,7 +1477,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     int y_off = entry ? entry->y_offset : 0;
                     blit_glyph(data->renderer, &data->atlas, entry, style,
                                cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
-                               is_regional);
+                               is_regional, color_baked, r, g, b);
                 }
             }
             free(shaped->glyph_ids);
@@ -1468,6 +1499,12 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         if (glyph_index == 0 && style != FONT_STYLE_NORMAL) {
             style = FONT_STYLE_NORMAL;
             font_data = data->font->font_data[style];
+            color_baked = is_color_font(data->font, style);
+            render_r = color_baked ? r : 255;
+            render_g = color_baked ? g : 255;
+            render_b = color_baked ? b : 255;
+            color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                    : 0xFFFFFF;
             glyph_index = font_get_glyph_index(data->font, style, codepoint);
         }
 
@@ -1477,6 +1514,12 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (fb_path && ensure_fallback_font(data, fb_path)) {
                 style = FONT_STYLE_FALLBACK;
                 font_data = data->font->font_data[style];
+                color_baked = is_color_font(data->font, style);
+                render_r = color_baked ? r : 255;
+                render_g = color_baked ? g : 255;
+                render_b = color_baked ? b : 255;
+                color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                        : 0xFFFFFF;
                 glyph_index = font_get_glyph_index(data->font, style, codepoint);
             }
         }
@@ -1484,7 +1527,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         if (glyph_index != 0)
             entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, glyph_index, color_key);
         if (!entry) {
-            GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1, r, g, b);
+            GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1,
+                                                           render_r, render_g, render_b);
             if (glyph_bitmap) {
                 uint32_t insert_id = glyph_index ? glyph_index : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
@@ -1497,7 +1541,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         if (!populate_only)
             blit_glyph(data->renderer, &data->atlas, entry, style,
                        cell_x, cell_y, entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
-                       avail_w, avail_h, data->font_ascent, is_regional);
+                       avail_w, avail_h, data->font_ascent, is_regional,
+                       color_baked, r, g, b);
     }
 
 render_cursor:
