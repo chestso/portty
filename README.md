@@ -166,7 +166,7 @@ cd build && make check
 
 Current test suites:
 
-- **test_atlas** — Glyph texture atlas tests covering insert/lookup, page selection, staging buffer contents, eviction behavior, and cross-page eviction isolation
+- **test_atlas** — Glyph texture atlas tests covering insert/lookup, shelf packing, staging buffer contents, spatial and load-factor eviction, plus regression tests for past hash table overflow, probe chain corruption, and post-eviction staging bugs
 
 Visual testing of rendering and terminal features is done manually using example scripts with the `-v` verbose flag.
 
