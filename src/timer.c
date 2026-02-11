@@ -16,7 +16,7 @@ typedef struct Timer
 
 struct TimerManager
 {
-    Timer *timers;
+    Timer **timers; // array of pointers (stable across realloc)
     size_t count;
     size_t capacity;
     TimerId next_id;
@@ -59,9 +59,10 @@ void timer_manager_destroy(TimerManager *mgr)
 
     // Remove all active timers
     for (size_t i = 0; i < mgr->count; i++) {
-        if (mgr->timers[i].sdl_timer_id != 0) {
-            SDL_RemoveTimer(mgr->timers[i].sdl_timer_id);
+        if (mgr->timers[i]->sdl_timer_id != 0) {
+            SDL_RemoveTimer(mgr->timers[i]->sdl_timer_id);
         }
+        free(mgr->timers[i]);
     }
 
     free(mgr->timers);
@@ -73,8 +74,8 @@ void timer_manager_destroy(TimerManager *mgr)
 static Timer *find_timer(TimerManager *mgr, TimerId id)
 {
     for (size_t i = 0; i < mgr->count; i++) {
-        if (mgr->timers[i].id == id) {
-            return &mgr->timers[i];
+        if (mgr->timers[i]->id == id) {
+            return mgr->timers[i];
         }
     }
     return NULL;
@@ -86,18 +87,21 @@ TimerId timer_add(TimerManager *mgr, uint32_t interval_ms, bool repeat,
     if (!mgr)
         return TIMER_INVALID;
 
-    // Grow array if needed
+    // Grow pointer array if needed
     if (mgr->count >= mgr->capacity) {
         size_t new_capacity = mgr->capacity == 0 ? 4 : mgr->capacity * 2;
-        Timer *new_timers = realloc(mgr->timers, new_capacity * sizeof(Timer));
+        Timer **new_timers = realloc(mgr->timers, new_capacity * sizeof(Timer *));
         if (!new_timers)
             return TIMER_INVALID;
         mgr->timers = new_timers;
         mgr->capacity = new_capacity;
     }
 
-    // Initialize new timer
-    Timer *timer = &mgr->timers[mgr->count];
+    // Allocate timer on the heap so its address is stable
+    Timer *timer = malloc(sizeof(Timer));
+    if (!timer)
+        return TIMER_INVALID;
+
     timer->id = mgr->next_id++;
     timer->interval_ms = interval_ms;
     timer->repeat = repeat;
@@ -108,9 +112,11 @@ TimerId timer_add(TimerManager *mgr, uint32_t interval_ms, bool repeat,
     timer->sdl_timer_id = SDL_AddTimer(interval_ms, timer_sdl_callback, timer);
     if (timer->sdl_timer_id == 0) {
         vlog("Failed to create SDL timer: %s\n", SDL_GetError());
+        free(timer);
         return TIMER_INVALID;
     }
 
+    mgr->timers[mgr->count] = timer;
     mgr->count++;
 
     vlog("Timer added: id=%u interval=%ums repeat=%s event_code=%u\n",
@@ -125,13 +131,15 @@ void timer_remove(TimerManager *mgr, TimerId id)
         return;
 
     for (size_t i = 0; i < mgr->count; i++) {
-        if (mgr->timers[i].id == id) {
+        if (mgr->timers[i]->id == id) {
             // Stop SDL timer
-            if (mgr->timers[i].sdl_timer_id != 0) {
-                SDL_RemoveTimer(mgr->timers[i].sdl_timer_id);
+            if (mgr->timers[i]->sdl_timer_id != 0) {
+                SDL_RemoveTimer(mgr->timers[i]->sdl_timer_id);
             }
 
             vlog("Timer removed: id=%u\n", id);
+
+            free(mgr->timers[i]);
 
             // Remove from array by swapping with last element
             if (i < mgr->count - 1) {
@@ -152,28 +160,17 @@ void timer_reset(TimerManager *mgr, TimerId id)
     if (!timer)
         return;
 
-    // Save timer properties
-    uint32_t interval_ms = timer->interval_ms;
-    bool repeat = timer->repeat;
-    uint32_t event_code = timer->event_code;
-    void *event_data = timer->event_data;
-
     // Stop old SDL timer
     if (timer->sdl_timer_id != 0) {
         SDL_RemoveTimer(timer->sdl_timer_id);
     }
 
     // Start new SDL timer
-    timer->sdl_timer_id = SDL_AddTimer(interval_ms, timer_sdl_callback, timer);
+    timer->sdl_timer_id = SDL_AddTimer(timer->interval_ms, timer_sdl_callback, timer);
     if (timer->sdl_timer_id == 0) {
         vlog("Failed to reset timer %u: %s\n", id, SDL_GetError());
         return;
     }
 
-    vlog("Timer reset: id=%u interval=%ums\n", id, interval_ms);
-
-    // Suppress unused variable warnings for saved properties
-    (void)repeat;
-    (void)event_code;
-    (void)event_data;
+    vlog("Timer reset: id=%u interval=%ums\n", id, timer->interval_ms);
 }

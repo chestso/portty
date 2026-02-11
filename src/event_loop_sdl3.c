@@ -51,6 +51,7 @@ typedef struct
     TimerManager *timers;
     TimerId cursor_blink_timer;
     bool cursor_blink_visible;
+    bool has_focus;
 } SDL3EventLoopContext;
 
 // Forward declarations
@@ -326,6 +327,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
 
     // Start cursor blink timer
     ctx->cursor_blink_visible = true;
+    ctx->has_focus = true;
     ctx->cursor_blink_timer = timer_add(ctx->timers, CURSOR_BLINK_INTERVAL_MS, true,
                                         EVENT_CURSOR_BLINK, NULL);
 
@@ -476,6 +478,7 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
                 SDL_SetAtomicInt(&ctx->quit_requested, 1);
             } else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
                        event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                ctx->has_focus = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
                 ctx->force_redraw = 1;
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 if (event.wheel.y != 0) {
