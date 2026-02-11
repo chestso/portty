@@ -474,6 +474,9 @@ static void sdl3_run(EventLoopBackend *loop, TerminalBackend *term, RendererBack
             } else if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 vlog("Window close requested\n");
                 SDL_SetAtomicInt(&ctx->quit_requested, 1);
+            } else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
+                       event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                ctx->force_redraw = 1;
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 if (event.wheel.y != 0) {
                     bool consumed = false;
