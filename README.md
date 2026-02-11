@@ -156,6 +156,20 @@ infocmp bloom-terminal | ssh remote-host 'tic -x -'
 - harfbuzz
 - libpng
 
+## Testing
+
+Unit tests are run via the Autotools test harness:
+
+```bash
+cd build && make check
+```
+
+Current test suites:
+
+- **test_atlas** — Glyph texture atlas tests covering insert/lookup, page selection, staging buffer contents, eviction behavior, and cross-page eviction isolation
+
+Visual testing of rendering and terminal features is done manually using example scripts with the `-v` verbose flag.
+
 ## Development
 
 The project includes:
@@ -164,4 +178,10 @@ The project includes:
 - `build.sh` for automated builds
 - Example scripts demonstrating terminal features, including `examples/unicode/emoji.sh` which exercises COLR/emoji paths
 
-Testing is currently manual using example scripts with the `-v` verbose flag. Automated visual tests for COLR/emoji rendering are not yet available.
+## Author
+
+Thomas Christensen
+
+## License
+
+MIT — see [LICENSE](LICENSE) for details.
