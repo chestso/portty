@@ -467,28 +467,7 @@ SubpixelOrder detect_subpixel_order(FcPattern *pattern) {
 
 ---
 
-## 5. Font Fallback Chain
-
-### Current State
-
-Dynamic per-codepoint font fallback is implemented in `rend_sdl3.c`:
-
-- `fallback_cache_lookup()` queries fontconfig for a font covering a given codepoint,
-  cached in a 64-entry FIFO (`FallbackCacheEntry`) to avoid repeated fontconfig queries
-- `ensure_fallback_font()` loads the resolved font and caches it in a separate LRU pool
-  of up to 8 loaded fonts (`LoadedFallbackFont`), keeping pointers stable for atlas keys
-- The fallback font is swapped into the `FONT_STYLE_FALLBACK` slot for rendering
-- Used for both HarfBuzz-shaped runs and single-glyph rendering paths
-
-### Possible Improvements
-
-- User-configurable fallback chain (static list instead of fontconfig per-codepoint)
-- Larger or unbounded fallback cache for terminals displaying many scripts
-- Pre-warm cache for common Unicode blocks at startup
-
----
-
-## 6. Custom Terminal Emulation Library
+## 5. Custom Terminal Emulation Library
 
 ### Problem
 
