@@ -364,6 +364,8 @@ int main(int argc, char *argv[])
         reflow_enabled = 1;
     if (conf.padding == 1)
         padding = 1;
+    if (conf.platform && strcmp(conf.platform, "gtk4") == 0)
+        use_gtk4 = 1;
 
     while ((opt = getopt_long(argc, argv, "hvef:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {

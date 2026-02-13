@@ -1124,15 +1124,20 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
     g_main_loop_run(ctx->main_loop);
     vlog("GTK4 event loop exiting\n");
 
-    // Cleanup signal watches and timer
+    // Cleanup signal watches and timer.
+    // Zero all IDs so gtk4_plat_destroy won't double-remove sources
+    // that were already auto-removed via G_SOURCE_REMOVE in callbacks.
     if (ctx->sigint_id)
         g_source_remove(ctx->sigint_id);
+    ctx->sigint_id = 0;
     if (ctx->sigterm_id)
         g_source_remove(ctx->sigterm_id);
-    if (ctx->cursor_blink_timer_id) {
+    ctx->sigterm_id = 0;
+    if (ctx->cursor_blink_timer_id)
         g_source_remove(ctx->cursor_blink_timer_id);
-        ctx->cursor_blink_timer_id = 0;
-    }
+    ctx->cursor_blink_timer_id = 0;
+    ctx->pty_watch_id = 0;
+    ctx->signal_watch_id = 0;
 }
 
 static void gtk4_request_quit(PlatformBackend *plat)

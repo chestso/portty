@@ -71,6 +71,7 @@ void bloom_conf_init(BloomConf *conf)
     conf->padding = -1;
     conf->verbose = -1;
     conf->word_chars = NULL;
+    conf->platform = NULL;
 }
 
 bool bloom_conf_load(BloomConf *conf)
@@ -173,6 +174,15 @@ bool bloom_conf_load(BloomConf *conf)
         } else if (strcmp(key, "word_chars") == 0) {
             free(conf->word_chars);
             conf->word_chars = strdup(val);
+        } else if (strcmp(key, "platform") == 0) {
+            if (strcmp(val, "sdl3") == 0 || strcmp(val, "gtk4") == 0) {
+                free(conf->platform);
+                conf->platform = strdup(val);
+            } else {
+                fprintf(stderr,
+                        "WARNING: %s:%d: invalid platform '%s' (use sdl3, gtk4)\n",
+                        path, lineno, val);
+            }
         } else {
             fprintf(stderr, "WARNING: %s:%d: unknown key '%s'\n", path, lineno, key);
         }
@@ -181,9 +191,10 @@ bool bloom_conf_load(BloomConf *conf)
     fclose(fp);
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d reflow=%d padding=%d verbose=%d"
-         " word_chars=%s\n",
+         " word_chars=%s platform=%s\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting, conf->reflow,
-         conf->padding, conf->verbose, conf->word_chars ? conf->word_chars : "(unset)");
+         conf->padding, conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
+         conf->platform ? conf->platform : "(unset)");
 
     free(path);
     return true;
@@ -195,4 +206,6 @@ void bloom_conf_free(BloomConf *conf)
     conf->font = NULL;
     free(conf->word_chars);
     conf->word_chars = NULL;
+    free(conf->platform);
+    conf->platform = NULL;
 }
