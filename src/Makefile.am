@@ -8,3 +8,10 @@ AM_CFLAGS = $(VTERM_CFLAGS) $(SDL3_CFLAGS) $(FONTCONFIG_CFLAGS) $(FREETYPE_CFLAG
 
 # Linker flags - include all necessary libraries
 bloom_terminal_LDADD = $(VTERM_LIBS) $(SDL3_LIBS) $(FONTCONFIG_LIBS) $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) -lm -lutil
+
+# Optional GTK4/libadwaita platform backend
+if HAVE_GTK4
+bloom_terminal_SOURCES += platform_gtk4.c
+AM_CFLAGS += $(GTK4_CFLAGS)
+bloom_terminal_LDADD += $(GTK4_LIBS)
+endif

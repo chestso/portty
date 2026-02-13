@@ -571,3 +571,45 @@ used standalone Rust library but has no C API.
 2. Create proof-of-concept with simplest alternative first
 3. Consider hybrid approach: keep libvterm for escape sequences, custom layer for cell management
 4. Evaluate libutf8proc for grapheme segmentation (small, C, permissive license)
+
+---
+
+## 6. GTK4 Platform Backend — Rendering Optimization
+
+The initial GTK4/libadwaita platform backend uses offscreen SDL rendering with pixel
+readback (`SDL_RenderReadPixels` → Cairo paint in `GtkDrawingArea`). This is simple and
+cross-platform (works on both X11 and Wayland) but involves a CPU-side pixel copy each
+frame. For typical terminal workloads (<1000x600px at 1-5fps) this is negligible, but
+on large HiDPI terminals it could become measurable. Two zero-copy alternatives exist:
+
+### 6.1 Wayland Subsurface Path
+
+Render directly to a `wl_subsurface` via SDL, bypassing the readback entirely. SDL
+creates its own `wl_surface` for the hidden window; this surface could be reparented as
+a subsurface of the GTK window's Wayland surface.
+
+**Blockers:**
+
+- GDK4 exposes `wl_compositor` via `gdk_wayland_display_get_wl_compositor()` but does
+  **not** expose `wl_subcompositor` ([GTK issue #4943](https://gitlab.gnome.org/GNOME/gtk/-/issues/4943))
+- Would need to bind `wl_subcompositor` from `wl_registry` directly
+- Wayland-only (X11 would still need the readback path)
+- Corner clipping (libadwaita rounded corners) requires manual handling
+
+### 6.2 DMA-BUF + GtkGraphicsOffload (GTK 4.14+)
+
+Zero-copy path where SDL renders to a DMA-BUF, which is wrapped as a
+`GdkDmabufTexture` and offloaded to a compositor subsurface automatically by GTK's
+`GtkGraphicsOffload` widget.
+
+**Pros:**
+
+- Zero-copy: compositor reads directly from GPU buffer
+- GTK handles the subsurface lifecycle and corner clipping
+- Works through public GTK API (no private Wayland bindings)
+
+**Cons:**
+
+- Requires GTK 4.14+ and a compositor that supports DMA-BUF import
+- SDL must render to a DMA-BUF-backed target (needs SDL GPU API or EGL interop)
+- Less portable than the readback approach

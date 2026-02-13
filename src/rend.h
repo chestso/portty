@@ -32,6 +32,7 @@ struct RendererBackend
     int (*get_scroll_offset)(RendererBackend *rend);
     int (*render_to_png)(RendererBackend *rend, TerminalBackend *term,
                          const char *output_path);
+    void (*set_pixel_density)(RendererBackend *rend, float density);
 };
 
 // Renderer API
@@ -50,5 +51,6 @@ void renderer_reset_scroll(RendererBackend *rend);
 int renderer_get_scroll_offset(RendererBackend *rend);
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path);
+void renderer_set_pixel_density(RendererBackend *rend, float density);
 
 #endif /* REND_H */

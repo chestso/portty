@@ -33,6 +33,28 @@ PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 
+# Optional GTK4/libadwaita support
+AC_ARG_ENABLE([gtk4],
+  [AS_HELP_STRING([--enable-gtk4],
+    [enable GTK4/libadwaita platform backend (auto-detected)])],
+  [enable_gtk4=$enableval],
+  [enable_gtk4=auto])
+
+have_gtk4=no
+if test "x$enable_gtk4" != "xno"; then
+  PKG_CHECK_MODULES([GTK4], [gtk4 libadwaita-1],
+    [have_gtk4=yes],
+    [have_gtk4=no])
+  if test "x$enable_gtk4" = "xyes" && test "x$have_gtk4" = "xno"; then
+    AC_MSG_ERROR([GTK4/libadwaita requested but not found])
+  fi
+fi
+AM_CONDITIONAL([HAVE_GTK4], [test "x$have_gtk4" = "xyes"])
+if test "x$have_gtk4" = "xyes"; then
+  AC_DEFINE([HAVE_GTK4], [1], [Define if GTK4/libadwaita is available])
+  AC_MSG_NOTICE([GTK4/libadwaita platform backend enabled])
+fi
+
 # Generate config.h header
 AC_CONFIG_HEADERS([config.h])
 

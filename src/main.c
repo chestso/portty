@@ -10,6 +10,9 @@
 #include "font_resolve_fc.h"
 #include "platform.h"
 #include "platform_sdl3.h"
+#ifdef HAVE_GTK4
+#include "platform_gtk4.h"
+#endif
 #include "png_mode.h"
 #include "rend.h"
 #include "rend_sdl3.h"
@@ -88,13 +91,16 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
     }
     // Ctrl+Shift+V → paste
     if (key == TERM_KEY_NONE && codepoint == 'V' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
-        char *clipboard = platform_clipboard_get(ctx->plat);
-        if (clipboard && clipboard[0] != '\0') {
-            terminal_start_paste(ctx->term);
-            pty_write(ctx->pty, clipboard, strlen(clipboard));
-            terminal_end_paste(ctx->term);
+        // Try async paste first (GTK4), fall back to synchronous (SDL3)
+        if (!platform_clipboard_paste_async(ctx->plat, ctx->term, ctx->pty)) {
+            char *clipboard = platform_clipboard_get(ctx->plat);
+            if (clipboard && clipboard[0] != '\0') {
+                terminal_start_paste(ctx->term);
+                pty_write(ctx->pty, clipboard, strlen(clipboard));
+                terminal_end_paste(ctx->term);
+            }
+            platform_clipboard_free(ctx->plat, clipboard);
         }
-        platform_clipboard_free(ctx->plat, clipboard);
         result.handled = true;
         return result;
     }
@@ -284,13 +290,16 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
             }
             terminal_selection_clear(ctx->term);
         } else {
-            char *clipboard = platform_clipboard_get(ctx->plat);
-            if (clipboard && clipboard[0] != '\0') {
-                terminal_start_paste(ctx->term);
-                pty_write(ctx->pty, clipboard, strlen(clipboard));
-                terminal_end_paste(ctx->term);
+            // Try async paste first (GTK4), fall back to synchronous (SDL3)
+            if (!platform_clipboard_paste_async(ctx->plat, ctx->term, ctx->pty)) {
+                char *clipboard = platform_clipboard_get(ctx->plat);
+                if (clipboard && clipboard[0] != '\0') {
+                    terminal_start_paste(ctx->term);
+                    pty_write(ctx->pty, clipboard, strlen(clipboard));
+                    terminal_end_paste(ctx->term);
+                }
+                platform_clipboard_free(ctx->plat, clipboard);
             }
-            platform_clipboard_free(ctx->plat, clipboard);
         }
         return true;
     }
@@ -318,11 +327,14 @@ int main(int argc, char *argv[])
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
 
+    int use_gtk4 = 0;
+
     static struct option long_options[] = {
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
         { "reflow", no_argument, NULL, 'R' },
         { "padding", no_argument, NULL, 'N' },
+        { "gtk4", no_argument, NULL, 'G' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -408,6 +420,9 @@ int main(int argc, char *argv[])
         case 'N':
             padding = 1;
             break;
+        case 'G':
+            use_gtk4 = 1;
+            break;
         case '?':
             print_usage(argv[0]);
             return 1;
@@ -447,8 +462,21 @@ int main(int argc, char *argv[])
         return png_render_text(png_text, argv[optind], font_name, ft_hint_target);
     }
 
-    // Initialize platform backend (SDL init, timer setup, etc.)
-    plat = platform_init(&platform_backend_sdl3);
+    // Select and initialize platform backend
+    PlatformBackend *selected_backend = &platform_backend_sdl3;
+#ifdef HAVE_GTK4
+    if (use_gtk4) {
+        selected_backend = &platform_backend_gtk4;
+        vlog("Using GTK4/libadwaita platform backend\n");
+    }
+#else
+    if (use_gtk4) {
+        fprintf(stderr, "ERROR: --gtk4 requested but GTK4 support not compiled in\n");
+        return 1;
+    }
+#endif
+
+    plat = platform_init(selected_backend);
     if (!plat) {
         fprintf(stderr, "ERROR: Failed to initialize platform\n");
         return 1;
@@ -628,6 +656,7 @@ static void print_usage(const char *progname)
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  --padding     Enable padding around terminal content\n");
+    printf("  --gtk4        Use GTK4/libadwaita platform backend (native CSD)\n");
     printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
     printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");

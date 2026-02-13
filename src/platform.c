@@ -99,6 +99,14 @@ void platform_clipboard_free(PlatformBackend *plat, char *text)
     plat->clipboard_free(plat, text);
 }
 
+bool platform_clipboard_paste_async(PlatformBackend *plat,
+                                    TerminalBackend *term, PtyContext *pty)
+{
+    if (!plat || !plat->clipboard_paste_async)
+        return false;
+    return plat->clipboard_paste_async(plat, term, pty);
+}
+
 bool platform_register_pty(PlatformBackend *plat, PtyContext *pty)
 {
     if (!plat || !plat->register_pty) {

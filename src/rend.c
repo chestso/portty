@@ -103,3 +103,10 @@ int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
         return -1;
     return rend->render_to_png(rend, term, output_path);
 }
+
+void renderer_set_pixel_density(RendererBackend *rend, float density)
+{
+    if (!rend || !rend->set_pixel_density)
+        return;
+    rend->set_pixel_density(rend, density);
+}

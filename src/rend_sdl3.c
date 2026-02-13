@@ -2028,6 +2028,17 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     return rc;
 }
 
+static void sdl3_set_pixel_density(RendererBackend *backend, float density)
+{
+    if (!backend || !backend->backend_data)
+        return;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (density > 0.0f) {
+        data->pixel_density = density;
+        vlog("Pixel density set to %.2f\n", density);
+    }
+}
+
 // SDL3 renderer backend instance
 RendererBackend renderer_backend_sdl3 = {
     .name = "sdl3",
@@ -2045,5 +2056,6 @@ RendererBackend renderer_backend_sdl3 = {
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,
-    .render_to_png = sdl3_render_to_png
+    .render_to_png = sdl3_render_to_png,
+    .set_pixel_density = sdl3_set_pixel_density,
 };

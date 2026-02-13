@@ -81,6 +81,12 @@ struct PlatformBackend
     bool (*clipboard_set)(PlatformBackend *plat, const char *text);
     void (*clipboard_free)(PlatformBackend *plat, char *text);
 
+    // Async clipboard paste — write clipboard content to PTY with
+    // bracketed paste. Returns true if handled asynchronously (GTK4).
+    // If NULL or returns false, caller falls back to synchronous path.
+    bool (*clipboard_paste_async)(PlatformBackend *plat,
+                                  TerminalBackend *term, PtyContext *pty);
+
     // Event loop (absorbs EventLoopBackend)
     bool (*register_pty)(PlatformBackend *plat, PtyContext *pty);
     void (*run)(PlatformBackend *plat, TerminalBackend *term,
@@ -104,6 +110,9 @@ void *platform_get_sdl_window(PlatformBackend *plat);
 char *platform_clipboard_get(PlatformBackend *plat);
 bool platform_clipboard_set(PlatformBackend *plat, const char *text);
 void platform_clipboard_free(PlatformBackend *plat, char *text);
+
+bool platform_clipboard_paste_async(PlatformBackend *plat,
+                                    TerminalBackend *term, PtyContext *pty);
 
 bool platform_register_pty(PlatformBackend *plat, PtyContext *pty);
 void platform_run(PlatformBackend *plat, TerminalBackend *term,

@@ -388,6 +388,14 @@ static bool sdl3_plat_init(PlatformBackend *plat)
 
     SDL_ClearError();
 
+#ifdef HAVE_GTK4
+    // When GTK4 is linked into this binary, libdecor's GTK3 plugin
+    // (libdecor-gtk-3-0.so) conflicts with GTK4's GLib type registrations.
+    // Disable libdecor so SDL3 uses its built-in Wayland decorations instead.
+    SDL_SetHint(SDL_HINT_VIDEO_WAYLAND_ALLOW_LIBDECOR, "0");
+    vlog("Disabled libdecor (GTK4 linked, avoiding GTK3 type conflict)\n");
+#endif
+
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         const char *error = SDL_GetError();
         fprintf(stderr, "ERROR: Failed to initialize SDL video subsystem\n");
