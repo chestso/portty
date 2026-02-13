@@ -1088,9 +1088,16 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         return -1;
     }
 
-    int line_gap = metrics->line_gap;
-    int visual_offset = (metrics->ascent - metrics->cap_height) / 2;
-    data->font_ascent = metrics->ascent + line_gap / 2 + visual_offset;
+    // Center uppercase text (cap_height region) vertically within cell_height.
+    // Derivation: we want cap_height midpoint at cell center, so
+    //   font_ascent - cap_height/2 = cell_height/2
+    //   font_ascent = (cell_height + cap_height) / 2
+    // Clamp to ascent+line_gap to prevent descender clipping when cap_height ≈ ascent.
+    int centered = (metrics->cell_height + metrics->cap_height) / 2;
+    int max_ascent = metrics->ascent + metrics->line_gap;
+    data->font_ascent = centered < max_ascent ? centered : max_ascent;
+    vlog("font_ascent: centered=%d, max_ascent=%d, chosen=%d\n",
+         centered, max_ascent, data->font_ascent);
     data->font_descent = metrics->descent;
     data->char_width = metrics->glyph_width;
     data->char_height = metrics->glyph_height;
