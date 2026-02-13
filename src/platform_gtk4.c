@@ -78,6 +78,7 @@ typedef struct
     GtkWindow *window;
     GtkWidget *drawing_area;
     GtkWidget *header_bar;
+    AdwWindowTitle *window_title;
     GtkIMContext *im_context;
     GMainLoop *main_loop;
 
@@ -189,19 +190,6 @@ static void draw_func(GtkDrawingArea *area, cairo_t *cr, int width, int height,
     // Only render terminal content if needed
     if (!terminal_needs_redraw(ctx->term) && !ctx->force_redraw)
         return;
-
-    // Update window title if changed
-    const char *title = terminal_get_title(ctx->term);
-    if (title) {
-        if (!ctx->last_title || strcmp(ctx->last_title, title) != 0) {
-            free(ctx->last_title);
-            ctx->last_title = strdup(title);
-            gtk_window_set_title(ctx->window, title);
-            adw_header_bar_set_title_widget(
-                ADW_HEADER_BAR(ctx->header_bar),
-                GTK_WIDGET(adw_window_title_new(title, NULL)));
-        }
-    }
 
     int scale = ctx->scale_factor;
     int phys_w = width * scale;
@@ -537,6 +525,8 @@ static void on_drawing_area_resize(GtkDrawingArea *area, int width, int height,
     ctx->force_redraw = true;
 }
 
+static void gtk4_set_window_title(PlatformBackend *plat, const char *title);
+
 // PTY I/O watch callback
 static gboolean on_pty_data(GIOChannel *source, GIOCondition condition,
                             gpointer user_data)
@@ -567,6 +557,9 @@ static gboolean on_pty_data(GIOChannel *source, GIOCondition condition,
                 if (delta > 0)
                     renderer_scroll(ctx->rend, ctx->term, delta);
             }
+
+            // Update window title if changed
+            gtk4_set_window_title(ctx->plat, terminal_get_title(ctx->term));
 
             ctx->force_redraw = true;
             gtk_widget_queue_draw(ctx->drawing_area);
@@ -849,11 +842,11 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     gtk_window_set_title(ctx->window, title);
     gtk_window_set_default_size(ctx->window, width, height);
 
-    // Create header bar
+    // Create header bar with persistent title widget
     ctx->header_bar = adw_header_bar_new();
-    adw_header_bar_set_title_widget(
-        ADW_HEADER_BAR(ctx->header_bar),
-        GTK_WIDGET(adw_window_title_new(title, NULL)));
+    ctx->window_title = ADW_WINDOW_TITLE(adw_window_title_new(title, NULL));
+    adw_header_bar_set_title_widget(ADW_HEADER_BAR(ctx->header_bar),
+                                    GTK_WIDGET(ctx->window_title));
 
     // Create drawing area for terminal content
     ctx->drawing_area = gtk_drawing_area_new();
@@ -936,13 +929,10 @@ static void gtk4_set_window_title(PlatformBackend *plat, const char *title)
     ctx->last_title = title ? strdup(title) : NULL;
 
     if (ctx->window) {
-        gtk_window_set_title(ctx->window, title ? title : "bloom-terminal");
-        if (ctx->header_bar) {
-            adw_header_bar_set_title_widget(
-                ADW_HEADER_BAR(ctx->header_bar),
-                GTK_WIDGET(adw_window_title_new(
-                    title ? title : "bloom-terminal", NULL)));
-        }
+        const char *t = title ? title : "bloom-terminal";
+        gtk_window_set_title(ctx->window, t);
+        if (ctx->window_title)
+            adw_window_title_set_title(ctx->window_title, t);
     }
 }
 

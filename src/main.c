@@ -336,6 +336,7 @@ int main(int argc, char *argv[])
         { "reflow", no_argument, NULL, 'R' },
         { "padding", no_argument, NULL, 'N' },
         { "gtk4", no_argument, NULL, 'G' },
+        { "sdl3", no_argument, NULL, 'S' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -425,6 +426,9 @@ int main(int argc, char *argv[])
             break;
         case 'G':
             use_gtk4 = 1;
+            break;
+        case 'S':
+            use_gtk4 = 0;
             break;
         case '?':
             print_usage(argv[0]);
@@ -710,6 +714,7 @@ static void print_usage(const char *progname)
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  --padding     Enable padding around terminal content\n");
     printf("  --gtk4        Use GTK4/libadwaita platform backend (native CSD)\n");
+    printf("  --sdl3        Use SDL3 platform backend (overrides config file)\n");
     printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
     printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
