@@ -1,8 +1,8 @@
 # bloom-terminal
 
-A universal terminal emulator with pluggable backends for terminal emulation, rendering, and fonts.
+A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz (fonts).
+Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration.
 
 ## Features
 
@@ -22,15 +22,20 @@ Currently ships with libvterm (terminal), SDL3 (renderer), and FreeType/HarfBuzz
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
 - Terminal resize handling with optional reflow (`--reflow`)
 - Custom terminfo entry (`TERM=bloom-terminal`) with truecolor, cursor style, bracketed paste, and strikethrough support
+- Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 
 ## Architecture
 
 bloom-terminal uses a modular backend abstraction design:
 
+- **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
+  - Default: SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
+  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Uses offscreen SDL rendering composited into a GtkDrawingArea via Cairo.
+
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: libvterm (`terminal_backend_vt`)
 
-- **Renderer Backend**: Handles graphics output and windowing
+- **Renderer Backend**: Handles graphics output
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
   - Uses a texture atlas with shelf packing and FNV-1a hash-based lookup
   - LRU eviction occurs when the atlas fills
@@ -42,13 +47,22 @@ bloom-terminal uses a modular backend abstraction design:
   - Supports solid fills, linear/radial/sweep gradients, transforms, glyph masking, and basic composite modes
   - Some paint semantics (extend modes, all composite operators, transform edge-cases) are best-effort
 
-- **Event Loop Backend**: Handles SDL event polling and PTY I/O integration
-  - Current implementation: SDL3 (`event_loop_backend_sdl3`)
-
 - **Font Resolver Backend**: Handles font discovery and selection
   - Current implementation: Fontconfig (`font_resolve_backend_fc`)
 
-Each backend defines a standard interface (`TerminalBackend`, `RendererBackend`, `FontBackend`, `EventLoopBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
+Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`, `RendererBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
+
+### GTK4 Plugin
+
+The GTK4 backend is compiled as a separate shared library (`bloom-terminal-gtk4.so`) and loaded via `dlopen` only when `--gtk4` is passed. This avoids symbol conflicts between GTK4 and libdecor's GTK3 plugin, which both export identically-named symbols (`gtk_init`, `gtk_widget_get_type`, etc.).
+
+```
+build/src/bloom-terminal                          # Main binary (no GTK4 symbols)
+build/src/.libs/bloom-terminal-gtk4.so            # Plugin (dev build)
+
+$PREFIX/bin/bloom-terminal                        # Installed binary
+$PREFIX/lib/bloom-terminal/bloom-terminal-gtk4.so # Installed plugin
+```
 
 ## Building
 
@@ -65,6 +79,8 @@ This will:
 2. Configure the build with appropriate flags
 3. Build the project with parallel jobs
 4. Create a `build/` directory with the compiled binary
+
+If GTK4 and libadwaita are available, the plugin is built automatically. Use `--disable-gtk4` to skip it.
 
 ### Build Script Options
 
@@ -94,6 +110,9 @@ build/src/bloom-terminal
 
 # Run with verbose output (useful to debug font/COLR/emoji handling)
 build/src/bloom-terminal -v
+
+# Run with GTK4/libadwaita backend (native GNOME decorations)
+build/src/bloom-terminal --gtk4
 ```
 
 ## Configuration
@@ -115,6 +134,7 @@ The first file found is used:
 font = Cascadia Code-14
 geometry = 120x40
 hinting = light
+platform = gtk4
 reflow = true
 padding = false
 verbose = false
@@ -130,6 +150,7 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `font`       | Fontconfig pattern                | `monospace`       | Font family and size (e.g. `monospace-16`)  |
 | `geometry`   | `COLSxROWS`                       | `80x24`           | Initial terminal dimensions                 |
 | `hinting`    | `none`, `light`, `normal`, `mono` | `light`           | FreeType hinting mode                       |
+| `platform`   | `sdl3`, `gtk4`                    | `sdl3`            | Platform backend                            |
 | `reflow`     | `true`/`false`                    | `false`           | Text reflow on resize                       |
 | `padding`    | `true`/`false`                    | `false`           | Padding around terminal content             |
 | `verbose`    | `true`/`false`                    | `false`           | Debug output                                |
@@ -155,6 +176,10 @@ infocmp bloom-terminal | ssh remote-host 'tic -x -'
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz
 - libpng
+
+Optional:
+
+- gtk4 + libadwaita-1 (for `--gtk4` platform backend)
 
 ## Testing
 
