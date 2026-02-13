@@ -96,13 +96,6 @@ int renderer_get_scroll_offset(RendererBackend *rend)
     return rend->get_scroll_offset(rend);
 }
 
-void renderer_set_title(RendererBackend *rend, const char *title)
-{
-    if (!rend || !rend->set_title)
-        return;
-    rend->set_title(rend, title);
-}
-
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path)
 {

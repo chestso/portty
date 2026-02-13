@@ -829,8 +829,6 @@ typedef struct RendererSdl3Data
     int width;
     int height;
     int scroll_offset;
-    char *last_title;
-
     // Padding around the terminal content area
     int pad_left;
     int pad_right;
@@ -890,7 +888,6 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->width = 0;
     data->height = 0;
     data->scroll_offset = 0;
-    data->last_title = NULL;
     data->pad_left = 0;
     data->pad_right = 0;
     data->pad_top = 0;
@@ -968,7 +965,6 @@ static void sdl3_destroy(RendererBackend *backend)
         data->resolve = NULL;
     }
 
-    free(data->last_title);
     free(data);
     backend->backend_data = NULL;
 }
@@ -1919,28 +1915,6 @@ static int sdl3_get_scroll_offset(RendererBackend *backend)
     return data->scroll_offset;
 }
 
-static void sdl3_set_title(RendererBackend *backend, const char *title)
-{
-    if (!backend || !backend->backend_data)
-        return;
-
-    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-
-    // Skip if title unchanged
-    if (data->last_title && title && strcmp(data->last_title, title) == 0)
-        return;
-    if (!data->last_title && !title)
-        return;
-
-    // Update stored title
-    free(data->last_title);
-    data->last_title = title ? strdup(title) : NULL;
-
-    // Update window title
-    SDL_SetWindowTitle(data->window, title ? title : "bloom-terminal");
-    vlog("Window title set to: %s\n", title ? title : "(default)");
-}
-
 static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
                               const char *output_path)
 {
@@ -2071,6 +2045,5 @@ RendererBackend renderer_backend_sdl3 = {
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,
-    .set_title = sdl3_set_title,
     .render_to_png = sdl3_render_to_png
 };
