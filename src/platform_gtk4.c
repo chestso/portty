@@ -842,6 +842,16 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     gtk_window_set_title(ctx->window, title);
     gtk_window_set_default_size(ctx->window, width, height);
 
+    // Set window background to black so it matches terminal content at
+    // rounded corners (prevents greyish outline from theme background)
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_string(css_provider,
+                                      "window { background-color: black; }");
+    gtk_style_context_add_provider_for_display(
+        gdk_display_get_default(), GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    g_object_unref(css_provider);
+
     // Create header bar with persistent title widget
     ctx->header_bar = adw_header_bar_new();
     ctx->window_title = ADW_WINDOW_TITLE(adw_window_title_new(title, NULL));
