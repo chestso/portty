@@ -7,11 +7,18 @@ bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_vt.c rend.c rend_sdl3.c
 AM_CFLAGS = $(VTERM_CFLAGS) $(SDL3_CFLAGS) $(FONTCONFIG_CFLAGS) $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) -DDATADIR='"$(datadir)"' -Wall -Wextra
 
 # Linker flags - include all necessary libraries
-bloom_terminal_LDADD = $(VTERM_LIBS) $(SDL3_LIBS) $(FONTCONFIG_LIBS) $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) -lm -lutil
+bloom_terminal_LDADD = $(VTERM_LIBS) $(SDL3_LIBS) $(FONTCONFIG_LIBS) $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) -lm -lutil -ldl
+bloom_terminal_LDFLAGS = -rdynamic
 
-# Optional GTK4/libadwaita platform backend
+AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'
+
+# Optional GTK4/libadwaita platform backend (built as dlopen plugin)
 if HAVE_GTK4
-bloom_terminal_SOURCES += platform_gtk4.c
-AM_CFLAGS += $(GTK4_CFLAGS)
-bloom_terminal_LDADD += $(GTK4_LIBS)
+pkglib_LTLIBRARIES = bloom-terminal-gtk4.la
+bloom_terminal_gtk4_la_SOURCES = platform_gtk4.c
+bloom_terminal_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) $(VTERM_CFLAGS) \
+    $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
+    -DDATADIR='"$(datadir)"' -Wall -Wextra
+bloom_terminal_gtk4_la_LDFLAGS = -module -avoid-version
+bloom_terminal_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS)
 endif

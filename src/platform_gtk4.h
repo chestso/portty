@@ -3,7 +3,7 @@
 
 #include "platform.h"
 
-// GTK4/libadwaita platform backend declaration
-extern PlatformBackend platform_backend_gtk4;
+// Function pointer type for the GTK4 plugin getter
+typedef PlatformBackend *(*bloom_platform_gtk4_get_fn)(void);
 
 #endif /* PLATFORM_GTK4_H */

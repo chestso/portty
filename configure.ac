@@ -4,8 +4,12 @@ AM_INIT_AUTOMAKE([foreign subdir-objects])
 
 # Check for programs
 AC_PROG_CC
+LT_INIT([dlopen])
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
+
+# dlopen support
+AC_SEARCH_LIBS([dlopen], [dl])
 
 # Debug option
 AC_ARG_ENABLE([debug],

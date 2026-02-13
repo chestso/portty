@@ -9,16 +9,17 @@
 #include "font_resolve.h"
 #include "font_resolve_fc.h"
 #include "platform.h"
-#include "platform_sdl3.h"
-#ifdef HAVE_GTK4
 #include "platform_gtk4.h"
-#endif
+#include "platform_sdl3.h"
 #include "png_mode.h"
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
 #include "term_vt.h"
+#include <SDL3/SDL.h>
+#include <dlfcn.h>
 #include <getopt.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -464,21 +465,69 @@ int main(int argc, char *argv[])
 
     // Select and initialize platform backend
     PlatformBackend *selected_backend = &platform_backend_sdl3;
-#ifdef HAVE_GTK4
+    void *gtk4_plugin_handle = NULL;
+
     if (use_gtk4) {
-        selected_backend = &platform_backend_gtk4;
-        vlog("Using GTK4/libadwaita platform backend\n");
-    }
-#else
-    if (use_gtk4) {
-        fprintf(stderr, "ERROR: --gtk4 requested but GTK4 support not compiled in\n");
-        return 1;
-    }
+        // Probe for the GTK4 plugin shared object
+        static const char *plugin_name = "bloom-terminal-gtk4.so";
+        char probe_path[PATH_MAX];
+        const char *base = SDL_GetBasePath();
+        const char *try_paths[] = { NULL, NULL, NULL };
+        int n_paths = 0;
+
+        // Build tree: exe is build/src/bloom-terminal, plugin is build/src/.libs/
+        if (base) {
+            snprintf(probe_path, sizeof(probe_path), "%s.libs/%s", base, plugin_name);
+            try_paths[n_paths++] = probe_path;
+        }
+
+        // Installed: $PREFIX/lib/bloom-terminal/
+        char installed_path[PATH_MAX];
+        if (base) {
+            snprintf(installed_path, sizeof(installed_path),
+                     "%s../lib/bloom-terminal/%s", base, plugin_name);
+            try_paths[n_paths++] = installed_path;
+        }
+
+#ifdef PKGLIBDIR
+        // Compile-time pkglibdir fallback
+        char pkglib_path[PATH_MAX];
+        snprintf(pkglib_path, sizeof(pkglib_path), "%s/%s", PKGLIBDIR, plugin_name);
+        try_paths[n_paths++] = pkglib_path;
 #endif
+
+        const char *loaded_path = NULL;
+        for (int i = 0; i < n_paths && !gtk4_plugin_handle; i++) {
+            vlog("Probing GTK4 plugin: %s\n", try_paths[i]);
+            gtk4_plugin_handle = dlopen(try_paths[i], RTLD_NOW);
+            if (gtk4_plugin_handle)
+                loaded_path = try_paths[i];
+        }
+
+        if (!gtk4_plugin_handle) {
+            fprintf(stderr, "ERROR: --gtk4 requested but plugin not found\n");
+            fprintf(stderr, "  %s\n", dlerror());
+            return 1;
+        }
+
+        bloom_platform_gtk4_get_fn get_backend =
+            (bloom_platform_gtk4_get_fn)dlsym(gtk4_plugin_handle, "bloom_platform_gtk4_get");
+        if (!get_backend) {
+            fprintf(stderr, "ERROR: GTK4 plugin missing bloom_platform_gtk4_get: %s\n",
+                    dlerror());
+            dlclose(gtk4_plugin_handle);
+            return 1;
+        }
+
+        selected_backend = get_backend();
+        vlog("Loaded GTK4 plugin from %s\n", loaded_path);
+    }
 
     plat = platform_init(selected_backend);
     if (!plat) {
         fprintf(stderr, "ERROR: Failed to initialize platform\n");
+        if (gtk4_plugin_handle)
+            dlclose(gtk4_plugin_handle);
         return 1;
     }
 
@@ -613,6 +662,8 @@ int main(int argc, char *argv[])
     terminal_destroy(term);
     bloom_conf_free(&conf);
     platform_destroy(plat);
+    if (gtk4_plugin_handle)
+        dlclose(gtk4_plugin_handle);
 
     return 0;
 }

@@ -1144,3 +1144,10 @@ static void gtk4_request_quit(PlatformBackend *plat)
     if (ctx->main_loop)
         g_main_loop_quit(ctx->main_loop);
 }
+
+__attribute__((visibility("default")))
+PlatformBackend *
+bloom_platform_gtk4_get(void)
+{
+    return &platform_backend_gtk4;
+}
