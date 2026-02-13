@@ -698,6 +698,10 @@ static bool gtk4_plat_init(PlatformBackend *plat)
 {
     vlog("Initializing GTK4/libadwaita platform\n");
 
+    // Set program name so GTK4 sets the correct Wayland app_id,
+    // allowing GNOME to match the window to bloom-terminal.desktop
+    g_set_prgname("bloom-terminal");
+
     // Initialize libadwaita (also initializes GTK4)
     adw_init();
 

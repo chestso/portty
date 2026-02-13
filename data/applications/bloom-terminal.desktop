@@ -5,4 +5,5 @@ Comment=Terminal emulator
 Exec=bloom-terminal
 Icon=bloom-terminal
 Terminal=false
+StartupWMClass=bloom-terminal
 Categories=System;TerminalEmulator;
