@@ -845,8 +845,10 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     // Set window background to black so it matches terminal content at
     // rounded corners (prevents greyish outline from theme background)
     GtkCssProvider *css_provider = gtk_css_provider_new();
-    gtk_css_provider_load_from_string(css_provider,
-                                      "window { background-color: black; }");
+    gtk_css_provider_load_from_string(
+        css_provider,
+        "window { background-color: black; }"
+        "headerbar { background-color: @headerbar_bg_color; }");
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(), GTK_STYLE_PROVIDER(css_provider),
         GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
