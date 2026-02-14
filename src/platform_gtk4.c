@@ -844,8 +844,6 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     // Create AdwWindow (single integrated CSD header bar)
     ctx->window = GTK_WINDOW(adw_window_new());
     gtk_window_set_title(ctx->window, title);
-    gtk_window_set_default_size(ctx->window, width, height);
-
     // Set window background to black so it matches terminal content at
     // rounded corners (prevents greyish outline from theme background)
     GtkCssProvider *css_provider = gtk_css_provider_new();
@@ -923,8 +921,11 @@ static void gtk4_set_window_size(PlatformBackend *plat, int width, int height)
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
     ctx->content_width = width;
     ctx->content_height = height;
-    if (ctx->window) {
-        gtk_window_set_default_size(ctx->window, width, height);
+    if (ctx->drawing_area) {
+        gtk_drawing_area_set_content_width(
+            GTK_DRAWING_AREA(ctx->drawing_area), width);
+        gtk_drawing_area_set_content_height(
+            GTK_DRAWING_AREA(ctx->drawing_area), height);
     }
 }
 
