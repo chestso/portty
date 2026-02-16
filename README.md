@@ -31,7 +31,7 @@ bloom-terminal uses a modular backend abstraction design:
 
 - **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
   - Default: SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
-  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Uses offscreen SDL rendering composited into a GtkDrawingArea via Cairo.
+  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Uses zero-copy DMA-BUF rendering (GBM → EGL → `glCopyImageSubData` → `GdkDmabufTexture`) when EGL/GBM are available, with `SDL_RenderReadPixels` fallback.
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: libvterm (`terminal_backend_vt`)
@@ -181,6 +181,7 @@ infocmp bloom-terminal | ssh remote-host 'tic -x -'
 Optional:
 
 - gtk4 + libadwaita-1 (for `--gtk4` platform backend)
+- EGL + GBM + libdrm (for zero-copy DMA-BUF rendering in GTK4 backend)
 
 ## Testing
 
