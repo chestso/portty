@@ -132,3 +132,17 @@ void platform_request_quit(PlatformBackend *plat)
         return;
     plat->request_quit(plat);
 }
+
+void platform_pause_pty(PlatformBackend *plat)
+{
+    if (!plat || !plat->pause_pty)
+        return;
+    plat->pause_pty(plat);
+}
+
+void platform_resume_pty(PlatformBackend *plat)
+{
+    if (!plat || !plat->resume_pty)
+        return;
+    plat->resume_pty(plat);
+}

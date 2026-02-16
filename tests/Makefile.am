@@ -1,7 +1,20 @@
-check_PROGRAMS = test_atlas
+TEST_COMMON = test_common.c
+SDL_STUBS   = sdl_stubs.c
+TERM_STUBS  = term_stubs.c
+TEST_CFLAGS = -I$(top_srcdir)/src -Wall -Wextra
 
-test_atlas_SOURCES = test_atlas.c sdl_stubs.c ../src/rend_sdl3_atlas.c
-test_atlas_CFLAGS = -I$(top_srcdir)/src $(SDL3_CFLAGS) -Wall -Wextra
-test_atlas_LDADD =
+check_PROGRAMS = test_atlas test_pty_pause test_unicode test_conf
 
-TESTS = test_atlas
+test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
+test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
+
+test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/platform.c ../src/term.c
+test_pty_pause_CFLAGS = $(TEST_CFLAGS)
+
+test_unicode_SOURCES = test_unicode.c $(TEST_COMMON) ../src/unicode.c
+test_unicode_CFLAGS = $(TEST_CFLAGS)
+
+test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/bloom_conf.c
+test_conf_CFLAGS = $(TEST_CFLAGS)
+
+TESTS = $(check_PROGRAMS)

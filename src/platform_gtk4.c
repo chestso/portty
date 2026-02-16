@@ -94,6 +94,7 @@ typedef struct
     PtyContext *pty;
     GIOChannel *pty_channel;
     guint pty_watch_id;
+    bool pty_paused;
     GIOChannel *signal_channel;
     guint signal_watch_id;
 
@@ -672,6 +673,8 @@ static bool gtk4_register_pty(PlatformBackend *plat, PtyContext *pty);
 static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
                      RendererBackend *rend, PlatformCallbacks *callbacks);
 static void gtk4_request_quit(PlatformBackend *plat);
+static void gtk4_pause_pty(PlatformBackend *plat);
+static void gtk4_resume_pty(PlatformBackend *plat);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -692,6 +695,8 @@ PlatformBackend platform_backend_gtk4 = {
     .register_pty = gtk4_register_pty,
     .run = gtk4_run,
     .request_quit = gtk4_request_quit,
+    .pause_pty = gtk4_pause_pty,
+    .resume_pty = gtk4_resume_pty,
 };
 
 static bool gtk4_plat_init(PlatformBackend *plat)
@@ -1155,6 +1160,41 @@ static void gtk4_request_quit(PlatformBackend *plat)
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
     if (ctx->main_loop)
         g_main_loop_quit(ctx->main_loop);
+}
+
+static void gtk4_pause_pty(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return;
+
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (ctx->pty_paused)
+        return;
+
+    if (ctx->pty_watch_id) {
+        g_source_remove(ctx->pty_watch_id);
+        ctx->pty_watch_id = 0;
+    }
+    ctx->pty_paused = true;
+    vlog("PTY paused (backpressure)\n");
+}
+
+static void gtk4_resume_pty(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return;
+
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (!ctx->pty_paused)
+        return;
+
+    ctx->pty_paused = false;
+    if (ctx->pty_channel) {
+        ctx->pty_watch_id = g_io_add_watch(ctx->pty_channel,
+                                           G_IO_IN | G_IO_ERR | G_IO_HUP,
+                                           on_pty_data, ctx);
+    }
+    vlog("PTY resumed\n");
 }
 
 __attribute__((visibility("default")))

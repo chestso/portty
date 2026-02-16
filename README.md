@@ -191,9 +191,12 @@ cd build && make check
 
 Current test suites:
 
-- **test_atlas** — Glyph texture atlas tests covering insert/lookup, shelf packing, staging buffer contents, spatial and load-factor eviction, plus regression tests for past hash table overflow, probe chain corruption, and post-eviction staging bugs
+- **test_atlas** — Glyph texture atlas: insert/lookup, shelf packing, staging buffer contents, spatial and load-factor eviction, plus regression tests for hash table overflow, probe chain corruption, and post-eviction staging bugs
+- **test_pty_pause** — PTY pause/resume during alt-screen selection: platform wrapper delegation, pause on alt-screen select, resume on clear/copy/resize, full select-copy cycles
+- **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
+- **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
 
-Visual testing of rendering and terminal features is done manually using example scripts with the `-v` verbose flag.
+All tests support `-v` for verbose output. Visual testing of rendering and terminal features is done manually using example scripts.
 
 ## Development
 

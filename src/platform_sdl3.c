@@ -96,6 +96,7 @@ typedef struct
     SDL_Thread *pty_reader_thread;
     SDL_AtomicInt running;
     SDL_AtomicInt quit_requested;
+    SDL_AtomicInt pty_paused;
     int force_redraw;
 
     // Wakeup pipe to interrupt reader thread on shutdown
@@ -223,6 +224,8 @@ static bool sdl3_register_pty(PlatformBackend *plat, PtyContext *pty);
 static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                      RendererBackend *rend, PlatformCallbacks *callbacks);
 static void sdl3_request_quit(PlatformBackend *plat);
+static void sdl3_pause_pty(PlatformBackend *plat);
+static void sdl3_resume_pty(PlatformBackend *plat);
 
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
@@ -242,6 +245,8 @@ PlatformBackend platform_backend_sdl3 = {
     .register_pty = sdl3_register_pty,
     .run = sdl3_run,
     .request_quit = sdl3_request_quit,
+    .pause_pty = sdl3_pause_pty,
+    .resume_pty = sdl3_resume_pty,
 };
 
 // PTY reader thread function
@@ -257,23 +262,33 @@ static int pty_reader_thread_func(void *data)
     int wakeup_fd = ctx->wakeup_pipe[0];
 
     while (SDL_GetAtomicInt(&ctx->running)) {
-        struct pollfd pfds[3];
-        int nfds = 1;
+        bool paused = SDL_GetAtomicInt(&ctx->pty_paused) != 0;
 
-        pfds[0].fd = pty_fd;
-        pfds[0].events = POLLIN;
-        pfds[0].revents = 0;
+        struct pollfd pfds[3];
+        int nfds = 0;
+        int pty_idx = -1;
+        int signal_idx = -1;
+        int wakeup_idx = -1;
+
+        // Only poll PTY fd when not paused
+        if (!paused) {
+            pty_idx = nfds;
+            pfds[nfds].fd = pty_fd;
+            pfds[nfds].events = POLLIN;
+            pfds[nfds].revents = 0;
+            nfds++;
+        }
 
         // Poll signal pipe if available
         if (signal_fd >= 0) {
+            signal_idx = nfds;
             pfds[nfds].fd = signal_fd;
             pfds[nfds].events = POLLIN;
             pfds[nfds].revents = 0;
             nfds++;
         }
 
-        // Poll wakeup pipe for shutdown notification
-        int wakeup_idx = -1;
+        // Poll wakeup pipe for shutdown/pause notifications
         if (wakeup_fd >= 0) {
             wakeup_idx = nfds;
             pfds[nfds].fd = wakeup_fd;
@@ -292,14 +307,21 @@ static int pty_reader_thread_func(void *data)
             break;
         }
 
-        // Check wakeup pipe first (shutdown request)
+        // Check wakeup pipe (shutdown or pause/resume notification)
         if (wakeup_idx >= 0 && (pfds[wakeup_idx].revents & POLLIN)) {
-            vlog("PTY reader thread: wakeup received, shutting down\n");
-            break;
+            char tmp;
+            while (read(wakeup_fd, &tmp, 1) > 0)
+                ; // drain
+            if (!SDL_GetAtomicInt(&ctx->running)) {
+                vlog("PTY reader thread: wakeup received, shutting down\n");
+                break;
+            }
+            // Otherwise it was a pause/unpause wakeup — re-loop
+            continue;
         }
 
         // Check signal pipe (child exit)
-        if (signal_fd >= 0 && (pfds[1].revents & POLLIN)) {
+        if (signal_idx >= 0 && (pfds[signal_idx].revents & POLLIN)) {
             pty_signal_drain();
             vlog("PTY reader thread: SIGCHLD received\n");
 
@@ -316,13 +338,13 @@ static int pty_reader_thread_func(void *data)
         }
 
         // Check for PTY errors
-        if (pfds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-            vlog("PTY reader thread: poll error condition (revents=0x%x)\n", pfds[0].revents);
+        if (pty_idx >= 0 && (pfds[pty_idx].revents & (POLLERR | POLLHUP | POLLNVAL))) {
+            vlog("PTY reader thread: poll error condition (revents=0x%x)\n", pfds[pty_idx].revents);
             break;
         }
 
         // Read PTY data
-        if (pfds[0].revents & POLLIN) {
+        if (pty_idx >= 0 && (pfds[pty_idx].revents & POLLIN)) {
             ssize_t n = pty_read(ctx->pty, buf, sizeof(buf));
             if (n > 0) {
                 PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
@@ -424,6 +446,7 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     ctx->pty_reader_thread = NULL;
     SDL_SetAtomicInt(&ctx->running, 0);
     SDL_SetAtomicInt(&ctx->quit_requested, 0);
+    SDL_SetAtomicInt(&ctx->pty_paused, 0);
     ctx->force_redraw = 1; // Force initial render
     ctx->last_title = NULL;
 
@@ -920,4 +943,42 @@ static void sdl3_request_quit(PlatformBackend *plat)
 
     SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
     SDL_SetAtomicInt(&ctx->quit_requested, 1);
+}
+
+static void sdl3_pause_pty(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return;
+
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    if (SDL_GetAtomicInt(&ctx->pty_paused))
+        return;
+
+    SDL_SetAtomicInt(&ctx->pty_paused, 1);
+    vlog("PTY paused (backpressure)\n");
+
+    // Wake reader thread so it re-enters poll() without PTY fd
+    if (ctx->wakeup_pipe[1] >= 0) {
+        char c = 1;
+        (void)write(ctx->wakeup_pipe[1], &c, 1);
+    }
+}
+
+static void sdl3_resume_pty(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return;
+
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    if (!SDL_GetAtomicInt(&ctx->pty_paused))
+        return;
+
+    SDL_SetAtomicInt(&ctx->pty_paused, 0);
+    vlog("PTY resumed\n");
+
+    // Wake reader thread so it re-includes PTY fd in poll()
+    if (ctx->wakeup_pipe[1] >= 0) {
+        char c = 1;
+        (void)write(ctx->wakeup_pipe[1], &c, 1);
+    }
 }

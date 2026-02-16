@@ -3,20 +3,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Satisfy common.h requirements
-int verbose = 0;
-
-void vlog_impl(const char *file, const char *func, int line, const char *format, ...)
-{
-    if (!verbose)
-        return;
-    va_list args;
-    va_start(args, format);
-    fprintf(stderr, "[%s:%s:%d] ", file, func, line);
-    vfprintf(stderr, format, args);
-    va_end(args);
-}
-
 // Helper: allocate a GlyphBitmap with uniform RGBA fill
 static GlyphBitmap *make_bitmap(int w, int h, uint8_t fill)
 {
@@ -433,8 +419,7 @@ static void test_regression_repeated_eviction_cycles(void)
 
 int main(int argc, char *argv[])
 {
-    if (argc > 1 && strcmp(argv[1], "-v") == 0)
-        verbose = 1;
+    test_parse_args(argc, argv);
 
     printf("Atlas unit tests\n");
 

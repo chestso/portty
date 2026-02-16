@@ -26,7 +26,8 @@ typedef struct
 } BloomConf;
 
 void bloom_conf_init(BloomConf *conf);
-bool bloom_conf_load(BloomConf *conf); /* returns true if file found */
+bool bloom_conf_load(BloomConf *conf);                        /* returns true if file found */
+bool bloom_conf_load_path(BloomConf *conf, const char *path); /* load from explicit path */
 void bloom_conf_free(BloomConf *conf);
 
 #endif /* BLOOM_CONF_H */

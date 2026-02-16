@@ -74,17 +74,11 @@ void bloom_conf_init(BloomConf *conf)
     conf->platform = NULL;
 }
 
-bool bloom_conf_load(BloomConf *conf)
+bool bloom_conf_load_path(BloomConf *conf, const char *path)
 {
-    char *path = find_config_file();
-    if (!path)
-        return false;
-
     FILE *fp = fopen(path, "r");
-    if (!fp) {
-        free(path);
+    if (!fp)
         return false;
-    }
 
     vlog("Loading config from %s\n", path);
 
@@ -196,8 +190,18 @@ bool bloom_conf_load(BloomConf *conf)
          conf->padding, conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
          conf->platform ? conf->platform : "(unset)");
 
-    free(path);
     return true;
+}
+
+bool bloom_conf_load(BloomConf *conf)
+{
+    char *path = find_config_file();
+    if (!path)
+        return false;
+
+    bool result = bloom_conf_load_path(conf, path);
+    free(path);
+    return result;
 }
 
 void bloom_conf_free(BloomConf *conf)

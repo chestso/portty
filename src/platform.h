@@ -92,6 +92,10 @@ struct PlatformBackend
     void (*run)(PlatformBackend *plat, TerminalBackend *term,
                 RendererBackend *rend, PlatformCallbacks *callbacks);
     void (*request_quit)(PlatformBackend *plat);
+
+    // PTY backpressure — pause/resume reading from PTY fd
+    void (*pause_pty)(PlatformBackend *plat);
+    void (*resume_pty)(PlatformBackend *plat);
 };
 
 // Platform API
@@ -118,5 +122,8 @@ bool platform_register_pty(PlatformBackend *plat, PtyContext *pty);
 void platform_run(PlatformBackend *plat, TerminalBackend *term,
                   RendererBackend *rend, PlatformCallbacks *callbacks);
 void platform_request_quit(PlatformBackend *plat);
+
+void platform_pause_pty(PlatformBackend *plat);
+void platform_resume_pty(PlatformBackend *plat);
 
 #endif /* PLATFORM_H */
