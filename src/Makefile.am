@@ -18,7 +18,8 @@ pkglib_LTLIBRARIES = bloom-terminal-gtk4.la
 bloom_terminal_gtk4_la_SOURCES = platform_gtk4.c
 bloom_terminal_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) $(VTERM_CFLAGS) \
     $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
+    $(EGL_CFLAGS) $(LIBDRM_CFLAGS) $(GBM_CFLAGS) \
     -DDATADIR='"$(datadir)"' -Wall -Wextra
 bloom_terminal_gtk4_la_LDFLAGS = -module -avoid-version
-bloom_terminal_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS)
+bloom_terminal_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS) $(EGL_LIBS) $(GBM_LIBS)
 endif

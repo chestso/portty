@@ -57,6 +57,17 @@ AM_CONDITIONAL([HAVE_GTK4], [test "x$have_gtk4" = "xyes"])
 if test "x$have_gtk4" = "xyes"; then
   AC_DEFINE([HAVE_GTK4], [1], [Define if GTK4/libadwaita is available])
   AC_MSG_NOTICE([GTK4/libadwaita platform backend enabled])
+
+  # Check for EGL + libdrm + GBM for zero-copy DMA-BUF rendering
+  PKG_CHECK_MODULES([EGL], [egl], [have_egl=yes], [have_egl=no])
+  PKG_CHECK_MODULES([LIBDRM], [libdrm], [have_libdrm=yes], [have_libdrm=no])
+  PKG_CHECK_MODULES([GBM], [gbm], [have_gbm=yes], [have_gbm=no])
+  if test "x$have_egl" = "xyes" && test "x$have_libdrm" = "xyes" && test "x$have_gbm" = "xyes"; then
+    AC_DEFINE([HAVE_EGL_DMABUF], [1], [Have EGL + GBM + DRM for zero-copy DMA-BUF rendering])
+    AC_MSG_NOTICE([GBM/EGL DMA-BUF zero-copy rendering enabled])
+  else
+    AC_MSG_NOTICE([GBM/EGL DMA-BUF not available, using readback rendering])
+  fi
 fi
 
 # Generate config.h header

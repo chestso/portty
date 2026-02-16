@@ -6,7 +6,6 @@
 #include "platform_gtk4.h"
 #include <SDL3/SDL.h>
 #include <adwaita.h>
-#include <cairo.h>
 #include <errno.h>
 #include <glib-unix.h>
 #include <signal.h>
@@ -14,6 +13,70 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+
+#ifdef HAVE_EGL_DMABUF
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
+#include <fcntl.h>
+#include <gbm.h>
+#include <libdrm/drm_fourcc.h>
+// GL function pointer types (loaded via eglGetProcAddress, avoids -lGL)
+typedef void(EGLAPIENTRYP PFNGLFINISHPROC)(void);
+typedef void(EGLAPIENTRYP PFNGLGENTEXTURESPROC)(int n, unsigned int *textures);
+typedef void(EGLAPIENTRYP PFNGLBINDTEXTUREPROC)(unsigned int target,
+                                                unsigned int texture);
+typedef void(EGLAPIENTRYP PFNGLDELETETEXTURESPROC)(int n,
+                                                   const unsigned int *textures);
+typedef void(EGLAPIENTRYP PFNGLTEXPARAMETERIPROC)(unsigned int target,
+                                                  unsigned int pname,
+                                                  int param);
+typedef void(EGLAPIENTRYP PFNGLGENFRAMEBUFFERSPROC)(int n,
+                                                    unsigned int *framebuffers);
+typedef void(EGLAPIENTRYP PFNGLBINDFRAMEBUFFERPROC)(unsigned int target,
+                                                    unsigned int framebuffer);
+typedef void(EGLAPIENTRYP PFNGLFRAMEBUFFERTEXTURE2DPROC)(
+    unsigned int target, unsigned int attachment, unsigned int textarget,
+    unsigned int texture, int level);
+typedef void(EGLAPIENTRYP PFNGLDELETEFRAMEBUFFERSPROC)(
+    int n, const unsigned int *framebuffers);
+typedef void(EGLAPIENTRYP PFNGLBLITFRAMEBUFFERPROC)(
+    int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0,
+    int dstX1, int dstY1, unsigned int mask, unsigned int filter);
+typedef unsigned int(EGLAPIENTRYP PFNGLCHECKFRAMEBUFFERSTATUSPROC)(
+    unsigned int target);
+typedef unsigned int(EGLAPIENTRYP PFNGLGETERRORPROC)(void);
+typedef void(EGLAPIENTRYP PFNGLGETINTEGERVPROC)(unsigned int pname,
+                                                int *params);
+// glEGLImageTargetTexture2DOES — bind EGLImage to GL texture
+typedef void(EGLAPIENTRYP PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)(
+    unsigned int target, void *image);
+// glCopyImageSubData — copy between textures without FBO binding (GL 4.3)
+typedef void(EGLAPIENTRYP PFNGLCOPYIMAGESUBDATAPROC)(
+    unsigned int srcName, unsigned int srcTarget, int srcLevel, int srcX,
+    int srcY, int srcZ, unsigned int dstName, unsigned int dstTarget,
+    int dstLevel, int dstX, int dstY, int dstZ, int srcWidth, int srcHeight,
+    int srcDepth);
+// glGetFramebufferAttachmentParameteriv — query FBO attachments
+typedef void(EGLAPIENTRYP PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC)(
+    unsigned int target, unsigned int attachment, unsigned int pname,
+    int *params);
+#define GL_TEXTURE_2D                         0x0DE1
+#define GL_TEXTURE_MIN_FILTER                 0x2801
+#define GL_TEXTURE_MAG_FILTER                 0x2800
+#define GL_LINEAR                             0x2601
+#define GL_NEAREST                            0x2600
+#define GL_RGBA                               0x1908
+#define GL_RGBA8                              0x8058
+#define GL_UNSIGNED_BYTE                      0x1401
+#define GL_FRAMEBUFFER                        0x8D40
+#define GL_READ_FRAMEBUFFER                   0x8CA8
+#define GL_DRAW_FRAMEBUFFER                   0x8CA9
+#define GL_FRAMEBUFFER_BINDING                0x8CA6
+#define GL_COLOR_ATTACHMENT0                  0x8CE0
+#define GL_COLOR_BUFFER_BIT                   0x00004000
+#define GL_FRAMEBUFFER_COMPLETE               0x8CD5
+#define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME 0x8CD1
+#endif
 
 // Cursor blink interval in milliseconds
 #define CURSOR_BLINK_INTERVAL_MS 1000
@@ -122,6 +185,56 @@ typedef struct
     // Unix signal watch IDs (0 = already removed)
     guint sigint_id;
     guint sigterm_id;
+
+#ifdef HAVE_EGL_DMABUF
+    // Zero-copy DMA-BUF rendering state (GBM import approach)
+    bool zero_copy;
+    EGLDisplay egl_display;
+    GdkTexture *prev_texture;
+
+    // GBM state
+    int drm_fd; // DRM render node fd
+    struct gbm_device *gbm_dev;
+    struct gbm_bo *gbm_bo; // current buffer object
+    int dmabuf_fd;         // DMA-BUF fd from GBM (persistent, dup'd for GTK)
+    int dmabuf_stride;
+    int dmabuf_offset;
+    uint32_t dmabuf_fourcc;
+    uint64_t dmabuf_modifier;
+
+    // GL resources (texture + FBO backed by GBM buffer via EGLImage import)
+    EGLImage egl_image;      // imported from DMA-BUF (persistent per resize)
+    unsigned int export_tex; // GL texture bound to EGLImage
+    unsigned int export_fbo; // FBO with export_tex as color attachment
+
+    // EGL context state (saved for direct eglMakeCurrent restoration,
+    // since SDL_GL_MakeCurrent doesn't work after GTK changes the context)
+    EGLContext egl_ctx;
+    EGLSurface egl_draw;
+    EGLSurface egl_read;
+
+    // SDL render target's GL texture ID (queried from FBO attachment)
+    unsigned int sdl_target_gl_tex;
+
+    // GL function pointers
+    PFNGLFINISHPROC glFinish;
+    PFNGLGENTEXTURESPROC glGenTextures;
+    PFNGLBINDTEXTUREPROC glBindTexture;
+    PFNGLDELETETEXTURESPROC glDeleteTextures;
+    PFNGLTEXPARAMETERIPROC glTexParameteri;
+    PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
+    PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
+    PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D;
+    PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
+    PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer;
+    PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
+    PFNGLGETERRORPROC glGetError;
+    PFNGLGETINTEGERVPROC glGetIntegerv;
+    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
+    PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData; // optional
+    PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC
+    glGetFramebufferAttachmentParameteriv;
+#endif
 } GTK4PlatformData;
 
 // Convert GDK modifier flags to TERM_MOD_* flags
@@ -174,27 +287,294 @@ static void handle_keyboard_result(GTK4PlatformData *ctx, KeyboardResult *result
     }
 }
 
-// Draw function for GtkDrawingArea
-static void draw_func(GtkDrawingArea *area, cairo_t *cr, int width, int height,
-                      gpointer user_data)
+#ifdef HAVE_EGL_DMABUF
+// Load a GL/EGL function via eglGetProcAddress
+#define LOAD_GL(ctx, name, type) \
+    ctx->name = (type)eglGetProcAddress(#name)
+
+// Find and open a DRM render node (/dev/dri/renderD128, etc.)
+static int open_drm_render_node(void)
 {
-    (void)area;
-    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+    for (int i = 128; i < 136; i++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/dri/renderD%d", i);
+        int fd = open(path, O_RDWR | O_CLOEXEC);
+        if (fd >= 0) {
+            vlog("Opened DRM render node: %s\n", path);
+            return fd;
+        }
+    }
+    return -1;
+}
 
-    if (!ctx->rend || !ctx->term || !ctx->sdl_renderer)
+// Initialize GBM + EGL for DMA-BUF import — call after GL renderer creation
+static bool init_dmabuf_export(GTK4PlatformData *ctx)
+{
+    ctx->egl_display = eglGetCurrentDisplay();
+    if (ctx->egl_display == EGL_NO_DISPLAY) {
+        vlog("No EGL display available\n");
+        return false;
+    }
+
+    // Check for EGL_EXT_image_dma_buf_import (needed to import DMA-BUF)
+    const char *extensions = eglQueryString(ctx->egl_display, EGL_EXTENSIONS);
+    if (!extensions ||
+        !strstr(extensions, "EGL_EXT_image_dma_buf_import")) {
+        vlog("EGL_EXT_image_dma_buf_import not available\n");
+        return false;
+    }
+
+    // Open DRM render node for GBM
+    ctx->drm_fd = open_drm_render_node();
+    if (ctx->drm_fd < 0) {
+        vlog("No DRM render node available\n");
+        return false;
+    }
+
+    // Create GBM device
+    ctx->gbm_dev = gbm_create_device(ctx->drm_fd);
+    if (!ctx->gbm_dev) {
+        vlog("gbm_create_device failed\n");
+        close(ctx->drm_fd);
+        ctx->drm_fd = -1;
+        return false;
+    }
+
+    // Save EGL context and surfaces for direct restoration.
+    // SDL_GL_MakeCurrent doesn't work after GTK makes its own context current,
+    // so we call eglMakeCurrent directly in the snapshot callback.
+    ctx->egl_ctx = eglGetCurrentContext();
+    ctx->egl_draw = eglGetCurrentSurface(EGL_DRAW);
+    ctx->egl_read = eglGetCurrentSurface(EGL_READ);
+
+    // Load GL functions (required)
+    LOAD_GL(ctx, glFinish, PFNGLFINISHPROC);
+    LOAD_GL(ctx, glGenTextures, PFNGLGENTEXTURESPROC);
+    LOAD_GL(ctx, glBindTexture, PFNGLBINDTEXTUREPROC);
+    LOAD_GL(ctx, glDeleteTextures, PFNGLDELETETEXTURESPROC);
+    LOAD_GL(ctx, glTexParameteri, PFNGLTEXPARAMETERIPROC);
+    LOAD_GL(ctx, glGenFramebuffers, PFNGLGENFRAMEBUFFERSPROC);
+    LOAD_GL(ctx, glBindFramebuffer, PFNGLBINDFRAMEBUFFERPROC);
+    LOAD_GL(ctx, glFramebufferTexture2D, PFNGLFRAMEBUFFERTEXTURE2DPROC);
+    LOAD_GL(ctx, glDeleteFramebuffers, PFNGLDELETEFRAMEBUFFERSPROC);
+    LOAD_GL(ctx, glBlitFramebuffer, PFNGLBLITFRAMEBUFFERPROC);
+    LOAD_GL(ctx, glCheckFramebufferStatus, PFNGLCHECKFRAMEBUFFERSTATUSPROC);
+    LOAD_GL(ctx, glGetError, PFNGLGETERRORPROC);
+    LOAD_GL(ctx, glGetIntegerv, PFNGLGETINTEGERVPROC);
+    LOAD_GL(ctx, glEGLImageTargetTexture2DOES,
+            PFNGLEGLIMAGETARGETTEXTURE2DOESPROC);
+    LOAD_GL(ctx, glGetFramebufferAttachmentParameteriv,
+            PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC);
+    // Optional: glCopyImageSubData (GL 4.3) — preferred over FBO blit
+    LOAD_GL(ctx, glCopyImageSubData, PFNGLCOPYIMAGESUBDATAPROC);
+
+    if (!ctx->glFinish || !ctx->glGenTextures || !ctx->glBindTexture ||
+        !ctx->glDeleteTextures || !ctx->glTexParameteri ||
+        !ctx->glGenFramebuffers || !ctx->glBindFramebuffer ||
+        !ctx->glFramebufferTexture2D || !ctx->glDeleteFramebuffers ||
+        !ctx->glBlitFramebuffer || !ctx->glCheckFramebufferStatus ||
+        !ctx->glGetError || !ctx->glGetIntegerv ||
+        !ctx->glEGLImageTargetTexture2DOES ||
+        !ctx->glGetFramebufferAttachmentParameteriv) {
+        vlog("Failed to load GL function pointers\n");
+        gbm_device_destroy(ctx->gbm_dev);
+        ctx->gbm_dev = NULL;
+        close(ctx->drm_fd);
+        ctx->drm_fd = -1;
+        return false;
+    }
+
+    ctx->gbm_bo = NULL;
+    ctx->dmabuf_fd = -1;
+    ctx->egl_image = EGL_NO_IMAGE;
+    ctx->export_tex = 0;
+    ctx->export_fbo = 0;
+    ctx->sdl_target_gl_tex = 0;
+    vlog("GBM DMA-BUF import initialized (glCopyImageSubData: %s)\n",
+         ctx->glCopyImageSubData ? "yes" : "no");
+    return true;
+}
+
+// Create or resize the GBM-backed GL texture + FBO.
+// Allocates a GBM buffer, exports its DMA-BUF fd, imports into EGL/GL.
+static bool setup_export_resources(GTK4PlatformData *ctx, int w, int h)
+{
+    // Clean up previous resources (reverse order of creation)
+    if (ctx->export_fbo) {
+        ctx->glDeleteFramebuffers(1, &ctx->export_fbo);
+        ctx->export_fbo = 0;
+    }
+    if (ctx->export_tex) {
+        ctx->glDeleteTextures(1, &ctx->export_tex);
+        ctx->export_tex = 0;
+    }
+    if (ctx->egl_image != EGL_NO_IMAGE) {
+        eglDestroyImage(ctx->egl_display, ctx->egl_image);
+        ctx->egl_image = EGL_NO_IMAGE;
+    }
+    if (ctx->dmabuf_fd >= 0) {
+        close(ctx->dmabuf_fd);
+        ctx->dmabuf_fd = -1;
+    }
+    if (ctx->gbm_bo) {
+        gbm_bo_destroy(ctx->gbm_bo);
+        ctx->gbm_bo = NULL;
+    }
+
+    // 1. Allocate GBM buffer with explicit linear modifier
+    uint64_t linear_mod = DRM_FORMAT_MOD_LINEAR;
+    ctx->gbm_bo = gbm_bo_create_with_modifiers2(
+        ctx->gbm_dev, (uint32_t)w, (uint32_t)h, GBM_FORMAT_ABGR8888,
+        &linear_mod, 1, GBM_BO_USE_RENDERING);
+    if (!ctx->gbm_bo) {
+        // Fallback: try gbm_bo_create with LINEAR flag
+        ctx->gbm_bo = gbm_bo_create(ctx->gbm_dev, (uint32_t)w, (uint32_t)h,
+                                    GBM_FORMAT_ABGR8888,
+                                    GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
+    }
+    if (!ctx->gbm_bo) {
+        vlog("gbm_bo_create(%dx%d) failed\n", w, h);
+        return false;
+    }
+
+    // 2. Get DMA-BUF fd and metadata from GBM
+    ctx->dmabuf_fd = gbm_bo_get_fd(ctx->gbm_bo);
+    if (ctx->dmabuf_fd < 0) {
+        vlog("gbm_bo_get_fd failed\n");
+        gbm_bo_destroy(ctx->gbm_bo);
+        ctx->gbm_bo = NULL;
+        return false;
+    }
+    ctx->dmabuf_stride = (int)gbm_bo_get_stride(ctx->gbm_bo);
+    ctx->dmabuf_offset = 0;
+    ctx->dmabuf_fourcc = gbm_bo_get_format(ctx->gbm_bo);
+    ctx->dmabuf_modifier = gbm_bo_get_modifier(ctx->gbm_bo);
+    // If GBM reports INVALID modifier but we requested linear, use linear
+    if (ctx->dmabuf_modifier == DRM_FORMAT_MOD_INVALID)
+        ctx->dmabuf_modifier = DRM_FORMAT_MOD_LINEAR;
+
+    // 3. Import DMA-BUF into EGL as an EGLImage (with explicit modifier)
+    EGLAttrib img_attrs[] = {
+        EGL_WIDTH, w,
+        EGL_HEIGHT, h,
+        EGL_LINUX_DRM_FOURCC_EXT, (EGLAttrib)ctx->dmabuf_fourcc,
+        EGL_DMA_BUF_PLANE0_FD_EXT, ctx->dmabuf_fd,
+        EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
+        EGL_DMA_BUF_PLANE0_PITCH_EXT, ctx->dmabuf_stride,
+        EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
+        (EGLAttrib)(ctx->dmabuf_modifier & 0xFFFFFFFF),
+        EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
+        (EGLAttrib)(ctx->dmabuf_modifier >> 32),
+        EGL_NONE
+    };
+    ctx->egl_image = eglCreateImage(ctx->egl_display, EGL_NO_CONTEXT,
+                                    EGL_LINUX_DMA_BUF_EXT, NULL, img_attrs);
+    if (ctx->egl_image == EGL_NO_IMAGE) {
+        vlog("eglCreateImage(DMA-BUF import) failed: 0x%x\n", eglGetError());
+        close(ctx->dmabuf_fd);
+        ctx->dmabuf_fd = -1;
+        gbm_bo_destroy(ctx->gbm_bo);
+        ctx->gbm_bo = NULL;
+        return false;
+    }
+
+    // 4. Create GL texture backed by the EGLImage
+    ctx->glGenTextures(1, &ctx->export_tex);
+    ctx->glBindTexture(GL_TEXTURE_2D, ctx->export_tex);
+    ctx->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    ctx->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    ctx->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D,
+                                      (void *)ctx->egl_image);
+    ctx->glBindTexture(GL_TEXTURE_2D, 0);
+
+    // 5. Create FBO with the EGLImage-backed texture
+    ctx->glGenFramebuffers(1, &ctx->export_fbo);
+    ctx->glBindFramebuffer(GL_FRAMEBUFFER, ctx->export_fbo);
+    ctx->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                                GL_TEXTURE_2D, ctx->export_tex, 0);
+    unsigned int status = ctx->glCheckFramebufferStatus(GL_FRAMEBUFFER);
+    ctx->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+    if (status != GL_FRAMEBUFFER_COMPLETE) {
+        vlog("Export FBO incomplete: 0x%x\n", status);
+        ctx->glDeleteFramebuffers(1, &ctx->export_fbo);
+        ctx->export_fbo = 0;
+        ctx->glDeleteTextures(1, &ctx->export_tex);
+        ctx->export_tex = 0;
+        eglDestroyImage(ctx->egl_display, ctx->egl_image);
+        ctx->egl_image = EGL_NO_IMAGE;
+        close(ctx->dmabuf_fd);
+        ctx->dmabuf_fd = -1;
+        gbm_bo_destroy(ctx->gbm_bo);
+        ctx->gbm_bo = NULL;
+        return false;
+    }
+
+    vlog("GBM export resources: bo=%p tex=%u fbo=%u fd=%d "
+         "fourcc=0x%x modifier=0x%lx stride=%d (%dx%d)\n",
+         (void *)ctx->gbm_bo, ctx->export_tex, ctx->export_fbo,
+         ctx->dmabuf_fd, ctx->dmabuf_fourcc,
+         (unsigned long)ctx->dmabuf_modifier, ctx->dmabuf_stride, w, h);
+    return true;
+}
+
+// GDestroyNotify callback to close dup'd fd when GTK is done with texture
+static void close_dmabuf_fd(gpointer data)
+{
+    int fd = (int)(intptr_t)data;
+    if (fd >= 0)
+        close(fd);
+}
+#endif // HAVE_EGL_DMABUF
+
+// BloomTerminalArea — GtkDrawingArea subclass with snapshot override
+
+#define BLOOM_TYPE_TERMINAL_AREA (bloom_terminal_area_get_type())
+G_DECLARE_FINAL_TYPE(BloomTerminalArea, bloom_terminal_area, BLOOM,
+                     TERMINAL_AREA, GtkDrawingArea)
+
+struct _BloomTerminalArea
+{
+    GtkDrawingArea parent_instance;
+    GTK4PlatformData *ctx;
+};
+
+G_DEFINE_TYPE(BloomTerminalArea, bloom_terminal_area, GTK_TYPE_DRAWING_AREA)
+
+static void bloom_terminal_area_snapshot(GtkWidget *widget,
+                                         GtkSnapshot *snapshot)
+{
+    BloomTerminalArea *self = BLOOM_TERMINAL_AREA(widget);
+    GTK4PlatformData *ctx = self->ctx;
+
+    if (!ctx || !ctx->rend || !ctx->term || !ctx->sdl_renderer)
         return;
 
-    // Always fill background black (avoids white flash on resize)
-    cairo_set_source_rgb(cr, 0, 0, 0);
-    cairo_paint(cr);
-
-    // Only render terminal content if needed
-    if (!terminal_needs_redraw(ctx->term) && !ctx->force_redraw)
-        return;
-
+    int width = gtk_widget_get_width(widget);
+    int height = gtk_widget_get_height(widget);
     int scale = ctx->scale_factor;
     int phys_w = width * scale;
     int phys_h = height * scale;
+
+    // Always paint black background (avoids white flash on resize)
+    gtk_snapshot_append_color(
+        snapshot, &(GdkRGBA){ 0, 0, 0, 1 },
+        &GRAPHENE_RECT_INIT(0, 0, width, height));
+
+    bool needs_render =
+        terminal_needs_redraw(ctx->term) || ctx->force_redraw;
+
+#ifdef HAVE_EGL_DMABUF
+    // If nothing changed and we have a cached texture, reuse it
+    if (!needs_render && ctx->prev_texture) {
+        gtk_snapshot_append_texture(
+            snapshot, ctx->prev_texture,
+            &GRAPHENE_RECT_INIT(0, 0, width, height));
+        return;
+    }
+#endif
+
+    if (!needs_render)
+        return;
 
     if (phys_w <= 0 || phys_h <= 0)
         return;
@@ -212,57 +592,186 @@ static void draw_func(GtkDrawingArea *area, cairo_t *cr, int width, int height,
             SDL_TEXTUREACCESS_TARGET, phys_w, phys_h);
         ctx->target_w = phys_w;
         ctx->target_h = phys_h;
+#ifdef HAVE_EGL_DMABUF
+        // Recreate export resources for new size
+        if (ctx->zero_copy) {
+            g_clear_object(&ctx->prev_texture);
+            if (!setup_export_resources(ctx, phys_w, phys_h)) {
+                vlog("Export resource setup failed, disabling zero-copy\n");
+                ctx->zero_copy = false;
+            }
+
+            // Query the SDL render target's GL texture ID from the FBO
+            // attachment. SDL's offscreen renderer doesn't expose it via
+            // properties, but we can read it from the FBO color attachment.
+            ctx->sdl_target_gl_tex = 0;
+            SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target);
+            int fbo_id = 0;
+            ctx->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo_id);
+            if (fbo_id > 0) {
+                int tex_name = 0;
+                ctx->glGetFramebufferAttachmentParameteriv(
+                    GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
+                    GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &tex_name);
+                if (tex_name > 0)
+                    ctx->sdl_target_gl_tex = (unsigned int)tex_name;
+            }
+            SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
+            while (ctx->glGetError() != 0)
+                ;
+            vlog("SDL render target GL texture: %u\n",
+                 ctx->sdl_target_gl_tex);
+        }
+#endif
         if (!ctx->render_target) {
             vlog("Failed to create render target %dx%d: %s\n", phys_w, phys_h,
                  SDL_GetError());
             return;
         }
-        vlog("Created render target texture %dx%d\n", phys_w, phys_h);
     }
 
-    // Render terminal into the render target texture
-    SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target);
+    // Render terminal into SDL's render target texture.
+#ifdef HAVE_EGL_DMABUF
+    if (ctx->zero_copy) {
+        // GTK4 makes its own EGL context current for GL rendering.
+        // SDL_GL_MakeCurrent doesn't restore ours, so call eglMakeCurrent
+        // directly with the saved EGL context and surfaces.
+        eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
+                       ctx->egl_ctx);
+    }
+#endif
+    SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
+#ifdef HAVE_EGL_DMABUF
+    if (ctx->zero_copy) {
+        while (ctx->glGetError() != 0)
+            ;
+    }
+#endif
+    if (!SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target)) {
+        vlog("SDL_SetRenderTarget failed: %s\n", SDL_GetError());
+        return;
+    }
 
     bool cursor_vis =
         !terminal_get_cursor_blink(ctx->term) || ctx->cursor_blink_visible;
     renderer_draw_terminal(ctx->rend, ctx->term, cursor_vis);
 
-    // Read pixels back from the render target
-    SDL_Surface *surface = SDL_RenderReadPixels(ctx->sdl_renderer, NULL);
-    SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
+#ifdef HAVE_EGL_DMABUF
+    if (ctx->zero_copy) {
+        // Flush SDL draw commands to GL
+        SDL_FlushRenderer(ctx->sdl_renderer);
 
-    if (!surface) {
-        vlog("SDL_RenderReadPixels failed: %s\n", SDL_GetError());
-        return;
+        // Copy SDL render target → GBM-backed export texture
+        if (ctx->glCopyImageSubData && ctx->sdl_target_gl_tex) {
+            // glCopyImageSubData copies between textures directly —
+            // no FBO binding needed, avoids FBO completeness issues
+            ctx->glCopyImageSubData(
+                ctx->sdl_target_gl_tex, GL_TEXTURE_2D, 0, 0, 0, 0,
+                ctx->export_tex, GL_TEXTURE_2D, 0, 0, 0, 0,
+                phys_w, phys_h, 1);
+        } else {
+            // Fallback: blit via FBOs
+            int sdl_fbo = 0;
+            ctx->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &sdl_fbo);
+            ctx->glBindFramebuffer(GL_READ_FRAMEBUFFER,
+                                   (unsigned int)sdl_fbo);
+            ctx->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ctx->export_fbo);
+            ctx->glBlitFramebuffer(0, 0, phys_w, phys_h, 0, 0, phys_w,
+                                   phys_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+            ctx->glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int)sdl_fbo);
+        }
+        ctx->glFinish();
+
+        // dup() the persistent DMA-BUF fd for this frame's GTK texture.
+        // GTK closes the fd via close_dmabuf_fd when done.
+        int fd = dup(ctx->dmabuf_fd);
+        if (fd < 0) {
+            vlog("dup(dmabuf_fd) failed: %s\n", strerror(errno));
+            goto readback_fallback;
+        }
+
+        GdkDmabufTextureBuilder *builder =
+            gdk_dmabuf_texture_builder_new();
+        gdk_dmabuf_texture_builder_set_display(
+            builder, gtk_widget_get_display(widget));
+        gdk_dmabuf_texture_builder_set_width(builder, phys_w);
+        gdk_dmabuf_texture_builder_set_height(builder, phys_h);
+        gdk_dmabuf_texture_builder_set_fourcc(builder, ctx->dmabuf_fourcc);
+        gdk_dmabuf_texture_builder_set_modifier(builder, ctx->dmabuf_modifier);
+        gdk_dmabuf_texture_builder_set_n_planes(builder, 1);
+        gdk_dmabuf_texture_builder_set_fd(builder, 0, fd);
+        gdk_dmabuf_texture_builder_set_stride(builder, 0, ctx->dmabuf_stride);
+        gdk_dmabuf_texture_builder_set_offset(builder, 0, ctx->dmabuf_offset);
+        gdk_dmabuf_texture_builder_set_premultiplied(builder, TRUE);
+
+        if (ctx->prev_texture)
+            gdk_dmabuf_texture_builder_set_update_texture(builder,
+                                                          ctx->prev_texture);
+
+        GError *error = NULL;
+        GdkTexture *texture = gdk_dmabuf_texture_builder_build(
+            builder, close_dmabuf_fd, (gpointer)(intptr_t)fd, &error);
+        g_object_unref(builder);
+
+        if (texture) {
+            gtk_snapshot_append_texture(
+                snapshot, texture,
+                &GRAPHENE_RECT_INIT(0, 0, width, height));
+            g_clear_object(&ctx->prev_texture);
+            ctx->prev_texture = texture;
+
+            terminal_clear_redraw(ctx->term);
+            ctx->force_redraw = false;
+            return;
+        }
+
+        // DMA-BUF texture build failed
+        vlog("GdkDmabufTextureBuilder failed: %s\n",
+             error ? error->message : "unknown");
+        g_clear_error(&error);
+        close(fd);
     }
 
-    // Convert to ARGB32 (Cairo uses ARGB32 premultiplied)
-    SDL_Surface *argb_surface =
-        SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ARGB8888);
-    SDL_DestroySurface(surface);
-    if (!argb_surface) {
-        vlog("SDL_ConvertSurface failed: %s\n", SDL_GetError());
-        return;
+readback_fallback:
+#endif // HAVE_EGL_DMABUF
+
+    // Readback fallback — read pixels and create GdkMemoryTexture
+    {
+        SDL_Surface *surface = SDL_RenderReadPixels(ctx->sdl_renderer, NULL);
+        SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
+
+        if (!surface) {
+            vlog("SDL_RenderReadPixels failed: %s\n", SDL_GetError());
+            return;
+        }
+
+        // SDL renders with premultiplied alpha
+        GBytes *bytes = g_bytes_new(surface->pixels,
+                                    surface->h * surface->pitch);
+        GdkTexture *texture = gdk_memory_texture_new(
+            surface->w, surface->h, GDK_MEMORY_R8G8B8A8_PREMULTIPLIED,
+            bytes, surface->pitch);
+        g_bytes_unref(bytes);
+        SDL_DestroySurface(surface);
+
+        gtk_snapshot_append_texture(
+            snapshot, texture,
+            &GRAPHENE_RECT_INIT(0, 0, width, height));
+        g_object_unref(texture);
     }
-
-    // Create Cairo surface from pixel data
-    cairo_surface_t *cairo_surface = cairo_image_surface_create_for_data(
-        (unsigned char *)argb_surface->pixels, CAIRO_FORMAT_ARGB32,
-        argb_surface->w, argb_surface->h, argb_surface->pitch);
-
-    // Scale from physical to logical pixels and paint
-    cairo_save(cr);
-    cairo_scale(cr, 1.0 / scale, 1.0 / scale);
-    cairo_set_source_surface(cr, cairo_surface, 0, 0);
-    cairo_pattern_set_filter(cairo_get_source(cr), CAIRO_FILTER_NEAREST);
-    cairo_paint(cr);
-    cairo_restore(cr);
-
-    cairo_surface_destroy(cairo_surface);
-    SDL_DestroySurface(argb_surface);
 
     terminal_clear_redraw(ctx->term);
     ctx->force_redraw = false;
+}
+
+static void bloom_terminal_area_init(BloomTerminalArea *self)
+{
+    (void)self;
+}
+
+static void bloom_terminal_area_class_init(BloomTerminalAreaClass *klass)
+{
+    GTK_WIDGET_CLASS(klass)->snapshot = bloom_terminal_area_snapshot;
 }
 
 // Key press handler
@@ -738,31 +1247,153 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     ctx->force_redraw = true;
     ctx->scale_factor = 1;
 
-    // Create hidden SDL window for offscreen rendering
+#ifdef HAVE_EGL_DMABUF
+    // Try to create an OpenGL-backed offscreen renderer for zero-copy DMA-BUF.
+    // Strategy: offscreen driver + OpenGL window/renderer, with fallbacks.
+    bool got_gl = false;
+    // Attempt 1: offscreen driver with OpenGL renderer
     ctx->sdl_window = SDL_CreateWindow("bloom-terminal-offscreen", 800, 600,
-                                       SDL_WINDOW_HIDDEN);
-    if (!ctx->sdl_window) {
-        fprintf(stderr, "ERROR: Failed to create offscreen SDL window: %s\n",
-                SDL_GetError());
-        free(ctx);
-        SDL_Quit();
-        return false;
+                                       SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
+    if (ctx->sdl_window) {
+        SDL_PropertiesID rprops = SDL_CreateProperties();
+        SDL_SetStringProperty(rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING,
+                              "opengl");
+        SDL_SetPointerProperty(rprops, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
+                               ctx->sdl_window);
+        ctx->sdl_renderer = SDL_CreateRendererWithProperties(rprops);
+        SDL_DestroyProperties(rprops);
+
+        if (ctx->sdl_renderer) {
+            const char *rname = SDL_GetRendererName(ctx->sdl_renderer);
+            if (rname &&
+                (strcmp(rname, "opengl") == 0 ||
+                 strcmp(rname, "opengles2") == 0)) {
+                got_gl = true;
+
+                vlog("SDL GL renderer (%s) on offscreen driver\n", rname);
+            } else {
+                vlog("Got non-GL renderer '%s', retrying\n",
+                     rname ? rname : "(null)");
+                SDL_DestroyRenderer(ctx->sdl_renderer);
+                ctx->sdl_renderer = NULL;
+            }
+        }
+        if (!got_gl) {
+            SDL_DestroyWindow(ctx->sdl_window);
+            ctx->sdl_window = NULL;
+        }
     }
 
-    ctx->sdl_renderer = SDL_CreateRenderer(ctx->sdl_window, NULL);
-    if (!ctx->sdl_renderer) {
-        fprintf(stderr, "ERROR: Failed to create SDL renderer: %s\n",
-                SDL_GetError());
-        SDL_DestroyWindow(ctx->sdl_window);
-        free(ctx);
+    // Attempt 2: default video driver with hidden GL window
+    if (!got_gl) {
         SDL_Quit();
-        return false;
+        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "");
+        if (SDL_Init(SDL_INIT_VIDEO)) {
+            ctx->sdl_window =
+                SDL_CreateWindow("bloom-terminal-offscreen", 800, 600,
+                                 SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
+            if (ctx->sdl_window) {
+                SDL_PropertiesID rprops = SDL_CreateProperties();
+                SDL_SetStringProperty(
+                    rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING, "opengl");
+                SDL_SetPointerProperty(
+                    rprops, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
+                    ctx->sdl_window);
+                ctx->sdl_renderer =
+                    SDL_CreateRendererWithProperties(rprops);
+                SDL_DestroyProperties(rprops);
+
+                if (ctx->sdl_renderer) {
+                    const char *rname =
+                        SDL_GetRendererName(ctx->sdl_renderer);
+                    if (rname &&
+                        (strcmp(rname, "opengl") == 0 ||
+                         strcmp(rname, "opengles2") == 0)) {
+                        got_gl = true;
+
+                        vlog("SDL GL renderer (%s) on default driver\n",
+                             rname);
+                    } else {
+                        SDL_DestroyRenderer(ctx->sdl_renderer);
+                        ctx->sdl_renderer = NULL;
+                    }
+                }
+                if (!got_gl) {
+                    SDL_DestroyWindow(ctx->sdl_window);
+                    ctx->sdl_window = NULL;
+                }
+            }
+        }
+        // Reinitialize with offscreen driver for fallback
+        if (!got_gl) {
+            SDL_Quit();
+            SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
+            if (!SDL_Init(SDL_INIT_VIDEO)) {
+                fprintf(stderr,
+                        "ERROR: Failed to reinitialize SDL video: %s\n",
+                        SDL_GetError());
+                free(ctx);
+                return false;
+            }
+        }
+    }
+#endif // HAVE_EGL_DMABUF
+
+    // Fallback: offscreen + any renderer (software)
+    if (!ctx->sdl_window) {
+        ctx->sdl_window = SDL_CreateWindow("bloom-terminal-offscreen", 800,
+                                           600, SDL_WINDOW_HIDDEN);
+        if (!ctx->sdl_window) {
+            fprintf(stderr,
+                    "ERROR: Failed to create offscreen SDL window: %s\n",
+                    SDL_GetError());
+            free(ctx);
+            SDL_Quit();
+            return false;
+        }
+    }
+    if (!ctx->sdl_renderer) {
+        ctx->sdl_renderer = SDL_CreateRenderer(ctx->sdl_window, NULL);
+        if (!ctx->sdl_renderer) {
+            fprintf(stderr, "ERROR: Failed to create SDL renderer: %s\n",
+                    SDL_GetError());
+            SDL_DestroyWindow(ctx->sdl_window);
+            free(ctx);
+            SDL_Quit();
+            return false;
+        }
     }
 
     // Disable VSync for offscreen rendering
     SDL_SetRenderVSync(ctx->sdl_renderer, 0);
 
-    vlog("GTK4 platform initialized with offscreen SDL renderer\n");
+#ifdef HAVE_EGL_DMABUF
+    // Initialize DMA-BUF export if we got a GL renderer
+    if (got_gl) {
+        // Force a render to ensure GL context is current
+        SDL_SetRenderDrawColor(ctx->sdl_renderer, 0, 0, 0, 255);
+        SDL_RenderClear(ctx->sdl_renderer);
+        SDL_RenderPresent(ctx->sdl_renderer);
+
+        if (init_dmabuf_export(ctx)) {
+            ctx->zero_copy = true;
+            vlog("Zero-copy DMA-BUF rendering enabled (EGL ctx=%p)\n",
+                 (void *)ctx->egl_ctx);
+        } else {
+            vlog("DMA-BUF export init failed, using readback\n");
+        }
+    } else {
+        vlog("No GL renderer, using readback rendering\n");
+    }
+#endif
+
+    vlog("GTK4 platform initialized (zero_copy=%s, renderer=%s)\n",
+#ifdef HAVE_EGL_DMABUF
+         ctx->zero_copy ? "yes" : "no",
+#else
+         "no",
+#endif
+         SDL_GetRendererName(ctx->sdl_renderer));
 
     plat->backend_data = ctx;
     return true;
@@ -816,6 +1447,39 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
         gtk_window_destroy(ctx->window);
         ctx->window = NULL;
     }
+
+#ifdef HAVE_EGL_DMABUF
+    // Destroy GBM/EGL/GL export resources (reverse order of creation)
+    g_clear_object(&ctx->prev_texture);
+    if (ctx->export_fbo && ctx->glDeleteFramebuffers) {
+        ctx->glDeleteFramebuffers(1, &ctx->export_fbo);
+        ctx->export_fbo = 0;
+    }
+    if (ctx->export_tex && ctx->glDeleteTextures) {
+        ctx->glDeleteTextures(1, &ctx->export_tex);
+        ctx->export_tex = 0;
+    }
+    if (ctx->egl_image != EGL_NO_IMAGE && ctx->egl_display != EGL_NO_DISPLAY) {
+        eglDestroyImage(ctx->egl_display, ctx->egl_image);
+        ctx->egl_image = EGL_NO_IMAGE;
+    }
+    if (ctx->dmabuf_fd >= 0) {
+        close(ctx->dmabuf_fd);
+        ctx->dmabuf_fd = -1;
+    }
+    if (ctx->gbm_bo) {
+        gbm_bo_destroy(ctx->gbm_bo);
+        ctx->gbm_bo = NULL;
+    }
+    if (ctx->gbm_dev) {
+        gbm_device_destroy(ctx->gbm_dev);
+        ctx->gbm_dev = NULL;
+    }
+    if (ctx->drm_fd >= 0) {
+        close(ctx->drm_fd);
+        ctx->drm_fd = -1;
+    }
+#endif
 
     // Destroy SDL resources
     if (ctx->render_target) {
@@ -879,8 +1543,11 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(ctx->header_bar),
                                     GTK_WIDGET(ctx->window_title));
 
-    // Create drawing area for terminal content
-    ctx->drawing_area = gtk_drawing_area_new();
+    // Create drawing area for terminal content (custom subclass for snapshot)
+    BloomTerminalArea *term_area =
+        g_object_new(BLOOM_TYPE_TERMINAL_AREA, NULL);
+    term_area->ctx = ctx;
+    ctx->drawing_area = GTK_WIDGET(term_area);
     gtk_widget_set_hexpand(ctx->drawing_area, TRUE);
     gtk_widget_set_vexpand(ctx->drawing_area, TRUE);
     gtk_widget_set_focusable(ctx->drawing_area, TRUE);
@@ -890,13 +1557,25 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     GtkWidget *toolbar_view = adw_toolbar_view_new();
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view),
                                  ctx->header_bar);
+
+#ifdef HAVE_EGL_DMABUF
+    // Wrap in GtkGraphicsOffload for potential compositor direct scanout
+    if (ctx->zero_copy) {
+        GtkWidget *offload = gtk_graphics_offload_new(ctx->drawing_area);
+        gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(offload),
+                                         GTK_GRAPHICS_OFFLOAD_ENABLED);
+        gtk_graphics_offload_set_black_background(
+            GTK_GRAPHICS_OFFLOAD(offload), TRUE);
+        adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), offload);
+    } else {
+        adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view),
+                                     ctx->drawing_area);
+    }
+#else
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view),
                                  ctx->drawing_area);
+#endif
     adw_window_set_content(ADW_WINDOW(ctx->window), toolbar_view);
-
-    // Set draw function
-    gtk_drawing_area_set_draw_func(GTK_DRAWING_AREA(ctx->drawing_area),
-                                   draw_func, ctx, NULL);
 
     // Connect resize signal
     g_signal_connect(ctx->drawing_area, "resize",
