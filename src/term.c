@@ -104,7 +104,8 @@ int terminal_process_input(TerminalBackend *term, const char *input, size_t len)
 {
     if (!term || !term->process_input)
         return -1;
-    terminal_selection_clear(term);
+    if (!terminal_is_altscreen(term))
+        terminal_selection_clear(term);
     return term->process_input(term, input, len);
 }
 
@@ -254,10 +255,12 @@ void terminal_set_reflow(TerminalBackend *term, bool enabled)
 
 void terminal_selection_clear(TerminalBackend *term)
 {
-    if (!term)
+    if (!term || !term->selection.active)
         return;
     term->selection.active = false;
     term->selection.mode = TERM_SELECT_NONE;
+    if (term->selection_change_cb)
+        term->selection_change_cb(false, term->selection_change_data);
 }
 
 bool terminal_selection_active(TerminalBackend *term)
@@ -273,6 +276,15 @@ void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars)
         return;
     free(term->selection.word_chars);
     term->selection.word_chars = chars ? strdup(chars) : NULL;
+}
+
+void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionChangeFn cb,
+                                     void *user_data)
+{
+    if (!term)
+        return;
+    term->selection_change_cb = cb;
+    term->selection_change_data = user_data;
 }
 
 // Expand start/end to cover the word at (row, col)
@@ -346,6 +358,9 @@ void terminal_selection_start(TerminalBackend *term, int row, int col, TerminalS
         sel->active = false;
         break;
     }
+
+    if (sel->active && term->selection_change_cb)
+        term->selection_change_cb(true, term->selection_change_data);
 }
 
 void terminal_selection_update(TerminalBackend *term, int row, int col)

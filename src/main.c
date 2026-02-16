@@ -69,6 +69,18 @@ static int display_row_to_unified(RendererBackend *rend, int display_row)
     }
 }
 
+// Selection change callback — pauses/resumes PTY on alt screen
+static void on_selection_change(bool active, void *user_data)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    if (terminal_is_altscreen(ctx->term)) {
+        if (active)
+            platform_pause_pty(ctx->plat);
+        else
+            platform_resume_pty(ctx->plat);
+    }
+}
+
 // Key callback — receives TERM_KEY_* and TERM_MOD_* (platform-independent)
 static KeyboardResult on_key(void *user_data, int key, int mod,
                              uint32_t codepoint)
@@ -84,7 +96,6 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
                 platform_clipboard_set(ctx->plat, text);
                 free(text);
             }
-            platform_resume_pty(ctx->plat);
             terminal_selection_clear(ctx->term);
             result.force_redraw = true;
         }
@@ -157,7 +168,6 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
 {
     MainContext *ctx = (MainContext *)user_data;
 
-    platform_resume_pty(ctx->plat);
     terminal_selection_clear(ctx->term);
     renderer_resize(ctx->rend, pixel_w, pixel_h);
 
@@ -272,22 +282,14 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
     // Left button press — start selection
     if (button == 1 && pressed) {
-        bool in_altscreen = terminal_is_altscreen(ctx->term);
         if (clicks >= 3) {
             terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_LINE);
-            if (in_altscreen)
-                platform_pause_pty(ctx->plat);
         } else if (clicks == 2) {
             terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_WORD);
-            if (in_altscreen)
-                platform_pause_pty(ctx->plat);
         } else if (terminal_selection_active(ctx->term)) {
-            platform_resume_pty(ctx->plat);
             terminal_selection_clear(ctx->term);
         } else {
             terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_CHAR);
-            if (in_altscreen)
-                platform_pause_pty(ctx->plat);
         }
         return true;
     }
@@ -306,7 +308,6 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
                 platform_clipboard_set(ctx->plat, text);
                 free(text);
             }
-            platform_resume_pty(ctx->plat);
             terminal_selection_clear(ctx->term);
         } else {
             // Try async paste first (GTK4), fall back to synchronous (SDL3)
@@ -672,6 +673,9 @@ int main(int argc, char *argv[])
 
         // Connect terminal output to PTY (for mouse escape sequences)
         terminal_set_output_callback(term, term_output_to_pty, pty);
+
+        // Pause/resume PTY on selection changes in alt screen
+        terminal_set_selection_callback(term, on_selection_change, &main_ctx);
 
         // Run the event loop (blocks)
         platform_run(plat, term, rend, &callbacks);

@@ -17,6 +17,9 @@ typedef struct TerminalBackend TerminalBackend;
 // Callback type for terminal output (e.g., mouse escape sequences to send to PTY)
 typedef void (*TerminalOutputCallback)(const char *data, size_t len, void *user);
 
+// Callback fired when selection becomes active or inactive
+typedef void (*TerminalSelectionChangeFn)(bool active, void *user_data);
+
 typedef struct
 {
     int row;
@@ -86,6 +89,8 @@ struct TerminalBackend
 
     // Application-level selection state (not backend-specific)
     TerminalSelection selection;
+    TerminalSelectionChangeFn selection_change_cb;
+    void *selection_change_data;
 
     // Application-level sixel image storage
     SixelImage *sixel_images[TERM_MAX_SIXEL_IMAGES];
@@ -227,6 +232,8 @@ bool terminal_selection_active(TerminalBackend *term);
 bool terminal_cell_in_selection(TerminalBackend *term, int row, int col);
 char *terminal_selection_get_text(TerminalBackend *term);
 void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars);
+void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionChangeFn cb,
+                                     void *user_data);
 
 // Sixel image API
 void terminal_add_sixel_image(TerminalBackend *term, SixelImage *image);
