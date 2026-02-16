@@ -1405,6 +1405,13 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int cell_y = data->pad_top + row * data->cell_height;
     int avail_w = columns_to_consume * data->cell_width;
     int avail_h = data->cell_height;
+
+    // Single-width emoji: use cell_height as width so the glyph renders
+    // as a square instead of being squished to cell_width
+    if (style == FONT_STYLE_EMOJI && columns_to_consume == 1) {
+        avail_w = avail_h;
+    }
+
     void *font_data = data->font->font_data[style];
     bool color_baked = is_color_font(data->font, style);
     uint8_t render_r = color_baked ? r : 255;
