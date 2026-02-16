@@ -849,16 +849,28 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     // Create AdwWindow (single integrated CSD header bar)
     ctx->window = GTK_WINDOW(adw_window_new());
     gtk_window_set_title(ctx->window, title);
-    // Set window background to black so it matches terminal content at
-    // rounded corners (prevents greyish outline from theme background)
+    // Black window background prevents theme color from bleeding through
+    // at anti-aliased rounded corners. Override named colors so libadwaita
+    // derives backdrop/shade colors correctly, and override the flat
+    // headerbar's "background: none" so it uses the headerbar colors.
     GtkCssProvider *css_provider = gtk_css_provider_new();
     gtk_css_provider_load_from_string(
         css_provider,
-        "window { background-color: black; }"
-        "headerbar { background-color: @headerbar_bg_color; }");
+        "@define-color window_bg_color black;"
+        "@define-color window_fg_color white;"
+        "@define-color headerbar_bg_color #2e2e32;"
+        "@define-color headerbar_fg_color white;"
+        "@define-color headerbar_backdrop_color #2e2e32;"
+        "toolbarview > .top-bar headerbar {"
+        "  background: @headerbar_bg_color;"
+        "  color: @headerbar_fg_color;"
+        "}"
+        "toolbarview > .top-bar headerbar:backdrop {"
+        "  background: @headerbar_backdrop_color;"
+        "}");
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(), GTK_STYLE_PROVIDER(css_provider),
-        GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
     g_object_unref(css_provider);
 
     // Create header bar with persistent title widget
