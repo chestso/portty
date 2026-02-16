@@ -11,6 +11,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
+- Bold, italic, and bold-italic font styles (variable font axes, fontconfig resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
 - Sixel graphics protocol support

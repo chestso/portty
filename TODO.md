@@ -130,35 +130,21 @@ void main() {
 
 The variation axis infrastructure is fully implemented: `cache_mm_var()` caches axis
 metadata, `ft_set_variation_axis()` / `ft_set_variation_axes()` set values, and
-`apply_font_variations()` applies per-style overrides. Currently only the weight (wght)
-axis is used in practice. Remaining work is to wire up additional axes at the
-application level.
+`apply_font_variations()` applies per-style overrides. The `wght` axis is used for bold,
+and `ital`/`slnt` axes are used for italic rendering. Remaining work is to wire up
+additional axes at the application level.
 
-### Slant Axis (slnt)
+### ~~Slant Axis (slnt)~~ — Done
 
-**Range:** -15° to 0°
-**Use Case:** Oblique/italic text without separate font file
+Implemented in `apply_font_variations()`: sets `slnt` to -12° (clamped to axis min) for
+`FONT_STYLE_ITALIC` and `FONT_STYLE_BOLD_ITALIC`. Fonts without a `slnt` axis fall back
+to synthetic oblique via `FT_GlyphSlot_Oblique`.
 
-```c
-void set_italic_via_slant(FtFontData *ft_data, bool italic) {
-    float slant = italic ? -12.0f : 0.0f;
-    ft_set_axis_value(ft_data, "slnt", slant);
-}
-```
+### ~~Italic Axis (ital)~~ — Done
 
-Terminal use: Italic escape sequence (`\033[3m`) could use slant instead of loading separate font.
-
-### Italic Axis (ital)
-
-**Range:** 0.0 (Roman) to 1.0 (Italic)
-**Use Case:** True italic with alternate letterforms (different 'a', 'g', etc.), unlike slant which just skews glyphs.
-
-```c
-void set_true_italic(FtFontData *ft_data, bool italic) {
-    float ital = italic ? 1.0f : 0.0f;
-    ft_set_axis_value(ft_data, "ital", ital);
-}
-```
+Implemented in `apply_font_variations()`: sets `ital` to 1.0 for italic styles. Combined
+with `slnt` when the font supports both axes. Fonts without `ital`/`slnt` axes and
+without native italic face style get synthetic oblique.
 
 ### Optical Size (opsz)
 
