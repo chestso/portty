@@ -51,14 +51,13 @@ static void reset_mock_counts(void)
 
 // ---- Mock terminal backend ----
 
-static bool mock_altscreen = false;
 static int mock_term_rows = 24;
 static int mock_term_cols = 80;
 
 static bool mock_is_altscreen(TerminalBackend *term)
 {
     (void)term;
-    return mock_altscreen;
+    return false;
 }
 
 static int mock_get_dimensions(TerminalBackend *term, int *rows, int *cols)
@@ -148,12 +147,10 @@ static void tracking_selection_cb(bool active, void *user_data)
 static void mock_selection_cb(bool active, void *user_data)
 {
     (void)user_data;
-    if (mock_altscreen) {
-        if (active)
-            mock_pause_count++;
-        else
-            mock_resume_count++;
-    }
+    if (active)
+        mock_pause_count++;
+    else
+        mock_resume_count++;
 }
 
 static void reset_cb_counts(void)
@@ -199,9 +196,8 @@ static void test_wrapper_null_fn_ptr(void)
 
 // ---- Tests: process_input selection behavior ----
 
-static void test_process_input_clears_selection_normal_screen(void)
+static void test_process_input_clears_selection(void)
 {
-    mock_altscreen = false;
     TerminalBackend *term = create_mock_term();
 
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
@@ -209,20 +205,6 @@ static void test_process_input_clears_selection_normal_screen(void)
 
     terminal_process_input(term, "hello", 5);
     ASSERT_TRUE(!terminal_selection_active(term));
-
-    destroy_mock_term(term);
-}
-
-static void test_process_input_preserves_selection_altscreen(void)
-{
-    mock_altscreen = true;
-    TerminalBackend *term = create_mock_term();
-
-    terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
-    ASSERT_TRUE(terminal_selection_active(term));
-
-    terminal_process_input(term, "hello", 5);
-    ASSERT_TRUE(terminal_selection_active(term));
 
     destroy_mock_term(term);
 }
@@ -274,7 +256,6 @@ static void test_callback_not_fired_on_redundant_clear(void)
 static void test_callback_pause_resume_integration(void)
 {
     reset_mock_counts();
-    mock_altscreen = true;
     TerminalBackend *term = create_mock_term();
     terminal_set_selection_callback(term, mock_selection_cb, NULL);
 
@@ -282,27 +263,9 @@ static void test_callback_pause_resume_integration(void)
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
     ASSERT_EQ(mock_pause_count, 1);
 
-    // PTY data arrives — selection survives on alt screen
-    terminal_process_input(term, "data", 4);
-    ASSERT_TRUE(terminal_selection_active(term));
-
     // Clear selection → callback resumes PTY
     terminal_selection_clear(term);
     ASSERT_EQ(mock_resume_count, 1);
-
-    destroy_mock_term(term);
-}
-
-static void test_normal_screen_callback_no_pause(void)
-{
-    reset_mock_counts();
-    mock_altscreen = false;
-    TerminalBackend *term = create_mock_term();
-    terminal_set_selection_callback(term, mock_selection_cb, NULL);
-
-    // Start selection on normal screen — callback fires but doesn't pause
-    terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
-    ASSERT_EQ(mock_pause_count, 0);
 
     destroy_mock_term(term);
 }
@@ -320,8 +283,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_wrapper_null_fn_ptr);
 
     // process_input selection behavior
-    RUN_TEST(test_process_input_clears_selection_normal_screen);
-    RUN_TEST(test_process_input_preserves_selection_altscreen);
+    RUN_TEST(test_process_input_clears_selection);
 
     // Selection change callback
     RUN_TEST(test_callback_fires_on_selection_start);
@@ -330,7 +292,6 @@ int main(int argc, char *argv[])
 
     // Callback-based pause/resume integration
     RUN_TEST(test_callback_pause_resume_integration);
-    RUN_TEST(test_normal_screen_callback_no_pause);
 
     TEST_SUMMARY();
 }

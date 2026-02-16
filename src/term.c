@@ -104,8 +104,7 @@ int terminal_process_input(TerminalBackend *term, const char *input, size_t len)
 {
     if (!term || !term->process_input)
         return -1;
-    if (!terminal_is_altscreen(term))
-        terminal_selection_clear(term);
+    terminal_selection_clear(term);
     return term->process_input(term, input, len);
 }
 

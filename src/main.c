@@ -69,16 +69,14 @@ static int display_row_to_unified(RendererBackend *rend, int display_row)
     }
 }
 
-// Selection change callback — pauses/resumes PTY on alt screen
+// Selection change callback — pauses/resumes PTY during selection
 static void on_selection_change(bool active, void *user_data)
 {
     MainContext *ctx = (MainContext *)user_data;
-    if (terminal_is_altscreen(ctx->term)) {
-        if (active)
-            platform_pause_pty(ctx->plat);
-        else
-            platform_resume_pty(ctx->plat);
-    }
+    if (active)
+        platform_pause_pty(ctx->plat);
+    else
+        platform_resume_pty(ctx->plat);
 }
 
 // Key callback — receives TERM_KEY_* and TERM_MOD_* (platform-independent)
