@@ -40,9 +40,10 @@ typedef struct
     } *axes;
     FT_Fixed *coords_scratch; // Reusable buffer for variation coordinates
 
-    bool synthetic_bold; // Whether to apply FT_GlyphSlot_Embolden for faux bold
-    bool has_colr;       // Whether the font has COLR table
-    FT_Color *palette;   // COLR palette data (if any)
+    bool synthetic_bold;   // Whether to apply FT_GlyphSlot_Embolden for faux bold
+    bool synthetic_italic; // Whether to apply FT_GlyphSlot_Oblique for faux italic
+    bool has_colr;         // Whether the font has COLR table
+    FT_Color *palette;     // COLR palette data (if any)
     FT_UShort palette_size;
 
     // Font rendering options

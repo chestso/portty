@@ -141,17 +141,33 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
     result->size = 0; // 0 = not specified in pattern
 
     const char *pattern = NULL;
-    char bold_pattern[256];
+    char styled_pattern[256];
     switch (type) {
     case FONT_TYPE_NORMAL:
         pattern = family ? family : "monospace";
         break;
     case FONT_TYPE_BOLD:
         if (family) {
-            snprintf(bold_pattern, sizeof(bold_pattern), "%s:weight=bold", family);
-            pattern = bold_pattern;
+            snprintf(styled_pattern, sizeof(styled_pattern), "%s:weight=bold", family);
+            pattern = styled_pattern;
         } else {
             pattern = "monospace:weight=bold";
+        }
+        break;
+    case FONT_TYPE_ITALIC:
+        if (family) {
+            snprintf(styled_pattern, sizeof(styled_pattern), "%s:slant=italic", family);
+            pattern = styled_pattern;
+        } else {
+            pattern = "monospace:slant=italic";
+        }
+        break;
+    case FONT_TYPE_BOLD_ITALIC:
+        if (family) {
+            snprintf(styled_pattern, sizeof(styled_pattern), "%s:weight=bold:slant=italic", family);
+            pattern = styled_pattern;
+        } else {
+            pattern = "monospace:weight=bold:slant=italic";
         }
         break;
     case FONT_TYPE_EMOJI:

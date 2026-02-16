@@ -1070,6 +1070,14 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     load_font_style(data->resolve, data->font, FONT_TYPE_BOLD, FONT_STYLE_BOLD,
                     font_name, font_size, &options, "Bold", NULL);
 
+    // Load italic font (optional)
+    load_font_style(data->resolve, data->font, FONT_TYPE_ITALIC, FONT_STYLE_ITALIC,
+                    font_name, font_size, &options, "Italic", NULL);
+
+    // Load bold italic font (optional)
+    load_font_style(data->resolve, data->font, FONT_TYPE_BOLD_ITALIC, FONT_STYLE_BOLD_ITALIC,
+                    font_name, font_size, &options, "Bold Italic", NULL);
+
     // Load emoji font (optional)
     load_font_style(data->resolve, data->font, FONT_TYPE_EMOJI, FONT_STYLE_EMOJI,
                     NULL, font_size * EMOJI_FONT_SCALE, &options, "Emoji", NULL);
@@ -1119,6 +1127,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     vlog("Font loading summary:\n");
     vlog("  Normal font: %s\n", font_has_style(data->font, FONT_STYLE_NORMAL) ? "Loaded" : "Not loaded");
     vlog("  Bold font: %s\n", font_has_style(data->font, FONT_STYLE_BOLD) ? "Loaded" : "Not loaded");
+    vlog("  Italic font: %s\n", font_has_style(data->font, FONT_STYLE_ITALIC) ? "Loaded" : "Not loaded");
+    vlog("  Bold Italic font: %s\n", font_has_style(data->font, FONT_STYLE_BOLD_ITALIC) ? "Loaded" : "Not loaded");
     vlog("  Emoji font: %s\n", font_has_style(data->font, FONT_STYLE_EMOJI) ? "Loaded" : "Not loaded");
     vlog("  Fallback font: (loaded on demand)\n");
 
@@ -1385,8 +1395,20 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     // Select font style
     FontStyle style = FONT_STYLE_NORMAL;
-    if (cell.attrs.bold && font_has_style(data->font, FONT_STYLE_BOLD))
-        style = FONT_STYLE_BOLD;
+    if (cell.attrs.bold && cell.attrs.italic) {
+        if (font_has_style(data->font, FONT_STYLE_BOLD_ITALIC))
+            style = FONT_STYLE_BOLD_ITALIC;
+        else if (font_has_style(data->font, FONT_STYLE_BOLD))
+            style = FONT_STYLE_BOLD;
+        else if (font_has_style(data->font, FONT_STYLE_ITALIC))
+            style = FONT_STYLE_ITALIC;
+    } else if (cell.attrs.bold) {
+        if (font_has_style(data->font, FONT_STYLE_BOLD))
+            style = FONT_STYLE_BOLD;
+    } else if (cell.attrs.italic) {
+        if (font_has_style(data->font, FONT_STYLE_ITALIC))
+            style = FONT_STYLE_ITALIC;
+    }
     if (cp_count > 0) {
         bool use_emoji = is_emoji_presentation(cps[0]) || is_regional_indicator(cps[0]);
         if (!use_emoji) {

@@ -7,10 +7,12 @@
 // Font resolution types
 typedef enum
 {
-    FONT_TYPE_NORMAL,  // Primary text font (monospace/terminal)
-    FONT_TYPE_BOLD,    // Bold monospace font
-    FONT_TYPE_EMOJI,   // Color emoji font
-    FONT_TYPE_FALLBACK // Dynamic fallback (not used with font_resolve_find_font)
+    FONT_TYPE_NORMAL,      // Primary text font (monospace/terminal)
+    FONT_TYPE_BOLD,        // Bold monospace font
+    FONT_TYPE_ITALIC,      // Italic monospace font
+    FONT_TYPE_BOLD_ITALIC, // Bold italic monospace font
+    FONT_TYPE_EMOJI,       // Color emoji font
+    FONT_TYPE_FALLBACK     // Dynamic fallback (not used with font_resolve_find_font)
 } FontType;
 
 // Font resolution result

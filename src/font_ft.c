@@ -157,8 +157,8 @@ static void apply_font_variations(FtFontData *ft_data, FontStyle style)
         coords[i] = (FT_Fixed)(val * 65536.0f);
     }
 
-    // Handle bold style by nudging 'wght' if available
-    if (style == FONT_STYLE_BOLD) {
+    // Handle bold weight for BOLD and BOLD_ITALIC styles
+    if (style == FONT_STYLE_BOLD || style == FONT_STYLE_BOLD_ITALIC) {
         for (FT_UInt i = 0; i < mm_var->num_axis; i++) {
             if (mm_var->axis[i].tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
                 float default_weight = (float)mm_var->axis[i].def / 65536.0f;
@@ -175,6 +175,25 @@ static void apply_font_variations(FtFontData *ft_data, FontStyle style)
                     vlog("Set 'wght' axis to 700.0 (fallback) for bold style\n");
                 }
                 break;
+            }
+        }
+    }
+
+    // Handle italic axes for ITALIC and BOLD_ITALIC styles
+    if (style == FONT_STYLE_ITALIC || style == FONT_STYLE_BOLD_ITALIC) {
+        for (FT_UInt i = 0; i < mm_var->num_axis; i++) {
+            if (mm_var->axis[i].tag == FT_MAKE_TAG('i', 't', 'a', 'l')) {
+                coords[i] = (FT_Fixed)(1.0f * 65536.0f);
+                ft_data->axes[i].current_value = 1.0f;
+                vlog("Set 'ital' axis to 1.0 for italic style\n");
+            } else if (mm_var->axis[i].tag == FT_MAKE_TAG('s', 'l', 'n', 't')) {
+                float min_slant = (float)mm_var->axis[i].minimum / 65536.0f;
+                float target = -12.0f;
+                if (target < min_slant)
+                    target = min_slant;
+                coords[i] = (FT_Fixed)(target * 65536.0f);
+                ft_data->axes[i].current_value = target;
+                vlog("Set 'slnt' axis to %f for italic style\n", target);
             }
         }
     }
@@ -652,7 +671,7 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
     // Detect whether synthetic bold is needed: if we requested bold but the
     // font isn't actually bold (no variable weight axis was applied, and the
     // OS/2 weight class is below semi-bold threshold of 600).
-    if (style == FONT_STYLE_BOLD) {
+    if (style == FONT_STYLE_BOLD || style == FONT_STYLE_BOLD_ITALIC) {
         bool has_weight_axis = false;
         if (ft_data->mm_var) {
             for (FT_UInt i = 0; i < ft_data->mm_var->num_axis; i++) {
@@ -669,6 +688,26 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
                 vlog("Enabling synthetic bold for %s (weight class %d, no variable weight axis)\n",
                      font_path, os2->usWeightClass);
             }
+        }
+    }
+
+    // Detect whether synthetic italic is needed: if we requested italic but
+    // the font has no ital/slnt axis and the face isn't natively italic.
+    if (style == FONT_STYLE_ITALIC || style == FONT_STYLE_BOLD_ITALIC) {
+        bool has_italic_axis = false;
+        if (ft_data->mm_var) {
+            for (FT_UInt i = 0; i < ft_data->mm_var->num_axis; i++) {
+                if (ft_data->mm_var->axis[i].tag == FT_MAKE_TAG('i', 't', 'a', 'l') ||
+                    ft_data->mm_var->axis[i].tag == FT_MAKE_TAG('s', 'l', 'n', 't')) {
+                    has_italic_axis = true;
+                    break;
+                }
+            }
+        }
+        if (!has_italic_axis && !(ft_data->ft_face->style_flags & FT_STYLE_FLAG_ITALIC)) {
+            ft_data->synthetic_italic = true;
+            vlog("Enabling synthetic italic for %s (no ital/slnt axis, face not italic)\n",
+                 font_path);
         }
     }
 
@@ -901,6 +940,8 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
 
     if (ft_data->synthetic_bold)
         FT_GlyphSlot_Embolden(face->glyph);
+    if (ft_data->synthetic_italic)
+        FT_GlyphSlot_Oblique(face->glyph);
 
     // Render glyph to bitmap
     error = FT_Render_Glyph(face->glyph, FT_LOAD_TARGET_MODE(ft_data->ft_hint_target));
