@@ -241,9 +241,16 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
             return false;
     }
 
-    // Wheel events not consumed by terminal
-    if (button == 4 || button == 5)
+    // Wheel events not consumed by terminal — convert to arrow keys in altscreen
+    if (button == 4 || button == 5) {
+        if (terminal_is_altscreen(ctx->term)) {
+            int key = (button == 4) ? TERM_KEY_UP : TERM_KEY_DOWN;
+            for (int i = 0; i < 3; i++)
+                terminal_send_key(ctx->term, key, TERM_MOD_NONE);
+            return true;
+        }
         return false;
+    }
 
     int display_row, display_col;
     if (!pixel_to_cell(ctx, pixel_x, pixel_y, &display_row, &display_col))
