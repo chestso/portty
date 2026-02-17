@@ -142,36 +142,47 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         setenv("TERM", "bloom-terminal", 1);
 
         // Point to our installed terminfo database
-        const char *home = getenv("HOME");
-        if (home) {
+#ifdef DATADIR
+        {
             char buf[4096];
             const char *existing = getenv("TERMINFO_DIRS");
             if (existing) {
-                snprintf(buf, sizeof(buf), "%s/.local/share/terminfo:%s",
-                         home, existing);
+                snprintf(buf, sizeof(buf), DATADIR "/terminfo:%s", existing);
             } else {
-                snprintf(buf, sizeof(buf), "%s/.local/share/terminfo:", home);
+                snprintf(buf, sizeof(buf), DATADIR "/terminfo:");
             }
             setenv("TERMINFO_DIRS", buf, 1);
         }
+#endif
 
         // Help emacs find our term/*.el file
-        if (home) {
+#ifdef DATADIR
+        {
             char buf[4096];
             const char *existing = getenv("EMACSLOADPATH");
             if (existing) {
                 snprintf(buf, sizeof(buf),
-                         "%s/.local/share/emacs/site-lisp:%s", home,
-                         existing);
+                         DATADIR "/emacs/site-lisp:%s", existing);
             } else {
                 snprintf(buf, sizeof(buf),
-                         "%s/.local/share/emacs/site-lisp:", home);
+                         DATADIR "/emacs/site-lisp:");
             }
             setenv("EMACSLOADPATH", buf, 1);
         }
+#endif
 
         // Also set COLORTERM for applications that check it
         setenv("COLORTERM", "truecolor", 1);
+
+        // Set window title via PROMPT_COMMAND for bash.
+        // Fedora's /etc/bashrc guards its PROMPT_COMMAND setup with
+        // [ -z "$PROMPT_COMMAND" ], so pre-setting it here causes bash
+        // to skip its xterm*/screen* case and use our value instead.
+        // User's .bashrc can still override this.
+        setenv("PROMPT_COMMAND",
+               "printf '\\033]0;%s@%s:%s\\007' "
+               "\"${USER}\" \"${HOSTNAME%%.*}\" \"${PWD/#$HOME/\\~}\"",
+               0);
 
         if (argv && argv[0]) {
             // Command provided - execute directly
