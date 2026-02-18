@@ -8,10 +8,12 @@
 #include <adwaita.h>
 #include <errno.h>
 #include <glib-unix.h>
+#include <limits.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #ifdef HAVE_EGL_DMABUF
@@ -1502,6 +1504,53 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     SDL_Quit();
 }
 
+static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+
+    char exe_path[PATH_MAX];
+    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
+    if (exe_len <= 0)
+        return;
+    exe_path[exe_len] = '\0';
+
+    char cwd_path[PATH_MAX] = "";
+    if (ctx->pty && ctx->pty->child_pid > 0) {
+        char proc_cwd[64];
+        snprintf(proc_cwd, sizeof(proc_cwd), "/proc/%d/cwd",
+                 ctx->pty->child_pid);
+        ssize_t cwd_len =
+            readlink(proc_cwd, cwd_path, sizeof(cwd_path) - 1);
+        if (cwd_len > 0)
+            cwd_path[cwd_len] = '\0';
+        else
+            cwd_path[0] = '\0';
+    }
+
+    pid_t pid = fork();
+    if (pid < 0)
+        return;
+    if (pid > 0) {
+        // Parent: reap intermediate child
+        waitpid(pid, NULL, 0);
+        return;
+    }
+    // Intermediate child: fork again to avoid zombies
+    pid_t pid2 = fork();
+    if (pid2 < 0)
+        _exit(1);
+    if (pid2 > 0)
+        _exit(0); // Intermediate exits immediately, reaped above
+    // Grandchild: detach and exec
+    setsid();
+    if (cwd_path[0])
+        (void)chdir(cwd_path);
+    char *argv[] = { "bloom-terminal", "--gtk4", NULL };
+    execv(exe_path, argv);
+    _exit(1);
+}
+
 static bool gtk4_create_window(PlatformBackend *plat, const char *title,
                                int width, int height)
 {
@@ -1542,6 +1591,14 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     ctx->window_title = ADW_WINDOW_TITLE(adw_window_title_new(title, NULL));
     adw_header_bar_set_title_widget(ADW_HEADER_BAR(ctx->header_bar),
                                     GTK_WIDGET(ctx->window_title));
+
+    GtkWidget *new_term_btn =
+        gtk_button_new_from_icon_name("tab-new-symbolic");
+    gtk_widget_set_tooltip_text(new_term_btn, "New Terminal");
+    gtk_widget_add_css_class(new_term_btn, "flat");
+    g_signal_connect(new_term_btn, "clicked",
+                     G_CALLBACK(on_new_terminal_clicked), ctx);
+    adw_header_bar_pack_start(ADW_HEADER_BAR(ctx->header_bar), new_term_btn);
 
     // Create drawing area for terminal content (custom subclass for snapshot)
     BloomTerminalArea *term_area =
