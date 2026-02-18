@@ -42,6 +42,9 @@ typedef struct
     RendererBackend *rend;
     PtyContext *pty;
     PlatformBackend *plat;
+    bool drag_pending;
+    int drag_start_row; // unified row
+    int drag_start_col; // display col
 } MainContext;
 
 // Convert pixel coordinates to display row/col (accounting for padding)
@@ -278,24 +281,46 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
     int unified_row = display_row_to_unified(ctx->rend, display_row);
 
-    // Left button press — start selection
+    // Left button press — start selection (or defer for char mode)
     if (button == 1 && pressed) {
         if (clicks >= 3) {
+            ctx->drag_pending = false;
             terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_LINE);
         } else if (clicks == 2) {
+            ctx->drag_pending = false;
             terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_WORD);
         } else if (terminal_selection_active(ctx->term)) {
+            ctx->drag_pending = false;
             terminal_selection_clear(ctx->term);
         } else {
-            terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_CHAR);
+            // Defer char selection until drag — don't pause PTY on stray clicks
+            ctx->drag_pending = true;
+            ctx->drag_start_row = unified_row;
+            ctx->drag_start_col = display_col;
         }
         return true;
     }
 
-    // Motion with button held — drag to update selection
-    if (button == 0 && pressed && terminal_selection_active(ctx->term)) {
-        terminal_selection_update(ctx->term, unified_row, display_col);
-        return true;
+    // Left button release — cancel pending drag if no motion occurred
+    if (button == 1 && !pressed) {
+        ctx->drag_pending = false;
+        return false;
+    }
+
+    // Motion with button held — start or update selection
+    if (button == 0 && pressed) {
+        if (ctx->drag_pending) {
+            // First motion after click — start char selection from saved position
+            ctx->drag_pending = false;
+            terminal_selection_start(ctx->term, ctx->drag_start_row, ctx->drag_start_col,
+                                     TERM_SELECT_CHAR);
+            terminal_selection_update(ctx->term, unified_row, display_col);
+            return true;
+        }
+        if (terminal_selection_active(ctx->term)) {
+            terminal_selection_update(ctx->term, unified_row, display_col);
+            return true;
+        }
     }
 
     // Right button press — copy selection if active, otherwise paste
