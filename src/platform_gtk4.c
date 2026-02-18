@@ -771,9 +771,31 @@ static void bloom_terminal_area_init(BloomTerminalArea *self)
     (void)self;
 }
 
+static void bloom_terminal_area_measure(GtkWidget *widget,
+                                        GtkOrientation orientation,
+                                        int for_size, int *minimum,
+                                        int *natural, int *minimum_baseline,
+                                        int *natural_baseline)
+{
+    (void)for_size;
+    BloomTerminalArea *self = BLOOM_TERMINAL_AREA(widget);
+    GTK4PlatformData *ctx = self->ctx;
+
+    *minimum = 1;
+    *natural = 1;
+    if (ctx) {
+        *natural = (orientation == GTK_ORIENTATION_HORIZONTAL)
+                       ? ctx->content_width
+                       : ctx->content_height;
+    }
+    *minimum_baseline = -1;
+    *natural_baseline = -1;
+}
+
 static void bloom_terminal_area_class_init(BloomTerminalAreaClass *klass)
 {
     GTK_WIDGET_CLASS(klass)->snapshot = bloom_terminal_area_snapshot;
+    GTK_WIDGET_CLASS(klass)->measure = bloom_terminal_area_measure;
 }
 
 // Key press handler
@@ -1674,12 +1696,6 @@ static void gtk4_set_window_size(PlatformBackend *plat, int width, int height)
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
     ctx->content_width = width;
     ctx->content_height = height;
-    if (ctx->drawing_area) {
-        gtk_drawing_area_set_content_width(
-            GTK_DRAWING_AREA(ctx->drawing_area), width);
-        gtk_drawing_area_set_content_height(
-            GTK_DRAWING_AREA(ctx->drawing_area), height);
-    }
 }
 
 static void gtk4_set_window_title(PlatformBackend *plat, const char *title)
