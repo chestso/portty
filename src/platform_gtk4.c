@@ -13,7 +13,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #ifdef HAVE_EGL_DMABUF
@@ -1526,6 +1525,19 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     SDL_Quit();
 }
 
+static void on_child_exited(GPid pid, gint status, gpointer user_data)
+{
+    (void)status;
+    (void)user_data;
+    g_spawn_close_pid(pid);
+}
+
+static void child_setup(gpointer user_data)
+{
+    (void)user_data;
+    setsid();
+}
+
 static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
 {
     (void)button;
@@ -1550,27 +1562,24 @@ static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
             cwd_path[0] = '\0';
     }
 
-    pid_t pid = fork();
-    if (pid < 0)
-        return;
-    if (pid > 0) {
-        // Parent: reap intermediate child
-        waitpid(pid, NULL, 0);
-        return;
+    char *argv[] = { exe_path, "--gtk4", NULL };
+    GPid child_pid;
+    GError *error = NULL;
+
+    gboolean ok = g_spawn_async(
+        cwd_path[0] ? cwd_path : NULL, argv, NULL,
+        G_SPAWN_DO_NOT_REAP_CHILD, child_setup, NULL, &child_pid, &error);
+
+    if (ok) {
+        g_child_watch_add(child_pid, on_child_exited, NULL);
+    } else {
+        if (error) {
+            vlog("Failed to spawn terminal: %s\n", error->message);
+            g_error_free(error);
+        }
     }
-    // Intermediate child: fork again to avoid zombies
-    pid_t pid2 = fork();
-    if (pid2 < 0)
-        _exit(1);
-    if (pid2 > 0)
-        _exit(0); // Intermediate exits immediately, reaped above
-    // Grandchild: detach and exec
-    setsid();
-    if (cwd_path[0])
-        (void)chdir(cwd_path);
-    char *argv[] = { "bloom-terminal", "--gtk4", NULL };
-    execv(exe_path, argv);
-    _exit(1);
+
+    gtk_widget_grab_focus(ctx->drawing_area);
 }
 
 static bool gtk4_create_window(PlatformBackend *plat, const char *title,
