@@ -166,6 +166,9 @@ typedef struct
     guint cursor_blink_timer_id;
     bool cursor_blink_visible;
 
+    // Cached exe path (resolved once at startup, avoids " (deleted)" issue)
+    char exe_path[PATH_MAX];
+
     // Render state
     bool force_redraw;
     bool has_focus;
@@ -1270,6 +1273,12 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     ctx->force_redraw = true;
     ctx->scale_factor = 1;
 
+    // Cache exe path now while the binary still exists on disk.
+    // SDL_GetBasePath() caches internally and is platform-independent.
+    const char *base = SDL_GetBasePath();
+    if (base)
+        snprintf(ctx->exe_path, sizeof(ctx->exe_path), "%s" PACKAGE, base);
+
 #ifdef HAVE_EGL_DMABUF
     // Try to create an OpenGL-backed offscreen renderer for zero-copy DMA-BUF.
     // Strategy: offscreen driver + OpenGL window/renderer, with fallbacks.
@@ -1543,11 +1552,8 @@ static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
     (void)button;
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
 
-    char exe_path[PATH_MAX];
-    ssize_t exe_len = readlink("/proc/self/exe", exe_path, sizeof(exe_path) - 1);
-    if (exe_len <= 0)
+    if (!ctx->exe_path[0])
         return;
-    exe_path[exe_len] = '\0';
 
     char cwd_path[PATH_MAX] = "";
     if (ctx->pty && ctx->pty->child_pid > 0) {
@@ -1562,7 +1568,7 @@ static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
             cwd_path[0] = '\0';
     }
 
-    char *argv[] = { exe_path, "--gtk4", NULL };
+    char *argv[] = { ctx->exe_path, "--gtk4", NULL };
     GPid child_pid;
     GError *error = NULL;
 
