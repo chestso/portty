@@ -1423,14 +1423,30 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             style = FONT_STYLE_EMOJI;
     }
 
+    // Ambiguous emoji with FE0F: render at full 2-cell emoji size.
+    // Without FE0F: use emoji font (colored) but stay at 1 cell.
+    bool has_fe0f = false;
+    for (int i = 1; i < cp_count; i++) {
+        if (cps[i] == 0xFE0F) {
+            has_fe0f = true;
+            break;
+        }
+    }
+    bool ambiguous_text = (style == FONT_STYLE_EMOJI && cp_count > 0 &&
+                           is_ambiguous_emoji(cps[0]) && !has_fe0f &&
+                           columns_to_consume < 2);
+    if (style == FONT_STYLE_EMOJI && !ambiguous_text &&
+        columns_to_consume < 2 && is_ambiguous_emoji(cps[0]))
+        columns_to_consume = 2;
+
     int cell_x = data->pad_left + col * data->cell_width;
     int cell_y = data->pad_top + row * data->cell_height;
     int avail_w = columns_to_consume * data->cell_width;
     int avail_h = data->cell_height;
 
-    // Single-width emoji: use cell_height as width so the glyph renders
-    // as a square instead of being squished to cell_width
-    if (style == FONT_STYLE_EMOJI && columns_to_consume == 1) {
+    // Emoji: prefer square aspect ratio (avail_h) but never exceed
+    // the allocated cell space (columns_to_consume * cell_width).
+    if (style == FONT_STYLE_EMOJI && avail_h < avail_w) {
         avail_w = avail_h;
     }
 
@@ -1556,18 +1572,25 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             }
         }
 
-        if (glyph_index != 0)
-            entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, glyph_index, color_key);
+        // Tag glyph_index so single-cell and double-cell emoji get
+        // separate atlas entries (different downscale sizes).
+        uint32_t atlas_glyph_id = glyph_index;
+        if (ambiguous_text && atlas_glyph_id != 0)
+            atlas_glyph_id |= (1u << 30);
+
+        if (atlas_glyph_id != 0)
+            entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_glyph_id, color_key);
         if (!entry) {
             GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1,
                                                            render_r, render_g, render_b);
             if (glyph_bitmap) {
-                uint32_t insert_id = glyph_index ? glyph_index : (uint32_t)glyph_bitmap->glyph_id;
+                uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
+                                                    : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
                                     glyph_bitmap, style, cache_w, cache_h);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
-            } else if (glyph_index != 0) {
-                rend_sdl3_atlas_insert_empty(&data->atlas, font_data, glyph_index, color_key);
+            } else if (atlas_glyph_id != 0) {
+                rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
             }
         }
         if (!populate_only)
