@@ -89,6 +89,20 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
     MainContext *ctx = (MainContext *)user_data;
     KeyboardResult result = { 0 };
 
+    // Ctrl+C with active selection → copy and cancel (not SIGINT)
+    if (codepoint == 'c' && (mod & TERM_MOD_CTRL) && !(mod & TERM_MOD_SHIFT) &&
+        terminal_selection_active(ctx->term)) {
+        char *text = terminal_selection_get_text(ctx->term);
+        if (text) {
+            platform_clipboard_set(ctx->plat, text);
+            free(text);
+        }
+        terminal_selection_clear(ctx->term);
+        result.force_redraw = true;
+        result.handled = true;
+        return result;
+    }
+
     // Ctrl+Shift+C → copy
     if (key == TERM_KEY_NONE && codepoint == 'C' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
         if (terminal_selection_active(ctx->term)) {
@@ -103,6 +117,12 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
         result.handled = true;
         return result;
     }
+    // Any key with active selection → cancel selection
+    if (terminal_selection_active(ctx->term)) {
+        terminal_selection_clear(ctx->term);
+        result.force_redraw = true;
+    }
+
     // Ctrl+Shift+V → paste
     if (key == TERM_KEY_NONE && codepoint == 'V' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
         // Try async paste first (GTK4), fall back to synchronous (SDL3)
@@ -152,8 +172,13 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
 // Text input callback — pure UTF-8 from IME/compose
 static KeyboardResult on_text(void *user_data, const char *text)
 {
-    (void)user_data;
+    MainContext *ctx = (MainContext *)user_data;
     KeyboardResult result = { 0 };
+
+    if (terminal_selection_active(ctx->term)) {
+        terminal_selection_clear(ctx->term);
+        result.force_redraw = true;
+    }
 
     size_t text_len = strlen(text);
     if (text_len > 0 && text_len < sizeof(result.data)) {
