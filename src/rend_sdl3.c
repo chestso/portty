@@ -1516,7 +1516,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                            render_r, render_g, render_b);
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, gid, color_key,
-                                            gb, emoji_render, cache_w, cache_h);
+                                            gb, emoji_render && color_baked,
+                                            cache_w, cache_h);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
                         rend_sdl3_atlas_insert_empty(&data->atlas, font_data, gid, color_key);
@@ -1525,8 +1526,9 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 if (!populate_only) {
                     int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
                     int y_off = entry ? entry->y_offset : 0;
-                    blit_glyph(data->renderer, &data->atlas, entry, emoji_render,
-                               cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
+                    blit_glyph(data->renderer, &data->atlas, entry,
+                               emoji_render && color_baked, cell_x, cell_y, x_off,
+                               y_off, avail_w, avail_h, data->font_ascent,
                                is_regional, color_baked, r, g, b);
                 }
             }
@@ -1589,15 +1591,17 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
                                                     : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
-                                    glyph_bitmap, emoji_render, cache_w, cache_h);
+                                    glyph_bitmap, emoji_render && color_baked,
+                                    cache_w, cache_h);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (atlas_glyph_id != 0) {
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
             }
         }
         if (!populate_only)
-            blit_glyph(data->renderer, &data->atlas, entry, emoji_render,
-                       cell_x, cell_y, entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
+            blit_glyph(data->renderer, &data->atlas, entry,
+                       emoji_render && color_baked, cell_x, cell_y,
+                       entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
                        avail_w, avail_h, data->font_ascent, is_regional,
                        color_baked, r, g, b);
     }
