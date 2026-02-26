@@ -992,15 +992,12 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     glyph_bitmap->advance = (int)(slot->advance.x >> 6);
     glyph_bitmap->glyph_id = glyph_index;
 
-    // When the glyph was scaled down, FreeType's bitmap_top and bitmap_left
-    // are also scaled, which mispositions the glyph.  Center it within the
-    // vertical extent of the original (unscaled) glyph and horizontally
-    // within the target cell width.
+    // When the glyph was scaled down, FreeType's bitmap_top is also scaled.
+    // Restore the original (unscaled) bitmap_top so the glyph sits on the
+    // correct baseline, and center horizontally within the target cell width.
     if (glyph_scale > 0.0) {
         double inv = 1.0 / glyph_scale;
-        int orig_top = (int)(slot->bitmap_top * inv);
-        int orig_h = (int)(bitmap->rows * inv);
-        glyph_bitmap->y_offset = orig_top - (orig_h - (int)bitmap->rows) / 2;
+        glyph_bitmap->y_offset = (int)(slot->bitmap_top * inv);
         glyph_bitmap->x_offset = (ft_data->target_cell_width - (int)bitmap->width) / 2;
     }
 
