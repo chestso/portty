@@ -938,6 +938,31 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
     }
 
+    // If the glyph's actual ink width exceeds the target cell width, apply a
+    // uniform scale transform and re-rasterize so the bitmap fits the cell
+    // (avoids lossy post-render bitmap scaling in the renderer).
+    // Use metrics.width (ink extent) not advance.x (which includes sidebearings).
+    FT_GlyphSlot slot_pre = face->glyph;
+    int ink_width = (int)(slot_pre->metrics.width >> 6);
+    int bearing_x = (int)(slot_pre->metrics.horiBearingX >> 6);
+    int glyph_extent = bearing_x + ink_width; // rightmost pixel
+    double glyph_scale = 0.0;                 // non-zero when glyph was scaled down
+    if (ft_data->target_cell_width > 0 && glyph_extent > ft_data->target_cell_width) {
+        glyph_scale = (double)ft_data->target_cell_width / glyph_extent;
+        FT_Fixed scale_16_16 = (FT_Fixed)(glyph_scale * 0x10000);
+        FT_Matrix matrix = { scale_16_16, 0, 0, scale_16_16 };
+        vlog("rasterize_glyph_index: glyph %u extent %d (ink=%d+bearing=%d) > cell %d, scaling by %.3f\n",
+             glyph_index, glyph_extent, ink_width, bearing_x,
+             ft_data->target_cell_width, glyph_scale);
+        FT_Set_Transform(face, &matrix, NULL);
+        error = FT_Load_Glyph(face, glyph_index, load_flags);
+        FT_Set_Transform(face, NULL, NULL); // reset transform
+        if (error) {
+            vlog("rasterize_glyph_index: Failed to reload scaled glyph %u: error %d\n", glyph_index, error);
+            return NULL;
+        }
+    }
+
     if (ft_data->synthetic_bold)
         FT_GlyphSlot_Embolden(face->glyph);
     if (ft_data->synthetic_italic)
@@ -966,6 +991,18 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     glyph_bitmap->y_offset = slot->bitmap_top;
     glyph_bitmap->advance = (int)(slot->advance.x >> 6);
     glyph_bitmap->glyph_id = glyph_index;
+
+    // When the glyph was scaled down, FreeType's bitmap_top and bitmap_left
+    // are also scaled, which mispositions the glyph.  Center it within the
+    // vertical extent of the original (unscaled) glyph and horizontally
+    // within the target cell width.
+    if (glyph_scale > 0.0) {
+        double inv = 1.0 / glyph_scale;
+        int orig_top = (int)(slot->bitmap_top * inv);
+        int orig_h = (int)(bitmap->rows * inv);
+        glyph_bitmap->y_offset = orig_top - (orig_h - (int)bitmap->rows) / 2;
+        glyph_bitmap->x_offset = (ft_data->target_cell_width - (int)bitmap->width) / 2;
+    }
 
     glyph_bitmap->pixels = malloc(glyph_bitmap->width * glyph_bitmap->height * 4);
     if (!glyph_bitmap->pixels) {
@@ -1214,6 +1251,14 @@ static bool ft_style_has_colr(FontBackend *font, void *font_data)
     return ft_data->has_colr;
 }
 
+// Set target cell width on a single FtFontData (vtable callback)
+static void ft_set_target_cell_width(void *font_data, int cell_width)
+{
+    FtFontData *ft_data = (FtFontData *)font_data;
+    if (ft_data)
+        ft_data->target_cell_width = cell_width;
+}
+
 FontBackend font_backend_ft = {
     .name = "freetype",
     .init = font_init,
@@ -1232,5 +1277,6 @@ FontBackend font_backend_ft = {
     .get_style_metrics = font_get_metrics,
     .has_style = font_has_style,
     .style_has_colr = ft_style_has_colr,
-    .get_glyph_index = ft_get_glyph_index
+    .get_glyph_index = ft_get_glyph_index,
+    .set_target_cell_width = ft_set_target_cell_width
 };

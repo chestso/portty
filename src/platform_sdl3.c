@@ -678,24 +678,21 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
 
     SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
 
-    if (!ctx->pty) {
-        fprintf(stderr, "ERROR: No PTY registered with platform\n");
-        return;
-    }
-
     // Start cursor blink timer
     ctx->cursor_blink_visible = true;
     ctx->has_focus = true;
     ctx->cursor_blink_timer = timer_add(ctx->timers, CURSOR_BLINK_INTERVAL_MS, true,
                                         EVENT_CURSOR_BLINK, NULL);
 
-    // Start PTY reader thread
+    // Start PTY reader thread (skip in demo mode when no PTY)
     SDL_SetAtomicInt(&ctx->running, 1);
     SDL_SetAtomicInt(&ctx->quit_requested, 0);
-    ctx->pty_reader_thread = SDL_CreateThread(pty_reader_thread_func, "pty_reader", ctx);
-    if (!ctx->pty_reader_thread) {
-        fprintf(stderr, "ERROR: Failed to create PTY reader thread: %s\n", SDL_GetError());
-        return;
+    if (ctx->pty) {
+        ctx->pty_reader_thread = SDL_CreateThread(pty_reader_thread_func, "pty_reader", ctx);
+        if (!ctx->pty_reader_thread) {
+            fprintf(stderr, "ERROR: Failed to create PTY reader thread: %s\n", SDL_GetError());
+            return;
+        }
     }
 
     // Enable text input for proper Unicode character handling
@@ -808,7 +805,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         ctx->force_redraw = 1;
 
                         // Write to PTY if callback provided raw data
-                        if (result.len > 0 && !result.handled) {
+                        if (result.len > 0 && !result.handled && ctx->pty) {
                             ssize_t written =
                                 pty_write(ctx->pty, result.data, result.len);
                             if (written < 0) {
@@ -836,7 +833,8 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                             timer_reset(ctx->timers, ctx->cursor_blink_timer);
                             ctx->force_redraw = 1;
 
-                            pty_write(ctx->pty, result.data, result.len);
+                            if (ctx->pty)
+                                pty_write(ctx->pty, result.data, result.len);
                         }
                     }
                 }

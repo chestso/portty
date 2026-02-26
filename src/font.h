@@ -138,6 +138,9 @@ struct FontBackend
 
     // Get glyph index for a codepoint without rasterizing
     uint32_t (*get_glyph_index)(FontBackend *font, void *font_data, uint32_t codepoint);
+
+    // Set target cell width for oversized glyph scaling (backend-specific)
+    void (*set_target_cell_width)(void *font_data, int cell_width);
 };
 
 // Font font API
@@ -171,5 +174,8 @@ GlyphBitmap *font_render_glyph_id(FontBackend *font, FontStyle style,
 
 // NEW: Check if a loaded style supports COLR (color glyphs)
 bool font_style_has_colr(FontBackend *font, FontStyle style);
+
+// Set target cell width on all loaded font styles (for oversized glyph scaling)
+void font_set_target_cell_width(FontBackend *font, int cell_width);
 
 #endif // FONT_H

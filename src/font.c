@@ -181,3 +181,14 @@ bool font_style_has_colr(FontBackend *font, FontStyle style)
         return false;
     return font->style_has_colr(font, font->font_data[style]);
 }
+
+// Set target cell width on all loaded font styles
+void font_set_target_cell_width(FontBackend *font, int cell_width)
+{
+    if (!font || !font->set_target_cell_width)
+        return;
+    for (int i = 0; i < FONT_STYLE_COUNT; i++) {
+        if (font->font_data[i])
+            font->set_target_cell_width(font->font_data[i], cell_width);
+    }
+}

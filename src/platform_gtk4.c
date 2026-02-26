@@ -280,7 +280,7 @@ static void handle_keyboard_result(GTK4PlatformData *ctx, KeyboardResult *result
         ctx->force_redraw = true;
 
         // Write to PTY if callback provided raw data
-        if (result->len > 0 && !result->handled) {
+        if (result->len > 0 && !result->handled && ctx->pty) {
             ssize_t written = pty_write(ctx->pty, result->data, result->len);
             if (written < 0) {
                 vlog("PTY write failed: %s\n", strerror(errno));
@@ -1123,7 +1123,7 @@ static gboolean on_sigchld(GIOChannel *source, GIOCondition condition,
 
     pty_signal_drain();
 
-    if (!pty_is_running(ctx->pty)) {
+    if (ctx->pty && !pty_is_running(ctx->pty)) {
         vlog("Child process has exited\n");
         g_main_loop_quit(ctx->main_loop);
         return G_SOURCE_REMOVE;
@@ -1181,7 +1181,7 @@ static void clipboard_read_callback(GObject *source_object, GAsyncResult *res,
 
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
-    if (text && text[0] != '\0') {
+    if (text && text[0] != '\0' && ctx->pty) {
         terminal_start_paste(ctx->term);
         pty_write(ctx->pty, text, strlen(text));
         terminal_end_paste(ctx->term);
@@ -1823,11 +1823,6 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
 
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
 
-    if (!ctx->pty) {
-        fprintf(stderr, "ERROR: No PTY registered with platform\n");
-        return;
-    }
-
     // Store references for draw_func and event handlers
     ctx->term = term;
     ctx->rend = rend;
@@ -1878,26 +1873,28 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
                      G_CALLBACK(on_focus_leave), ctx);
     gtk_widget_add_controller(ctx->drawing_area, focus_controller);
 
-    // Set up PTY I/O watch
-    int pty_fd = pty_get_master_fd(ctx->pty);
-    ctx->pty_channel = g_io_channel_unix_new(pty_fd);
-    g_io_channel_set_encoding(ctx->pty_channel, NULL, NULL);
-    g_io_channel_set_buffered(ctx->pty_channel, FALSE);
-    g_io_channel_set_flags(ctx->pty_channel,
-                           g_io_channel_get_flags(ctx->pty_channel) | G_IO_FLAG_NONBLOCK,
-                           NULL);
-    ctx->pty_watch_id = g_io_add_watch(ctx->pty_channel,
-                                       G_IO_IN | G_IO_ERR | G_IO_HUP,
-                                       on_pty_data, ctx);
+    // Set up PTY I/O watch (skip in demo mode when no PTY)
+    if (ctx->pty) {
+        int pty_fd = pty_get_master_fd(ctx->pty);
+        ctx->pty_channel = g_io_channel_unix_new(pty_fd);
+        g_io_channel_set_encoding(ctx->pty_channel, NULL, NULL);
+        g_io_channel_set_buffered(ctx->pty_channel, FALSE);
+        g_io_channel_set_flags(ctx->pty_channel,
+                               g_io_channel_get_flags(ctx->pty_channel) | G_IO_FLAG_NONBLOCK,
+                               NULL);
+        ctx->pty_watch_id = g_io_add_watch(ctx->pty_channel,
+                                           G_IO_IN | G_IO_ERR | G_IO_HUP,
+                                           on_pty_data, ctx);
 
-    // Set up SIGCHLD watch
-    int signal_fd = pty_signal_get_fd();
-    if (signal_fd >= 0) {
-        ctx->signal_channel = g_io_channel_unix_new(signal_fd);
-        g_io_channel_set_encoding(ctx->signal_channel, NULL, NULL);
-        g_io_channel_set_buffered(ctx->signal_channel, FALSE);
-        ctx->signal_watch_id = g_io_add_watch(ctx->signal_channel,
-                                              G_IO_IN, on_sigchld, ctx);
+        // Set up SIGCHLD watch
+        int signal_fd = pty_signal_get_fd();
+        if (signal_fd >= 0) {
+            ctx->signal_channel = g_io_channel_unix_new(signal_fd);
+            g_io_channel_set_encoding(ctx->signal_channel, NULL, NULL);
+            g_io_channel_set_buffered(ctx->signal_channel, FALSE);
+            ctx->signal_watch_id = g_io_add_watch(ctx->signal_channel,
+                                                  G_IO_IN, on_sigchld, ctx);
+        }
     }
 
     // Start cursor blink timer

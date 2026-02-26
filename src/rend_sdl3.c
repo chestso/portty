@@ -1123,6 +1123,10 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     vlog("Padding - left: %d, right: %d, top: %d, bottom: %d\n",
          data->pad_left, data->pad_right, data->pad_top, data->pad_bottom);
 
+    // Set target cell width on all loaded fonts so oversized glyphs are
+    // scaled down during rasterization (before bitmap generation).
+    font_set_target_cell_width(data->font, data->cell_width);
+
     // Log which fonts were successfully loaded
     vlog("Font loading summary:\n");
     vlog("  Normal font: %s\n", font_has_style(data->font, FONT_STYLE_NORMAL) ? "Loaded" : "Not loaded");
@@ -1323,6 +1327,9 @@ static bool ensure_fallback_font(RendererSdl3Data *data, const char *font_path)
     // Set the fallback slot
     data->font->font_data[FONT_STYLE_FALLBACK] = new_font_data;
     data->font->loaded_styles |= (1u << FONT_STYLE_FALLBACK);
+
+    // Set target cell width on the new fallback font for oversized glyph scaling
+    font_set_target_cell_width(data->font, data->cell_width);
 
     vlog("Fallback font loaded and cached (%d/%d): %s\n",
          data->loaded_fallback_count, MAX_LOADED_FALLBACKS, font_path);

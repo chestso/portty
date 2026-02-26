@@ -388,6 +388,7 @@ int main(int argc, char *argv[])
     int list_fonts = 0;
     int ft_hint_target = FT_LOAD_TARGET_LIGHT; // Default: light hinting
     char *png_text = NULL;
+    char *demo_text = NULL;
     const char *font_name = NULL;
     const char *colr_debug_path = NULL;
     char **exec_argv = NULL;
@@ -404,6 +405,7 @@ int main(int argc, char *argv[])
         { "padding", no_argument, NULL, 'N' },
         { "gtk4", no_argument, NULL, 'G' },
         { "sdl3", no_argument, NULL, 'S' },
+        { "demo", required_argument, NULL, 'd' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -435,7 +437,7 @@ int main(int argc, char *argv[])
     if (conf.platform && strcmp(conf.platform, "gtk4") == 0)
         use_gtk4 = 1;
 
-    while ((opt = getopt_long(argc, argv, "hvef:g:P:D:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvf:g:P:D:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -443,9 +445,8 @@ int main(int argc, char *argv[])
         case 'v':
             verbose = 1;
             break;
-        case 'e':
-            running = 0;
-            fprintf(stderr, "STATUS: exit_flag_set=1\n");
+        case 'd':
+            demo_text = optarg;
             break;
         case 'f':
             font_name = optarg;
@@ -673,31 +674,37 @@ int main(int argc, char *argv[])
         renderer_resize(rend, win_w, win_h);
         platform_show_window(plat);
 
-        // Initialize signal handling before creating PTY
-        if (pty_signal_init() < 0) {
-            fprintf(stderr, "WARNING: Failed to initialize SIGCHLD handling\n");
-        }
+        if (demo_text) {
+            // Demo mode: feed text directly into terminal, no PTY needed
+            terminal_process_input(term, demo_text, strlen(demo_text));
+            vlog("Demo mode: fed %zu bytes into terminal\n", strlen(demo_text));
+        } else {
+            // Initialize signal handling before creating PTY
+            if (pty_signal_init() < 0) {
+                fprintf(stderr, "WARNING: Failed to initialize SIGCHLD handling\n");
+            }
 
-        // Create PTY and spawn shell (or custom command)
-        pty = pty_create(init_rows, init_cols, exec_argv);
-        if (!pty) {
-            fprintf(stderr, "ERROR: Failed to create PTY\n");
-            pty_signal_cleanup();
-            renderer_destroy(rend);
-            terminal_destroy(term);
-            platform_destroy(plat);
-            return 1;
-        }
+            // Create PTY and spawn shell (or custom command)
+            pty = pty_create(init_rows, init_cols, exec_argv);
+            if (!pty) {
+                fprintf(stderr, "ERROR: Failed to create PTY\n");
+                pty_signal_cleanup();
+                renderer_destroy(rend);
+                terminal_destroy(term);
+                platform_destroy(plat);
+                return 1;
+            }
 
-        // Register PTY with platform
-        if (!platform_register_pty(plat, pty)) {
-            fprintf(stderr, "ERROR: Failed to register PTY with platform\n");
-            pty_destroy(pty);
-            pty_signal_cleanup();
-            renderer_destroy(rend);
-            terminal_destroy(term);
-            platform_destroy(plat);
-            return 1;
+            // Register PTY with platform
+            if (!platform_register_pty(plat, pty)) {
+                fprintf(stderr, "ERROR: Failed to register PTY with platform\n");
+                pty_destroy(pty);
+                pty_signal_cleanup();
+                renderer_destroy(rend);
+                terminal_destroy(term);
+                platform_destroy(plat);
+                return 1;
+            }
         }
     }
 
@@ -775,7 +782,6 @@ static void print_usage(const char *progname)
     printf("Options:\n");
     printf("  -h          Show this help message\n");
     printf("  -v          Verbose output (debug information)\n");
-    printf("  -e          Exit immediately (for testing)\n");
     printf("  -f PATTERN  Font (fontconfig pattern, default: monospace)\n");
     printf("              Size is part of the pattern, e.g. -f monospace-16\n");
     printf("              Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
@@ -787,6 +793,7 @@ static void print_usage(const char *progname)
     printf("  --sdl3        Use SDL3 platform backend (overrides config file)\n");
     printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
     printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
+    printf("  --demo TEXT Display TEXT in terminal without spawning a shell (for testing)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
     printf("\n");
