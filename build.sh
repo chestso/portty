@@ -180,44 +180,38 @@ run_application() {
     return 0
 }
 
-# Generate a bench script for profiling (scripted key events)
+# Generate a bench script for profiling (bash commands that exercise rendering)
 generate_bench_script() {
     local output_file="$1"
     log_info "Generating bench script..."
 
     cat > "$output_file" <<'SCRIPT'
-# Bench script for profiling: exercises typing, scrolling, special keys
-# Format: [delay_ms] <key_spec>
+#!/bin/bash
+# Bench script for profiling: exercises colors, scrollback, emoji, box drawing
 
-# Type a command with color output
-0 echo -e "\e[31mRed\e[32mGreen\e[34mBlue\e[0m"\n
-50 echo -e "\e[1;33mBold Yellow\e[0m and \e[4;36mUnderline Cyan\e[0m"\n
+# SGR color output
+echo -e "\e[31mRed\e[32mGreen\e[34mBlue\e[0m"
+echo -e "\e[1;33mBold Yellow\e[0m and \e[4;36mUnderline Cyan\e[0m"
 
-# Type lines to fill the screen and exercise scrollback
-10 for i in $(seq 1 50); do echo "Line $i: The quick brown fox jumps over the lazy dog"; done\n
+# Fill screen and exercise scrollback
+for i in $(seq 1 50); do echo "Line $i: The quick brown fox jumps over the lazy dog"; done
 
 # Truecolor gradient
-50 for i in $(seq 0 5 255); do printf "\e[38;2;${i};$((255-i));128m#\e[0m"; done; echo\n
+for i in $(seq 0 5 255); do printf "\e[38;2;${i};$((255-i));128m#\e[0m"; done; echo
 
 # Emoji
-50 echo "Emoji: 😀🎉🚀💻🔥✨🌍🎨📚🔧"\n
+echo "Emoji: 😀🎉🚀💻🔥✨🌍🎨📚🔧"
 
 # Box drawing
-50 echo "┌────────────────────┐"\n
-0 echo "│ Box drawing test   │"\n
-0 echo "└────────────────────┘"\n
+echo "┌────────────────────┐"
+echo "│ Box drawing test   │"
+echo "└────────────────────┘"
 
-# More scrolling
-10 for i in $(seq 1 100); do echo "Scroll $i: Lorem ipsum dolor sit amet"; done\n
-
-# Arrow keys and backspace
-100 Hello\b\b\b\b\bWorld
-50 \n
-
-# Exit
-100 \C-q
+# Heavy scrolling
+for i in $(seq 1 200); do echo "Scroll $i: Lorem ipsum dolor sit amet"; done
 SCRIPT
 
+    chmod +x "$output_file"
     log_info "Bench script written to $output_file"
 }
 
@@ -255,13 +249,13 @@ run_profiling() {
     cd ..
 
     # Generate bench script
-    local bench_script="bench-script.txt"
+    local bench_script="bench-script.sh"
     generate_bench_script "$bench_script"
 
-    # Run benchmark with scripted events (window opens, script plays, Ctrl+Q exits)
-    log_info "Running benchmark (--bench $bench_script)..."
+    # Run benchmark (terminal exits when bash script finishes)
+    log_info "Running benchmark (-- bash $bench_script)..."
     rm -f gmon.out
-    ./"$BUILD_DIR"/src/"$PROJECT_NAME" --bench="$bench_script"
+    ./"$BUILD_DIR"/src/"$PROJECT_NAME" -- bash "$bench_script"
     if [ $? -ne 0 ]; then
         log_error "Benchmark run failed"
         rm -f "$bench_script"
