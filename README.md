@@ -114,7 +114,43 @@ build/src/bloom-terminal -v
 
 # Run with GTK4/libadwaita backend (native GNOME decorations)
 build/src/bloom-terminal --gtk4
+
+# Run a specific command instead of the default shell
+build/src/bloom-terminal -- htop
+
+# Display text without spawning a shell (for testing)
+build/src/bloom-terminal --demo "Hello, world!"
+
+# Render text to a PNG file
+build/src/bloom-terminal -P "😀" output.png
 ```
+
+### CLI Flags
+
+| Flag                  | Description                                                     |
+| --------------------- | --------------------------------------------------------------- |
+| `-h`                  | Show help message                                               |
+| `-v`                  | Verbose output (font resolution, COLR, atlas events)            |
+| `-f PATTERN`          | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)      |
+| `-g COLSxROWS`        | Initial terminal size (default: 80x24)                          |
+| `-P TEXT`             | Render TEXT to PNG (output path as positional arg)              |
+| `-D PREFIX`           | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
+| `-L` / `--list-fonts` | List available monospace fonts and exit                         |
+| `--ft-hinting S`      | FreeType hinting: none/light/normal/mono (default: light)       |
+| `--reflow`            | Enable text reflow on resize (unstable, libvterm bug)           |
+| `--padding`           | Enable padding around terminal content                          |
+| `--gtk4`              | Use GTK4/libadwaita platform backend                            |
+| `--sdl3`              | Use SDL3 platform backend (overrides config file)               |
+| `--demo TEXT`         | Display TEXT in terminal without spawning a shell (for testing) |
+
+### Keyboard Shortcuts
+
+| Shortcut            | Action                                    |
+| ------------------- | ----------------------------------------- |
+| `Ctrl+Shift+C`      | Copy selection to clipboard               |
+| `Ctrl+Shift+V`      | Paste from clipboard                      |
+| `Shift+PageUp/Down` | Scroll through scrollback buffer          |
+| Right-click         | Copy selection if active, otherwise paste |
 
 ## Configuration
 
