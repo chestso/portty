@@ -947,7 +947,11 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     int bearing_x = (int)(slot_pre->metrics.horiBearingX >> 6);
     int glyph_extent = bearing_x + ink_width; // rightmost pixel
     double glyph_scale = 0.0;                 // non-zero when glyph was scaled down
-    if (ft_data->target_cell_width > 0 && glyph_extent > ft_data->target_cell_width) {
+    // Allow glyphs to exceed the cell width by up to 10% before scaling,
+    // so near-fitting glyphs (e.g. A, V, X, Y in Consolas) render at full
+    // size and aren't visibly shrunken.
+    int scale_threshold = ft_data->target_cell_width + ft_data->target_cell_width / 10;
+    if (ft_data->target_cell_width > 0 && glyph_extent > scale_threshold) {
         glyph_scale = (double)ft_data->target_cell_width / glyph_extent;
         FT_Fixed scale_16_16 = (FT_Fixed)(glyph_scale * 0x10000);
         FT_Matrix matrix = { scale_16_16, 0, 0, scale_16_16 };
@@ -992,12 +996,10 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     glyph_bitmap->advance = (int)(slot->advance.x >> 6);
     glyph_bitmap->glyph_id = glyph_index;
 
-    // When the glyph was scaled down, FreeType's bitmap_top is also scaled.
-    // Restore the original (unscaled) bitmap_top so the glyph sits on the
-    // correct baseline, and center horizontally within the target cell width.
+    // When the glyph was scaled down via FT_Set_Transform, FreeType's
+    // bitmap_top is already correctly scaled to preserve baseline alignment.
+    // Only center horizontally within the target cell width.
     if (glyph_scale > 0.0) {
-        double inv = 1.0 / glyph_scale;
-        glyph_bitmap->y_offset = (int)(slot->bitmap_top * inv);
         glyph_bitmap->x_offset = (ft_data->target_cell_width - (int)bitmap->width) / 2;
     }
 
