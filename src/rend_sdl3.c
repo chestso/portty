@@ -1137,7 +1137,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
 
 static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
                                        uint32_t glyph_id, uint32_t color_key,
-                                       GlyphBitmap *bitmap, FontStyle style,
+                                       GlyphBitmap *bitmap, bool downscale,
                                        int max_w, int max_h)
 {
     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(atlas, font_data, glyph_id, color_key);
@@ -1145,7 +1145,7 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
         return entry;
 
     GlyphBitmap *scaled = NULL;
-    if (style == FONT_STYLE_EMOJI) {
+    if (downscale) {
         vlog("Cache emoji glyph %u: bitmap=%dx%d max=%dx%d\n",
              glyph_id, bitmap->width, bitmap->height, max_w, max_h);
         scaled = downscale_bitmap(bitmap, max_w, max_h);
@@ -1165,7 +1165,7 @@ static bool is_color_font(FontBackend *font, FontStyle style)
 }
 
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
-                       RendSdl3AtlasEntry *entry, FontStyle style,
+                       RendSdl3AtlasEntry *entry, bool emoji_centered,
                        int cell_x, int cell_y, int glyph_x_offset, int glyph_y_offset,
                        int avail_w, int avail_h, int font_ascent, bool is_regional,
                        bool color_baked, uint8_t mod_r, uint8_t mod_g, uint8_t mod_b)
@@ -1176,7 +1176,7 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
     SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
                       (float)entry->region.w, (float)entry->region.h };
     SDL_FRect dst;
-    if (style == FONT_STYLE_EMOJI) {
+    if (emoji_centered) {
         float glyph_w = (float)entry->region.w;
         float glyph_h = (float)entry->region.h;
         float scaled_w, scaled_h;
@@ -1423,6 +1423,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             style = FONT_STYLE_EMOJI;
     }
 
+    bool emoji_render = (style == FONT_STYLE_EMOJI);
+
     // Ambiguous emoji with FE0F: render at full 2-cell emoji size.
     // Without FE0F: use emoji font (colored) but stay at 1 cell.
     bool has_fe0f = false;
@@ -1514,7 +1516,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                            render_r, render_g, render_b);
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, gid, color_key,
-                                            gb, style, cache_w, cache_h);
+                                            gb, emoji_render, cache_w, cache_h);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
                         rend_sdl3_atlas_insert_empty(&data->atlas, font_data, gid, color_key);
@@ -1523,7 +1525,7 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 if (!populate_only) {
                     int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
                     int y_off = entry ? entry->y_offset : 0;
-                    blit_glyph(data->renderer, &data->atlas, entry, style,
+                    blit_glyph(data->renderer, &data->atlas, entry, emoji_render,
                                cell_x, cell_y, x_off, y_off, avail_w, avail_h, data->font_ascent,
                                is_regional, color_baked, r, g, b);
                 }
@@ -1587,14 +1589,14 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
                                                     : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
-                                    glyph_bitmap, style, cache_w, cache_h);
+                                    glyph_bitmap, emoji_render, cache_w, cache_h);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (atlas_glyph_id != 0) {
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
             }
         }
         if (!populate_only)
-            blit_glyph(data->renderer, &data->atlas, entry, style,
+            blit_glyph(data->renderer, &data->atlas, entry, emoji_render,
                        cell_x, cell_y, entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
                        avail_w, avail_h, data->font_ascent, is_regional,
                        color_baked, r, g, b);
