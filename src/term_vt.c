@@ -23,6 +23,7 @@ typedef struct
     VTermScreenCell *cells;
     CellExtAttrs *ext_cells; // extension attributes per cell (may be NULL for old lines)
     int cols;
+    bool continuation; // true if this line is a soft-wrap continuation of the previous
 } ScrollbackLine;
 
 // Default ANSI 16-color palette based on charmbracelet/glamour dark style
@@ -1015,6 +1016,11 @@ static int term_sb_pushline(int cols, const VTermScreenCell *cells, void *user)
     entry->cells = line_cells;
     entry->ext_cells = ext_cells;
     entry->cols = cols;
+
+    // Capture soft-wrap continuation flag from row 0 (the line being pushed)
+    const VTermLineInfo *li = vterm_state_get_lineinfo(data->state, 0);
+    entry->continuation = li ? (bool)li->continuation : false;
+
     data->scrollback_lines++;
 
     // Scroll sixel images up by one row when content scrolls
@@ -1301,6 +1307,26 @@ static void vt_end_paste(TerminalBackend *backend)
     vterm_keyboard_end_paste(data->vt);
 }
 
+static bool vt_get_line_continuation(TerminalBackend *backend, int row)
+{
+    if (!backend || !backend->backend_data)
+        return false;
+    TerminalVtData *data = (TerminalVtData *)backend->backend_data;
+
+    if (row >= 0) {
+        // Visible row: query state directly
+        const VTermLineInfo *li = vterm_state_get_lineinfo(data->state, row);
+        return li ? (bool)li->continuation : false;
+    } else {
+        // Scrollback row: unified row -1 = scrollback index 0 = most recent
+        int scrollback_index = -(row + 1);
+        int internal_row = data->scrollback_lines - 1 - scrollback_index;
+        if (internal_row < 0 || internal_row >= data->scrollback_lines)
+            return false;
+        return data->scrollback[internal_row].continuation;
+    }
+}
+
 static void vt_set_reflow(TerminalBackend *backend, bool enabled)
 {
     if (!backend || !backend->backend_data)
@@ -1339,4 +1365,5 @@ TerminalBackend terminal_backend_vt = {
     .start_paste = vt_start_paste,
     .end_paste = vt_end_paste,
     .set_reflow = vt_set_reflow,
+    .get_line_continuation = vt_get_line_continuation,
 };

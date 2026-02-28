@@ -131,6 +131,9 @@ struct TerminalBackend
 
     // Reflow setting
     void (*set_reflow)(TerminalBackend *term, bool enabled);
+
+    // Line continuation (soft-wrap) query
+    bool (*get_line_continuation)(TerminalBackend *term, int row);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -223,6 +226,9 @@ void terminal_end_paste(TerminalBackend *term);
 
 // Reflow setting
 void terminal_set_reflow(TerminalBackend *term, bool enabled);
+
+// Line continuation (soft-wrap) query
+bool terminal_get_line_continuation(TerminalBackend *term, int row);
 
 // Selection API
 void terminal_selection_start(TerminalBackend *term, int row, int col, TerminalSelectMode mode);

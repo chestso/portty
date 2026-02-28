@@ -250,6 +250,13 @@ void terminal_set_reflow(TerminalBackend *term, bool enabled)
     term->set_reflow(term, enabled);
 }
 
+bool terminal_get_line_continuation(TerminalBackend *term, int row)
+{
+    if (!term || !term->get_line_continuation)
+        return false;
+    return term->get_line_continuation(term, row);
+}
+
 // --- Selection API ---
 
 void terminal_selection_clear(TerminalBackend *term)
@@ -303,30 +310,57 @@ static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *ou
     }
     int cls = char_class(cell.chars[0], wchars);
 
-    // Scan left
-    int left = col;
-    while (left > 0) {
-        TerminalCell c;
-        if (read_cell_unified(term, row, left - 1, &c) < 0)
-            break;
-        if (char_class(c.chars[0], wchars) != cls)
-            break;
-        left--;
+    // Scan left — cross soft-wrapped line boundaries
+    int scan_row = row, left = col;
+    while (left > 0 || terminal_get_line_continuation(term, scan_row)) {
+        if (left > 0) {
+            TerminalCell c;
+            if (read_cell_unified(term, scan_row, left - 1, &c) < 0)
+                break;
+            if (char_class(c.chars[0], wchars) != cls)
+                break;
+            left--;
+        } else {
+            // At col 0 on a continuation line — move to end of previous row
+            if (!terminal_get_line_continuation(term, scan_row))
+                break;
+            scan_row--;
+            left = cols - 1;
+            // Verify the character class still matches
+            TerminalCell c;
+            if (read_cell_unified(term, scan_row, left, &c) < 0)
+                break;
+            if (char_class(c.chars[0], wchars) != cls)
+                break;
+        }
     }
 
-    // Scan right
-    int right = col;
-    while (right < cols - 1) {
-        TerminalCell c;
-        if (read_cell_unified(term, row, right + 1, &c) < 0)
-            break;
-        if (char_class(c.chars[0], wchars) != cls)
-            break;
-        right++;
+    // Scan right — cross soft-wrapped line boundaries
+    int scan_row_r = row, right = col;
+    while (right < cols - 1 || terminal_get_line_continuation(term, scan_row_r + 1)) {
+        if (right < cols - 1) {
+            TerminalCell c;
+            if (read_cell_unified(term, scan_row_r, right + 1, &c) < 0)
+                break;
+            if (char_class(c.chars[0], wchars) != cls)
+                break;
+            right++;
+        } else {
+            // At last col — check if next row continues
+            if (!terminal_get_line_continuation(term, scan_row_r + 1))
+                break;
+            scan_row_r++;
+            right = 0;
+            TerminalCell c;
+            if (read_cell_unified(term, scan_row_r, right, &c) < 0)
+                break;
+            if (char_class(c.chars[0], wchars) != cls)
+                break;
+        }
     }
 
-    *out_start = (TerminalPos){ row, left };
-    *out_end = (TerminalPos){ row, right };
+    *out_start = (TerminalPos){ scan_row, left };
+    *out_end = (TerminalPos){ scan_row_r, right };
 }
 
 void terminal_selection_start(TerminalBackend *term, int row, int col, TerminalSelectMode mode)
@@ -475,12 +509,18 @@ char *terminal_selection_get_text(TerminalBackend *term)
             }
         }
 
-        // Strip trailing whitespace from this row
-        pos = last_nonspace_pos;
+        // Strip trailing whitespace only at hard line boundaries (not soft-wraps,
+        // where trailing spaces are real content that continues on the next row)
+        bool next_is_continuation =
+            row < sel->end.row && terminal_get_line_continuation(term, row + 1);
+        if (!next_is_continuation)
+            pos = last_nonspace_pos;
 
-        // Add newline between rows (not after last)
-        if (row < sel->end.row && pos < buf_size - 1)
-            buf[pos++] = '\n';
+        // Add newline between rows only if next row is NOT a soft-wrap continuation
+        if (row < sel->end.row && pos < buf_size - 1) {
+            if (!next_is_continuation)
+                buf[pos++] = '\n';
+        }
     }
 
     buf[pos] = '\0';
