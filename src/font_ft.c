@@ -1041,7 +1041,7 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
     }
 
-    vlog("rasterize_glyph_index: Grayscale fallback rendered for glyph %u: %dx%d\n", glyph_index, glyph_bitmap->width, glyph_bitmap->height);
+    vlog("rasterize_glyph_index: Rendered glyph %u: %dx%d\n", glyph_index, glyph_bitmap->width, glyph_bitmap->height);
     return glyph_bitmap;
 }
 
