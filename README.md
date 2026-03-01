@@ -13,15 +13,19 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Bold, italic, and bold-italic font styles (variable font axes, fontconfig resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
+- Dynamic font fallback via Fontconfig (up to 8 runtime fallback fonts with codepoint cache)
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+Shift+C to copy, right-click copy/paste)
+- Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
 - Terminal resize handling with optional reflow (`--reflow`)
+- HiDPI support (pixel density scaling for underlines and UI elements)
+- Window title via OSC 2
 - Custom terminfo entry (`TERM=bloom-terminal`) with truecolor, cursor style, bracketed paste, and strikethrough support
 - Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 
@@ -182,16 +186,16 @@ word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/
 
 All keys are optional. Only the `[terminal]` section is recognized.
 
-| Key          | Values                            | Default           | Description                                 |
-| ------------ | --------------------------------- | ----------------- | ------------------------------------------- |
-| `font`       | Fontconfig pattern                | `monospace`       | Font family and size (e.g. `monospace-16`)  |
-| `geometry`   | `COLSxROWS`                       | `80x24`           | Initial terminal dimensions                 |
-| `hinting`    | `none`, `light`, `normal`, `mono` | `light`           | FreeType hinting mode                       |
-| `platform`   | `sdl3`, `gtk4`                    | `sdl3`            | Platform backend                            |
-| `reflow`     | `true`/`false`                    | `false`           | Text reflow on resize                       |
-| `padding`    | `true`/`false`                    | `false`           | Padding around terminal content             |
-| `verbose`    | `true`/`false`                    | `false`           | Debug output                                |
-| `word_chars` | Character string                  | `A-Za-z0-9` `_-/` | Characters treated as word for double-click |
+| Key          | Values                            | Default        | Description                                 |
+| ------------ | --------------------------------- | -------------- | ------------------------------------------- |
+| `font`       | Fontconfig pattern                | `monospace`    | Font family and size (e.g. `monospace-16`)  |
+| `geometry`   | `COLSxROWS`                       | `80x24`        | Initial terminal dimensions                 |
+| `hinting`    | `none`, `light`, `normal`, `mono` | `light`        | FreeType hinting mode                       |
+| `platform`   | `sdl3`, `gtk4`                    | `sdl3`         | Platform backend                            |
+| `reflow`     | `true`/`false`                    | `false`        | Text reflow on resize                       |
+| `padding`    | `true`/`false`                    | `false`        | Padding around terminal content             |
+| `verbose`    | `true`/`false`                    | `false`        | Debug output                                |
+| `word_chars` | Character string                  | `A-Za-z0-9_-/` | Characters treated as word for double-click |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
@@ -211,7 +215,7 @@ infocmp bloom-terminal | ssh remote-host 'tic -x -'
 - SDL3
 - fontconfig
 - freetype2 (>= 2.13 for COLR v1 APIs)
-- harfbuzz
+- harfbuzz (>= 2.0)
 - libpng
 
 Optional:
@@ -230,7 +234,7 @@ cd build && make check
 Current test suites:
 
 - **test_atlas** — Glyph texture atlas: insert/lookup, shelf packing, staging buffer contents, spatial and load-factor eviction, plus regression tests for hash table overflow, probe chain corruption, and post-eviction staging bugs
-- **test_pty_pause** — PTY pause/resume during alt-screen selection: platform wrapper delegation, pause on alt-screen select, resume on clear/copy/resize, full select-copy cycles
+- **test_pty_pause** — PTY pause/resume during selection: platform wrapper delegation, pause on select, resume on clear/copy/resize, full select-copy cycles
 - **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
 - **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
 
