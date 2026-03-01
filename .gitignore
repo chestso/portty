@@ -94,3 +94,8 @@ opencode.jsonc
 # Crush configuration
 crush.json
 .crushignore
+
+# AI assistant configuration
+CLAUDE.md
+AGENTS.md
+.claude/
