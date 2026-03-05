@@ -96,6 +96,9 @@ struct PlatformBackend
     // PTY backpressure — pause/resume reading from PTY fd
     void (*pause_pty)(PlatformBackend *plat);
     void (*resume_pty)(PlatformBackend *plat);
+
+    // Query desktop environment for preferred monospace font (optional)
+    char *(*get_default_font)(PlatformBackend *plat);
 };
 
 // Platform API
@@ -125,5 +128,7 @@ void platform_request_quit(PlatformBackend *plat);
 
 void platform_pause_pty(PlatformBackend *plat);
 void platform_resume_pty(PlatformBackend *plat);
+
+char *platform_get_default_font(PlatformBackend *plat);
 
 #endif /* PLATFORM_H */

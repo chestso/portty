@@ -1210,6 +1210,7 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
 static void gtk4_request_quit(PlatformBackend *plat);
 static void gtk4_pause_pty(PlatformBackend *plat);
 static void gtk4_resume_pty(PlatformBackend *plat);
+static char *gtk4_get_default_font(PlatformBackend *plat);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -1232,6 +1233,7 @@ PlatformBackend platform_backend_gtk4 = {
     .request_quit = gtk4_request_quit,
     .pause_pty = gtk4_pause_pty,
     .resume_pty = gtk4_resume_pty,
+    .get_default_font = gtk4_get_default_font,
 };
 
 static bool gtk4_plat_init(PlatformBackend *plat)
@@ -1971,6 +1973,28 @@ static void gtk4_resume_pty(PlatformBackend *plat)
                                            on_pty_data, ctx);
     }
     vlog("PTY resumed\n");
+}
+
+static char *gtk4_get_default_font(PlatformBackend *plat)
+{
+    (void)plat;
+    GSettings *settings = g_settings_new("org.gnome.desktop.interface");
+    if (!settings)
+        return NULL;
+    char *value = g_settings_get_string(settings, "monospace-font-name");
+    g_object_unref(settings);
+    if (!value || value[0] == '\0') {
+        g_free(value);
+        return NULL;
+    }
+    // Convert Pango format "Family Name 12" to fontconfig "Family Name-12"
+    char *last_space = strrchr(value, ' ');
+    if (last_space && last_space[1] >= '0' && last_space[1] <= '9')
+        *last_space = '-';
+    char *result = strdup(value);
+    g_free(value);
+    vlog("GNOME monospace font: %s\n", result);
+    return result;
 }
 
 __attribute__((visibility("default")))

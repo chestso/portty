@@ -146,3 +146,10 @@ void platform_resume_pty(PlatformBackend *plat)
         return;
     plat->resume_pty(plat);
 }
+
+char *platform_get_default_font(PlatformBackend *plat)
+{
+    if (plat && plat->get_default_font)
+        return plat->get_default_font(plat);
+    return NULL;
+}

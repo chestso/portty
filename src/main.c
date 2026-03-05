@@ -645,14 +645,24 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        // Query desktop environment for preferred monospace font
+        char *desktop_font = NULL;
+        if (!font_name) {
+            desktop_font = platform_get_default_font(plat);
+            if (desktop_font)
+                font_name = desktop_font;
+        }
+
         // Load fonts
         if (renderer_load_fonts(rend, font_size, font_name, ft_hint_target) < 0) {
             fprintf(stderr, "Failed to load fonts\n");
+            free(desktop_font);
             renderer_destroy(rend);
             terminal_destroy(term);
             platform_destroy(plat);
             return 1;
         }
+        free(desktop_font);
 
         // Disable padding unless --padding is passed
         if (!padding) {
