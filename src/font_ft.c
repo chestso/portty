@@ -947,11 +947,10 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     int bearing_x = (int)(slot_pre->metrics.horiBearingX >> 6);
     int glyph_extent = bearing_x + ink_width; // rightmost pixel
     double glyph_scale = 0.0;                 // non-zero when glyph was scaled down
-    // Allow glyphs to exceed the cell width by up to 10% before scaling,
-    // so near-fitting glyphs (e.g. A, V, X, Y in Consolas) render at full
-    // size and aren't visibly shrunken.
-    int scale_threshold = ft_data->target_cell_width + ft_data->target_cell_width / 10;
-    if (ft_data->target_cell_width > 0 && glyph_extent > scale_threshold) {
+    // Only scale glyphs from fallback fonts — the primary font's glyphs are
+    // trusted to fit the cell they defined.
+    bool is_fallback = (ft_data->style == FONT_STYLE_FALLBACK);
+    if (is_fallback && ft_data->target_cell_width > 0 && glyph_extent > ft_data->target_cell_width) {
         glyph_scale = (double)ft_data->target_cell_width / glyph_extent;
         FT_Fixed scale_16_16 = (FT_Fixed)(glyph_scale * 0x10000);
         FT_Matrix matrix = { scale_16_16, 0, 0, scale_16_16 };
