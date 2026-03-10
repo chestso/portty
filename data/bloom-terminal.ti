@@ -1,4 +1,4 @@
-bloom-terminal|Bloom Terminal Emulator,
+bloom-terminal-256color|bloom-terminal|Bloom Terminal Emulator,
     use=xterm-256color,
     colors#0x1000000,
     pairs#0x10000,

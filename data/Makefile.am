@@ -20,4 +20,5 @@ install-data-local:
 	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti
 
 uninstall-local:
+	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-256color
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal

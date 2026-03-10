@@ -139,7 +139,7 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         // Child process - exec command or default shell
 
         // Set TERM environment variable
-        setenv("TERM", "bloom-terminal", 1);
+        setenv("TERM", "bloom-terminal-256color", 1);
 
         // Point to our installed terminfo database
 #ifdef DATADIR
