@@ -17,7 +17,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
-- Text selection with clipboard support (Ctrl+Shift+C to copy, right-click copy/paste)
+- Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
 - Reverse video attribute rendering
@@ -26,7 +26,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Terminal resize handling with optional reflow (`--reflow`)
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
-- Custom terminfo entry (`TERM=bloom-terminal`) with truecolor, cursor style, bracketed paste, and strikethrough support
+- Custom terminfo entry (`TERM=bloom-terminal-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
 - Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 
 ## Architecture
@@ -149,12 +149,13 @@ build/src/bloom-terminal -P "😀" output.png
 
 ### Keyboard Shortcuts
 
-| Shortcut            | Action                                    |
-| ------------------- | ----------------------------------------- |
-| `Ctrl+Shift+C`      | Copy selection to clipboard               |
-| `Ctrl+Shift+V`      | Paste from clipboard                      |
-| `Shift+PageUp/Down` | Scroll through scrollback buffer          |
-| Right-click         | Copy selection if active, otherwise paste |
+| Shortcut            | Action                                               |
+| ------------------- | ---------------------------------------------------- |
+| `Ctrl+C`            | Copy selection to clipboard (sends SIGINT otherwise) |
+| `Ctrl+Shift+C`      | Copy selection to clipboard                          |
+| `Ctrl+Shift+V`      | Paste from clipboard                                 |
+| `Shift+PageUp/Down` | Scroll through scrollback buffer                     |
+| Right-click         | Copy selection if active, otherwise paste            |
 
 ## Configuration
 
@@ -201,12 +202,12 @@ Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting wit
 
 ## Terminfo
 
-bloom-terminal ships a custom terminfo entry (`bloom-terminal`) based on `xterm-256color`. It is compiled and installed automatically by `./build.sh --install` via `tic`. The child shell's `TERMINFO_DIRS` is set to `~/.local/share/terminfo` so the entry is found without system-wide installation.
+bloom-terminal ships a custom terminfo entry (`bloom-terminal-256color`) based on `xterm-256color`. It is compiled and installed automatically by `./build.sh --install` via `tic`. The child shell's `TERMINFO_DIRS` is set to `~/.local/share/terminfo` so the entry is found without system-wide installation.
 
 If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
 
 ```bash
-infocmp bloom-terminal | ssh remote-host 'tic -x -'
+infocmp bloom-terminal-256color | ssh remote-host 'tic -x -'
 ```
 
 ## Dependencies
