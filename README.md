@@ -265,6 +265,20 @@ The project includes:
 - `build.sh` for automated builds
 - Example scripts demonstrating terminal features, including `examples/unicode/emoji.sh` which exercises COLR/emoji paths
 
+### Code Formatting
+
+Run `./build.sh --format` to format all source files. This requires:
+
+- **clang-format** — C source and headers (`src/`)
+- **shfmt** — shell scripts (`examples/`)
+- **prettier** — markdown files
+
+```bash
+# Fedora 41+
+sudo dnf install clang-tools-extra shfmt
+npm install --prefix ~/.local prettier
+```
+
 ## Author
 
 Thomas Christensen
