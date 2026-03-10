@@ -6,6 +6,9 @@
 #include "platform_gtk4.h"
 #include <SDL3/SDL.h>
 #include <adwaita.h>
+#ifdef GDK_WINDOWING_WAYLAND
+#include <gdk/wayland/gdkwayland.h>
+#endif
 #include <errno.h>
 #include <glib-unix.h>
 #include <limits.h>
@@ -77,6 +80,23 @@ typedef void(EGLAPIENTRYP PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC)(
 #define GL_COLOR_BUFFER_BIT                   0x00004000
 #define GL_FRAMEBUFFER_COMPLETE               0x8CD5
 #define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME 0x8CD1
+// EGL device query constants (for matching DRM render node to EGL display)
+#ifndef EGL_DEVICE_EXT
+#define EGL_DEVICE_EXT 0x322C
+#endif
+#ifndef EGL_DRM_RENDER_NODE_FILE_EXT
+#define EGL_DRM_RENDER_NODE_FILE_EXT 0x3377
+#endif
+// GL functions for GPU diagnostics
+typedef const unsigned char *(EGLAPIENTRYP PFNGLGETSTRINGPROC)(unsigned int name);
+typedef void(EGLAPIENTRYP PFNGLREADPIXELSPROC)(
+    int x, int y, int width, int height, unsigned int format, unsigned int type,
+    void *pixels);
+#define GL_RENDERER                0x1F01
+#define GL_VENDOR                  0x1F00
+#define GL_TEXTURE_INTERNAL_FORMAT 0x1003
+typedef void(EGLAPIENTRYP PFNGLGETTEXLEVELPARAMETERIVPROC)(
+    unsigned int target, int level, unsigned int pname, int *params);
 #endif
 
 // Cursor blink interval in milliseconds
@@ -193,6 +213,7 @@ typedef struct
 #ifdef HAVE_EGL_DMABUF
     // Zero-copy DMA-BUF rendering state (GBM import approach)
     bool zero_copy;
+    bool dmabuf_verified; // set after first-frame content verification
     EGLDisplay egl_display;
     GdkTexture *prev_texture;
 
@@ -296,19 +317,66 @@ static void handle_keyboard_result(GTK4PlatformData *ctx, KeyboardResult *result
 #define LOAD_GL(ctx, name, type) \
     ctx->name = (type)eglGetProcAddress(#name)
 
-// Find and open a DRM render node (/dev/dri/renderD128, etc.)
-static int open_drm_render_node(void)
+// Find and open the DRM render node matching the current EGL display's device.
+// This is critical on multi-GPU systems (e.g. NVIDIA + AMD) where DMA-BUF
+// sharing only works when GBM allocates on the same GPU as the EGL context.
+static int open_drm_render_node(EGLDisplay egl_display)
 {
+    // Try EGL device query to find the render node for this display's GPU
+    PFNEGLQUERYDISPLAYATTRIBEXTPROC eglQueryDisplayAttribEXT =
+        (PFNEGLQUERYDISPLAYATTRIBEXTPROC)eglGetProcAddress(
+            "eglQueryDisplayAttribEXT");
+    PFNEGLQUERYDEVICESTRINGEXTPROC eglQueryDeviceStringEXT =
+        (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress(
+            "eglQueryDeviceStringEXT");
+
+    if (eglQueryDisplayAttribEXT && eglQueryDeviceStringEXT) {
+        EGLAttrib device = 0;
+        if (eglQueryDisplayAttribEXT(egl_display, EGL_DEVICE_EXT, &device) &&
+            device) {
+            const char *node = eglQueryDeviceStringEXT(
+                (EGLDeviceEXT)device, EGL_DRM_RENDER_NODE_FILE_EXT);
+            if (node) {
+                int fd = open(node, O_RDWR | O_CLOEXEC);
+                if (fd >= 0) {
+                    vlog("Opened DRM render node from EGL device: %s\n", node);
+                    return fd;
+                }
+                vlog("Failed to open EGL device render node %s: %s\n",
+                     node, strerror(errno));
+            }
+        }
+    }
+
+    // Fallback: try render nodes sequentially
     for (int i = 128; i < 136; i++) {
         char path[32];
         snprintf(path, sizeof(path), "/dev/dri/renderD%d", i);
         int fd = open(path, O_RDWR | O_CLOEXEC);
         if (fd >= 0) {
-            vlog("Opened DRM render node: %s\n", path);
+            vlog("Opened DRM render node (fallback): %s\n", path);
             return fd;
         }
     }
     return -1;
+}
+
+// Query the DRM render node path for an EGL display. Returns a static string
+// or NULL. Caller must not free.
+static const char *get_egl_render_node(EGLDisplay egl_display)
+{
+    PFNEGLQUERYDISPLAYATTRIBEXTPROC qda =
+        (PFNEGLQUERYDISPLAYATTRIBEXTPROC)eglGetProcAddress(
+            "eglQueryDisplayAttribEXT");
+    PFNEGLQUERYDEVICESTRINGEXTPROC qds =
+        (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress(
+            "eglQueryDeviceStringEXT");
+    if (!qda || !qds)
+        return NULL;
+    EGLAttrib device = 0;
+    if (!qda(egl_display, EGL_DEVICE_EXT, &device) || !device)
+        return NULL;
+    return qds((EGLDeviceEXT)device, EGL_DRM_RENDER_NODE_FILE_EXT);
 }
 
 // Initialize GBM + EGL for DMA-BUF import — call after GL renderer creation
@@ -320,6 +388,20 @@ static bool init_dmabuf_export(GTK4PlatformData *ctx)
         return false;
     }
 
+    // Log GPU info from the GL context for diagnostics
+    PFNGLGETSTRINGPROC glGetString =
+        (PFNGLGETSTRINGPROC)eglGetProcAddress("glGetString");
+    if (glGetString) {
+        const char *renderer = (const char *)glGetString(GL_RENDERER);
+        const char *vendor = (const char *)glGetString(GL_VENDOR);
+        vlog("SDL GL context: vendor='%s' renderer='%s'\n",
+             vendor ? vendor : "?", renderer ? renderer : "?");
+    }
+
+    // Log SDL's EGL render node
+    const char *sdl_node = get_egl_render_node(ctx->egl_display);
+    vlog("SDL EGL render node: %s\n", sdl_node ? sdl_node : "(unknown)");
+
     // Check for EGL_EXT_image_dma_buf_import (needed to import DMA-BUF)
     const char *extensions = eglQueryString(ctx->egl_display, EGL_EXTENSIONS);
     if (!extensions ||
@@ -329,7 +411,7 @@ static bool init_dmabuf_export(GTK4PlatformData *ctx)
     }
 
     // Open DRM render node for GBM
-    ctx->drm_fd = open_drm_render_node();
+    ctx->drm_fd = open_drm_render_node(ctx->egl_display);
     if (ctx->drm_fd < 0) {
         vlog("No DRM render node available\n");
         return false;
@@ -636,21 +718,17 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
 
     // Render terminal into SDL's render target texture.
 #ifdef HAVE_EGL_DMABUF
-    if (ctx->zero_copy) {
-        // GTK4 makes its own EGL context current for GL rendering.
-        // SDL_GL_MakeCurrent doesn't restore ours, so call eglMakeCurrent
-        // directly with the saved EGL context and surfaces.
+    // GTK4 makes its own EGL context current for GL rendering between frames.
+    // Restore SDL's EGL context before any SDL/GL operations. This is needed
+    // both for zero-copy AND readback paths when using a GL renderer.
+    if (ctx->egl_ctx) {
         eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
                        ctx->egl_ctx);
-    }
-#endif
-    SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
-#ifdef HAVE_EGL_DMABUF
-    if (ctx->zero_copy) {
-        while (ctx->glGetError() != 0)
+        while (ctx->glGetError && ctx->glGetError() != 0)
             ;
     }
 #endif
+    SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
     if (!SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target)) {
         vlog("SDL_SetRenderTarget failed: %s\n", SDL_GetError());
         return;
@@ -665,16 +743,19 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
         // Flush SDL draw commands to GL
         SDL_FlushRenderer(ctx->sdl_renderer);
 
-        // Copy SDL render target → GBM-backed export texture
-        if (ctx->glCopyImageSubData && ctx->sdl_target_gl_tex) {
-            // glCopyImageSubData copies between textures directly —
-            // no FBO binding needed, avoids FBO completeness issues
+        // Copy SDL render target → GBM-backed export texture.
+        // Use glBlitFramebuffer instead of glCopyImageSubData —
+        // glCopyImageSubData silently produces blank output with
+        // EGLImage-backed textures on Mesa radeonsi, even when
+        // internal formats match (both GL_RGBA8).
+        // Set BLOOM_COPY_IMAGE=1 to force the old path for testing.
+        if (getenv("BLOOM_COPY_IMAGE") && ctx->glCopyImageSubData &&
+            ctx->sdl_target_gl_tex) {
             ctx->glCopyImageSubData(
                 ctx->sdl_target_gl_tex, GL_TEXTURE_2D, 0, 0, 0, 0,
                 ctx->export_tex, GL_TEXTURE_2D, 0, 0, 0, 0,
                 phys_w, phys_h, 1);
         } else {
-            // Fallback: blit via FBOs
             int sdl_fbo = 0;
             ctx->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &sdl_fbo);
             ctx->glBindFramebuffer(GL_READ_FRAMEBUFFER,
@@ -685,6 +766,67 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
             ctx->glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int)sdl_fbo);
         }
         ctx->glFinish();
+
+        // First-frame verification: read back a sample from the export
+        // texture to detect GPU mismatch or driver issues that cause
+        // the DMA-BUF export to silently produce blank frames.
+        if (!ctx->dmabuf_verified) {
+            ctx->dmabuf_verified = true;
+            // Log GL internal formats for diagnostics (GLES 3.1+)
+            PFNGLGETTEXLEVELPARAMETERIVPROC glGetTexLevelParameteriv =
+                (PFNGLGETTEXLEVELPARAMETERIVPROC)eglGetProcAddress(
+                    "glGetTexLevelParameteriv");
+            if (glGetTexLevelParameteriv) {
+                int sdl_ifmt = 0, exp_ifmt = 0;
+                if (ctx->sdl_target_gl_tex) {
+                    ctx->glBindTexture(GL_TEXTURE_2D,
+                                       ctx->sdl_target_gl_tex);
+                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0,
+                                             GL_TEXTURE_INTERNAL_FORMAT,
+                                             &sdl_ifmt);
+                    ctx->glBindTexture(GL_TEXTURE_2D, 0);
+                }
+                ctx->glBindTexture(GL_TEXTURE_2D, ctx->export_tex);
+                glGetTexLevelParameteriv(GL_TEXTURE_2D, 0,
+                                         GL_TEXTURE_INTERNAL_FORMAT,
+                                         &exp_ifmt);
+                ctx->glBindTexture(GL_TEXTURE_2D, 0);
+                vlog("GL internal formats: SDL=0x%04x export=0x%04x "
+                     "(%s)\n",
+                     sdl_ifmt, exp_ifmt,
+                     sdl_ifmt == exp_ifmt ? "match" : "MISMATCH");
+            }
+
+            PFNGLREADPIXELSPROC glReadPixels =
+                (PFNGLREADPIXELSPROC)eglGetProcAddress("glReadPixels");
+            if (glReadPixels) {
+                // Read a few rows from the export FBO
+                ctx->glBindFramebuffer(GL_FRAMEBUFFER, ctx->export_fbo);
+                uint8_t sample[64 * 4]; // 64 pixels
+                int sample_w = phys_w < 64 ? phys_w : 64;
+                glReadPixels(0, 0, sample_w, 1, GL_RGBA, GL_UNSIGNED_BYTE,
+                             sample);
+                ctx->glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+                int nonzero = 0;
+                for (int i = 0; i < sample_w * 4; i++) {
+                    if (sample[i])
+                        nonzero++;
+                }
+
+                if (nonzero == 0) {
+                    vlog("DMA-BUF export verification FAILED: export texture "
+                         "is blank after GL copy — falling back to "
+                         "readback\n");
+                    ctx->zero_copy = false;
+                    // Fall through to readback path below
+                    goto readback_fallback;
+                }
+                vlog("DMA-BUF export verification OK (%d non-zero bytes "
+                     "in %d-pixel sample)\n",
+                     nonzero, sample_w);
+            }
+        }
 
         // dup() the persistent DMA-BUF fd for this frame's GTK texture.
         // GTK closes the fd via close_dmabuf_fd when done.
@@ -1403,7 +1545,7 @@ static bool gtk4_plat_init(PlatformBackend *plat)
 
 #ifdef HAVE_EGL_DMABUF
     // Initialize DMA-BUF export if we got a GL renderer
-    if (got_gl) {
+    if (got_gl && !getenv("BLOOM_NO_DMABUF")) {
         // Force a render to ensure GL context is current
         SDL_SetRenderDrawColor(ctx->sdl_renderer, 0, 0, 0, 255);
         SDL_RenderClear(ctx->sdl_renderer);
@@ -1411,8 +1553,29 @@ static bool gtk4_plat_init(PlatformBackend *plat)
 
         if (init_dmabuf_export(ctx)) {
             ctx->zero_copy = true;
+            ctx->dmabuf_verified = false;
             vlog("Zero-copy DMA-BUF rendering enabled (EGL ctx=%p)\n",
                  (void *)ctx->egl_ctx);
+
+            // Check if GTK4's display is on the same GPU as SDL
+            GdkDisplay *gdk_dpy = gdk_display_get_default();
+            if (gdk_dpy && GDK_IS_WAYLAND_DISPLAY(gdk_dpy)) {
+                EGLDisplay gtk_egl =
+                    gdk_wayland_display_get_egl_display(gdk_dpy);
+                if (gtk_egl && gtk_egl != EGL_NO_DISPLAY) {
+                    const char *gtk_node = get_egl_render_node(gtk_egl);
+                    const char *sdl_node =
+                        get_egl_render_node(ctx->egl_display);
+                    vlog("GTK4 EGL render node: %s\n",
+                         gtk_node ? gtk_node : "(unknown)");
+                    if (gtk_node && sdl_node &&
+                        strcmp(gtk_node, sdl_node) != 0) {
+                        vlog("WARNING: GPU mismatch! SDL uses %s but "
+                             "GTK4 uses %s — DMA-BUF may not work\n",
+                             sdl_node, gtk_node);
+                    }
+                }
+            }
         } else {
             vlog("DMA-BUF export init failed, using readback\n");
         }

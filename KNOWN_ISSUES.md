@@ -46,3 +46,21 @@ Reflow is disabled by default due to a [libvterm bug](https://github.com/neovim/
    ```
 
 4. **Avoid resizing** while at a shell prompt - resize while a full-screen app is running or before starting the shell
+
+## glCopyImageSubData Blank Output on Mesa radeonsi (Fixed)
+
+### Symptoms
+
+GTK4 zero-copy DMA-BUF rendering produced blank frames on AMD Radeon GPUs (Mesa radeonsi). The first-frame verification detected the blank and fell back to `SDL_RenderReadPixels` readback.
+
+### Cause
+
+`glCopyImageSubData` silently produces blank output when the destination texture is backed by an EGLImage (imported from a GBM buffer via DMA-BUF), even when both textures have matching internal formats (GL_RGBA8). This appears to be a Mesa radeonsi driver issue specific to EGLImage-backed texture targets.
+
+A standalone test (`tests/test_dmabuf_copy.c`) confirmed that `glCopyImageSubData` works correctly between two regular textures on the same GPU, isolating the problem to the EGLImage interaction.
+
+### Fix
+
+The copy path was changed from `glCopyImageSubData` (texture-to-texture copy) to `glBlitFramebuffer` (FBO blit), which correctly handles EGLImage-backed textures.
+
+Set `BLOOM_COPY_IMAGE=1` to force the old `glCopyImageSubData` path for testing.
