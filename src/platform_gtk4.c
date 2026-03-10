@@ -99,9 +99,6 @@ typedef void(EGLAPIENTRYP PFNGLGETTEXLEVELPARAMETERIVPROC)(
     unsigned int target, int level, unsigned int pname, int *params);
 #endif
 
-// Cursor blink interval in milliseconds
-#define CURSOR_BLINK_INTERVAL_MS 1000
-
 // GDK keyval -> terminal key mapping
 static const struct
 {
@@ -192,7 +189,6 @@ typedef struct
     // Render state
     bool force_redraw;
     bool has_focus;
-    char *last_title;
 
     // Stored for draw_func access
     TerminalBackend *term;
@@ -735,7 +731,7 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     }
 
     bool cursor_vis =
-        !terminal_get_cursor_blink(ctx->term) || ctx->cursor_blink_visible;
+        !ctx->has_focus || !terminal_get_cursor_blink(ctx->term) || ctx->cursor_blink_visible;
     renderer_draw_terminal(ctx->rend, ctx->term, cursor_vis);
 
 #ifdef HAVE_EGL_DMABUF
@@ -1159,7 +1155,7 @@ static gboolean on_scroll(GtkEventControllerScroll *controller,
 
     // Fallback to scroll callback
     if (!consumed && ctx->callbacks->on_scroll) {
-        ctx->callbacks->on_scroll(ctx->callbacks->user_data, (int)(-dy * 3));
+        ctx->callbacks->on_scroll(ctx->callbacks->user_data, (int)(-dy * SCROLL_LINES_PER_TICK));
     }
 
     ctx->force_redraw = true;
@@ -1215,8 +1211,6 @@ static void on_drawing_area_resize(GtkDrawingArea *area, int width, int height,
     ctx->force_redraw = true;
 }
 
-static void gtk4_set_window_title(PlatformBackend *plat, const char *title);
-
 // PTY I/O watch callback
 static gboolean on_pty_data(GIOChannel *source, GIOCondition condition,
                             gpointer user_data)
@@ -1234,22 +1228,10 @@ static gboolean on_pty_data(GIOChannel *source, GIOCondition condition,
         char buf[4096];
         ssize_t n = pty_read(ctx->pty, buf, sizeof(buf));
         if (n > 0) {
-            int scroll_off = renderer_get_scroll_offset(ctx->rend);
-            int old_sb = 0;
-            if (scroll_off > 0)
-                old_sb = terminal_get_scrollback_lines(ctx->term);
-
-            terminal_process_input(ctx->term, buf, (size_t)n);
-
-            // If user is scrolled up, compensate for new scrollback
-            if (scroll_off > 0) {
-                int delta = terminal_get_scrollback_lines(ctx->term) - old_sb;
-                if (delta > 0)
-                    renderer_scroll(ctx->rend, ctx->term, delta);
-            }
+            renderer_process_pty_data(ctx->rend, ctx->term, buf, (size_t)n);
 
             // Update window title if changed
-            gtk4_set_window_title(ctx->plat, terminal_get_title(ctx->term));
+            platform_set_window_title(ctx->plat, terminal_get_title(ctx->term));
 
             ctx->force_redraw = true;
             gtk_widget_queue_draw(ctx->drawing_area);
@@ -1706,7 +1688,6 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
         ctx->sdl_window = NULL;
     }
 
-    free(ctx->last_title);
     free(ctx);
     plat->backend_data = NULL;
 
@@ -1906,16 +1887,6 @@ static void gtk4_set_window_title(PlatformBackend *plat, const char *title)
         return;
 
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
-
-    // Skip if title unchanged
-    if (ctx->last_title && title && strcmp(ctx->last_title, title) == 0)
-        return;
-    if (!ctx->last_title && !title)
-        return;
-
-    free(ctx->last_title);
-    ctx->last_title = title ? strdup(title) : NULL;
-
     if (ctx->window) {
         const char *t = title ? title : "bloom-terminal";
         gtk_window_set_title(ctx->window, t);

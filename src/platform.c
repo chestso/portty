@@ -5,6 +5,8 @@
 #include "common.h"
 #include "platform.h"
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 
 PlatformBackend *platform_init(PlatformBackend *plat)
 {
@@ -31,6 +33,9 @@ void platform_destroy(PlatformBackend *plat)
     if (plat->destroy) {
         plat->destroy(plat);
     }
+
+    free(plat->last_title);
+    plat->last_title = NULL;
 
     vlog("Platform backend '%s' destroyed\n", plat->name ? plat->name : "unknown");
 }
@@ -61,6 +66,12 @@ void platform_set_window_title(PlatformBackend *plat, const char *title)
 {
     if (!plat || !plat->set_window_title)
         return;
+    if (plat->last_title && title && strcmp(plat->last_title, title) == 0)
+        return;
+    if (!plat->last_title && !title)
+        return;
+    free(plat->last_title);
+    plat->last_title = title ? strdup(title) : NULL;
     plat->set_window_title(plat, title);
 }
 

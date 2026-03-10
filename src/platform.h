@@ -102,6 +102,9 @@ struct PlatformBackend
 
     // Get content display scale (physical DPI / 96). Returns 0 if unknown.
     float (*get_display_scale)(PlatformBackend *plat);
+
+    // Window title dedup (managed by platform_set_window_title wrapper)
+    char *last_title;
 };
 
 // Platform API

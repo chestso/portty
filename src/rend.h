@@ -53,4 +53,7 @@ int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path);
 void renderer_set_content_scale(RendererBackend *rend, float scale);
 
+void renderer_process_pty_data(RendererBackend *rend, TerminalBackend *term,
+                               const char *data, size_t len);
+
 #endif /* REND_H */

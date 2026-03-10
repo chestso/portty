@@ -25,9 +25,6 @@ enum BloomEventCode
     EVENT_CURSOR_BLINK,
 };
 
-// Cursor blink interval in milliseconds
-#define CURSOR_BLINK_INTERVAL_MS 1000
-
 // PTY data event payload
 typedef struct
 {
@@ -97,7 +94,7 @@ typedef struct
     SDL_AtomicInt running;
     SDL_AtomicInt quit_requested;
     SDL_AtomicInt pty_paused;
-    int force_redraw;
+    bool force_redraw;
 
     // Wakeup pipe to interrupt reader thread on shutdown
     int wakeup_pipe[2];
@@ -107,9 +104,6 @@ typedef struct
     TimerId cursor_blink_timer;
     bool cursor_blink_visible;
     bool has_focus;
-
-    // Window title dedup
-    char *last_title;
 } SDL3PlatformData;
 
 // Convert SDL modifier flags to TERM_MOD_* flags
@@ -449,8 +443,7 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     SDL_SetAtomicInt(&ctx->running, 0);
     SDL_SetAtomicInt(&ctx->quit_requested, 0);
     SDL_SetAtomicInt(&ctx->pty_paused, 0);
-    ctx->force_redraw = 1; // Force initial render
-    ctx->last_title = NULL;
+    ctx->force_redraw = true; // Force initial render
 
     // Create wakeup pipe for reader thread shutdown
     ctx->wakeup_pipe[0] = -1;
@@ -526,8 +519,6 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
         SDL_DestroyWindow(ctx->window);
         ctx->window = NULL;
     }
-
-    free(ctx->last_title);
 
     free(ctx);
     plat->backend_data = NULL;
@@ -610,18 +601,6 @@ static void sdl3_set_window_title(PlatformBackend *plat, const char *title)
         return;
 
     SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
-
-    // Skip if title unchanged
-    if (ctx->last_title && title && strcmp(ctx->last_title, title) == 0)
-        return;
-    if (!ctx->last_title && !title)
-        return;
-
-    // Update stored title
-    free(ctx->last_title);
-    ctx->last_title = title ? strdup(title) : NULL;
-
-    // Update window title
     if (ctx->window) {
         SDL_SetWindowTitle(ctx->window, title ? title : "bloom-terminal");
         vlog("Window title set to: %s\n", title ? title : "(default)");
@@ -718,20 +697,8 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 {
                     PtyDataPayload *payload = (PtyDataPayload *)event.user.data1;
                     if (payload) {
-                        int scroll_off = renderer_get_scroll_offset(rend);
-                        int old_sb = 0;
-                        if (scroll_off > 0)
-                            old_sb = terminal_get_scrollback_lines(term);
-
-                        terminal_process_input(term, payload->data, payload->len);
-
-                        // If user is scrolled up, compensate for new scrollback
-                        if (scroll_off > 0) {
-                            int delta = terminal_get_scrollback_lines(term) - old_sb;
-                            if (delta > 0)
-                                renderer_scroll(rend, term, delta);
-                        }
-
+                        renderer_process_pty_data(rend, term, payload->data, payload->len);
+                        platform_set_window_title(plat, terminal_get_title(term));
                         free(payload);
                     }
                     break;
@@ -749,7 +716,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 case EVENT_CURSOR_BLINK:
                     if (terminal_get_cursor_blink(term)) {
                         ctx->cursor_blink_visible = !ctx->cursor_blink_visible;
-                        ctx->force_redraw = 1;
+                        ctx->force_redraw = true;
                     }
                     break;
                 }
@@ -793,18 +760,18 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     if (result.request_quit) {
                         SDL_SetAtomicInt(&ctx->quit_requested, 1);
                     } else if (result.force_redraw) {
-                        ctx->force_redraw = 1;
+                        ctx->force_redraw = true;
                     } else if (result.handled || (result.len > 0)) {
                         // Reset scroll position when typing
                         if (renderer_get_scroll_offset(rend) != 0) {
                             renderer_reset_scroll(rend);
-                            ctx->force_redraw = 1;
+                            ctx->force_redraw = true;
                         }
 
                         // Reset cursor blink on user input
                         ctx->cursor_blink_visible = true;
                         timer_reset(ctx->timers, ctx->cursor_blink_timer);
-                        ctx->force_redraw = 1;
+                        ctx->force_redraw = true;
 
                         // Write to PTY if callback provided raw data
                         if (result.len > 0 && !result.handled && ctx->pty) {
@@ -827,13 +794,13 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                             // Reset scroll position when typing
                             if (renderer_get_scroll_offset(rend) != 0) {
                                 renderer_reset_scroll(rend);
-                                ctx->force_redraw = 1;
+                                ctx->force_redraw = true;
                             }
 
                             // Reset cursor blink on user input
                             ctx->cursor_blink_visible = true;
                             timer_reset(ctx->timers, ctx->cursor_blink_timer);
-                            ctx->force_redraw = 1;
+                            ctx->force_redraw = true;
 
                             if (ctx->pty)
                                 pty_write(ctx->pty, result.data, result.len);
@@ -846,14 +813,14 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                                          event.window.data1,
                                          event.window.data2);
                 }
-                ctx->force_redraw = 1;
+                ctx->force_redraw = true;
             } else if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
                 vlog("Window close requested\n");
                 SDL_SetAtomicInt(&ctx->quit_requested, 1);
             } else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
                        event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                 ctx->has_focus = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
-                ctx->force_redraw = 1;
+                ctx->force_redraw = true;
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 if (event.wheel.y != 0) {
                     bool consumed = false;
@@ -869,10 +836,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         }
                     }
                     if (!consumed && callbacks && callbacks->on_scroll) {
-                        callbacks->on_scroll(callbacks->user_data, (int)event.wheel.y * 3);
+                        callbacks->on_scroll(callbacks->user_data, (int)event.wheel.y * SCROLL_LINES_PER_TICK);
                     }
                 }
-                ctx->force_redraw = 1;
+                ctx->force_redraw = true;
             } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
                        event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
                 if (callbacks && callbacks->on_mouse) {
@@ -883,7 +850,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     if (callbacks->on_mouse(callbacks->user_data, (int)event.button.x,
                                             (int)event.button.y, button, pressed,
                                             clicks, tmod)) {
-                        ctx->force_redraw = 1;
+                        ctx->force_redraw = true;
                     }
                 }
             } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
@@ -893,7 +860,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     if (callbacks->on_mouse(callbacks->user_data, (int)event.motion.x,
                                             (int)event.motion.y, 0, any_button_pressed,
                                             0, tmod)) {
-                        ctx->force_redraw = 1;
+                        ctx->force_redraw = true;
                     }
                 }
             }
@@ -901,15 +868,11 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
 
         // Render terminal only if needed
         if (terminal_needs_redraw(term) || ctx->force_redraw) {
-            // Update window title if changed
-            sdl3_set_window_title(plat, terminal_get_title(term));
-
-            // Cursor visible if: blink disabled OR (blink enabled AND in visible phase)
-            bool cursor_vis = !terminal_get_cursor_blink(term) || ctx->cursor_blink_visible;
+            bool cursor_vis = !ctx->has_focus || !terminal_get_cursor_blink(term) || ctx->cursor_blink_visible;
             renderer_draw_terminal(rend, term, cursor_vis);
             SDL_RenderPresent(ctx->sdl_renderer);
             terminal_clear_redraw(term);
-            ctx->force_redraw = 0;
+            ctx->force_redraw = false;
         }
     }
 

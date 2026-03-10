@@ -1,4 +1,5 @@
 #include "rend.h"
+#include <stddef.h>
 #include <stdlib.h>
 
 RendererBackend *renderer_init(RendererBackend *backend, void *window, void *renderer)
@@ -109,4 +110,21 @@ void renderer_set_content_scale(RendererBackend *rend, float scale)
     if (!rend || !rend->set_content_scale)
         return;
     rend->set_content_scale(rend, scale);
+}
+
+void renderer_process_pty_data(RendererBackend *rend, TerminalBackend *term,
+                               const char *data, size_t len)
+{
+    int scroll_off = renderer_get_scroll_offset(rend);
+    int old_sb = 0;
+    if (scroll_off > 0)
+        old_sb = terminal_get_scrollback_lines(term);
+
+    terminal_process_input(term, data, len);
+
+    if (scroll_off > 0) {
+        int delta = terminal_get_scrollback_lines(term) - old_sb;
+        if (delta > 0)
+            renderer_scroll(rend, term, delta);
+    }
 }
