@@ -153,3 +153,10 @@ char *platform_get_default_font(PlatformBackend *plat)
         return plat->get_default_font(plat);
     return NULL;
 }
+
+float platform_get_display_scale(PlatformBackend *plat)
+{
+    if (plat && plat->get_display_scale)
+        return plat->get_display_scale(plat);
+    return 0.0f;
+}

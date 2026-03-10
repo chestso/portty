@@ -99,6 +99,9 @@ struct PlatformBackend
 
     // Query desktop environment for preferred monospace font (optional)
     char *(*get_default_font)(PlatformBackend *plat);
+
+    // Get content display scale (physical DPI / 96). Returns 0 if unknown.
+    float (*get_display_scale)(PlatformBackend *plat);
 };
 
 // Platform API
@@ -130,5 +133,6 @@ void platform_pause_pty(PlatformBackend *plat);
 void platform_resume_pty(PlatformBackend *plat);
 
 char *platform_get_default_font(PlatformBackend *plat);
+float platform_get_display_scale(PlatformBackend *plat);
 
 #endif /* PLATFORM_H */

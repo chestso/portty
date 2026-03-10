@@ -1353,6 +1353,7 @@ static void gtk4_request_quit(PlatformBackend *plat);
 static void gtk4_pause_pty(PlatformBackend *plat);
 static void gtk4_resume_pty(PlatformBackend *plat);
 static char *gtk4_get_default_font(PlatformBackend *plat);
+static float gtk4_get_display_scale(PlatformBackend *plat);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -1376,6 +1377,7 @@ PlatformBackend platform_backend_gtk4 = {
     .pause_pty = gtk4_pause_pty,
     .resume_pty = gtk4_resume_pty,
     .get_default_font = gtk4_get_default_font,
+    .get_display_scale = gtk4_get_display_scale,
 };
 
 static bool gtk4_plat_init(PlatformBackend *plat)
@@ -2158,6 +2160,23 @@ static char *gtk4_get_default_font(PlatformBackend *plat)
     g_free(value);
     vlog("GNOME monospace font: %s\n", result);
     return result;
+}
+
+static float gtk4_get_display_scale(PlatformBackend *plat)
+{
+    (void)plat;
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display)
+        return 0.0f;
+    GListModel *monitors = gdk_display_get_monitors(display);
+    if (!monitors || g_list_model_get_n_items(monitors) == 0)
+        return 0.0f;
+    GdkMonitor *monitor = g_list_model_get_item(monitors, 0);
+    if (!monitor)
+        return 0.0f;
+    int scale = gdk_monitor_get_scale_factor(monitor);
+    g_object_unref(monitor);
+    return (float)scale;
 }
 
 __attribute__((visibility("default")))

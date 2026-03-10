@@ -226,6 +226,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
 static void sdl3_request_quit(PlatformBackend *plat);
 static void sdl3_pause_pty(PlatformBackend *plat);
 static void sdl3_resume_pty(PlatformBackend *plat);
+static float sdl3_get_display_scale(PlatformBackend *plat);
 
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
@@ -247,6 +248,7 @@ PlatformBackend platform_backend_sdl3 = {
     .request_quit = sdl3_request_quit,
     .pause_pty = sdl3_pause_pty,
     .resume_pty = sdl3_resume_pty,
+    .get_display_scale = sdl3_get_display_scale,
 };
 
 // PTY reader thread function
@@ -979,4 +981,17 @@ static void sdl3_resume_pty(PlatformBackend *plat)
         char c = 1;
         (void)write(ctx->wakeup_pipe[1], &c, 1);
     }
+}
+
+static float sdl3_get_display_scale(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return 0.0f;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    if (ctx->window) {
+        float scale = SDL_GetWindowDisplayScale(ctx->window);
+        if (scale > 0.0f)
+            return scale;
+    }
+    return 0.0f;
 }

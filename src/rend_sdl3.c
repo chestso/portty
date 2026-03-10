@@ -1022,21 +1022,30 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     options.dpi_x = 96;
     options.dpi_y = 96;
 
-    // Get DPI from window if available
+    // Determine font DPI from display scale.
+    // pixel_density (pixel/coord ratio) is used for decoration scaling.
+    // display_scale (content scale = physical DPI / 96) is used for font DPI.
+    // On GTK4, pixel_density may be pre-set via set_pixel_density() before
+    // this function is called, since SDL's offscreen window lacks display info.
+    float display_scale = 0.0f;
     if (data->window) {
         float pixel_density = SDL_GetWindowPixelDensity(data->window);
-        if (pixel_density > 0.0f) {
+        display_scale = SDL_GetWindowDisplayScale(data->window);
+        vlog("SDL pixel_density=%.2f display_scale=%.2f"
+             " pre-set_pixel_density=%.2f\n",
+             pixel_density, display_scale, data->pixel_density);
+        if (pixel_density > 0.0f && data->pixel_density <= 1.0f)
             data->pixel_density = pixel_density;
-            // Calculate DPI based on pixel density (assuming 96 DPI as base)
-            // This is a reasonable approximation for HiDPI displays
-            int dpi = (int)(96.0f * pixel_density);
-            options.dpi_x = dpi;
-            options.dpi_y = dpi;
-            vlog("SDL Pixel Density: %.2f (calculated DPI: %d)\n", pixel_density, dpi);
-        } else {
-            // Fallback to default DPI
-            vlog("Failed to get window pixel density: %s\n", SDL_GetError());
-        }
+    }
+    // Prefer SDL display_scale; fall back to pre-set pixel_density (from GTK4)
+    float font_scale = (display_scale > 1.0f)         ? display_scale
+                       : (data->pixel_density > 1.0f) ? data->pixel_density
+                                                      : display_scale;
+    if (font_scale > 0.0f) {
+        int dpi = (int)(96.0f * font_scale);
+        options.dpi_x = dpi;
+        options.dpi_y = dpi;
+        vlog("Font DPI: %d (scale=%.2f)\n", dpi, font_scale);
     }
 
     // Load normal monospace font (required)
