@@ -1044,7 +1044,9 @@ static void on_click_pressed(GtkGestureClick *gesture, int n_press,
             GTK_EVENT_CONTROLLER(gesture));
     int tmod = gdk_mod_to_term(state);
 
-    if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, (int)x, (int)y,
+    int px = (int)(x * ctx->scale_factor);
+    int py = (int)(y * ctx->scale_factor);
+    if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, px, py,
                                  button, true, n_press, tmod)) {
         ctx->force_redraw = true;
         gtk_widget_queue_draw(ctx->drawing_area);
@@ -1066,7 +1068,9 @@ static void on_click_released(GtkGestureClick *gesture, int n_press,
             GTK_EVENT_CONTROLLER(gesture));
     int tmod = gdk_mod_to_term(state);
 
-    if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, (int)x, (int)y,
+    int px = (int)(x * ctx->scale_factor);
+    int py = (int)(y * ctx->scale_factor);
+    if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, px, py,
                                  button, false, 0, tmod)) {
         ctx->force_redraw = true;
         gtk_widget_queue_draw(ctx->drawing_area);
@@ -1090,7 +1094,9 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y,
     // Check if any button is pressed
     bool any_pressed = (state & (GDK_BUTTON1_MASK | GDK_BUTTON2_MASK | GDK_BUTTON3_MASK)) != 0;
 
-    if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, (int)x, (int)y,
+    int px = (int)(x * ctx->scale_factor);
+    int py = (int)(y * ctx->scale_factor);
+    if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, px, py,
                                  0, any_pressed, 0, tmod)) {
         ctx->force_redraw = true;
         gtk_widget_queue_draw(ctx->drawing_area);
@@ -1139,12 +1145,14 @@ static gboolean on_scroll(GtkEventControllerScroll *controller,
             }
         }
 
+        int smx = (int)(mx * ctx->scale_factor);
+        int smy = (int)(my * ctx->scale_factor);
         int clicks_count = (int)(fabs(dy));
         if (clicks_count < 1)
             clicks_count = 1;
         for (int i = 0; i < clicks_count && !consumed; i++) {
             consumed = ctx->callbacks->on_mouse(ctx->callbacks->user_data,
-                                                (int)mx, (int)my, button,
+                                                smx, smy, button,
                                                 true, 0, tmod);
         }
     }
@@ -1193,7 +1201,7 @@ static void on_drawing_area_resize(GtkDrawingArea *area, int width, int height,
 
     // Update scale factor
     ctx->scale_factor = gtk_widget_get_scale_factor(ctx->drawing_area);
-    renderer_set_pixel_density(ctx->rend, (float)ctx->scale_factor);
+    renderer_set_content_scale(ctx->rend, (float)ctx->scale_factor);
 
     int phys_w = width * ctx->scale_factor;
     int phys_h = height * ctx->scale_factor;
@@ -2010,7 +2018,7 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
 
     // Get scale factor
     ctx->scale_factor = gtk_widget_get_scale_factor(ctx->drawing_area);
-    renderer_set_pixel_density(rend, (float)ctx->scale_factor);
+    renderer_set_content_scale(rend, (float)ctx->scale_factor);
     vlog("GTK4 scale factor: %d\n", ctx->scale_factor);
 
     // Set up event controllers on drawing area

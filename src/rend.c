@@ -104,16 +104,9 @@ int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
     return rend->render_to_png(rend, term, output_path);
 }
 
-void renderer_set_pixel_density(RendererBackend *rend, float density)
+void renderer_set_content_scale(RendererBackend *rend, float scale)
 {
-    if (!rend || !rend->set_pixel_density)
+    if (!rend || !rend->set_content_scale)
         return;
-    rend->set_pixel_density(rend, density);
-}
-
-void renderer_set_display_scale(RendererBackend *rend, float scale)
-{
-    if (!rend || !rend->set_display_scale)
-        return;
-    rend->set_display_scale(rend, scale);
+    rend->set_content_scale(rend, scale);
 }

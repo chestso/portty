@@ -653,10 +653,10 @@ int main(int argc, char *argv[])
                 font_name = desktop_font;
         }
 
-        // Set display scale before font loading so FreeType uses correct DPI
+        // Set content scale before font loading so FreeType uses correct DPI
         float display_scale = platform_get_display_scale(plat);
         if (display_scale > 0.0f)
-            renderer_set_display_scale(rend, display_scale);
+            renderer_set_content_scale(rend, display_scale);
 
         // Load fonts
         if (renderer_load_fonts(rend, font_size, font_name, ft_hint_target) < 0) {

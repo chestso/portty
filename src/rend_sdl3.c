@@ -851,11 +851,9 @@ typedef struct RendererSdl3Data
     LoadedFallbackFont loaded_fallbacks[MAX_LOADED_FALLBACKS];
     int loaded_fallback_count;
 
-    // Display pixel density for DPI-aware rendering (pixel/coord ratio)
-    float pixel_density;
-
-    // Content display scale for font DPI (physical DPI / 96)
-    float display_scale;
+    // Content scale factor (physical pixels / logical pixels)
+    // Used for both font DPI and decoration scaling
+    float content_scale;
 
     // Sixel texture cache
     struct
@@ -902,8 +900,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     memset(data->fallback_cache, 0, sizeof(data->fallback_cache));
     data->loaded_fallback_count = 0;
     memset(data->loaded_fallbacks, 0, sizeof(data->loaded_fallbacks));
-    data->pixel_density = 1.0f;
-    data->display_scale = 0.0f;
+    data->content_scale = 1.0f;
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -1026,29 +1023,21 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     options.dpi_x = 96;
     options.dpi_y = 96;
 
-    // Determine font DPI from display scale.
-    // display_scale (content scale = physical DPI / 96) is used for font DPI.
-    // pixel_density (pixel/coord ratio) is used for decoration scaling only.
-    float sdl_display_scale = 0.0f;
-    if (data->window) {
-        float pixel_density = SDL_GetWindowPixelDensity(data->window);
-        sdl_display_scale = SDL_GetWindowDisplayScale(data->window);
-        vlog("SDL pixel_density=%.2f display_scale=%.2f"
-             " pre-set_display_scale=%.2f\n",
-             pixel_density, sdl_display_scale, data->display_scale);
-        if (pixel_density > 0.0f && data->pixel_density <= 1.0f)
-            data->pixel_density = pixel_density;
+    // Determine font DPI from content scale.
+    // content_scale is pre-set by GTK4 or main.c; also check SDL window.
+    float font_scale = data->content_scale;
+    if (data->window && font_scale <= 1.0f) {
+        float sdl_scale = SDL_GetWindowDisplayScale(data->window);
+        if (sdl_scale > 1.0f)
+            font_scale = sdl_scale;
     }
-    // Prefer SDL display_scale; fall back to pre-set display_scale (from GTK4)
-    float font_scale = (sdl_display_scale > 1.0f)     ? sdl_display_scale
-                       : (data->display_scale > 1.0f) ? data->display_scale
-                                                      : sdl_display_scale;
     if (font_scale > 0.0f) {
+        data->content_scale = font_scale;
         int dpi = (int)(96.0f * font_scale);
         options.dpi_x = dpi;
         options.dpi_y = dpi;
-        vlog("Font DPI: %d (scale=%.2f)\n", dpi, font_scale);
     }
+    vlog("Font DPI: %d (content_scale=%.2f)\n", options.dpi_x, data->content_scale);
 
     // Load normal monospace font (required)
     // Resolve path first, then check for pattern-specified size before loading
@@ -1715,7 +1704,7 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     col += next.width > 1 ? next.width : 1;
                 }
                 // Render the full run
-                float pd = data->pixel_density;
+                float pd = data->content_scale;
                 int thickness = (int)roundf(1.0f * pd);
                 if (thickness < 1)
                     thickness = 1;
@@ -2104,25 +2093,14 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     return rc;
 }
 
-static void sdl3_set_pixel_density(RendererBackend *backend, float density)
-{
-    if (!backend || !backend->backend_data)
-        return;
-    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-    if (density > 0.0f) {
-        data->pixel_density = density;
-        vlog("Pixel density set to %.2f\n", density);
-    }
-}
-
-static void sdl3_set_display_scale(RendererBackend *backend, float scale)
+static void sdl3_set_content_scale(RendererBackend *backend, float scale)
 {
     if (!backend || !backend->backend_data)
         return;
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     if (scale > 0.0f) {
-        data->display_scale = scale;
-        vlog("Display scale set to %.2f\n", scale);
+        data->content_scale = scale;
+        vlog("Content scale set to %.2f\n", scale);
     }
 }
 
@@ -2144,6 +2122,5 @@ RendererBackend renderer_backend_sdl3 = {
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,
     .render_to_png = sdl3_render_to_png,
-    .set_pixel_density = sdl3_set_pixel_density,
-    .set_display_scale = sdl3_set_display_scale,
+    .set_content_scale = sdl3_set_content_scale,
 };
