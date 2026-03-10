@@ -224,6 +224,22 @@ Optional:
 - gtk4 + libadwaita-1 (for `--gtk4` platform backend)
 - EGL + GBM + libdrm (for zero-copy DMA-BUF rendering in GTK4 backend)
 
+### Fedora 41+
+
+```bash
+# Build tools
+sudo dnf install gcc autoconf automake libtool pkgconf-pkg-config
+
+# Required libraries
+sudo dnf install libvterm-devel SDL3-devel fontconfig-devel freetype-devel harfbuzz-devel libpng-devel
+
+# Optional: GTK4 backend
+sudo dnf install gtk4-devel libadwaita-devel mesa-libEGL-devel mesa-libgbm-devel libdrm-devel
+
+# Optional: compile_commands.json for editors
+sudo dnf install bear
+```
+
 ## Testing
 
 Unit tests are run via the Autotools test harness:
