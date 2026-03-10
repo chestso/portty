@@ -665,8 +665,8 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     if (phys_w <= 0 || phys_h <= 0)
         return;
 
-    // Ensure renderer internal state matches drawing area
-    renderer_resize(ctx->rend, width, height);
+    // Ensure renderer internal state matches drawing area (physical pixels)
+    renderer_resize(ctx->rend, phys_w, phys_h);
 
     // Create/resize render target texture if needed
     if (!ctx->render_target || ctx->target_w != phys_w ||
@@ -1191,15 +1191,19 @@ static void on_drawing_area_resize(GtkDrawingArea *area, int width, int height,
     (void)area;
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
 
-    vlog("Drawing area resized to %dx%d (logical)\n", width, height);
-
     // Update scale factor
     ctx->scale_factor = gtk_widget_get_scale_factor(ctx->drawing_area);
     renderer_set_pixel_density(ctx->rend, (float)ctx->scale_factor);
 
-    // Notify main.c callback (updates terminal dimensions, PTY, renderer)
+    int phys_w = width * ctx->scale_factor;
+    int phys_h = height * ctx->scale_factor;
+    vlog("Drawing area resized to %dx%d (logical), %dx%d (physical)\n",
+         width, height, phys_w, phys_h);
+
+    // Notify main.c callback with physical dimensions (font metrics are
+    // at physical DPI, so cols/rows must be computed in physical pixels)
     if (ctx->callbacks && ctx->callbacks->on_resize)
-        ctx->callbacks->on_resize(ctx->callbacks->user_data, width, height);
+        ctx->callbacks->on_resize(ctx->callbacks->user_data, phys_w, phys_h);
     ctx->force_redraw = true;
 }
 
@@ -1876,6 +1880,14 @@ static void gtk4_set_window_size(PlatformBackend *plat, int width, int height)
     if (!plat || !plat->backend_data)
         return;
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+
+    // Font metrics are at physical DPI. Convert to logical for GTK widget.
+    float scale = gtk4_get_display_scale(plat);
+    if (scale > 1.0f) {
+        width = (int)(width / scale);
+        height = (int)(height / scale);
+    }
+
     ctx->content_width = width;
     ctx->content_height = height;
 }

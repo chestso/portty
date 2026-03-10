@@ -110,3 +110,10 @@ void renderer_set_pixel_density(RendererBackend *rend, float density)
         return;
     rend->set_pixel_density(rend, density);
 }
+
+void renderer_set_display_scale(RendererBackend *rend, float scale)
+{
+    if (!rend || !rend->set_display_scale)
+        return;
+    rend->set_display_scale(rend, scale);
+}
