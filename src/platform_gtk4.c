@@ -1852,16 +1852,23 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     return true;
 }
 
+// Deferred window presentation — called from GMainLoop idle to avoid
+// blocking startup on Wayland compositor roundtrip (~1.3s cold start).
+static gboolean present_window_idle(gpointer user_data)
+{
+    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+    vlog("gtk_window_present (deferred)\n");
+    gtk_window_present(ctx->window);
+    gtk_widget_grab_focus(ctx->drawing_area);
+    vlog("gtk_window_present done\n");
+    return G_SOURCE_REMOVE;
+}
+
 static void gtk4_show_window(PlatformBackend *plat)
 {
-    if (!plat || !plat->backend_data)
-        return;
-    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
-    if (ctx->window) {
-        gtk_window_present(ctx->window);
-        // Focus the drawing area
-        gtk_widget_grab_focus(ctx->drawing_area);
-    }
+    // No-op: actual presentation is deferred to gtk4_run() via idle callback.
+    // This allows PTY creation to happen before the blocking Wayland roundtrip.
+    (void)plat;
 }
 
 static void gtk4_set_window_size(PlatformBackend *plat, int width, int height)
@@ -2066,6 +2073,11 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
 
     // Create main loop and run
     ctx->main_loop = g_main_loop_new(NULL, FALSE);
+
+    // Present window from idle callback so the Wayland compositor roundtrip
+    // happens inside the event loop instead of blocking startup.
+    g_idle_add(present_window_idle, ctx);
+
     vlog("GTK4 event loop starting\n");
     g_main_loop_run(ctx->main_loop);
     vlog("GTK4 event loop exiting\n");
