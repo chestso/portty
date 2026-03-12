@@ -629,19 +629,41 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
     // This is the correct approach for HiDPI support as per the design document
     error = FT_Set_Char_Size(ft_data->ft_face, 0, (FT_F26Dot6)(font_size * 64), ft_data->dpi_x, ft_data->dpi_y);
     if (error) {
-        vlog("Failed to set character size for FreeType face\n");
-        FT_Done_Face(ft_data->ft_face);
-        free(font_data);
-        free(ft_data);
-        return NULL;
+        // Bitmap-only fonts (e.g. CBDT/CBLC emoji) don't support arbitrary sizes;
+        // fall back to the first available bitmap strike.
+        if (FT_HAS_FIXED_SIZES(ft_data->ft_face) && ft_data->ft_face->num_fixed_sizes > 0) {
+            if (FT_Select_Size(ft_data->ft_face, 0) != 0) {
+                vlog("Failed to select bitmap strike for FreeType face\n");
+                FT_Done_Face(ft_data->ft_face);
+                free(font_data);
+                free(ft_data);
+                return NULL;
+            }
+            vlog("Selected bitmap strike (size %d) for %s\n",
+                 ft_data->ft_face->size->metrics.y_ppem, font_path);
+        } else {
+            vlog("Failed to set character size for FreeType face\n");
+            FT_Done_Face(ft_data->ft_face);
+            free(font_data);
+            free(ft_data);
+            return NULL;
+        }
     }
 
     // Calculate scale: pixels-per-em / units-per-em
-    // FT_Set_Char_Size with DPI means actual ppem = font_size * dpi / 72
-    float ppem = font_size * ft_data->dpi_x / 72.0f;
-    ft_data->scale = ppem / (float)ft_data->ft_face->units_per_EM;
-    vlog("Font scale factor: %f (ppem=%.1f, upem=%d, dpi=%d)\n",
-         ft_data->scale, ppem, ft_data->ft_face->units_per_EM, ft_data->dpi_x);
+    // Bitmap-only fonts have units_per_EM == 0; their glyphs are pre-rendered
+    // at a fixed size so scale is 1.0.
+    float scale;
+    if (ft_data->ft_face->units_per_EM > 0) {
+        float ppem = font_size * ft_data->dpi_x / 72.0f;
+        scale = ppem / (float)ft_data->ft_face->units_per_EM;
+        vlog("Font scale factor: %f (ppem=%.1f, upem=%d, dpi=%d)\n",
+             scale, ppem, ft_data->ft_face->units_per_EM, ft_data->dpi_x);
+    } else {
+        scale = 1.0f;
+        vlog("Font scale factor: 1.0 (bitmap-only font)\n");
+    }
+    ft_data->scale = scale;
 
     // Initialize HarfBuzz font from FreeType face
     ft_data->hb_font = hb_ft_font_create_referenced(ft_data->ft_face);
@@ -879,7 +901,7 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     // If COLR and FreeType supports FT_LOAD_COLOR, try color render path first
     // (handles COLR v0 layers and bitmap color fonts like sbix/CBDT;
     //  COLR v1 paint glyphs are handled above via render_colr_paint_glyph)
-    if (ft_data->has_colr && FT_HAS_COLOR(face)) {
+    if (FT_HAS_COLOR(face)) {
         FT_Error color_err = FT_Load_Glyph(face, glyph_index, load_flags | FT_LOAD_COLOR);
         if (color_err == 0) {
             color_err = FT_Render_Glyph(face->glyph, FT_RENDER_MODE_NORMAL);
