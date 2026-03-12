@@ -103,6 +103,9 @@ struct PlatformBackend
     // Get content display scale (physical DPI / 96). Returns 0 if unknown.
     float (*get_display_scale)(PlatformBackend *plat);
 
+    // Get usable display size in physical pixels. Returns false if unknown.
+    bool (*get_display_size)(PlatformBackend *plat, int *width, int *height);
+
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
 };
@@ -137,5 +140,6 @@ void platform_resume_pty(PlatformBackend *plat);
 
 char *platform_get_default_font(PlatformBackend *plat);
 float platform_get_display_scale(PlatformBackend *plat);
+bool platform_get_display_size(PlatformBackend *plat, int *width, int *height);
 
 #endif /* PLATFORM_H */

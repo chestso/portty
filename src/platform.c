@@ -171,3 +171,10 @@ float platform_get_display_scale(PlatformBackend *plat)
         return plat->get_display_scale(plat);
     return 0.0f;
 }
+
+bool platform_get_display_size(PlatformBackend *plat, int *width, int *height)
+{
+    if (plat && plat->get_display_size)
+        return plat->get_display_size(plat, width, height);
+    return false;
+}

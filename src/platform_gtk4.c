@@ -664,6 +664,18 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     // Ensure renderer internal state matches drawing area (physical pixels)
     renderer_resize(ctx->rend, phys_w, phys_h);
 
+#ifdef HAVE_EGL_DMABUF
+    // GTK4 makes its own EGL context current for GL rendering between frames.
+    // Restore SDL's EGL context before any SDL/GL operations — including
+    // render target creation, export resource setup, and drawing.
+    if (ctx->egl_ctx) {
+        eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
+                       ctx->egl_ctx);
+        while (ctx->glGetError && ctx->glGetError() != 0)
+            ;
+    }
+#endif
+
     // Create/resize render target texture if needed
     if (!ctx->render_target || ctx->target_w != phys_w ||
         ctx->target_h != phys_h) {
@@ -682,10 +694,11 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
                 vlog("Export resource setup failed, disabling zero-copy\n");
                 ctx->zero_copy = false;
             }
-
-            // Query the SDL render target's GL texture ID from the FBO
-            // attachment. SDL's offscreen renderer doesn't expose it via
-            // properties, but we can read it from the FBO color attachment.
+        }
+        // Query the SDL render target's GL texture ID from the FBO
+        // attachment. SDL's offscreen renderer doesn't expose it via
+        // properties, but we can read it from the FBO color attachment.
+        if (ctx->zero_copy) {
             ctx->sdl_target_gl_tex = 0;
             SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target);
             int fbo_id = 0;
@@ -713,17 +726,6 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     }
 
     // Render terminal into SDL's render target texture.
-#ifdef HAVE_EGL_DMABUF
-    // GTK4 makes its own EGL context current for GL rendering between frames.
-    // Restore SDL's EGL context before any SDL/GL operations. This is needed
-    // both for zero-copy AND readback paths when using a GL renderer.
-    if (ctx->egl_ctx) {
-        eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
-                       ctx->egl_ctx);
-        while (ctx->glGetError && ctx->glGetError() != 0)
-            ;
-    }
-#endif
     SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
     if (!SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target)) {
         vlog("SDL_SetRenderTarget failed: %s\n", SDL_GetError());
@@ -1348,6 +1350,7 @@ static void gtk4_pause_pty(PlatformBackend *plat);
 static void gtk4_resume_pty(PlatformBackend *plat);
 static char *gtk4_get_default_font(PlatformBackend *plat);
 static float gtk4_get_display_scale(PlatformBackend *plat);
+static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -1372,6 +1375,7 @@ PlatformBackend platform_backend_gtk4 = {
     .resume_pty = gtk4_resume_pty,
     .get_default_font = gtk4_get_default_font,
     .get_display_scale = gtk4_get_display_scale,
+    .get_display_size = gtk4_get_display_size,
 };
 
 static bool gtk4_plat_init(PlatformBackend *plat)
@@ -2180,6 +2184,29 @@ static float gtk4_get_display_scale(PlatformBackend *plat)
     int scale = gdk_monitor_get_scale_factor(monitor);
     g_object_unref(monitor);
     return (float)scale;
+}
+
+static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height)
+{
+    (void)plat;
+    GdkDisplay *display = gdk_display_get_default();
+    if (!display)
+        return false;
+    GListModel *monitors = gdk_display_get_monitors(display);
+    if (!monitors || g_list_model_get_n_items(monitors) == 0)
+        return false;
+    GdkMonitor *monitor = g_list_model_get_item(monitors, 0);
+    if (!monitor)
+        return false;
+    GdkRectangle geom;
+    gdk_monitor_get_geometry(monitor, &geom);
+    int scale = gdk_monitor_get_scale_factor(monitor);
+    g_object_unref(monitor);
+    if (width)
+        *width = geom.width * scale;
+    if (height)
+        *height = geom.height * scale;
+    return true;
 }
 
 __attribute__((visibility("default")))

@@ -684,6 +684,28 @@ int main(int argc, char *argv[])
             win_h = init_rows * cell_h + pad_t + pad_b;
             vlog("Derived window size from font: %dx%d (%d cols * %d px + %d pad, %d rows * %d px + %d pad)\n",
                  win_w, win_h, init_cols, cell_w, pad_l + pad_r, init_rows, cell_h, pad_t + pad_b);
+
+            // Clamp to display bounds so the WM doesn't have to force-resize
+            int disp_w, disp_h;
+            if (platform_get_display_size(plat, &disp_w, &disp_h)) {
+                if (win_w > disp_w || win_h > disp_h) {
+                    if (win_w > disp_w)
+                        win_w = disp_w;
+                    if (win_h > disp_h)
+                        win_h = disp_h;
+                    init_cols = (win_w - pad_l - pad_r) / cell_w;
+                    init_rows = (win_h - pad_t - pad_b) / cell_h;
+                    if (init_cols < 1)
+                        init_cols = 1;
+                    if (init_rows < 1)
+                        init_rows = 1;
+                    win_w = init_cols * cell_w + pad_l + pad_r;
+                    win_h = init_rows * cell_h + pad_t + pad_b;
+                    vlog("Clamped to display %dx%d: %dx%d (%d cols, %d rows)\n",
+                         disp_w, disp_h, win_w, win_h, init_cols, init_rows);
+                    terminal_resize(term, init_cols, init_rows);
+                }
+            }
         }
         platform_set_window_size(plat, win_w, win_h);
         renderer_resize(rend, win_w, win_h);
@@ -800,7 +822,7 @@ static void print_usage(const char *progname)
     printf("  -f PATTERN  Font (fontconfig pattern, default: monospace)\n");
     printf("              Size is part of the pattern, e.g. -f monospace-16\n");
     printf("              Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
-    printf("  -g COLSxROWS  Initial terminal size (default: 80x24)\n");
+    printf("  -g COLSxROWS  Initial terminal size, e.g. 120x40 = 120 columns, 40 rows (default: 80x24)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  --padding     Enable padding around terminal content\n");

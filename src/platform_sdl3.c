@@ -221,6 +221,7 @@ static void sdl3_request_quit(PlatformBackend *plat);
 static void sdl3_pause_pty(PlatformBackend *plat);
 static void sdl3_resume_pty(PlatformBackend *plat);
 static float sdl3_get_display_scale(PlatformBackend *plat);
+static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height);
 
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
@@ -243,6 +244,7 @@ PlatformBackend platform_backend_sdl3 = {
     .pause_pty = sdl3_pause_pty,
     .resume_pty = sdl3_resume_pty,
     .get_display_scale = sdl3_get_display_scale,
+    .get_display_size = sdl3_get_display_size,
 };
 
 // PTY reader thread function
@@ -957,4 +959,26 @@ static float sdl3_get_display_scale(PlatformBackend *plat)
             return scale;
     }
     return 0.0f;
+}
+
+static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height)
+{
+    if (!plat || !plat->backend_data)
+        return false;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    SDL_DisplayID display_id = 0;
+    if (ctx->window)
+        display_id = SDL_GetDisplayForWindow(ctx->window);
+    if (!display_id)
+        display_id = SDL_GetPrimaryDisplay();
+    if (!display_id)
+        return false;
+    SDL_Rect bounds;
+    if (!SDL_GetDisplayUsableBounds(display_id, &bounds))
+        return false;
+    if (width)
+        *width = bounds.w;
+    if (height)
+        *height = bounds.h;
+    return true;
 }
