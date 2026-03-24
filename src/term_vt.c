@@ -26,29 +26,29 @@ typedef struct
     bool continuation; // true if this line is a soft-wrap continuation of the previous
 } ScrollbackLine;
 
-// Default ANSI 16-color palette based on charmbracelet/glamour dark style
+// Default ANSI 16-color palette inspired by charm.land color style
 // clang-format off
 static const uint8_t default_palette[16][3] = {
-    [0]  = { 0x1c, 0x1c, 0x1c }, // Black
-    [1]  = { 0xff, 0x5f, 0x5f }, // Red
-    [2]  = { 0x00, 0xd7, 0x87 }, // Green
-    [3]  = { 0xff, 0xff, 0x87 }, // Yellow
-    [4]  = { 0x5f, 0x5f, 0xff }, // Blue
-    [5]  = { 0xff, 0x5f, 0x87 }, // Magenta
-    [6]  = { 0x6e, 0xef, 0xc0 }, // Cyan
+    [0]  = { 0x1a, 0x1a, 0x1a }, // Black
+    [1]  = { 0xed, 0x56, 0x7a }, // Red        — Charm brand red
+    [2]  = { 0x02, 0xbf, 0x87 }, // Green      — Charm brand green
+    [3]  = { 0xec, 0xcc, 0x68 }, // Yellow     — warm golden
+    [4]  = { 0x75, 0x71, 0xf9 }, // Blue       — Charm indigo
+    [5]  = { 0xf7, 0x80, 0xe2 }, // Magenta    — Charm fuchsia
+    [6]  = { 0x6e, 0xef, 0xc0 }, // Cyan       — Charm mint
     [7]  = { 0xd0, 0xd0, 0xd0 }, // White
     [8]  = { 0x67, 0x67, 0x67 }, // Bright Black
-    [9]  = { 0xef, 0x80, 0x80 }, // Bright Red
-    [10] = { 0xaf, 0xff, 0xd7 }, // Bright Green
-    [11] = { 0xe8, 0xe8, 0xa8 }, // Bright Yellow
-    [12] = { 0x7a, 0x7a, 0xe6 }, // Bright Blue
-    [13] = { 0xff, 0x8e, 0xc7 }, // Bright Magenta
-    [14] = { 0xaf, 0xff, 0xd7 }, // Bright Cyan
-    [15] = { 0xf0, 0xf0, 0xf0 }, // Bright White
+    [9]  = { 0xff, 0x8d, 0xa1 }, // Bright Red
+    [10] = { 0x5a, 0xee, 0xad }, // Bright Green
+    [11] = { 0xf5, 0xdf, 0xa0 }, // Bright Yellow
+    [12] = { 0x9b, 0x98, 0xff }, // Bright Blue
+    [13] = { 0xff, 0x9c, 0xe8 }, // Bright Magenta
+    [14] = { 0xa5, 0xf5, 0xd4 }, // Bright Cyan
+    [15] = { 0xff, 0xfd, 0xf5 }, // Bright White — Charm cream
 };
 // clang-format on
 
-static const uint8_t default_fg[3] = { 0xf8, 0xf8, 0xf2 };
+static const uint8_t default_fg[3] = { 0xff, 0xfd, 0xf5 }; // Charm cream
 static const uint8_t default_bg[3] = { 0x00, 0x00, 0x00 };
 
 // Forward declaration for callback type
