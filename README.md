@@ -285,4 +285,4 @@ Thomas Christensen
 
 ## License
 
-MIT — see [LICENSE](LICENSE) for details.
+MIT — see [COPYING](COPYING) for details.
