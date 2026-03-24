@@ -592,14 +592,10 @@ static void *ft_init_font(FontBackend *font, const char *font_path,
     // Set font options
     if (options) {
         ft_data->ft_hint_target = options->ft_hint_target;
-        ft_data->subpixel_order = options->subpixel_order;
-        ft_data->lcd_filter = options->lcd_filter;
         ft_data->dpi_x = options->dpi_x;
         ft_data->dpi_y = options->dpi_y;
     } else {
         ft_data->ft_hint_target = FT_LOAD_NO_HINTING;
-        ft_data->subpixel_order = 0;
-        ft_data->lcd_filter = 0;
         ft_data->dpi_x = 96;
         ft_data->dpi_y = 96;
     }

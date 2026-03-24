@@ -351,109 +351,7 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ---
 
-## 4. Subpixel Rendering and LCD Filtering
-
-`FtFontData` has `subpixel_order` and `lcd_filter` fields (populated from `FontOptions`),
-but `FT_LOAD_TARGET_LCD` and `FT_Library_SetLcdFilter()` are never called — rendering
-always uses `FT_RENDER_MODE_NORMAL`.
-
-### Goals
-
-- RGB subpixel rendering for LCD screens
-- FreeType LCD filtering support
-- Configuration for RGB vs BGR subpixel order
-
-### Technical Design
-
-#### FreeType LCD Rendering
-
-```c
-void enable_lcd_rendering(FtFontData *ft_data, int subpixel_order) {
-    FT_Library_SetLcdFilter(ft_library, FT_LCD_FILTER_DEFAULT);
-
-    switch (subpixel_order) {
-        case FC_RGBA_RGB:
-        case FC_RGBA_BGR:
-            ft_data->ft_load_flags = FT_LOAD_TARGET_LCD;
-            break;
-        case FC_RGBA_VRGB:
-        case FC_RGBA_VBGR:
-            ft_data->ft_load_flags = FT_LOAD_TARGET_LCD_V;
-            break;
-        default:
-            ft_data->ft_load_flags = FT_LOAD_TARGET_NORMAL;
-    }
-}
-
-GlyphBitmap *render_lcd_glyph(FtFontData *ft_data, FT_UInt glyph_index,
-                               uint8_t fg_r, uint8_t fg_g, uint8_t fg_b) {
-    FT_Load_Glyph(ft_data->ft_face, glyph_index, ft_data->ft_load_flags);
-    FT_Render_Glyph(ft_data->ft_face->glyph, FT_RENDER_MODE_LCD);
-
-    FT_Bitmap *bitmap = &ft_data->ft_face->glyph->bitmap;
-
-    GlyphBitmap *result = malloc(sizeof(GlyphBitmap));
-    result->width = bitmap->width / 3;  // LCD mode is 3x wider
-    result->height = bitmap->rows;
-    result->pixels = malloc(result->width * result->height * 4);
-
-    for (int y = 0; y < result->height; y++) {
-        uint8_t *src_row = bitmap->buffer + y * bitmap->pitch;
-        uint8_t *dst_row = result->pixels + y * result->width * 4;
-
-        for (int x = 0; x < result->width; x++) {
-            uint8_t r_coverage = src_row[x * 3 + 0];
-            uint8_t g_coverage = src_row[x * 3 + 1];
-            uint8_t b_coverage = src_row[x * 3 + 2];
-
-            dst_row[x * 4 + 0] = (fg_r * r_coverage) / 255;
-            dst_row[x * 4 + 1] = (fg_g * g_coverage) / 255;
-            dst_row[x * 4 + 2] = (fg_b * b_coverage) / 255;
-            dst_row[x * 4 + 3] = (r_coverage + g_coverage + b_coverage) / 3;
-        }
-    }
-
-    return result;
-}
-```
-
-#### Subpixel Order Detection
-
-```c
-typedef enum {
-    SUBPIXEL_NONE,
-    SUBPIXEL_RGB,
-    SUBPIXEL_BGR,
-    SUBPIXEL_VRGB,
-    SUBPIXEL_VBGR
-} SubpixelOrder;
-
-SubpixelOrder detect_subpixel_order(FcPattern *pattern) {
-    int rgba;
-    if (FcPatternGetInteger(pattern, FC_RGBA, 0, &rgba) == FcResultMatch) {
-        switch (rgba) {
-            case FC_RGBA_RGB:  return SUBPIXEL_RGB;
-            case FC_RGBA_BGR:  return SUBPIXEL_BGR;
-            case FC_RGBA_VRGB: return SUBPIXEL_VRGB;
-            case FC_RGBA_VBGR: return SUBPIXEL_VBGR;
-            default:           return SUBPIXEL_NONE;
-        }
-    }
-    return SUBPIXEL_NONE;
-}
-```
-
-### Notes
-
-- Subpixel rendering assumes static pixel grid (doesn't work well with scaling/rotation)
-- Color fringing on non-neutral backgrounds
-- Not ideal for OLED/PenTile displays
-- Make optional (disabled by default)
-- Expose as config option: `subpixel_rendering = auto|rgb|bgr|vrgb|vbgr|none`
-
----
-
-## 5. Custom Terminal Emulation Library
+## 4. Custom Terminal Emulation Library
 
 ### Problem
 
@@ -560,7 +458,7 @@ used standalone Rust library but has no C API.
 
 ---
 
-## ~~6. GTK4 Platform Backend — Rendering Optimization~~ — Done
+## ~~5. GTK4 Platform Backend — Rendering Optimization~~ — Done
 
 Zero-copy DMA-BUF rendering is implemented in `platform_gtk4.c`. SDL renders to an
 offscreen GL texture, `glCopyImageSubData` copies it to a GBM-allocated DMA-BUF backed
@@ -580,8 +478,8 @@ texture, and `GdkDmabufTextureBuilder` wraps it for GTK's scene graph. Falls bac
   from the FBO color attachment via `glGetFramebufferAttachmentParameteriv`
 - Build dependencies: `egl`, `libdrm`, `gbm` (pkg-config), guarded by `HAVE_EGL_DMABUF`
 
-### Remaining: GtkGraphicsOffload
+### ~~GtkGraphicsOffload~~ — Done
 
-Wrapping the terminal widget in `GtkGraphicsOffload` could enable compositor direct
-scanout of the DMA-BUF texture, bypassing compositor compositing entirely. This is an
-optional optimization on top of the current implementation.
+Implemented in `platform_gtk4.c`: terminal drawing area wrapped in `GtkGraphicsOffload`
+with `GTK_GRAPHICS_OFFLOAD_ENABLED` and black background optimization, enabling
+compositor direct scanout of the DMA-BUF texture. Guarded by `HAVE_EGL_DMABUF`.

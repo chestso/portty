@@ -1033,8 +1033,6 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     // Setup DPI options
     FontOptions options = { 0 };
     options.ft_hint_target = ft_hint_target;
-    options.subpixel_order = 0;
-    options.lcd_filter = 0;
     options.dpi_x = 96;
     options.dpi_y = 96;
 

@@ -51,10 +51,8 @@ typedef struct
 
     // Font rendering options
     int ft_hint_target; // FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT, _NORMAL, or _MONO
-    int subpixel_order;
-    int lcd_filter;
-    int dpi_x; // Horizontal DPI for HiDPI support
-    int dpi_y; // Vertical DPI for HiDPI support
+    int dpi_x;          // Horizontal DPI for HiDPI support
+    int dpi_y;          // Vertical DPI for HiDPI support
 } FtFontData;
 
 // Shared functions used by colr.c
