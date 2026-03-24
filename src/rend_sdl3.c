@@ -815,6 +815,20 @@ static void draw_underline_dashed(SDL_Renderer *renderer, int x, int y, int widt
     }
 }
 
+// ---------------------------------------------------------------------------
+// Strikethrough drawing helper (DPI-aware)
+// ---------------------------------------------------------------------------
+
+static void draw_strikethrough(SDL_Renderer *renderer, int x, int y, int width,
+                               float pixel_density)
+{
+    int thickness = (int)roundf(1.0f * pixel_density);
+    if (thickness < 1)
+        thickness = 1;
+    SDL_FRect rect = { (float)x, (float)y, (float)width, (float)thickness };
+    SDL_RenderFillRect(renderer, &rect);
+}
+
 typedef struct RendererSdl3Data
 {
     SDL_Renderer *renderer;
@@ -826,6 +840,7 @@ typedef struct RendererSdl3Data
     int char_height;
     int font_ascent;
     int font_descent;
+    int font_cap_height;
     int width;
     int height;
     int scroll_offset;
@@ -1103,6 +1118,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     vlog("font_ascent: centered=%d, max_ascent=%d, chosen=%d\n",
          centered, max_ascent, data->font_ascent);
     data->font_descent = metrics->descent;
+    data->font_cap_height = metrics->cap_height;
     data->char_width = metrics->glyph_width;
     data->char_height = metrics->glyph_height;
     data->cell_width = metrics->cell_width;
@@ -1734,6 +1750,43 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
                     break;
                 }
+            }
+        }
+        // Pass 4: draw strikethroughs as continuous spans across consecutive cells
+        if (!populate_only) {
+            int col = 0;
+            while (col < display_cols) {
+                TerminalCell cell;
+                if (get_cell_with_scroll(data, term, row, col, &cell) < 0 ||
+                    !cell.attrs.strikethrough) {
+                    col++;
+                    continue;
+                }
+                // Start of a strikethrough run — use cell's foreground color
+                Uint8 st_r = cell.fg.r;
+                Uint8 st_g = cell.fg.g;
+                Uint8 st_b = cell.fg.b;
+                int run_start = col;
+                col += cell.width > 1 ? cell.width : 1;
+                // Extend run while next cell has strikethrough with same fg color
+                while (col < display_cols) {
+                    TerminalCell next;
+                    if (get_cell_with_scroll(data, term, row, col, &next) < 0 ||
+                        !next.attrs.strikethrough)
+                        break;
+                    if (next.fg.r != st_r || next.fg.g != st_g || next.fg.b != st_b)
+                        break;
+                    col += next.width > 1 ? next.width : 1;
+                }
+                // Render the full run
+                float pd = data->content_scale;
+                int cell_y = data->pad_top + row * data->cell_height;
+                int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
+                int run_x = data->pad_left + run_start * data->cell_width;
+                int run_w = (col - run_start) * data->cell_width;
+
+                SDL_SetRenderDrawColor(data->renderer, st_r, st_g, st_b, 255);
+                draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
             }
         }
     }
