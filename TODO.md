@@ -197,23 +197,18 @@ bool ft_set_custom_axis(FtFontData *ft_data, uint32_t tag, float value) {
 
 ### Configuration Interface
 
-**User Config File (e.g., `~/.config/bloom-terminal/fontrc`):**
+Font axis settings would extend the existing `bloom.conf` config file (parsed by
+`bloom_conf.h/c`). Example additions to the `[terminal]` section:
 
 ```ini
-[font.axes]
-weight = 400
-width = 100
-slant = 0
-italic = 0
+[terminal]
+font = Cascadia Code-14
 optical_size = auto
+grade = 0
 
-# Custom axes (if font supports them)
-#ROND = 50
-#SOFT = 0
-
-[font.styles]
-bold.weight = 700
-italic.slant = -12
+# Per-style overrides
+bold_weight = 700
+italic_slant = -12
 ```
 
 ---
