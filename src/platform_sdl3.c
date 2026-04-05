@@ -8,13 +8,21 @@
 #include "timer.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <limits.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#define access _access
+#define R_OK   4
+#else
+#include <fcntl.h>
+#include <poll.h>
 #include <unistd.h>
+#endif
 
 // Custom event codes for SDL_EVENT_USER
 enum BloomEventCode
@@ -96,8 +104,12 @@ typedef struct
     SDL_AtomicInt pty_paused;
     bool force_redraw;
 
-    // Wakeup pipe to interrupt reader thread on shutdown
+    // Wakeup mechanism to interrupt reader thread on shutdown/pause
+#ifdef _WIN32
+    HANDLE wakeup_event;
+#else
     int wakeup_pipe[2];
+#endif
 
     // Timer system
     TimerManager *timers;
@@ -146,11 +158,11 @@ static const char *find_icon_path(void)
         }
     }
 
-#ifdef DATADIR
+#ifdef BLOOM_DATADIR
     /* Autotools compile-time datadir */
-    snprintf(path, sizeof(path), "%s/%s", DATADIR, icon_rel);
+    snprintf(path, sizeof(path), "%s/%s", BLOOM_DATADIR, icon_rel);
     if (access(path, R_OK) == 0) {
-        vlog("Found icon at %s (DATADIR)\n", path);
+        vlog("Found icon at %s (BLOOM_DATADIR)\n", path);
         return path;
     }
 #endif
@@ -248,6 +260,96 @@ PlatformBackend platform_backend_sdl3 = {
 };
 
 // PTY reader thread function
+#ifdef _WIN32
+static int pty_reader_thread_func(void *data)
+{
+    SDL3PlatformData *ctx = (SDL3PlatformData *)data;
+    char buf[4096];
+
+    vlog("PTY reader thread started (Win32)\n");
+
+    HANDLE hProcess = (HANDLE)pty_get_process_handle(ctx->pty);
+
+    while (SDL_GetAtomicInt(&ctx->running)) {
+        if (SDL_GetAtomicInt(&ctx->pty_paused)) {
+            // When paused, wait for wakeup or child exit only
+            HANDLE wait_h[2] = { ctx->wakeup_event, hProcess };
+            DWORD wr = WaitForMultipleObjects(2, wait_h, FALSE, INFINITE);
+            ResetEvent(ctx->wakeup_event);
+
+            if (wr == WAIT_OBJECT_0) {
+                // Wakeup — check running/paused and re-loop
+                if (!SDL_GetAtomicInt(&ctx->running))
+                    break;
+                continue;
+            }
+            if (wr == WAIT_OBJECT_0 + 1) {
+                // Child exited
+                vlog("PTY reader thread: child process exited\n");
+                SDL_Event ev = { 0 };
+                ev.type = SDL_EVENT_USER;
+                ev.user.code = EVENT_PTY_CHILD_EXIT;
+                SDL_PushEvent(&ev);
+                break;
+            }
+            break; // error
+        }
+
+        // ReadFile on the ConPTY output pipe blocks until data arrives.
+        ssize_t n = pty_read(ctx->pty, buf, sizeof(buf));
+        if (n > 0) {
+            PtyDataPayload *payload =
+                malloc(sizeof(PtyDataPayload) + n);
+            if (payload) {
+                payload->len = n;
+                memcpy(payload->data, buf, n);
+
+                SDL_Event ev = { 0 };
+                ev.type = SDL_EVENT_USER;
+                ev.user.code = EVENT_PTY_DATA;
+                ev.user.data1 = payload;
+
+                if (!SDL_PushEvent(&ev)) {
+                    vlog("PTY reader thread: failed to push event: "
+                         "%s\n",
+                         SDL_GetError());
+                    free(payload);
+                }
+            }
+        } else if (n == 0) {
+            vlog("PTY reader thread: EOF from PTY\n");
+            break;
+        } else {
+            DWORD err = GetLastError();
+            if (err == ERROR_BROKEN_PIPE) {
+                vlog("PTY reader thread: pipe closed\n");
+            } else {
+                vlog("PTY reader thread: read error: %lu\n", err);
+            }
+            break;
+        }
+
+        // Check child exit after read
+        if (!pty_is_running(ctx->pty)) {
+            vlog("PTY reader thread: child exited after read\n");
+            SDL_Event ev = { 0 };
+            ev.type = SDL_EVENT_USER;
+            ev.user.code = EVENT_PTY_CHILD_EXIT;
+            SDL_PushEvent(&ev);
+            break;
+        }
+    }
+
+    // Push PTY_CLOSED event
+    SDL_Event event = { 0 };
+    event.type = SDL_EVENT_USER;
+    event.user.code = EVENT_PTY_CLOSED;
+    SDL_PushEvent(&event);
+
+    vlog("PTY reader thread exiting\n");
+    return 0;
+}
+#else  /* POSIX */
 static int pty_reader_thread_func(void *data)
 {
     SDL3PlatformData *ctx = (SDL3PlatformData *)data;
@@ -379,6 +481,7 @@ static int pty_reader_thread_func(void *data)
     vlog("PTY reader thread exiting\n");
     return 0;
 }
+#endif /* _WIN32 */
 
 static bool sdl3_plat_init(PlatformBackend *plat)
 {
@@ -447,7 +550,17 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     SDL_SetAtomicInt(&ctx->pty_paused, 0);
     ctx->force_redraw = true; // Force initial render
 
-    // Create wakeup pipe for reader thread shutdown
+    // Create wakeup mechanism for reader thread shutdown/pause
+#ifdef _WIN32
+    ctx->wakeup_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!ctx->wakeup_event) {
+        fprintf(stderr, "ERROR: Failed to create wakeup event: %lu\n",
+                GetLastError());
+        free(ctx);
+        SDL_Quit();
+        return false;
+    }
+#else
     ctx->wakeup_pipe[0] = -1;
     ctx->wakeup_pipe[1] = -1;
     if (pipe(ctx->wakeup_pipe) < 0) {
@@ -460,13 +573,18 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     fcntl(ctx->wakeup_pipe[1], F_SETFL, O_NONBLOCK);
     fcntl(ctx->wakeup_pipe[0], F_SETFD, FD_CLOEXEC);
     fcntl(ctx->wakeup_pipe[1], F_SETFD, FD_CLOEXEC);
+#endif
 
     // Initialize timer system
     ctx->timers = timer_manager_create();
     if (!ctx->timers) {
         fprintf(stderr, "ERROR: Failed to create timer manager\n");
+#ifdef _WIN32
+        CloseHandle(ctx->wakeup_event);
+#else
         close(ctx->wakeup_pipe[0]);
         close(ctx->wakeup_pipe[1]);
+#endif
         free(ctx);
         SDL_Quit();
         return false;
@@ -488,10 +606,14 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
     // Stop reader thread if running
     if (ctx->pty_reader_thread) {
         SDL_SetAtomicInt(&ctx->running, 0);
+#ifdef _WIN32
+        SetEvent(ctx->wakeup_event);
+#else
         if (ctx->wakeup_pipe[1] >= 0) {
             char c = 1;
             (void)write(ctx->wakeup_pipe[1], &c, 1);
         }
+#endif
         SDL_WaitThread(ctx->pty_reader_thread, NULL);
         ctx->pty_reader_thread = NULL;
     }
@@ -502,7 +624,13 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
         ctx->timers = NULL;
     }
 
-    // Close wakeup pipe
+    // Close wakeup mechanism
+#ifdef _WIN32
+    if (ctx->wakeup_event) {
+        CloseHandle(ctx->wakeup_event);
+        ctx->wakeup_event = NULL;
+    }
+#else
     if (ctx->wakeup_pipe[0] >= 0) {
         close(ctx->wakeup_pipe[0]);
         ctx->wakeup_pipe[0] = -1;
@@ -511,6 +639,7 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
         close(ctx->wakeup_pipe[1]);
         ctx->wakeup_pipe[1] = -1;
     }
+#endif
 
     // Destroy SDL resources
     if (ctx->sdl_renderer) {
@@ -892,10 +1021,14 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
     // Stop reader thread
     SDL_SetAtomicInt(&ctx->running, 0);
     if (ctx->pty_reader_thread) {
+#ifdef _WIN32
+        SetEvent(ctx->wakeup_event);
+#else
         if (ctx->wakeup_pipe[1] >= 0) {
             char c = 1;
             (void)write(ctx->wakeup_pipe[1], &c, 1);
         }
+#endif
         SDL_WaitThread(ctx->pty_reader_thread, NULL);
         ctx->pty_reader_thread = NULL;
     }
@@ -922,11 +1055,15 @@ static void sdl3_pause_pty(PlatformBackend *plat)
     SDL_SetAtomicInt(&ctx->pty_paused, 1);
     vlog("PTY paused (backpressure)\n");
 
-    // Wake reader thread so it re-enters poll() without PTY fd
+    // Wake reader thread so it re-enters wait without PTY reads
+#ifdef _WIN32
+    SetEvent(ctx->wakeup_event);
+#else
     if (ctx->wakeup_pipe[1] >= 0) {
         char c = 1;
         (void)write(ctx->wakeup_pipe[1], &c, 1);
     }
+#endif
 }
 
 static void sdl3_resume_pty(PlatformBackend *plat)
@@ -941,11 +1078,15 @@ static void sdl3_resume_pty(PlatformBackend *plat)
     SDL_SetAtomicInt(&ctx->pty_paused, 0);
     vlog("PTY resumed\n");
 
-    // Wake reader thread so it re-includes PTY fd in poll()
+    // Wake reader thread so it re-includes PTY reads
+#ifdef _WIN32
+    SetEvent(ctx->wakeup_event);
+#else
     if (ctx->wakeup_pipe[1] >= 0) {
         char c = 1;
         (void)write(ctx->wakeup_pipe[1], &c, 1);
     }
+#endif
 }
 
 static float sdl3_get_display_scale(PlatformBackend *plat)

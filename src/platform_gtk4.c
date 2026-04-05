@@ -1720,10 +1720,11 @@ static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
         return;
 
     char cwd_path[PATH_MAX] = "";
-    if (ctx->pty && ctx->pty->child_pid > 0) {
+    int pty_child_pid = ctx->pty ? pty_get_child_pid(ctx->pty) : -1;
+    if (pty_child_pid > 0) {
         char proc_cwd[64];
         snprintf(proc_cwd, sizeof(proc_cwd), "/proc/%d/cwd",
-                 ctx->pty->child_pid);
+                 pty_child_pid);
         ssize_t cwd_len =
             readlink(proc_cwd, cwd_path, sizeof(cwd_path) - 1);
         if (cwd_len > 0)

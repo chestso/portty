@@ -16,9 +16,11 @@ emacs_DATA = bloom-terminal.el
 
 EXTRA_DIST = bloom-terminal.ti bloom-terminal.el
 
+if !HOST_WINDOWS
 install-data-local:
 	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti
 
 uninstall-local:
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-256color
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal
+endif

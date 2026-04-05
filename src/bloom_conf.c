@@ -8,7 +8,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#ifdef _WIN32
+#include <io.h>
+#define access _access
+#define R_OK   4
+#else
 #include <unistd.h>
+#endif
 
 #define MAX_LINE 1024
 
@@ -42,9 +49,19 @@ static char *find_config_file(void)
     if (access("bloom.conf", R_OK) == 0)
         return strdup("bloom.conf");
 
+    char path[MAX_LINE];
+
+#ifdef _WIN32
+    /* 2. %APPDATA%\bloom\bloom.conf */
+    const char *appdata = getenv("APPDATA");
+    if (appdata && appdata[0] != '\0') {
+        snprintf(path, sizeof(path), "%s\\bloom\\bloom.conf", appdata);
+        if (access(path, R_OK) == 0)
+            return strdup(path);
+    }
+#else
     /* 2. XDG_CONFIG_HOME or ~/.config */
     const char *xdg = getenv("XDG_CONFIG_HOME");
-    char path[MAX_LINE];
 
     if (xdg && xdg[0] != '\0') {
         snprintf(path, sizeof(path), "%s/bloom/bloom.conf", xdg);
@@ -57,6 +74,7 @@ static char *find_config_file(void)
 
     if (access(path, R_OK) == 0)
         return strdup(path);
+#endif
 
     return NULL;
 }

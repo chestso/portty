@@ -1,6 +1,7 @@
 AC_INIT([bloom-terminal], [0.1], [bug-report@example.com])
 AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
+AC_CANONICAL_HOST
 
 # Check for programs
 AC_PROG_CC
@@ -8,8 +9,17 @@ LT_INIT([dlopen])
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 
-# dlopen support
-AC_SEARCH_LIBS([dlopen], [dl])
+# Detect Windows cross-compilation
+case "$host_os" in
+  mingw*|msys*) host_windows=yes ;;
+  *) host_windows=no ;;
+esac
+AM_CONDITIONAL([HOST_WINDOWS], [test "x$host_windows" = "xyes"])
+
+# dlopen support (POSIX only)
+if test "x$host_windows" = "xno"; then
+  AC_SEARCH_LIBS([dlopen], [dl])
+fi
 
 # Debug option
 AC_ARG_ENABLE([debug],
@@ -37,12 +47,17 @@ PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 
-# Optional GTK4/libadwaita support
+# Optional GTK4/libadwaita support (not on Windows)
 AC_ARG_ENABLE([gtk4],
   [AS_HELP_STRING([--enable-gtk4],
     [enable GTK4/libadwaita platform backend (auto-detected)])],
   [enable_gtk4=$enableval],
   [enable_gtk4=auto])
+
+# Force-disable GTK4 on Windows
+if test "x$host_windows" = "xyes"; then
+  enable_gtk4=no
+fi
 
 have_gtk4=no
 if test "x$enable_gtk4" != "xno"; then

@@ -12,6 +12,14 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+struct PtyContext
+{
+    int master_fd;
+    pid_t child_pid;
+    int rows;
+    int cols;
+};
+
 // Self-pipe for SIGCHLD notification
 static int sigchld_pipe[2] = { -1, -1 };
 static struct sigaction old_sigchld_action;
@@ -142,30 +150,30 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         setenv("TERM", "bloom-terminal-256color", 1);
 
         // Point to our installed terminfo database
-#ifdef DATADIR
+#ifdef BLOOM_DATADIR
         {
             char buf[4096];
             const char *existing = getenv("TERMINFO_DIRS");
             if (existing) {
-                snprintf(buf, sizeof(buf), DATADIR "/terminfo:%s", existing);
+                snprintf(buf, sizeof(buf), BLOOM_DATADIR "/terminfo:%s", existing);
             } else {
-                snprintf(buf, sizeof(buf), DATADIR "/terminfo:");
+                snprintf(buf, sizeof(buf), BLOOM_DATADIR "/terminfo:");
             }
             setenv("TERMINFO_DIRS", buf, 1);
         }
 #endif
 
         // Help emacs find our term/*.el file
-#ifdef DATADIR
+#ifdef BLOOM_DATADIR
         {
             char buf[4096];
             const char *existing = getenv("EMACSLOADPATH");
             if (existing) {
                 snprintf(buf, sizeof(buf),
-                         DATADIR "/emacs/site-lisp:%s", existing);
+                         BLOOM_DATADIR "/emacs/site-lisp:%s", existing);
             } else {
                 snprintf(buf, sizeof(buf),
-                         DATADIR "/emacs/site-lisp:");
+                         BLOOM_DATADIR "/emacs/site-lisp:");
             }
             setenv("EMACSLOADPATH", buf, 1);
         }
@@ -332,4 +340,11 @@ int pty_get_master_fd(PtyContext *ctx)
     if (!ctx)
         return -1;
     return ctx->master_fd;
+}
+
+int pty_get_child_pid(PtyContext *ctx)
+{
+    if (!ctx)
+        return -1;
+    return (int)ctx->child_pid;
 }

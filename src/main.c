@@ -17,14 +17,20 @@
 #include "term.h"
 #include "term_vt.h"
 #include <SDL3/SDL.h>
-#include <dlfcn.h>
 #include <getopt.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#ifdef _WIN32
+#include <io.h>
+#include <windows.h>
+#else
+#include <dlfcn.h>
 #include <unistd.h>
+#endif
 
 #define DEFAULT_COLS 80
 #define DEFAULT_ROWS 24
@@ -539,9 +545,15 @@ int main(int argc, char *argv[])
 
     // Select and initialize platform backend
     PlatformBackend *selected_backend = &platform_backend_sdl3;
+#ifndef _WIN32
     void *gtk4_plugin_handle = NULL;
+#endif
 
     if (use_gtk4) {
+#ifdef _WIN32
+        fprintf(stderr, "ERROR: GTK4 backend not available on Windows\n");
+        return 1;
+#else
         // Probe for the GTK4 plugin shared object
         static const char *plugin_name = "bloom-terminal-gtk4.so";
         char probe_path[PATH_MAX];
@@ -595,13 +607,16 @@ int main(int argc, char *argv[])
 
         selected_backend = get_backend();
         vlog("Loaded GTK4 plugin from %s\n", loaded_path);
+#endif /* _WIN32 */
     }
 
     plat = platform_init(selected_backend);
     if (!plat) {
         fprintf(stderr, "ERROR: Failed to initialize platform\n");
+#ifndef _WIN32
         if (gtk4_plugin_handle)
             dlclose(gtk4_plugin_handle);
+#endif
         return 1;
     }
 
@@ -782,8 +797,10 @@ int main(int argc, char *argv[])
     terminal_destroy(term);
     bloom_conf_free(&conf);
     platform_destroy(plat);
+#ifndef _WIN32
     if (gtk4_plugin_handle)
         dlclose(gtk4_plugin_handle);
+#endif
 
     return 0;
 }
@@ -793,21 +810,34 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
     if (!verbose)
         return;
 
+    // Extract basename from file path
+    const char *basename = strrchr(file, '/');
+#ifdef _WIN32
+    const char *basename2 = strrchr(file, '\\');
+    if (!basename || (basename2 && basename2 > basename))
+        basename = basename2;
+#endif
+    basename = basename ? basename + 1 : file;
+
     // Get current time with milliseconds
+#ifdef _WIN32
+    SYSTEMTIME st;
+    GetLocalTime(&st);
+    int hour = st.wHour, min = st.wMinute, sec = st.wSecond;
+    long ms = st.wMilliseconds;
+#else
     struct timespec ts;
     clock_gettime(CLOCK_REALTIME, &ts);
     struct tm tm;
     localtime_r(&ts.tv_sec, &tm);
-
-    // Extract basename from file path
-    const char *basename = strrchr(file, '/');
-    basename = basename ? basename + 1 : file;
+    int hour = tm.tm_hour, min = tm.tm_min, sec = tm.tm_sec;
+    long ms = ts.tv_nsec / 1000000;
+#endif
 
     va_list args;
     va_start(args, format);
     fprintf(stderr, "DEBUG [%02d:%02d:%02d.%03ld] %s:%d %s(): ",
-            tm.tm_hour, tm.tm_min, tm.tm_sec, ts.tv_nsec / 1000000,
-            basename, line, func);
+            hour, min, sec, ms, basename, line, func);
     vfprintf(stderr, format, args);
     va_end(args);
 }

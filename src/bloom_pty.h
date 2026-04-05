@@ -3,15 +3,16 @@
 
 #include <stdbool.h>
 #include <stddef.h>
-#include <sys/types.h>
 
-typedef struct PtyContext
-{
-    int master_fd;
-    pid_t child_pid;
-    int rows;
-    int cols;
-} PtyContext;
+#ifdef _WIN32
+#include <basetsd.h>
+typedef SSIZE_T ssize_t;
+#else
+#include <sys/types.h>
+#endif
+
+/* Opaque — defined in platform-specific pty.c / pty_win32.c */
+typedef struct PtyContext PtyContext;
 
 /**
  * Create a new PTY and spawn a process.
@@ -110,5 +111,23 @@ int pty_signal_get_fd(void);
  * Call this after poll/select indicates the signal pipe is readable.
  */
 void pty_signal_drain(void);
+
+/**
+ * Get the child process PID (Unix only, for /proc queries).
+ *
+ * @param ctx PTY context
+ * @return Child PID, or -1 if not running
+ */
+int pty_get_child_pid(PtyContext *ctx);
+
+#ifdef _WIN32
+/**
+ * Get the child process handle for WaitForMultipleObjects.
+ *
+ * @param ctx PTY context
+ * @return Process HANDLE cast to void*, or NULL
+ */
+void *pty_get_process_handle(PtyContext *ctx);
+#endif
 
 #endif /* PTY_H */

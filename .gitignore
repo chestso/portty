@@ -25,6 +25,7 @@ ltmain.sh
 
 # Build directories
 build/
+deps/
 _build/
 .deps/
 .dirstamp

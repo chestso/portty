@@ -104,6 +104,7 @@ Available options:
 - `--format` - Format source files with clang-format, shfmt, and prettier
 - `--ref-png TEXT OUT` - Generate reference PNG of text using hb-view
 - `--ref-layers TEXT PREFIX` - Export COLR layers for debugging (requires blackrenderer)
+- `--mingw64` - Cross-compile for Windows using mingw64
 - `--prefix=PATH` - Set installation prefix (default: $HOME/.local)
 - `--help` - Show help message
 
@@ -239,6 +240,43 @@ sudo dnf install gtk4-devel libadwaita-devel mesa-libEGL-devel mesa-libgbm-devel
 # Optional: compile_commands.json for editors
 sudo dnf install bear
 ```
+
+## Windows Cross-Compilation
+
+bloom-terminal can be cross-compiled for Windows using Fedora's mingw64 toolchain. The Windows build uses ConPTY for terminal emulation and can be tested under Wine.
+
+### Prerequisites (Fedora)
+
+```bash
+sudo dnf install mingw64-gcc mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-fontconfig mingw64-libpng
+```
+
+libvterm is downloaded and cross-compiled automatically (no mingw64 package exists).
+
+### Building
+
+```bash
+./build.sh --mingw64
+```
+
+This produces `build/src/.libs/bloom-terminal.exe` with all required DLLs copied alongside for testing.
+
+### Testing with Wine
+
+```bash
+# Display text without spawning a shell
+wine64 ./build/src/.libs/bloom-terminal.exe --demo "Hello Windows!"
+
+# Render text to PNG (offscreen, no window)
+wine64 ./build/src/.libs/bloom-terminal.exe -P "Test" /tmp/out.png
+
+# Interactive terminal session (requires Wine ConPTY support)
+wine64 ./build/src/.libs/bloom-terminal.exe
+```
+
+### Windows PTY
+
+The Windows build uses ConPTY (`CreatePseudoConsole`) instead of Unix PTYs. The implementation is in `src/pty_win32.c`. The GTK4 backend is not available on Windows; only the SDL3 backend is used.
 
 ## Testing
 

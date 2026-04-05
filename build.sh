@@ -316,6 +316,169 @@ format_sources() {
     log_info "Formatting completed."
 }
 
+# Cross-compile for Windows using mingw64
+build_mingw64() {
+    log_info "Cross-compiling for Windows (mingw64)..."
+
+    local MINGW_HOST="x86_64-w64-mingw32"
+    local MINGW_CC="${MINGW_HOST}-gcc"
+    local MINGW_AR="${MINGW_HOST}-ar"
+    local MINGW_PKG_CONFIG="${MINGW_HOST}-pkg-config"
+    local MINGW_SYSROOT="/usr/x86_64-w64-mingw32/sys-root/mingw"
+    local DEPS_DIR="deps"
+    local VTERM_VERSION="0.3.3"
+    local VTERM_URL="https://www.leonerd.org.uk/code/libvterm/libvterm-${VTERM_VERSION}.tar.gz"
+    local VTERM_DIR="${DEPS_DIR}/libvterm-${VTERM_VERSION}"
+    local VTERM_TARBALL="${DEPS_DIR}/libvterm-${VTERM_VERSION}.tar.gz"
+
+    # Check for cross-compiler
+    if ! command -v "$MINGW_CC" &> /dev/null; then
+        log_error "mingw64 cross-compiler not found: $MINGW_CC"
+        log_error "Install with: sudo dnf install mingw64-gcc"
+        exit 1
+    fi
+
+    # Check for required mingw64 packages
+    local missing_pkgs=()
+    for pkg in mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-fontconfig mingw64-libpng; do
+        if ! rpm -q "$pkg" &> /dev/null; then
+            missing_pkgs+=("$pkg")
+        fi
+    done
+    if [ ${#missing_pkgs[@]} -gt 0 ]; then
+        log_error "Missing mingw64 packages: ${missing_pkgs[*]}"
+        log_error "Install with: sudo dnf install ${missing_pkgs[*]}"
+        exit 1
+    fi
+
+    # --- Cross-compile libvterm ---
+    mkdir -p "$DEPS_DIR"
+
+    if [ ! -f "$VTERM_TARBALL" ]; then
+        log_info "Downloading libvterm ${VTERM_VERSION}..."
+        curl -L -o "$VTERM_TARBALL" "$VTERM_URL"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to download libvterm"
+            rm -f "$VTERM_TARBALL"
+            exit 1
+        fi
+    fi
+
+    if [ ! -d "$VTERM_DIR" ]; then
+        log_info "Extracting libvterm..."
+        tar -xzf "$VTERM_TARBALL" -C "$DEPS_DIR"
+    fi
+
+    local VTERM_BUILD="${VTERM_DIR}/build-mingw64"
+    if [ ! -f "${VTERM_BUILD}/libvterm.a" ]; then
+        log_info "Cross-compiling libvterm for mingw64..."
+        mkdir -p "$VTERM_BUILD"
+        for f in "${VTERM_DIR}"/src/*.c; do
+            local base
+            base=$(basename "$f" .c)
+            "$MINGW_CC" -Wall -I"${VTERM_DIR}/include" -c "$f" \
+                -o "${VTERM_BUILD}/${base}.o"
+        done
+        "$MINGW_AR" rcs "${VTERM_BUILD}/libvterm.a" "${VTERM_BUILD}"/*.o
+        log_info "libvterm cross-compiled: ${VTERM_BUILD}/libvterm.a"
+    else
+        log_info "Using cached libvterm: ${VTERM_BUILD}/libvterm.a"
+    fi
+
+    local VTERM_ABS
+    VTERM_ABS=$(cd "$VTERM_DIR" && pwd)
+
+    # --- Generate configure script ---
+    if ! generate_configure; then
+        exit 1
+    fi
+
+    # --- Configure for cross-compilation ---
+    if [ -d "$BUILD_DIR" ]; then
+        rm -rf "$BUILD_DIR"
+    fi
+    mkdir -p "$BUILD_DIR"
+    cd "$BUILD_DIR"
+
+    local CONFIGURE_CMD="../configure"
+    CONFIGURE_CMD="$CONFIGURE_CMD --host=${MINGW_HOST}"
+    CONFIGURE_CMD="$CONFIGURE_CMD --prefix=${MINGW_SYSROOT}"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG=${MINGW_PKG_CONFIG}"
+    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_CFLAGS=-I${VTERM_ABS}/include"
+    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_LIBS=\"-L${VTERM_ABS}/build-mingw64 -lvterm\""
+
+    if [ "$ENABLE_DEBUG" = true ]; then
+        CONFIGURE_CMD="$CONFIGURE_CMD CFLAGS='-O0 -g3 -DDEBUG'"
+    fi
+
+    log_info "Running: $CONFIGURE_CMD"
+    eval "$CONFIGURE_CMD"
+
+    if [ $? -ne 0 ]; then
+        log_error "Cross-compilation configure failed"
+        if [ -f "config.log" ]; then
+            log_error "Last 50 lines of config.log:"
+            tail -50 config.log
+        fi
+        cd ..
+        exit 1
+    fi
+
+    cd ..
+
+    # --- Build ---
+    cd "$BUILD_DIR"
+    log_info "Building with $PARALLEL_JOBS parallel jobs..."
+    make -j"$PARALLEL_JOBS"
+
+    if [ $? -ne 0 ]; then
+        log_error "Cross-compilation build failed"
+        cd ..
+        exit 1
+    fi
+    cd ..
+
+    # --- Copy DLLs for Wine testing ---
+    log_info "Copying DLLs for Wine testing..."
+    local DLL_DIR="${MINGW_SYSROOT}/bin"
+    local EXE_DIR="${BUILD_DIR}/src/.libs"
+    local DLLS=(
+        SDL3.dll
+        libfreetype-6.dll
+        libharfbuzz-0.dll
+        libfontconfig-1.dll
+        libpng16-16.dll
+        zlib1.dll
+        libgcc_s_seh-1.dll
+        libwinpthread-1.dll
+        libintl-8.dll
+        libbz2-1.dll
+        libexpat-1.dll
+        libglib-2.0-0.dll
+        libgmodule-2.0-0.dll
+        libgobject-2.0-0.dll
+        libffi-8.dll
+        libpcre2-8-0.dll
+        iconv.dll
+    )
+
+    for dll in "${DLLS[@]}"; do
+        if [ -f "${DLL_DIR}/${dll}" ]; then
+            cp "${DLL_DIR}/${dll}" "${EXE_DIR}/"
+        else
+            log_warn "DLL not found: ${DLL_DIR}/${dll}"
+        fi
+    done
+
+    log_info "Cross-compilation complete!"
+    log_info "Binary: ${EXE_DIR}/bloom-terminal.exe"
+    log_info ""
+    log_info "To test with Wine:"
+    log_info "  wine64 ./${EXE_DIR}/bloom-terminal.exe --demo \"Hello\""
+    log_info "  wine64 ./${EXE_DIR}/bloom-terminal.exe -P \"Test\" /tmp/out.png"
+    log_info "  wine64 ./${EXE_DIR}/bloom-terminal.exe"
+}
+
 # Main execution
 main() {
     log_info "Starting build process for $PROJECT_NAME"
@@ -338,6 +501,10 @@ main() {
             --prefix=*)
                 INSTALL_PREFIX="${1#*=}"
                 shift
+                ;;
+            --mingw64)
+                build_mingw64
+                exit 0
                 ;;
             --profiling)
                 run_profiling
@@ -407,6 +574,7 @@ main() {
                 echo "  --install         Only install the project (skip build and run)"
                 echo "  --bear            Generate compile_commands.json using bear"
                 echo "  --no-debug        Disable debug build"
+                echo "  --mingw64         Cross-compile for Windows using mingw64"
                 echo "  --profiling       Build with gprof, run benchmark, generate profile report"
                 echo "  --format          Format source files with clang-format, shfmt, and prettier"
                 echo "  --ref-png T OUT   Generate reference PNG of text T using hb-view"
