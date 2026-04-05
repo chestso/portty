@@ -956,8 +956,8 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
     }
 
-    // If the glyph's actual ink width exceeds the target cell width, apply a
-    // uniform scale transform and re-rasterize so the bitmap fits the cell
+    // If the glyph's actual ink width exceeds the available pixel budget,
+    // apply a uniform scale transform and re-rasterize so the bitmap fits
     // (avoids lossy post-render bitmap scaling in the renderer).
     // Use metrics.width (ink extent) not advance.x (which includes sidebearings).
     FT_GlyphSlot slot_pre = face->glyph;
@@ -965,16 +965,20 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     int bearing_x = (int)(slot_pre->metrics.horiBearingX >> 6);
     int glyph_extent = bearing_x + ink_width; // rightmost pixel
     double glyph_scale = 0.0;                 // non-zero when glyph was scaled down
-    // Only scale glyphs from fallback fonts — the primary font's glyphs are
-    // trusted to fit the cell they defined.
+    // presentation_width is the per-render pixel budget (e.g. 2*cell_width
+    // for CJK); target_cell_width is the base monospace cell width.
+    // Only scale fallback fonts — primary font glyphs that overflow the
+    // cell are clipped by the renderer to preserve visual weight.
     bool is_fallback = (ft_data->style == FONT_STYLE_FALLBACK);
-    if (is_fallback && ft_data->target_cell_width > 0 && glyph_extent > ft_data->target_cell_width) {
-        glyph_scale = (double)ft_data->target_cell_width / glyph_extent;
+    int target = ft_data->presentation_width > 0 ? ft_data->presentation_width
+                                                 : ft_data->target_cell_width;
+    if (is_fallback && target > 0 && glyph_extent > target) {
+        glyph_scale = (double)target / glyph_extent;
         FT_Fixed scale_16_16 = (FT_Fixed)(glyph_scale * 0x10000);
         FT_Matrix matrix = { scale_16_16, 0, 0, scale_16_16 };
-        vlog("rasterize_glyph_index: glyph %u extent %d (ink=%d+bearing=%d) > cell %d, scaling by %.3f\n",
+        vlog("rasterize_glyph_index: glyph %u extent %d (ink=%d+bearing=%d) > target %d, scaling by %.3f\n",
              glyph_index, glyph_extent, ink_width, bearing_x,
-             ft_data->target_cell_width, glyph_scale);
+             target, glyph_scale);
         FT_Set_Transform(face, &matrix, NULL);
         error = FT_Load_Glyph(face, glyph_index, load_flags);
         FT_Set_Transform(face, NULL, NULL); // reset transform
@@ -1015,9 +1019,9 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
 
     // When the glyph was scaled down via FT_Set_Transform, FreeType's
     // bitmap_top is already correctly scaled to preserve baseline alignment.
-    // Only center horizontally within the target cell width.
+    // Only center horizontally within the available pixel budget.
     if (glyph_scale > 0.0) {
-        glyph_bitmap->x_offset = (ft_data->target_cell_width - (int)bitmap->width) / 2;
+        glyph_bitmap->x_offset = (target - (int)bitmap->width) / 2;
     }
 
     glyph_bitmap->pixels = malloc(glyph_bitmap->width * glyph_bitmap->height * 4);
@@ -1275,6 +1279,14 @@ static void ft_set_target_cell_width(void *font_data, int cell_width)
         ft_data->target_cell_width = cell_width;
 }
 
+// Set per-render presentation width (vtable callback)
+static void ft_set_presentation_width(void *font_data, int width)
+{
+    FtFontData *ft_data = (FtFontData *)font_data;
+    if (ft_data)
+        ft_data->presentation_width = width;
+}
+
 FontBackend font_backend_ft = {
     .name = "freetype",
     .init = font_init,
@@ -1294,5 +1306,6 @@ FontBackend font_backend_ft = {
     .has_style = font_has_style,
     .style_has_colr = ft_style_has_colr,
     .get_glyph_index = ft_get_glyph_index,
-    .set_target_cell_width = ft_set_target_cell_width
+    .set_target_cell_width = ft_set_target_cell_width,
+    .set_presentation_width = ft_set_presentation_width
 };

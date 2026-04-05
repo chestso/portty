@@ -47,7 +47,8 @@ typedef struct
     FT_UShort palette_size;
 
     // Terminal cell constraints (set by renderer after font load)
-    int target_cell_width; // Terminal cell width in pixels (0 = no constraint)
+    int target_cell_width;  // Base monospace cell width in pixels (0 = no constraint)
+    int presentation_width; // Per-render target width in pixels (0 = use target_cell_width)
 
     // Font rendering options
     int ft_hint_target; // FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT, _NORMAL, or _MONO

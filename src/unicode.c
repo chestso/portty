@@ -14,14 +14,14 @@ bool is_emoji_base_range(uint32_t cp)
 
 bool is_ambiguous_emoji(uint32_t cp)
 {
-    // Characters that MIGHT be emoji with U+FE0F (text vs. emoji presentation)
-    return (cp >= 0x2600 && cp <= 0x27BF) ||
-           (cp >= 0x231A && cp <= 0x231B) ||   // Watch, Clock
-           (cp == 0x2328) ||                   // Keyboard
-           (cp >= 0x23E9 && cp <= 0x23FA) ||   // Media controls
-           (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
-           (cp >= 0x1F300 && cp <= 0x1F5FF) || // Miscellaneous Symbols and Pictographs
-           (cp >= 0x1F680 && cp <= 0x1F6FF);   // Transport and Map Symbols
+    // Text-default emoji: Emoji=Yes, Emoji_Presentation=No per Unicode.
+    // These render as text by default and only as emoji with U+FE0F.
+    // Ranges that have Emoji_Presentation=Yes (0x1F300+) belong in
+    // is_emoji_base_range() instead.
+    return (cp >= 0x2600 && cp <= 0x27BF) || // Miscellaneous Symbols, Dingbats
+           (cp >= 0x231A && cp <= 0x231B) || // Watch, Clock
+           (cp == 0x2328) ||                 // Keyboard
+           (cp >= 0x23E9 && cp <= 0x23FA);   // Media controls
 }
 
 bool is_emoji_presentation(uint32_t cp)

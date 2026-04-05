@@ -139,6 +139,10 @@ struct FontBackend
 
     // Set target cell width for oversized glyph scaling (backend-specific)
     void (*set_target_cell_width)(void *font_data, int cell_width);
+
+    // Set per-render presentation width (pixel budget for the current glyph).
+    // This is the actual available space: columns_to_consume * cell_width.
+    void (*set_presentation_width)(void *font_data, int width);
 };
 
 // Font font API
@@ -175,5 +179,8 @@ bool font_style_has_colr(FontBackend *font, FontStyle style);
 
 // Set target cell width on all loaded font styles (for oversized glyph scaling)
 void font_set_target_cell_width(FontBackend *font, int cell_width);
+
+// Set per-render presentation width on a single font style
+void font_set_presentation_width(FontBackend *font, FontStyle style, int width);
 
 #endif // FONT_H

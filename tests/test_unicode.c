@@ -28,6 +28,11 @@ static void test_ambiguous_emoji(void)
 
     ASSERT_FALSE(is_ambiguous_emoji(0x0041));  /* 'A' */
     ASSERT_FALSE(is_ambiguous_emoji(0x1F1E6)); /* regional indicator */
+
+    /* Emoji_Presentation=Yes ranges belong in is_emoji_base_range, not here */
+    ASSERT_FALSE(is_ambiguous_emoji(0x1F600)); /* grinning face */
+    ASSERT_FALSE(is_ambiguous_emoji(0x1F300)); /* cyclone */
+    ASSERT_FALSE(is_ambiguous_emoji(0x1F680)); /* rocket */
 }
 
 static void test_emoji_presentation(void)

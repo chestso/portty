@@ -1217,11 +1217,32 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
             scaled_w, scaled_h
         };
     } else {
+        float gx = (float)cell_x + glyph_x_offset;
+        float gw = (float)entry->region.w;
+        // Center oversized glyphs horizontally within the cell so
+        // clipping removes equal amounts from both sides.
+        if (gx + gw > (float)(cell_x + avail_w)) {
+            gx = (float)cell_x + ((float)avail_w - gw) * 0.5f;
+        }
         dst = (SDL_FRect){
-            (float)cell_x + glyph_x_offset,
+            gx,
             (float)cell_y + font_ascent - glyph_y_offset,
-            (float)entry->region.w, (float)entry->region.h
+            gw, (float)entry->region.h
         };
+        // Clip glyphs that overflow the cell boundary.
+        float right_edge = (float)(cell_x + avail_w);
+        if (dst.x + dst.w > right_edge) {
+            float excess = (dst.x + dst.w) - right_edge;
+            src.w -= excess;
+            dst.w -= excess;
+        }
+        if (dst.x < (float)cell_x) {
+            float excess = (float)cell_x - dst.x;
+            src.x += excess;
+            src.w -= excess;
+            dst.x = (float)cell_x;
+            dst.w -= excess;
+        }
     }
     if (!color_baked)
         SDL_SetTextureColorMod(atlas->texture, mod_r, mod_g, mod_b);
@@ -1345,6 +1366,10 @@ static bool ensure_fallback_font(RendererSdl3Data *data, const char *font_path)
     // Set target cell width on the new fallback font for oversized glyph scaling
     font_set_target_cell_width(data->font, data->cell_width);
 
+    // Match fallback font weight to regular (400).  Variable fonts like
+    // Noto Sans CJK VF default to weight 100 (Thin) which is unreadable.
+    font_set_variation_axis(data->font, FONT_STYLE_FALLBACK, "wght", 400);
+
     vlog("Fallback font loaded and cached (%d/%d): %s\n",
          data->loaded_fallback_count, MAX_LOADED_FALLBACKS, font_path);
     return true;
@@ -1462,10 +1487,21 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         columns_to_consume < 2 && is_ambiguous_emoji(cps[0]))
         columns_to_consume = 2;
 
+    if (cps[0] > 0x7F)
+        vlog("render_cell: U+%04X style=%d emoji=%d fe0f=%d ambig_text=%d "
+             "cols=%d cell.w=%d\n",
+             cps[0], style, emoji_render, has_fe0f, ambiguous_text,
+             columns_to_consume, cell.width);
+
     int cell_x = data->pad_left + col * data->cell_width;
     int cell_y = data->pad_top + row * data->cell_height;
     int avail_w = columns_to_consume * data->cell_width;
     int avail_h = data->cell_height;
+
+    // Tell the font backend the pixel budget for this glyph so oversized
+    // glyphs (e.g. double-advance symbols, CJK via fallback) get scaled.
+    for (int s = 0; s < FONT_STYLE_COUNT; s++)
+        font_set_presentation_width(data->font, s, avail_w);
 
     // Emoji: prefer square aspect ratio (avail_h) but never exceed
     // the allocated cell space (columns_to_consume * cell_width).
@@ -1515,6 +1551,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (fb_path && ensure_fallback_font(data, fb_path)) {
                 style = FONT_STYLE_FALLBACK;
                 font_data = data->font->font_data[style];
+                // Lazily loaded — set presentation_width now
+                font_set_presentation_width(data->font, style, avail_w);
                 color_baked = is_color_font(data->font, style);
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;
@@ -1587,6 +1625,8 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (fb_path && ensure_fallback_font(data, fb_path)) {
                 style = FONT_STYLE_FALLBACK;
                 font_data = data->font->font_data[style];
+                // Lazily loaded — set presentation_width now
+                font_set_presentation_width(data->font, style, avail_w);
                 color_baked = is_color_font(data->font, style);
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;
@@ -1597,11 +1637,13 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
             }
         }
 
-        // Tag glyph_index so single-cell and double-cell emoji get
-        // separate atlas entries (different downscale sizes).
+        // Tag glyph_index so glyphs at different presentation widths
+        // get separate atlas entries (different rasterization sizes).
         uint32_t atlas_glyph_id = glyph_index;
         if (ambiguous_text && atlas_glyph_id != 0)
             atlas_glyph_id |= (1u << 30);
+        if (columns_to_consume >= 2 && atlas_glyph_id != 0)
+            atlas_glyph_id |= (1u << 29);
 
         if (atlas_glyph_id != 0)
             entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_glyph_id, color_key);

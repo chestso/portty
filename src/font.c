@@ -192,3 +192,12 @@ void font_set_target_cell_width(FontBackend *font, int cell_width)
             font->set_target_cell_width(font->font_data[i], cell_width);
     }
 }
+
+// Set per-render presentation width on a single font style
+void font_set_presentation_width(FontBackend *font, FontStyle style, int width)
+{
+    if (!font || !font->set_presentation_width)
+        return;
+    if (style < FONT_STYLE_COUNT && font->font_data[style])
+        font->set_presentation_width(font->font_data[style], width);
+}
