@@ -263,7 +263,16 @@ This produces `build-mingw64/src/.libs/bloom-terminal.exe` with all required DLL
 
 ### Testing with QEMU/KVM
 
-For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU/KVM. See [QEMU.md](QEMU.md) for VM setup, installation, and deployment instructions.
+For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU/KVM:
+
+```bash
+./build.sh --vm-setup       # Download ISOs, create disk images (one-time)
+./build.sh --vm-install      # Boot VM from ISO to install Windows
+./build.sh --vm-deploy       # Cross-compile and write files to VM transfer disk
+./build.sh --vm              # Boot the VM (transfer disk appears as second drive)
+```
+
+The installer requires a virtio storage driver: **Load driver** → **Browse** → `F:` → `viostor/w11/amd64`.
 
 ### Windows PTY
 

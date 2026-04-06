@@ -27,6 +27,7 @@ ltmain.sh
 build/
 build-mingw64/
 deps/
+vm/
 _build/
 .deps/
 .dirstamp

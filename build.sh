@@ -1,8 +1,8 @@
 #!/bin/bash
 # Build Script for bloom-terminal terminal emulator
 
-set -e  # Exit on any error
-set -u  # Treat unset variables as errors
+set -e # Exit on any error
+set -u # Treat unset variables as errors
 
 # Color codes for output
 RED='\033[0;31m'
@@ -16,6 +16,17 @@ BUILD_DIR="build"
 INSTALL_PREFIX="$HOME/.local"
 ENABLE_DEBUG=true
 PARALLEL_JOBS=$(nproc)
+
+# VM configuration
+VM_DIR="vm"
+VM_DISK="$VM_DIR/win11.qcow2"
+VM_ISO="$VM_DIR/win11-ltsc-eval.iso"
+VM_VIRTIO="$VM_DIR/virtio-win.iso"
+VM_OVMF_VARS="$VM_DIR/OVMF_VARS.fd"
+VM_TPM_DIR="$VM_DIR/tpm"
+VM_TRANSFER="$VM_DIR/transfer.img"
+VM_AUTOUNATTEND="$VM_DIR/autounattend.img"
+OVMF_CODE="/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd"
 
 # Logging functions
 log_info() {
@@ -48,24 +59,24 @@ check_os() {
 # Generate configure script
 generate_configure() {
     log_info "Generating configure script..."
-    
+
     # Clean up any existing generated files
     log_info "Cleaning up generated files..."
     rm -f configure aclocal.m4
     rm -rf autom4te.cache
-    
+
     if [ -f configure ]; then
         log_info "Removing existing configure script"
         rm -f configure
     fi
-    
+
     autoreconf -fvi
-    
+
     if [ $? -ne 0 ]; then
         log_error "Failed to generate configure script"
         return 1
     fi
-    
+
     log_info "Configure script generated successfully"
     return 0
 }
@@ -73,29 +84,26 @@ generate_configure() {
 # Configure the build
 configure_build() {
     log_info "Configuring build..."
-    
+
     # Create build directory if it doesn't exist
     if [ -d "$BUILD_DIR" ]; then
         log_info "Removing existing build directory"
         rm -rf "$BUILD_DIR"
     fi
-    
+
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
-    
+
     # Build configure command
     CONFIGURE_CMD="../configure --prefix=$INSTALL_PREFIX"
-    
+
     if [ "$ENABLE_DEBUG" = true ]; then
         CONFIGURE_CMD="$CONFIGURE_CMD CFLAGS='-O0 -g3 -DDEBUG'"
     fi
-    
-    # Note: --enable-debug and --enable-tests are not recognized by configure
-    # but we'll keep them for compatibility with BUILD.md
-    
+
     log_info "Running: $CONFIGURE_CMD"
     eval $CONFIGURE_CMD
-    
+
     if [ $? -ne 0 ]; then
         log_error "Configure failed"
         if [ -f "config.log" ]; then
@@ -105,7 +113,7 @@ configure_build() {
         cd ..
         return 1
     fi
-    
+
     cd ..
     log_info "Build configured successfully"
     return 0
@@ -114,11 +122,11 @@ configure_build() {
 # Build the project
 build_project() {
     local use_bear=${1:-false}
-    
+
     log_info "Building project..."
-    
+
     cd "$BUILD_DIR"
-    
+
     if [ "$use_bear" = true ]; then
         log_info "Generating compile_commands.json with bear..."
         bear --output ../compile_commands.json -- make -j"$PARALLEL_JOBS"
@@ -126,31 +134,30 @@ build_project() {
         log_info "Running make with $PARALLEL_JOBS parallel jobs"
         make -j"$PARALLEL_JOBS"
     fi
-    
+
     if [ $? -ne 0 ]; then
         log_error "Build failed"
         cd ..
         return 1
     fi
-    
+
     cd ..
     log_info "Project built successfully"
     return 0
 }
 
-
 # Install the project (optional)
 install_project() {
     log_info "Installing project to $INSTALL_PREFIX..."
-    
+
     cd "$BUILD_DIR"
-    
+
     if ! make install; then
         log_error "Installation failed"
         cd ..
         return 1
     fi
-    
+
     cd ..
     log_info "Project installed successfully"
     return 0
@@ -159,24 +166,24 @@ install_project() {
 # Run the application
 run_application() {
     log_info "Running application..."
-    
+
     if [ -f "$BUILD_DIR/src/$PROJECT_NAME" ]; then
         cd "$BUILD_DIR"
         log_info "Starting $PROJECT_NAME..."
         ./src/$PROJECT_NAME &
         APP_PID=$!
         cd ..
-        
+
         log_info "Application started with PID $APP_PID"
         log_info "Press Ctrl+C to stop the application"
-        
+
         # Wait for user interrupt
         wait $APP_PID
     else
         log_error "Application not found at $BUILD_DIR/src/$PROJECT_NAME"
         return 1
     fi
-    
+
     return 0
 }
 
@@ -185,7 +192,7 @@ generate_bench_script() {
     local output_file="$1"
     log_info "Generating bench script..."
 
-    cat > "$output_file" <<'SCRIPT'
+    cat >"$output_file" <<'SCRIPT'
 #!/bin/bash
 # Bench script for profiling: exercises colors, scrollback, emoji, box drawing
 
@@ -272,7 +279,7 @@ run_profiling() {
     # Generate report
     log_info "Generating gprof report..."
     local report_file="profile-report.txt"
-    gprof ./"$BUILD_DIR"/src/"$PROJECT_NAME" gmon.out > "$report_file"
+    gprof ./"$BUILD_DIR"/src/"$PROJECT_NAME" gmon.out >"$report_file"
 
     echo ""
     echo "=== Top 20 Functions by Cumulative Time ==="
@@ -288,31 +295,31 @@ run_profiling() {
 # Format source files
 format_sources() {
     log_info "Formatting source files..."
-    
+
     # Format C/C++ files with clang-format
-    if command -v clang-format &> /dev/null; then
+    if command -v clang-format &>/dev/null; then
         log_info "Formatting C/C++ files with clang-format..."
         find src/ -name "*.c" -o -name "*.h" | xargs clang-format -i
     else
         log_warn "clang-format not found. Skipping C/C++ formatting."
     fi
-    
+
     # Format shell scripts with shfmt
-    if command -v shfmt &> /dev/null; then
+    if command -v shfmt &>/dev/null; then
         log_info "Formatting shell scripts with shfmt..."
         find examples/ -name "*.sh" | xargs shfmt -w
     else
         log_warn "shfmt not found. Skipping shell script formatting."
     fi
-    
+
     # Format markdown files with prettier
-    if command -v prettier &> /dev/null; then
+    if command -v prettier &>/dev/null; then
         log_info "Formatting markdown files with prettier..."
         find . -name "*.md" | xargs prettier --write
     else
         log_warn "prettier not found. Skipping markdown formatting."
     fi
-    
+
     log_info "Formatting completed."
 }
 
@@ -333,7 +340,7 @@ build_mingw64() {
     local VTERM_TARBALL="${DEPS_DIR}/libvterm-${VTERM_VERSION}.tar.gz"
 
     # Check for cross-compiler
-    if ! command -v "$MINGW_CC" &> /dev/null; then
+    if ! command -v "$MINGW_CC" &>/dev/null; then
         log_error "mingw64 cross-compiler not found: $MINGW_CC"
         log_error "Install with: sudo dnf install mingw64-gcc"
         exit 1
@@ -342,7 +349,7 @@ build_mingw64() {
     # Check for required mingw64 packages
     local missing_pkgs=()
     for pkg in mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-fontconfig mingw64-libpng; do
-        if ! rpm -q "$pkg" &> /dev/null; then
+        if ! rpm -q "$pkg" &>/dev/null; then
             missing_pkgs+=("$pkg")
         fi
     done
@@ -475,11 +482,246 @@ build_mingw64() {
     log_info "Binary and DLLs: ${MINGW_BUILD_DIR}/src/.libs/"
 }
 
+# --- Windows VM (QEMU/KVM) functions ---
+
+# Download ISOs, create disk image, UEFI vars, autounattend floppy
+vm_setup() {
+    log_info "Setting up Windows VM..."
+
+    # Check prerequisites
+    for cmd in qemu-system-x86_64 swtpm qemu-img mcopy mkfs.fat; do
+        if ! command -v "$cmd" &>/dev/null; then
+            log_error "$cmd not found"
+            log_error "Install with: sudo dnf install qemu-system-x86 swtpm qemu-img mtools dosfstools"
+            exit 1
+        fi
+    done
+    if [ ! -f "$OVMF_CODE" ]; then
+        log_error "OVMF Secure Boot firmware not found: $OVMF_CODE"
+        log_error "Install with: sudo dnf install edk2-ovmf"
+        exit 1
+    fi
+
+    mkdir -p "$VM_DIR" "$VM_TPM_DIR"
+
+    # Download Windows 11 LTSC evaluation ISO
+    if [ ! -f "$VM_ISO" ]; then
+        log_info "Downloading Windows 11 LTSC evaluation ISO (~4.7 GB)..."
+        curl -L -o "$VM_ISO" \
+            'https://go.microsoft.com/fwlink/?linkid=2289029&clcid=0x409&culture=en-us&country=us'
+    else
+        log_info "Windows ISO already exists: $VM_ISO"
+    fi
+
+    # Download virtio-win drivers ISO
+    if [ ! -f "$VM_VIRTIO" ]; then
+        log_info "Downloading virtio-win drivers ISO..."
+        curl -L -o "$VM_VIRTIO" \
+            'https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso'
+    else
+        log_info "Virtio-win ISO already exists: $VM_VIRTIO"
+    fi
+
+    # Create disk image
+    if [ ! -f "$VM_DISK" ]; then
+        log_info "Creating 40GB disk image..."
+        qemu-img create -f qcow2 "$VM_DISK" 40G
+    else
+        log_info "Disk image already exists: $VM_DISK"
+    fi
+
+    # Copy UEFI variables
+    if [ ! -f "$VM_OVMF_VARS" ]; then
+        log_info "Copying UEFI variables (Secure Boot)..."
+        cp /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd "$VM_OVMF_VARS"
+    fi
+
+    # Create autounattend floppy (bypasses TPM/SecureBoot/storage checks)
+    if [ ! -f "$VM_AUTOUNATTEND" ]; then
+        log_info "Creating autounattend floppy image..."
+        local XML_FILE="$VM_DIR/autounattend.xml"
+        cat >"$XML_FILE" <<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<unattend xmlns="urn:schemas-microsoft-com:unattend"
+          xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State">
+    <settings pass="windowsPE">
+        <component name="Microsoft-Windows-Setup" processorArchitecture="amd64"
+                   publicKeyToken="31bf3856ad364e35" language="neutral"
+                   versionScope="nonSxS">
+            <RunSynchronous>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>1</Order>
+                    <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>2</Order>
+                    <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+                <RunSynchronousCommand wcm:action="add">
+                    <Order>3</Order>
+                    <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f</Path>
+                </RunSynchronousCommand>
+            </RunSynchronous>
+        </component>
+    </settings>
+</unattend>
+XML
+        dd if=/dev/zero of="$VM_AUTOUNATTEND" bs=1440k count=1 2>/dev/null
+        mkfs.fat "$VM_AUTOUNATTEND" >/dev/null
+        mcopy -i "$VM_AUTOUNATTEND" "$XML_FILE" ::/autounattend.xml
+        rm -f "$XML_FILE"
+    fi
+
+    # Create transfer disk image with MBR partition table
+    if [ ! -f "$VM_TRANSFER" ]; then
+        log_info "Creating 256MB transfer disk image..."
+        dd if=/dev/zero of="$VM_TRANSFER" bs=1M count=256 2>/dev/null
+        printf 'o\nn\np\n1\n\n\nt\nc\nw\n' | fdisk "$VM_TRANSFER" >/dev/null 2>&1
+        mkfs.fat -F 32 --offset 2048 "$VM_TRANSFER" >/dev/null
+    fi
+
+    log_info "VM setup complete!"
+    log_info "Next: ./build.sh --vm-install  (install Windows)"
+}
+
+# Launch the VM (install mode or normal boot)
+vm_launch() {
+    local mode="$1"
+
+    if [ ! -f "$VM_DISK" ]; then
+        log_error "VM disk not found. Run: ./build.sh --vm-setup"
+        exit 1
+    fi
+
+    # Start software TPM 2.0
+    mkdir -p "$VM_TPM_DIR"
+    swtpm socket \
+        --tpmstate dir="$VM_TPM_DIR" \
+        --ctrl type=unixio,path="$VM_TPM_DIR/swtpm-sock" \
+        --tpm2 \
+        --daemon
+
+    local QEMU_ARGS=(
+        -enable-kvm
+        -cpu host
+        -m 4G
+        -smp 4
+        -machine q35,smm=on
+        -global driver=cfi.pflash01,property=secure,value=on
+        -drive "if=pflash,format=raw,readonly=on,file=$OVMF_CODE"
+        -drive "if=pflash,format=raw,file=$VM_OVMF_VARS"
+        -drive "file=$VM_DISK,format=qcow2,if=virtio"
+        -chardev "socket,id=chrtpm,path=$VM_TPM_DIR/swtpm-sock"
+        -tpmdev emulator,id=tpm0,chardev=chrtpm
+        -device tpm-tis,tpmdev=tpm0
+        -device virtio-net-pci,netdev=net0
+        -netdev user,id=net0
+        -vga virtio
+        -display sdl,gl=on
+    )
+
+    if [ "$mode" = "install" ]; then
+        if [ ! -f "$VM_ISO" ]; then
+            log_error "Windows ISO not found. Run: ./build.sh --vm-setup"
+            exit 1
+        fi
+        log_info "Booting VM in install mode..."
+        log_info "When installer asks for disk driver: Load driver -> Browse -> F: -> viostor/w11/amd64"
+        cp /usr/share/edk2/ovmf/OVMF_VARS.secboot.fd "$VM_OVMF_VARS"
+        QEMU_ARGS+=(
+            -device qemu-xhci
+            -device usb-storage,drive=install
+            -drive "id=install,file=$VM_ISO,media=cdrom,readonly=on,if=none"
+            -device usb-storage,drive=virtio
+            -drive "id=virtio,file=$VM_VIRTIO,media=cdrom,readonly=on,if=none"
+            -drive "file=$VM_AUTOUNATTEND,format=raw,index=0,if=floppy"
+            -boot order=d
+        )
+    else
+        log_info "Booting VM..."
+        QEMU_ARGS+=(
+            -device qemu-xhci
+            -device usb-storage,drive=transfer
+            -drive "id=transfer,file=$VM_TRANSFER,format=raw,if=none,readonly=on"
+        )
+    fi
+
+    exec qemu-system-x86_64 "${QEMU_ARGS[@]}"
+}
+
+# Cross-compile and write exe + DLLs to transfer disk
+vm_deploy() {
+    build_mingw64
+
+    local EXE_DIR="build-mingw64/src/.libs"
+
+    # Recreate transfer image with MBR partition table
+    log_info "Writing files to transfer disk..."
+    dd if=/dev/zero of="$VM_TRANSFER" bs=1M count=256 2>/dev/null
+    printf 'o\nn\np\n1\n\n\nt\nc\nw\n' | fdisk "$VM_TRANSFER" >/dev/null 2>&1
+    # Format the partition (starts at sector 2048 = offset 1048576)
+    mkfs.fat -F 32 --offset 2048 "$VM_TRANSFER" >/dev/null
+
+    local MTOOLS_OFFSET="@@1048576"
+    for f in "${EXE_DIR}"/*.exe "${EXE_DIR}"/*.dll; do
+        mcopy -i "${VM_TRANSFER}${MTOOLS_OFFSET}" "$f" ::/
+    done
+
+    log_info "Transfer disk contents:"
+    mdir -i "${VM_TRANSFER}${MTOOLS_OFFSET}" ::/
+    log_info "Next: ./build.sh --vm  (boot VM, files on second drive)"
+}
+
+# Default build action
+do_build() {
+    check_os
+
+    if [ "${INSTALL_ONLY:-false}" = true ]; then
+        log_info "Installing project only (--install flag used)"
+
+        if ! generate_configure; then
+            exit 1
+        fi
+
+        if ! configure_build; then
+            exit 1
+        fi
+
+        log_info "Installing project to $INSTALL_PREFIX"
+        if ! install_project; then
+            log_error "Installation failed"
+            exit 1
+        fi
+    else
+        if ! generate_configure; then
+            exit 1
+        fi
+
+        if ! configure_build; then
+            exit 1
+        fi
+
+        if [ "${USE_BEAR:-false}" = true ]; then
+            if ! build_project true; then
+                exit 1
+            fi
+        else
+            if ! build_project; then
+                exit 1
+            fi
+        fi
+    fi
+
+    log_info "Build process completed successfully!"
+    log_info "Build directory: $BUILD_DIR"
+    log_info "To run the application: ./$BUILD_DIR/src/$PROJECT_NAME"
+}
+
 # Main execution
 main() {
-    log_info "Starting build process for $PROJECT_NAME"
-    
-    # Parse command line arguments
+    local ACTION="build"
+
+    # Parse all arguments first, then dispatch
     while [[ $# -gt 0 ]]; do
         case $1 in
             --install)
@@ -499,19 +741,35 @@ main() {
                 shift
                 ;;
             --mingw64)
-                build_mingw64
-                exit 0
+                ACTION=mingw64
+                shift
+                ;;
+            --vm-setup)
+                ACTION=vm_setup
+                shift
+                ;;
+            --vm-install)
+                ACTION=vm_install
+                shift
+                ;;
+            --vm)
+                ACTION=vm
+                shift
+                ;;
+            --vm-deploy)
+                ACTION=vm_deploy
+                shift
                 ;;
             --profiling)
-                run_profiling
-                exit 0
+                ACTION=profiling
+                shift
                 ;;
             --format)
-                format_sources
-                exit 0
+                ACTION=format
+                shift
                 ;;
             --ref-png)
-                # Usage: --ref-png "emoji" output.png
+                ACTION=ref_png
                 if [[ $# -lt 3 ]]; then
                     log_error "--ref-png requires TEXT and OUTPUT_PATH arguments"
                     echo "Usage: $0 --ref-png \"emoji_text\" output.png"
@@ -519,33 +777,10 @@ main() {
                 fi
                 REF_TEXT="$2"
                 REF_OUTPUT="$3"
-                REF_FONT="/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf"
-                if [ ! -f "$REF_FONT" ]; then
-                    log_error "Reference font not found: $REF_FONT"
-                    exit 1
-                fi
-                if ! command -v hb-view &> /dev/null; then
-                    log_error "hb-view not found. Install harfbuzz-utils."
-                    exit 1
-                fi
-                log_info "Generating reference PNG for \"$REF_TEXT\" -> $REF_OUTPUT"
-                hb-view --font-file="$REF_FONT" \
-                    --font-size=128 \
-                    --output-format=png \
-                    --background=00000000 \
-                    --margin=0 \
-                    --output-file="$REF_OUTPUT" \
-                    "$REF_TEXT"
-                if [ $? -eq 0 ]; then
-                    log_info "Reference PNG written to $REF_OUTPUT"
-                else
-                    log_error "hb-view failed"
-                    exit 1
-                fi
-                exit 0
+                shift 3
                 ;;
             --ref-layers)
-                # Usage: --ref-layers "emoji" output_prefix
+                ACTION=ref_layers
                 if [[ $# -lt 3 ]]; then
                     log_error "--ref-layers requires TEXT and OUTPUT_PREFIX arguments"
                     echo "Usage: $0 --ref-layers \"emoji\" /tmp/prefix"
@@ -553,16 +788,7 @@ main() {
                 fi
                 REF_TEXT="$2"
                 REF_PREFIX="$3"
-
-                # Check for blackrenderer
-                if ! python3 -c "import blackrenderer" 2>/dev/null; then
-                    log_error "blackrenderer not installed. Run: pip install blackrenderer"
-                    exit 1
-                fi
-
-                log_info "Exporting COLR layers for \"$REF_TEXT\" -> ${REF_PREFIX}_layer*.png"
-                python3 scripts/colr_layers.py "$REF_TEXT" "$REF_PREFIX"
-                exit 0
+                shift 3
                 ;;
             --help)
                 echo "Usage: $0 [options]"
@@ -571,6 +797,10 @@ main() {
                 echo "  --bear            Generate compile_commands.json using bear"
                 echo "  --no-debug        Disable debug build"
                 echo "  --mingw64         Cross-compile for Windows using mingw64"
+                echo "  --vm-setup        Download ISOs and create Windows VM disk images"
+                echo "  --vm-install      Boot VM from ISO for Windows installation"
+                echo "  --vm              Boot the Windows VM"
+                echo "  --vm-deploy       Cross-compile and write files to VM transfer disk"
                 echo "  --profiling       Build with gprof, run benchmark, generate profile report"
                 echo "  --format          Format source files with clang-format, shfmt, and prettier"
                 echo "  --ref-png T OUT   Generate reference PNG of text T using hb-view"
@@ -586,58 +816,68 @@ main() {
                 ;;
         esac
     done
-    
-    # Check OS
-    check_os
-    
-    # If --install flag is used, skip build and run steps
-    if [ "${INSTALL_ONLY:-false}" = true ]; then
-        log_info "Installing project only (--install flag used)"
-        
-        # Generate configure script
-        if ! generate_configure; then
-            exit 1
-        fi
-        
-        # Configure build
-        if ! configure_build; then
-            exit 1
-        fi
-        
-        # Install project (skip build)
-        log_info "Installing project to $INSTALL_PREFIX"
-        if ! install_project; then
-            log_error "Installation failed"
-            exit 1
-        fi
-    else
-        # Generate configure script
-        if ! generate_configure; then
-            exit 1
-        fi
-        
-        # Configure build
-        if ! configure_build; then
-            exit 1
-        fi
-        
-        # Build project with bear if requested
-        if [ "${USE_BEAR:-false}" = true ]; then
-            # Build project with bear
-            if ! build_project true; then
+
+    # Dispatch action
+    case "$ACTION" in
+        build)
+            log_info "Starting build process for $PROJECT_NAME"
+            do_build
+            ;;
+        mingw64)
+            build_mingw64
+            ;;
+        vm_setup)
+            vm_setup
+            ;;
+        vm_install)
+            vm_launch install
+            ;;
+        vm)
+            vm_launch run
+            ;;
+        vm_deploy)
+            vm_deploy
+            ;;
+        profiling)
+            run_profiling
+            ;;
+        format)
+            format_sources
+            ;;
+        ref_png)
+            REF_FONT="/usr/share/fonts/google-noto-color-emoji-fonts/Noto-COLRv1.ttf"
+            if [ ! -f "$REF_FONT" ]; then
+                log_error "Reference font not found: $REF_FONT"
                 exit 1
             fi
-        else
-            # Build project normally
-            if ! build_project; then
+            if ! command -v hb-view &>/dev/null; then
+                log_error "hb-view not found. Install harfbuzz-utils."
                 exit 1
             fi
-        fi
-    fi
-    
-    log_info "Build process completed successfully!"
-    log_info "Build directory: $BUILD_DIR"
-    log_info "To run the application: ./$BUILD_DIR/src/$PROJECT_NAME"
+            log_info "Generating reference PNG for \"$REF_TEXT\" -> $REF_OUTPUT"
+            hb-view --font-file="$REF_FONT" \
+                --font-size=128 \
+                --output-format=png \
+                --background=00000000 \
+                --margin=0 \
+                --output-file="$REF_OUTPUT" \
+                "$REF_TEXT"
+            if [ $? -eq 0 ]; then
+                log_info "Reference PNG written to $REF_OUTPUT"
+            else
+                log_error "hb-view failed"
+                exit 1
+            fi
+            ;;
+        ref_layers)
+            if ! python3 -c "import blackrenderer" 2>/dev/null; then
+                log_error "blackrenderer not installed. Run: pip install blackrenderer"
+                exit 1
+            fi
+            log_info "Exporting COLR layers for \"$REF_TEXT\" -> ${REF_PREFIX}_layer*.png"
+            python3 scripts/colr_layers.py "$REF_TEXT" "$REF_PREFIX"
+            ;;
+    esac
 }
 
 # Run main function with all arguments
