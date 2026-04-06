@@ -320,6 +320,7 @@ format_sources() {
 build_mingw64() {
     log_info "Cross-compiling for Windows (mingw64)..."
 
+    local MINGW_BUILD_DIR="build-mingw64"
     local MINGW_HOST="x86_64-w64-mingw32"
     local MINGW_CC="${MINGW_HOST}-gcc"
     local MINGW_AR="${MINGW_HOST}-ar"
@@ -394,11 +395,11 @@ build_mingw64() {
     fi
 
     # --- Configure for cross-compilation ---
-    if [ -d "$BUILD_DIR" ]; then
-        rm -rf "$BUILD_DIR"
+    if [ -d "$MINGW_BUILD_DIR" ]; then
+        rm -rf "$MINGW_BUILD_DIR"
     fi
-    mkdir -p "$BUILD_DIR"
-    cd "$BUILD_DIR"
+    mkdir -p "$MINGW_BUILD_DIR"
+    cd "$MINGW_BUILD_DIR"
 
     local CONFIGURE_CMD="../configure"
     CONFIGURE_CMD="$CONFIGURE_CMD --host=${MINGW_HOST}"
@@ -427,7 +428,7 @@ build_mingw64() {
     cd ..
 
     # --- Build ---
-    cd "$BUILD_DIR"
+    cd "$MINGW_BUILD_DIR"
     log_info "Building with $PARALLEL_JOBS parallel jobs..."
     make -j"$PARALLEL_JOBS"
 
@@ -438,10 +439,10 @@ build_mingw64() {
     fi
     cd ..
 
-    # --- Copy DLLs for Wine testing ---
-    log_info "Copying DLLs for Wine testing..."
+    # --- Collect DLLs alongside the binary ---
+    log_info "Collecting runtime DLLs..."
     local DLL_DIR="${MINGW_SYSROOT}/bin"
-    local EXE_DIR="${BUILD_DIR}/src/.libs"
+    local EXE_DIR="${MINGW_BUILD_DIR}/src/.libs"
     local DLLS=(
         SDL3.dll
         libfreetype-6.dll
@@ -471,12 +472,7 @@ build_mingw64() {
     done
 
     log_info "Cross-compilation complete!"
-    log_info "Binary: ${EXE_DIR}/bloom-terminal.exe"
-    log_info ""
-    log_info "To test with Wine:"
-    log_info "  wine64 ./${EXE_DIR}/bloom-terminal.exe --demo \"Hello\""
-    log_info "  wine64 ./${EXE_DIR}/bloom-terminal.exe -P \"Test\" /tmp/out.png"
-    log_info "  wine64 ./${EXE_DIR}/bloom-terminal.exe"
+    log_info "Binary and DLLs: ${MINGW_BUILD_DIR}/src/.libs/"
 }
 
 # Main execution

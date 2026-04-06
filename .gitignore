@@ -25,6 +25,7 @@ ltmain.sh
 
 # Build directories
 build/
+build-mingw64/
 deps/
 _build/
 .deps/

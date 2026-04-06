@@ -243,7 +243,7 @@ sudo dnf install bear
 
 ## Windows Cross-Compilation
 
-bloom-terminal can be cross-compiled for Windows using Fedora's mingw64 toolchain. The Windows build uses ConPTY for terminal emulation and can be tested under Wine.
+bloom-terminal can be cross-compiled for Windows using Fedora's mingw64 toolchain. The Windows build uses ConPTY for terminal emulation.
 
 ### Prerequisites (Fedora)
 
@@ -259,20 +259,11 @@ libvterm is downloaded and cross-compiled automatically (no mingw64 package exis
 ./build.sh --mingw64
 ```
 
-This produces `build/src/.libs/bloom-terminal.exe` with all required DLLs copied alongside for testing.
+This produces `build-mingw64/src/.libs/bloom-terminal.exe` with all required DLLs copied alongside. The mingw64 build uses a separate directory so it doesn't conflict with the Linux `build/`.
 
-### Testing with Wine
+### Testing with QEMU/KVM
 
-```bash
-# Display text without spawning a shell
-wine64 ./build/src/.libs/bloom-terminal.exe --demo "Hello Windows!"
-
-# Render text to PNG (offscreen, no window)
-wine64 ./build/src/.libs/bloom-terminal.exe -P "Test" /tmp/out.png
-
-# Interactive terminal session (requires Wine ConPTY support)
-wine64 ./build/src/.libs/bloom-terminal.exe
-```
+For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU/KVM. See [QEMU.md](QEMU.md) for VM setup, installation, and deployment instructions.
 
 ### Windows PTY
 
