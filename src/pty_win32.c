@@ -323,4 +323,14 @@ void *pty_get_process_handle(PtyContext *ctx)
     return (void *)ctx->process;
 }
 
+void pty_close_console(PtyContext *ctx)
+{
+    if (!ctx)
+        return;
+    if (ctx->hpc != INVALID_HANDLE_VALUE) {
+        ClosePseudoConsole(ctx->hpc);
+        ctx->hpc = INVALID_HANDLE_VALUE;
+    }
+}
+
 #endif /* _WIN32 */

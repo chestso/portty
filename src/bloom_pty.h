@@ -128,6 +128,14 @@ int pty_get_child_pid(PtyContext *ctx);
  * @return Process HANDLE cast to void*, or NULL
  */
 void *pty_get_process_handle(PtyContext *ctx);
+
+/**
+ * Close the pseudo-console to unblock any pending ReadFile.
+ *
+ * Call this before waiting for the reader thread to exit on shutdown.
+ * Safe to call multiple times.
+ */
+void pty_close_console(PtyContext *ctx);
 #endif
 
 #endif /* PTY_H */

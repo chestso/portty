@@ -607,6 +607,9 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
     if (ctx->pty_reader_thread) {
         SDL_SetAtomicInt(&ctx->running, 0);
 #ifdef _WIN32
+        // Close pseudo-console to unblock ReadFile in the reader thread
+        if (ctx->pty)
+            pty_close_console(ctx->pty);
         SetEvent(ctx->wakeup_event);
 #else
         if (ctx->wakeup_pipe[1] >= 0) {
@@ -1022,6 +1025,8 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
     SDL_SetAtomicInt(&ctx->running, 0);
     if (ctx->pty_reader_thread) {
 #ifdef _WIN32
+        if (ctx->pty)
+            pty_close_console(ctx->pty);
         SetEvent(ctx->wakeup_event);
 #else
         if (ctx->wakeup_pipe[1] >= 0) {
