@@ -7,7 +7,13 @@
 #include "common.h"
 #include "font_ft_internal.h"
 #include "font_resolve.h"
+#ifdef _WIN32
+#include "font_resolve_win32.h"
+#define FONT_RESOLVE_BACKEND font_resolve_backend_win32
+#else
 #include "font_resolve_fc.h"
+#define FONT_RESOLVE_BACKEND font_resolve_backend_fc
+#endif
 #include "platform.h"
 #include "platform_gtk4.h"
 #include "platform_sdl3.h"
@@ -383,6 +389,15 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
 int main(int argc, char *argv[])
 {
+#ifdef _WIN32
+    /* GUI subsystem detaches from console — reattach so stdout/stderr
+     * work when launched from cmd.exe (needed for --list-fonts, -h, -v) */
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+    }
+#endif
+
     TerminalBackend *term;
     RendererBackend *rend = NULL;
     PtyContext *pty = NULL;
@@ -517,7 +532,7 @@ int main(int argc, char *argv[])
 
     // List monospace fonts and exit
     if (list_fonts) {
-        FontResolveBackend *resolve = font_resolve_init(&font_resolve_backend_fc);
+        FontResolveBackend *resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
         if (!resolve) {
             fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
             return 1;

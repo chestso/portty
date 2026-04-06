@@ -348,7 +348,7 @@ build_mingw64() {
 
     # Check for required mingw64 packages
     local missing_pkgs=()
-    for pkg in mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-fontconfig mingw64-libpng; do
+    for pkg in mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-libpng; do
         if ! rpm -q "$pkg" &>/dev/null; then
             missing_pkgs+=("$pkg")
         fi
@@ -454,18 +454,13 @@ build_mingw64() {
         SDL3.dll
         libfreetype-6.dll
         libharfbuzz-0.dll
-        libfontconfig-1.dll
         libpng16-16.dll
         zlib1.dll
+        libbz2-1.dll
         libgcc_s_seh-1.dll
         libwinpthread-1.dll
-        libintl-8.dll
-        libbz2-1.dll
-        libexpat-1.dll
         libglib-2.0-0.dll
-        libgmodule-2.0-0.dll
-        libgobject-2.0-0.dll
-        libffi-8.dll
+        libintl-8.dll
         libpcre2-8-0.dll
         iconv.dll
     )

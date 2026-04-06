@@ -42,7 +42,9 @@ fi
 # Check for libraries
 PKG_CHECK_MODULES([VTERM], [vterm])
 PKG_CHECK_MODULES([SDL3], [sdl3])
-PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
+if test "x$host_windows" = "xno"; then
+  PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
+fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])

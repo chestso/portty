@@ -11,7 +11,6 @@
 // Forward declarations
 static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
                                     char **family_name, float *out_size);
-static int is_fixed_width_font(const char *font_path);
 
 // Helper function to find font using fontconfig
 static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
@@ -68,38 +67,8 @@ static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
     return font_path;
 }
 
-// Check if a font file is actually monospace by comparing glyph advances
-static int is_fixed_width_font(const char *font_path)
-{
-    FT_Library lib;
-    if (FT_Init_FreeType(&lib) != 0)
-        return 0;
-
-    FT_Face face;
-    if (FT_New_Face(lib, font_path, 0, &face) != 0) {
-        FT_Done_FreeType(lib);
-        return 0;
-    }
-
-    FT_Set_Char_Size(face, 0, 16 * 64, 72, 72);
-
-    FT_UInt gi_i = FT_Get_Char_Index(face, 'i');
-    FT_UInt gi_M = FT_Get_Char_Index(face, 'M');
-    int fixed = 0;
-
-    if (gi_i && gi_M &&
-        FT_Load_Glyph(face, gi_i, FT_LOAD_NO_HINTING) == 0) {
-        FT_Fixed adv_i = face->glyph->linearHoriAdvance;
-        if (FT_Load_Glyph(face, gi_M, FT_LOAD_NO_HINTING) == 0) {
-            FT_Fixed adv_M = face->glyph->linearHoriAdvance;
-            fixed = (adv_i == adv_M);
-        }
-    }
-
-    FT_Done_Face(face);
-    FT_Done_FreeType(lib);
-    return fixed;
-}
+// Shared utility in font_resolve.c — declaration in font_resolve.h
+// int font_resolve_is_fixed_width(const char *font_path);
 
 static bool fc_init(FontResolveBackend *resolve)
 {
@@ -314,7 +283,7 @@ static void fc_list_monospace(FontResolveBackend *resolve)
             continue;
 
         // Verify the font is actually fixed-width
-        if (!is_fixed_width_font((const char *)file))
+        if (!font_resolve_is_fixed_width((const char *)file))
             continue;
 
         if (count >= capacity) {

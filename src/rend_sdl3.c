@@ -3,7 +3,13 @@
 #include "font.h"
 #include "font_ft.h"
 #include "font_resolve.h"
+#ifdef _WIN32
+#include "font_resolve_win32.h"
+#define FONT_RESOLVE_BACKEND font_resolve_backend_win32
+#else
 #include "font_resolve_fc.h"
+#define FONT_RESOLVE_BACKEND font_resolve_backend_fc
+#endif
 #include "png_writer.h"
 #include "rend.h"
 #include "rend_sdl3_atlas.h"
@@ -1024,7 +1030,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         hint_name = "mono";
 
     // Initialize font resolver
-    data->resolve = font_resolve_init(&font_resolve_backend_fc);
+    data->resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
     if (!data->resolve) {
         fprintf(stderr, "Failed to initialize font resolver\n");
         return -1;

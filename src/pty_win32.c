@@ -14,9 +14,24 @@ struct PtyContext
     HANDLE output_read;
     HANDLE process;
     HANDLE thread;
+    HANDLE waiter_thread;
     int rows;
     int cols;
 };
+
+/* Waiter thread: when the child process exits, close the pseudo-console
+ * so that ReadFile on the output pipe returns instead of blocking. */
+static DWORD WINAPI pty_waiter_thread(LPVOID param)
+{
+    PtyContext *ctx = (PtyContext *)param;
+    WaitForSingleObject(ctx->process, INFINITE);
+    vlog("PTY waiter: child exited, closing pseudo-console\n");
+    if (ctx->hpc != INVALID_HANDLE_VALUE) {
+        ClosePseudoConsole(ctx->hpc);
+        ctx->hpc = INVALID_HANDLE_VALUE;
+    }
+    return 0;
+}
 
 int pty_signal_init(void)
 {
@@ -164,6 +179,10 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
     DeleteProcThreadAttributeList(si.lpAttributeList);
     free(si.lpAttributeList);
 
+    /* Start waiter thread to close console when child exits */
+    ctx->waiter_thread =
+        CreateThread(NULL, 0, pty_waiter_thread, ctx, 0, NULL);
+
     vlog("PTY created: pid=%lu, size=%dx%d\n",
          (unsigned long)pi.dwProcessId, cols, rows);
 
@@ -191,10 +210,16 @@ void pty_destroy(PtyContext *ctx)
 
     vlog("PTY destroy\n");
 
-    /* Close pseudo-console first — signals EOF to child */
+    /* Close pseudo-console (waiter thread may have already done this) */
     if (ctx->hpc != INVALID_HANDLE_VALUE) {
         ClosePseudoConsole(ctx->hpc);
         ctx->hpc = INVALID_HANDLE_VALUE;
+    }
+
+    /* Wait for waiter thread to finish */
+    if (ctx->waiter_thread != INVALID_HANDLE_VALUE) {
+        WaitForSingleObject(ctx->waiter_thread, 2000);
+        CloseHandle(ctx->waiter_thread);
     }
 
     /* Wait briefly for child to exit */

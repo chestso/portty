@@ -50,4 +50,7 @@ int font_resolve_find_font_for_codepoint(FontResolveBackend *resolve,
 void font_resolve_free_result(FontResolutionResult *result);
 void font_resolve_list_monospace(FontResolveBackend *resolve);
 
+// Shared utility: check if a font file is monospace by comparing glyph advances
+int font_resolve_is_fixed_width(const char *font_path);
+
 #endif // FONT_RESOLVE_H
