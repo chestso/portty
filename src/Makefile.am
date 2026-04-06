@@ -25,7 +25,7 @@ bloom_terminal_LDADD = $(VTERM_LIBS) $(SDL3_LIBS) \
     $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) -lm
 
 if HOST_WINDOWS
-bloom_terminal_LDADD += -ladvapi32 -lshell32
+bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi
 bloom_terminal_LDFLAGS =
 else
 AM_CFLAGS += $(FONTCONFIG_CFLAGS)

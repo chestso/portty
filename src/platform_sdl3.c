@@ -14,6 +14,7 @@
 #include <string.h>
 
 #ifdef _WIN32
+#include <dwmapi.h>
 #include <io.h>
 #include <windows.h>
 #define access _access
@@ -686,6 +687,37 @@ static bool sdl3_create_window(PlatformBackend *plat, const char *title,
 
     // Set window icon (non-fatal if missing)
     set_window_icon(ctx->window);
+
+#ifdef _WIN32
+    // Apply Windows 11 DWM attributes for native dark mode and Mica
+    {
+        HWND hwnd = (HWND)SDL_GetPointerProperty(
+            SDL_GetWindowProperties(ctx->window),
+            SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
+        if (hwnd) {
+            BOOL dark = TRUE;
+            DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                                  &dark, sizeof(dark));
+
+            /* Mica backdrop (Windows 11 22H2+, no-op on older) */
+            int backdrop = 2; /* DWMSBT_MAINWINDOW */
+            DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
+                                  &backdrop, sizeof(backdrop));
+
+            /* Caption color: dark gray matching terminal background */
+            COLORREF caption = 0x00282828; /* BGR */
+            DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR,
+                                  &caption, sizeof(caption));
+
+            /* Rounded corners (Windows 11) */
+            DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;
+            DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+                                  &corner, sizeof(corner));
+
+            vlog("DWM: dark mode + Mica + rounded corners applied\n");
+        }
+    }
+#endif
 
     // Create renderer
     vlog("Creating renderer\n");
