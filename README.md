@@ -14,7 +14,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Bold, italic, and bold-italic font styles (variable font axes, platform-native resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
-- Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
+- Support for Unicode characters and emoji (COLR v1 color fonts)
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
