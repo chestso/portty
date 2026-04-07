@@ -1,4 +1,5 @@
-AC_INIT([bloom-terminal], [0.1], [bug-report@example.com])
+AC_INIT([bloom-terminal],
+        m4_esyscmd_s([cat version 2>/dev/null || echo "0.0.0-unknown"]))
 AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AC_CANONICAL_HOST

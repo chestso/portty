@@ -13,6 +13,7 @@ config.log
 config.status
 config.sub
 configure
+version
 depcomp
 install-sh
 Makefile.in

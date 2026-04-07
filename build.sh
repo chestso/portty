@@ -56,9 +56,28 @@ check_os() {
     fi
 }
 
+# Compute version from git tags
+get_version() {
+    if git describe --tags --match 'v*' HEAD >/dev/null 2>&1; then
+        # v0.1 → "0.1", v0.1-5-gabc1234 → "0.1.5-abc1234"
+        git describe --tags --match 'v*' HEAD | sed 's/^v//;s/-\([0-9]*\)-g/.\1-/'
+    else
+        # No tags: 0.0.N-HASH
+        local count
+        count=$(git rev-list --count HEAD)
+        local hash
+        hash=$(git rev-parse --short HEAD)
+        echo "0.0.${count}-${hash}"
+    fi
+}
+
 # Generate configure script
 generate_configure() {
     log_info "Generating configure script..."
+
+    # Write version file for configure.ac
+    get_version > version
+    log_info "Version: $(cat version)"
 
     # Clean up any existing generated files
     log_info "Cleaning up generated files..."
