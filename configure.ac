@@ -114,6 +114,7 @@ fi
 
 # Generate config.h header
 AC_CONFIG_HEADERS([config.h])
+AC_DEFINE_UNQUOTED([BLOOM_TERMINAL_VERSION], ["$PACKAGE_VERSION"], [Version string])
 
 # Check for header files
 AC_CHECK_HEADERS([stdio.h stdlib.h string.h])

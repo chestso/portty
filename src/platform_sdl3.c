@@ -2,6 +2,10 @@
 #include "config.h"
 #endif
 
+#ifndef BLOOM_TERMINAL_VERSION
+#define BLOOM_TERMINAL_VERSION "unknown"
+#endif
+
 #include "common.h"
 #include "platform_sdl3.h"
 #include "png_reader.h"
@@ -490,7 +494,7 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     if (verbose) {
         fprintf(stderr, "DEBUG: Setting SDL app metadata\n");
     }
-    if (!SDL_SetAppMetadata("bloom-terminal", "1.0.0", "bloom-terminal")) {
+    if (!SDL_SetAppMetadata("bloom-terminal", BLOOM_TERMINAL_VERSION, "bloom-terminal")) {
         fprintf(stderr, "WARNING: Failed to set SDL app metadata: %s\n", SDL_GetError());
     }
 
