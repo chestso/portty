@@ -2,7 +2,7 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration.
+Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Cross-compiles for Windows using ConPTY, a native font resolver, and Windows 11 DWM styling.
 
 ## Features
 
@@ -20,6 +20,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
+- Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
@@ -53,7 +54,8 @@ bloom-terminal uses a modular backend abstraction design:
   - Some paint semantics (extend modes, all composite operators, transform edge-cases) are best-effort
 
 - **Font Resolver Backend**: Handles font discovery and selection
-  - Current implementation: Fontconfig (`font_resolve_backend_fc`)
+  - Linux: Fontconfig (`font_resolve_backend_fc`)
+  - Windows: Native registry-based resolver (`font_resolve_backend_win32`) with FreeType codepoint fallback
 
 Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`, `RendererBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
 
@@ -132,21 +134,21 @@ build/src/bloom-terminal -P "😀" output.png
 
 ### CLI Flags
 
-| Flag                  | Description                                                     |
-| --------------------- | --------------------------------------------------------------- |
-| `-h`                  | Show help message                                               |
-| `-v`                  | Verbose output (font resolution, COLR, atlas events)            |
-| `-f PATTERN`          | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)      |
-| `-g COLSxROWS`        | Initial terminal size (default: 80x24)                          |
-| `-P TEXT`             | Render TEXT to PNG (output path as positional arg)              |
-| `-D PREFIX`           | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
-| `-L` / `--list-fonts` | List available monospace fonts and exit                         |
-| `--ft-hinting S`      | FreeType hinting: none/light/normal/mono (default: light)       |
-| `--reflow`            | Enable text reflow on resize (unstable, libvterm bug)           |
-| `--padding`           | Enable padding around terminal content                          |
-| `--gtk4`              | Use GTK4/libadwaita platform backend                            |
-| `--sdl3`              | Use SDL3 platform backend (overrides config file)               |
-| `--demo TEXT`         | Display TEXT in terminal without spawning a shell (for testing) |
+| Flag                      | Description                                                     |
+| ------------------------- | --------------------------------------------------------------- |
+| `-h`                      | Show help message                                               |
+| `-v`                      | Verbose output (font resolution, COLR, atlas events)            |
+| `-f PATTERN`              | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)      |
+| `-g COLSxROWS`            | Initial terminal size (default: 80x24)                          |
+| `-P TEXT`                 | Render TEXT to PNG (output path as positional arg)              |
+| `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
+| `-L` / `--list-fonts`     | List available monospace fonts and exit                         |
+| `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)       |
+| `-R` / `--reflow`         | Enable text reflow on resize (unstable, libvterm bug)           |
+| `-N` / `--padding`        | Enable padding around terminal content                          |
+| `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                            |
+| `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)               |
+| `-d TEXT` / `--demo TEXT` | Display TEXT in terminal without spawning a shell (for testing) |
 
 ### Keyboard Shortcuts
 
@@ -274,9 +276,12 @@ For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU
 
 The installer requires a virtio storage driver: **Load driver** → **Browse** → `F:` → `viostor/w11/amd64`.
 
-### Windows PTY
+### Windows Details
 
-The Windows build uses ConPTY (`CreatePseudoConsole`) instead of Unix PTYs. The implementation is in `src/pty_win32.c`. The GTK4 backend is not available on Windows; only the SDL3 backend is used.
+- **PTY**: ConPTY (`CreatePseudoConsole`) instead of Unix PTYs (`src/pty_win32.c`)
+- **Font resolver**: Native Windows registry-based font discovery (`src/font_resolve_win32.c`) replaces Fontconfig. Default fallback chain: Cascadia Mono → Consolas → Courier New.
+- **DWM styling**: Dark title bar, Mica backdrop, custom caption color, rounded corners on Windows 11 (degrades gracefully on older versions)
+- **Platform**: SDL3 only (GTK4 backend is not available on Windows)
 
 ## Testing
 
@@ -292,6 +297,7 @@ Current test suites:
 - **test_pty_pause** — PTY pause/resume during selection: platform wrapper delegation, pause on select, resume on clear/copy/resize, full select-copy cycles
 - **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
 - **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
+- **test_dmabuf_copy** — DMA-BUF zero-copy: `glCopyImageSubData` vs `glBlitFramebuffer` across GBM pixel formats, isolates the EGL/GBM copy path from SDL and GTK4
 
 All tests support `-v` for verbose output. Visual testing of rendering and terminal features is done manually using example scripts.
 
