@@ -213,7 +213,7 @@ Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting wit
 
 ## Terminfo
 
-bloom-terminal ships a custom terminfo entry (`bloom-terminal-256color`) based on `xterm-256color`. It is compiled and installed automatically by `./build.sh --install` via `tic`. The child shell's `TERMINFO_DIRS` is set to `~/.local/share/terminfo` so the entry is found without system-wide installation.
+bloom-terminal ships a custom terminfo entry (`bloom-terminal-256color`) based on `xterm-256color`. On Linux, it is compiled and installed automatically by `./build.sh --install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install it natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
 
 If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
 
@@ -334,7 +334,15 @@ For interactive testing, use a macOS VM with QEMU/KVM via [OSX-KVM](https://gith
 ./build.sh --mac-vm          # Boot the VM (transfer disk appears as USB drive)
 ```
 
-The transfer disk mounts as a USB drive — copy `bloom-terminal` from it and run. No Homebrew or extra packages needed.
+The installer boots into OpenCore — select **"macOS Base System"**, then use **Disk Utility** to erase the SATA disk (APFS, GUID) before installing.
+
+The transfer disk mounts as a USB drive in Finder. On first use, install the terminfo entry (one-time):
+
+```bash
+sh /Volumes/NO\ NAME/install-terminfo.sh
+```
+
+Then run bloom-terminal from the USB drive or copy it locally.
 
 ### macOS Details
 
