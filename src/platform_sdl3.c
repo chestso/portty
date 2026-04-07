@@ -267,7 +267,7 @@ static int pty_reader_thread_func(void *data)
     SDL3PlatformData *ctx = (SDL3PlatformData *)data;
     char buf[4096];
 
-    vlog("PTY reader thread started (Win32)\n");
+    vlog("PTY reader thread started (W32)\n");
 
     HANDLE hProcess = (HANDLE)pty_get_process_handle(ctx->pty);
 

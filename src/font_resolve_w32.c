@@ -1,6 +1,6 @@
 #ifdef _WIN32
 
-#include "font_resolve_win32.h"
+#include "font_resolve_w32.h"
 #include "common.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H
@@ -25,7 +25,7 @@ typedef struct
     int count;
     int capacity;
     char fonts_dir[MAX_PATH]; /* e.g. "C:\\Windows\\Fonts\\" */
-} Win32FontData;
+} W32FontData;
 
 /* --- Helpers --- */
 
@@ -80,7 +80,7 @@ static void parse_display_name(char *name, char **out_family,
     *out_family = name;
 }
 
-static void add_entry(Win32FontData *data, const char *family,
+static void add_entry(W32FontData *data, const char *family,
                       const char *style, const char *path)
 {
     if (data->count >= data->capacity) {
@@ -96,7 +96,7 @@ static void add_entry(Win32FontData *data, const char *family,
 
 /* Case-insensitive family search. Returns first match with given style,
  * or first "Regular" match if style is NULL. */
-static FontEntry *find_entry(Win32FontData *data, const char *family,
+static FontEntry *find_entry(W32FontData *data, const char *family,
                              const char *style)
 {
     FontEntry *regular_fallback = NULL;
@@ -114,7 +114,7 @@ static FontEntry *find_entry(Win32FontData *data, const char *family,
     return regular_fallback;
 }
 
-static int has_family(Win32FontData *data, const char *family)
+static int has_family(W32FontData *data, const char *family)
 {
     for (int i = 0; i < data->count; i++) {
         if (_stricmp(data->entries[i].family, family) == 0)
@@ -135,7 +135,7 @@ typedef struct
 
 static void parse_fontconfig_pattern(const char *pattern,
                                      ParsedPattern *out,
-                                     Win32FontData *data)
+                                     W32FontData *data)
 {
     memset(out, 0, sizeof(*out));
 
@@ -196,9 +196,9 @@ static void parse_fontconfig_pattern(const char *pattern,
 
 /* --- Backend implementation --- */
 
-static bool win32_init(FontResolveBackend *resolve)
+static bool w32_init(FontResolveBackend *resolve)
 {
-    Win32FontData *data = calloc(1, sizeof(Win32FontData));
+    W32FontData *data = calloc(1, sizeof(W32FontData));
     if (!data)
         return false;
 
@@ -280,19 +280,19 @@ static bool win32_init(FontResolveBackend *resolve)
 
     RegCloseKey(hkey);
 
-    vlog("Win32 font resolver: loaded %d font entries from registry\n",
+    vlog("W32 font resolver: loaded %d font entries from registry\n",
          data->count);
 
     resolve->backend_data = data;
     return true;
 }
 
-static void win32_destroy(FontResolveBackend *resolve)
+static void w32_destroy(FontResolveBackend *resolve)
 {
     if (!resolve || !resolve->backend_data)
         return;
 
-    Win32FontData *data = (Win32FontData *)resolve->backend_data;
+    W32FontData *data = (W32FontData *)resolve->backend_data;
     for (int i = 0; i < data->count; i++) {
         free(data->entries[i].family);
         free(data->entries[i].style);
@@ -303,11 +303,11 @@ static void win32_destroy(FontResolveBackend *resolve)
     resolve->backend_data = NULL;
 }
 
-static int win32_find_font(FontResolveBackend *resolve, FontType type,
-                           const char *pattern,
-                           FontResolutionResult *result)
+static int w32_find_font(FontResolveBackend *resolve, FontType type,
+                         const char *pattern,
+                         FontResolutionResult *result)
 {
-    Win32FontData *data = (Win32FontData *)resolve->backend_data;
+    W32FontData *data = (W32FontData *)resolve->backend_data;
     if (!data)
         return -1;
 
@@ -365,17 +365,17 @@ static int win32_find_font(FontResolveBackend *resolve, FontType type,
     result->family_name = strdup(e->family);
     result->size = pp.size;
 
-    vlog("Win32 font resolver: %s style=%s -> %s\n", pp.family,
+    vlog("W32 font resolver: %s style=%s -> %s\n", pp.family,
          target_style, e->path);
 
     return 0;
 }
 
-static int win32_find_font_for_codepoint(FontResolveBackend *resolve,
-                                         uint32_t codepoint,
-                                         FontResolutionResult *result)
+static int w32_find_font_for_codepoint(FontResolveBackend *resolve,
+                                       uint32_t codepoint,
+                                       FontResolutionResult *result)
 {
-    Win32FontData *data = (Win32FontData *)resolve->backend_data;
+    W32FontData *data = (W32FontData *)resolve->backend_data;
     if (!data)
         return -1;
 
@@ -445,9 +445,9 @@ static int cmp_str(const void *a, const void *b)
     return _stricmp(*(const char **)a, *(const char **)b);
 }
 
-static void win32_list_monospace(FontResolveBackend *resolve)
+static void w32_list_monospace(FontResolveBackend *resolve)
 {
-    Win32FontData *data = (Win32FontData *)resolve->backend_data;
+    W32FontData *data = (W32FontData *)resolve->backend_data;
     if (!data)
         return;
 
@@ -490,14 +490,14 @@ static void win32_list_monospace(FontResolveBackend *resolve)
     free(families);
 }
 
-FontResolveBackend font_resolve_backend_win32 = {
-    .name = "win32",
+FontResolveBackend font_resolve_backend_w32 = {
+    .name = "w32",
     .backend_data = NULL,
-    .init = win32_init,
-    .destroy = win32_destroy,
-    .find_font = win32_find_font,
-    .find_font_for_codepoint = win32_find_font_for_codepoint,
-    .list_monospace = win32_list_monospace,
+    .init = w32_init,
+    .destroy = w32_destroy,
+    .find_font = w32_find_font,
+    .find_font_for_codepoint = w32_find_font_for_codepoint,
+    .list_monospace = w32_list_monospace,
 };
 
 #endif /* _WIN32 */

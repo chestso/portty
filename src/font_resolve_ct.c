@@ -11,7 +11,7 @@
 #include <string.h>
 #include <strings.h>
 
-/* --- Pattern parsing (same format as Fontconfig/Win32) --- */
+/* --- Pattern parsing (same format as Fontconfig/W32) --- */
 
 typedef struct
 {

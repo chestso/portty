@@ -8,8 +8,8 @@
 #include "font_ft_internal.h"
 #include "font_resolve.h"
 #ifdef _WIN32
-#include "font_resolve_win32.h"
-#define FONT_RESOLVE_BACKEND font_resolve_backend_win32
+#include "font_resolve_w32.h"
+#define FONT_RESOLVE_BACKEND font_resolve_backend_w32
 #elif defined(__APPLE__)
 #include "font_resolve_ct.h"
 #define FONT_RESOLVE_BACKEND font_resolve_backend_ct

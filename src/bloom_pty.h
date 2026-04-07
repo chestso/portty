@@ -11,7 +11,7 @@ typedef SSIZE_T ssize_t;
 #include <sys/types.h>
 #endif
 
-/* Opaque — defined in platform-specific pty.c / pty_win32.c */
+/* Opaque — defined in platform-specific pty.c / pty_w32.c */
 typedef struct PtyContext PtyContext;
 
 /**

@@ -4,8 +4,8 @@ bin_PROGRAMS = bloom-terminal
 
 # Platform-specific implementations
 if HOST_WINDOWS
-PTY_SOURCE = pty_win32.c
-FONT_RESOLVE_SOURCE = font_resolve_win32.c
+PTY_SOURCE = pty_w32.c
+FONT_RESOLVE_SOURCE = font_resolve_w32.c
 else !HOST_WINDOWS
 PTY_SOURCE = pty.c
 if HOST_MACOS
