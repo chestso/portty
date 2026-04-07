@@ -2,6 +2,30 @@
 
 ---
 
+## Known Issues
+
+### Cursor Position Offset After Resize (Line-Based Shells)
+
+When using line-based shells (bash, zsh, fish) in bloom-terminal:
+
+1. Resize the window narrower so the shell prompt wraps to multiple lines
+2. Resize the window wider so the prompt would fit on one line
+3. The cursor appears in the wrong position (often in the middle of the prompt)
+
+**Cause:** libvterm with reflow disabled keeps wrapped text at the same row/column positions. bash/readline assumes the terminal reflowed content during resize and recalculates cursor position based on how the prompt _would_ wrap at the new width.
+
+Reflow is disabled by default due to a [libvterm bug](https://github.com/neovim/neovim/issues/25234) that can cause crashes during extreme window resizes.
+
+| Use Case                            | Status                                         |
+| ----------------------------------- | ---------------------------------------------- |
+| Full-screen apps (vim, htop, less)  | Works correctly - they manage their own screen |
+| Line-based shells (bash, zsh, fish) | Cursor glitches after resize                   |
+| Running commands with output        | Works correctly                                |
+
+**Workarounds:** Type `reset`, press Ctrl+L, enable reflow with `--reflow` (at risk of crashes), or avoid resizing at a shell prompt.
+
+---
+
 ## 1. SDL3 GPU API Migration
 
 ### Goals
@@ -133,18 +157,6 @@ metadata, `ft_set_variation_axis()` / `ft_set_variation_axes()` set values, and
 `apply_font_variations()` applies per-style overrides. The `wght` axis is used for bold,
 and `ital`/`slnt` axes are used for italic rendering. Remaining work is to wire up
 additional axes at the application level.
-
-### ~~Slant Axis (slnt)~~ — Done
-
-Implemented in `apply_font_variations()`: sets `slnt` to -12° (clamped to axis min) for
-`FONT_STYLE_ITALIC` and `FONT_STYLE_BOLD_ITALIC`. Fonts without a `slnt` axis fall back
-to synthetic oblique via `FT_GlyphSlot_Oblique`.
-
-### ~~Italic Axis (ital)~~ — Done
-
-Implemented in `apply_font_variations()`: sets `ital` to 1.0 for italic styles. Combined
-with `slnt` when the font supports both axes. Fonts without `ital`/`slnt` axes and
-without native italic face style get synthetic oblique.
 
 ### Optical Size (opsz)
 
@@ -450,31 +462,3 @@ used standalone Rust library but has no C API.
 2. Create proof-of-concept with simplest alternative first
 3. Consider hybrid approach: keep libvterm for escape sequences, custom layer for cell management
 4. Evaluate libutf8proc for grapheme segmentation (small, C, permissive license)
-
----
-
-## ~~5. GTK4 Platform Backend — Rendering Optimization~~ — Done
-
-Zero-copy DMA-BUF rendering is implemented in `platform_gtk4.c`. SDL renders to an
-offscreen GL texture, `glCopyImageSubData` copies it to a GBM-allocated DMA-BUF backed
-texture, and `GdkDmabufTextureBuilder` wraps it for GTK's scene graph. Falls back to
-`SDL_RenderReadPixels` + `GdkMemoryTexture` on systems without EGL/GBM/libdrm.
-
-**Key implementation details:**
-
-- GBM allocates a linear DMA-BUF (`GBM_FORMAT_ABGR8888`, `DRM_FORMAT_MOD_LINEAR`)
-- EGL imports the DMA-BUF as an `EGLImage`, bound to a GL texture via
-  `glEGLImageTargetTexture2DOES`
-- `glCopyImageSubData` (GL 4.3) copies between SDL's texture and the export texture
-  without FBO binding; falls back to `glBlitFramebuffer` if unavailable
-- GTK4 creates its own EGL context for rendering — `SDL_GL_MakeCurrent` doesn't restore
-  SDL's context afterward, so `eglMakeCurrent` is called directly with saved EGL state
-- SDL's offscreen renderer doesn't expose its GL texture ID via properties; it's queried
-  from the FBO color attachment via `glGetFramebufferAttachmentParameteriv`
-- Build dependencies: `egl`, `libdrm`, `gbm` (pkg-config), guarded by `HAVE_EGL_DMABUF`
-
-### ~~GtkGraphicsOffload~~ — Done
-
-Implemented in `platform_gtk4.c`: terminal drawing area wrapped in `GtkGraphicsOffload`
-with `GTK_GRAPHICS_OFFLOAD_ENABLED` and black background optimization, enabling
-compositor direct scanout of the DMA-BUF texture. Guarded by `HAVE_EGL_DMABUF`.
