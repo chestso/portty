@@ -14,6 +14,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 struct PtyContext
@@ -150,6 +151,14 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
     if (pid == 0) {
         // Child process - exec command or default shell
 
+        // Ensure erase character is DEL (0x7F) to match terminfo kbs=^?
+        // macOS defaults to ^H which causes visual backspace issues
+        struct termios tios;
+        if (tcgetattr(STDIN_FILENO, &tios) == 0) {
+            tios.c_cc[VERASE] = 0x7f;
+            tcsetattr(STDIN_FILENO, TCSANOW, &tios);
+        }
+
         // Set TERM environment variable
         setenv("TERM", "bloom-terminal-256color", 1);
 
@@ -157,11 +166,16 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
 #ifdef BLOOM_DATADIR
         {
             char buf[4096];
+            const char *home = getenv("HOME");
             const char *existing = getenv("TERMINFO_DIRS");
             if (existing) {
-                snprintf(buf, sizeof(buf), BLOOM_DATADIR "/terminfo:%s", existing);
+                snprintf(buf, sizeof(buf),
+                         BLOOM_DATADIR "/terminfo:%s/.terminfo:%s",
+                         home ? home : "", existing);
             } else {
-                snprintf(buf, sizeof(buf), BLOOM_DATADIR "/terminfo:");
+                snprintf(buf, sizeof(buf),
+                         BLOOM_DATADIR "/terminfo:%s/.terminfo:",
+                         home ? home : "");
             }
             setenv("TERMINFO_DIRS", buf, 1);
         }

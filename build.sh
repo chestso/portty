@@ -1032,9 +1032,26 @@ mac_vm_deploy() {
         mcopy -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" "$f" ::/
     done
 
+    # Copy terminfo source and install script
+    if [ -f "data/bloom-terminal.ti" ]; then
+        mcopy -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" "data/bloom-terminal.ti" ::/
+        local install_script
+        install_script=$(mktemp)
+        cat >"$install_script" <<'SCRIPT'
+#!/bin/bash
+# Install bloom-terminal terminfo entry (compiled natively for this OS)
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+tic -x "$SCRIPT_DIR/bloom-terminal.ti"
+echo "Installed bloom-terminal-256color terminfo entry"
+SCRIPT
+        mcopy -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" "$install_script" ::/install-terminfo.sh
+        rm -f "$install_script"
+    fi
+
     log_info "Transfer disk contents:"
     mdir -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" ::/
     log_info "Next: ./build.sh --mac-vm  (boot VM, files on USB drive)"
+    log_info "In the VM, run: sh /Volumes/NO\\ NAME/install-terminfo.sh"
 }
 
 # Default build action
