@@ -491,23 +491,22 @@ build_osxcross() {
     local VTERM_DIR="${DEPS_DIR}/libvterm-${VTERM_VERSION}"
     local VTERM_TARBALL="${DEPS_DIR}/libvterm-${VTERM_VERSION}.tar.gz"
 
+    # Add local osxcross to PATH and LD_LIBRARY_PATH if present
+    if [ -d "osxcross/target/bin" ]; then
+        local OSXCROSS_ROOT="$(pwd)/osxcross/target"
+        export PATH="${OSXCROSS_ROOT}/bin:$PATH"
+        export LD_LIBRARY_PATH="${OSXCROSS_ROOT}/lib:${LD_LIBRARY_PATH:-}"
+    fi
+
     # Detect osxcross cross-compiler
     local OSXCROSS_CC=""
     local OSXCROSS_HOST=""
-    if command -v x86_64-apple-darwin23-clang &>/dev/null; then
-        OSXCROSS_CC="x86_64-apple-darwin23-clang"
-        OSXCROSS_HOST="x86_64-apple-darwin23"
-    elif command -v x86_64-apple-darwin22-clang &>/dev/null; then
-        OSXCROSS_CC="x86_64-apple-darwin22-clang"
-        OSXCROSS_HOST="x86_64-apple-darwin22"
-    elif command -v o64-clang &>/dev/null; then
+    if command -v o64-clang &>/dev/null; then
         OSXCROSS_CC="o64-clang"
-        # Detect host triple from o64-clang
         OSXCROSS_HOST=$(o64-clang -dumpmachine 2>/dev/null || echo "x86_64-apple-darwin23")
     else
         log_error "osxcross cross-compiler not found"
-        log_error "Expected: x86_64-apple-darwin*-clang or o64-clang in PATH"
-        log_error "See: https://github.com/tpoechtrager/osxcross"
+        log_error "Run: ./scripts/setup-osxcross.sh /path/to/Command_Line_Tools.dmg"
         exit 1
     fi
     local OSXCROSS_AR="${OSXCROSS_HOST}-ar"
@@ -837,7 +836,9 @@ MAC_VM_DIR="vm-macos"
 MAC_VM_DISK="$MAC_VM_DIR/macos.qcow2"
 MAC_VM_TRANSFER="$MAC_VM_DIR/transfer.img"
 MAC_VM_OPENCORE="$MAC_VM_DIR/OpenCore.qcow2"
-MAC_VM_BASEIMG="$MAC_VM_DIR/BaseSystem.dmg"
+MAC_VM_BASEIMG="$MAC_VM_DIR/BaseSystem.img"
+MAC_VM_OVMF_CODE="$MAC_VM_DIR/OVMF_CODE_4M.fd"
+MAC_VM_OVMF_VARS="$MAC_VM_DIR/OVMF_VARS.fd"
 MAC_VM_OSX_KVM="$MAC_VM_DIR/OSX-KVM"
 
 mac_vm_setup() {
@@ -860,27 +861,26 @@ mac_vm_setup() {
         git clone --depth 1 https://github.com/kholia/OSX-KVM.git "$MAC_VM_OSX_KVM"
     fi
 
-    # Download macOS recovery image
+    # Download macOS recovery image and convert to raw
     if [ ! -f "$MAC_VM_BASEIMG" ]; then
         log_info "Downloading macOS recovery image..."
-        cd "$MAC_VM_OSX_KVM"
-        # Fetch the latest macOS (Sonoma by default)
-        python3 fetch-macOS-v2.py --action download
+        local osx_kvm_abs
+        osx_kvm_abs=$(cd "$MAC_VM_OSX_KVM" && pwd)
+        (cd "$osx_kvm_abs" && python3 fetch-macOS-v2.py --action download)
         local dmg
-        dmg=$(find . -name "BaseSystem.dmg" -print -quit 2>/dev/null)
+        dmg=$(find "$osx_kvm_abs" -name "BaseSystem.dmg" -print -quit 2>/dev/null)
         if [ -z "$dmg" ]; then
             log_error "BaseSystem.dmg not found after download"
-            cd ..
             exit 1
         fi
-        cp "$dmg" "../$(basename "$MAC_VM_BASEIMG")"
-        cd ..
+        log_info "Converting BaseSystem.dmg to raw image..."
+        qemu-img convert "$dmg" -O raw "$MAC_VM_BASEIMG"
         log_info "Recovery image: $MAC_VM_BASEIMG"
     else
         log_info "Recovery image already exists: $MAC_VM_BASEIMG"
     fi
 
-    # Copy OpenCore bootloader
+    # Copy OpenCore bootloader and OVMF firmware from OSX-KVM
     if [ ! -f "$MAC_VM_OPENCORE" ]; then
         log_info "Copying OpenCore bootloader..."
         local oc_src="${MAC_VM_OSX_KVM}/OpenCore/OpenCore.qcow2"
@@ -889,6 +889,14 @@ mac_vm_setup() {
             exit 1
         fi
         cp "$oc_src" "$MAC_VM_OPENCORE"
+    fi
+
+    if [ ! -f "$MAC_VM_OVMF_CODE" ]; then
+        log_info "Copying OVMF firmware from OSX-KVM..."
+        cp "${MAC_VM_OSX_KVM}/OVMF_CODE_4M.fd" "$MAC_VM_OVMF_CODE"
+    fi
+    if [ ! -f "$MAC_VM_OVMF_VARS" ]; then
+        cp "${MAC_VM_OSX_KVM}/OVMF_VARS-1920x1080.fd" "$MAC_VM_OVMF_VARS"
     fi
 
     # Create disk image
@@ -923,27 +931,45 @@ mac_vm_launch() {
         exit 1
     fi
 
+    if [ ! -f "$MAC_VM_OVMF_CODE" ]; then
+        log_error "OVMF firmware not found. Run: ./build.sh --mac-vm-setup"
+        exit 1
+    fi
+
     local QEMU_ARGS=(
         -enable-kvm
-        -cpu "host,vendor=GenuineIntel,+invtsc,+avx2,vmware-cpuid-freq=on"
+        -cpu "Skylake-Client,-hle,-rtm,kvm=on,vendor=GenuineIntel,+invtsc,vmware-cpuid-freq=on,+ssse3,+sse4.2,+popcnt,+avx,+aes,+xsave,+xsaveopt"
         -m 4G
-        -smp 4,cores=4,sockets=1
+        -smp 4,cores=2,sockets=1
         -machine q35
 
+        # UEFI firmware (OSX-KVM custom OVMF)
+        -drive "if=pflash,format=raw,readonly=on,file=${MAC_VM_OVMF_CODE}"
+        -drive "if=pflash,format=raw,file=${MAC_VM_OVMF_VARS}"
+
+        # Apple SMC (required for macOS boot)
+        -device "isa-applesmc,osk=ourhardworkbythesewordsguardedpleasedontsteal(c)AppleComputerInc"
+        -smbios type=2
+
+        # AHCI controller for drives (macOS recovery lacks virtio drivers)
+        -device ich9-ahci,id=sata
+
         # OpenCore bootloader
-        -drive "id=OpenCore,if=virtio,file=${MAC_VM_OPENCORE},format=qcow2,snapshot=on"
+        -drive "id=OpenCoreBoot,if=none,snapshot=on,format=qcow2,file=${MAC_VM_OPENCORE}"
+        -device ide-hd,bus=sata.2,drive=OpenCoreBoot
 
         # Main disk
-        -drive "id=MacHDD,if=virtio,file=${MAC_VM_DISK},format=qcow2"
+        -drive "id=MacHDD,if=none,file=${MAC_VM_DISK},format=qcow2"
+        -device ide-hd,bus=sata.4,drive=MacHDD
 
         # USB input
-        -device usb-ehci,id=ehci
-        -device usb-kbd
-        -device usb-tablet
+        -device qemu-xhci,id=xhci
+        -device usb-kbd,bus=xhci.0
+        -device usb-tablet,bus=xhci.0
 
         # Display
-        -device virtio-vga-gl
-        -display sdl,gl=on
+        -device vmware-svga
+        -display sdl
 
         # Networking
         -device virtio-net-pci,netdev=net0
@@ -960,16 +986,14 @@ mac_vm_launch() {
             exit 1
         fi
         log_info "Booting macOS VM in install mode..."
-        log_info "Select 'macOS Base System' in OpenCore, then use Disk Utility to format the virtio disk"
+        log_info "Select 'macOS Base System' in OpenCore, then use Disk Utility to format the SATA disk"
         QEMU_ARGS+=(
-            -device qemu-xhci,id=xhci
-            -device usb-storage,drive=BaseSystem,bus=xhci.0
-            -drive "id=BaseSystem,if=none,file=${MAC_VM_BASEIMG},format=raw,readonly=on"
+            -drive "id=InstallMedia,if=none,file=${MAC_VM_BASEIMG},format=raw"
+            -device ide-hd,bus=sata.3,drive=InstallMedia
         )
     else
         log_info "Booting macOS VM..."
         QEMU_ARGS+=(
-            -device qemu-xhci,id=xhci
             -device usb-storage,drive=transfer,bus=xhci.0
             -drive "id=transfer,if=none,file=${MAC_VM_TRANSFER},format=raw,readonly=on"
         )

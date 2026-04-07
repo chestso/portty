@@ -313,13 +313,7 @@ bloom-terminal can be cross-compiled for macOS using [osxcross](https://github.c
 ./scripts/setup-osxcross.sh ~/Downloads/Command_Line_Tools_for_Xcode_*.dmg
 ```
 
-2. Add osxcross to your PATH:
-
-```bash
-export PATH="$HOME/osxcross/target/bin:$PATH"
-```
-
-All dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) are cross-compiled automatically on first build. No sudo required.
+osxcross is installed into `./osxcross/` (gitignored). All dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) are cross-compiled automatically on first build. No sudo required.
 
 ### Building
 

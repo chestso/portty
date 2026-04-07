@@ -27,6 +27,7 @@ ltmain.sh
 build/
 build-mingw64/
 build-osxcross/
+osxcross/
 deps/
 vm-w32/
 vm-macos/

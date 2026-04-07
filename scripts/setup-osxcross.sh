@@ -13,12 +13,14 @@
 #   - "Xcode 16" (.xip) — larger, ~7 GB
 #
 # After setup, add osxcross to your PATH:
-#   export PATH="$HOME/osxcross/target/bin:$PATH"
+#   export PATH="./osxcross/target/bin:$PATH"
 
 set -e
 set -u
 
-OSXCROSS_DIR="${OSXCROSS_DIR:-$HOME/osxcross}"
+# Default to ./osxcross (inside the bloom-terminal repo, gitignored)
+SCRIPT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+OSXCROSS_DIR="${OSXCROSS_DIR:-${SCRIPT_DIR}/osxcross}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -220,10 +222,7 @@ main() {
     echo ""
     info "Setup complete!"
     echo ""
-    echo "Add to your shell profile:"
-    echo "  export PATH=\"$OSXCROSS_DIR/target/bin:\$PATH\""
-    echo ""
-    echo "Then cross-compile bloom-terminal:"
+    echo "Cross-compile bloom-terminal:"
     echo "  ./build.sh --osxcross"
 }
 
