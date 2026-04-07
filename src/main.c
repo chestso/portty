@@ -890,4 +890,30 @@ static void print_usage(const char *progname)
     printf("    %s -- sh -c 'echo hello'        # Run shell command\n", progname);
     printf("\n");
     printf("Runtime controls:\n");
+    printf("  Ctrl+Shift+C    Copy selection to clipboard\n");
+    printf("  Ctrl+Shift+V    Paste from clipboard\n");
+    printf("  Shift+PgUp/Dn   Scroll through scrollback\n");
+    printf("\n");
+    printf("Build info:\n");
+    printf("  %s\n", PACKAGE_STRING);
+    printf("  CC: %s\n", BUILD_CC);
+    printf("  libvterm %s, SDL3 %s, FreeType %s\n",
+           DEP_VTERM_VERSION, DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
+    printf("  HarfBuzz %s, libpng %s\n",
+           DEP_HARFBUZZ_VERSION, DEP_LIBPNG_VERSION);
+#ifdef DEP_FONTCONFIG_VERSION
+    printf("  Fontconfig %s\n", DEP_FONTCONFIG_VERSION);
+#endif
+#ifdef __APPLE__
+    printf("  Font resolver: Core Text (system)\n");
+#elif defined(_WIN32)
+    printf("  Font resolver: W32 native\n");
+#endif
+#ifdef HAVE_GTK4
+    printf("  GTK4 %s, libadwaita %s\n", DEP_GTK4_VERSION,
+           DEP_LIBADWAITA_VERSION);
+#ifdef HAVE_EGL_DMABUF
+    printf("  DMA-BUF: EGL + GBM zero-copy\n");
+#endif
+#endif
 }
