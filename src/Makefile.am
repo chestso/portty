@@ -6,9 +6,13 @@ bin_PROGRAMS = bloom-terminal
 if HOST_WINDOWS
 PTY_SOURCE = pty_win32.c
 FONT_RESOLVE_SOURCE = font_resolve_win32.c
-else
+else !HOST_WINDOWS
 PTY_SOURCE = pty.c
+if HOST_MACOS
+FONT_RESOLVE_SOURCE = font_resolve_ct.c
+else
 FONT_RESOLVE_SOURCE = font_resolve_fc.c
+endif
 endif
 
 bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_vt.c rend.c rend_sdl3.c \
@@ -27,10 +31,17 @@ bloom_terminal_LDADD = $(VTERM_LIBS) $(SDL3_LIBS) \
 if HOST_WINDOWS
 bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi
 bloom_terminal_LDFLAGS =
+else !HOST_WINDOWS
+if HOST_MACOS
+bloom_terminal_LDFLAGS = -framework CoreText -framework CoreFoundation \
+    -framework GameController -framework CoreHaptics \
+    -framework CoreMotion -framework CoreMedia
 else
 AM_CFLAGS += $(FONTCONFIG_CFLAGS)
-bloom_terminal_LDADD += $(FONTCONFIG_LIBS) -lutil -ldl
+bloom_terminal_LDADD += $(FONTCONFIG_LIBS)
+bloom_terminal_LDADD += -lutil
 bloom_terminal_LDFLAGS = -rdynamic
+endif
 endif
 
 AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'

@@ -17,15 +17,15 @@ INSTALL_PREFIX="$HOME/.local"
 ENABLE_DEBUG=true
 PARALLEL_JOBS=$(nproc)
 
-# VM configuration
-VM_DIR="vm"
-VM_DISK="$VM_DIR/win11.qcow2"
-VM_ISO="$VM_DIR/win11-ltsc-eval.iso"
-VM_VIRTIO="$VM_DIR/virtio-win.iso"
-VM_OVMF_VARS="$VM_DIR/OVMF_VARS.fd"
-VM_TPM_DIR="$VM_DIR/tpm"
-VM_TRANSFER="$VM_DIR/transfer.img"
-VM_AUTOUNATTEND="$VM_DIR/autounattend.img"
+# Windows VM configuration
+W32_VM_DIR="vm-w32"
+VM_DISK="$W32_VM_DIR/win11.qcow2"
+VM_ISO="$W32_VM_DIR/win11-ltsc-eval.iso"
+VM_VIRTIO="$W32_VM_DIR/virtio-win.iso"
+VM_OVMF_VARS="$W32_VM_DIR/OVMF_VARS.fd"
+VM_TPM_DIR="$W32_VM_DIR/tpm"
+VM_TRANSFER="$W32_VM_DIR/transfer.img"
+VM_AUTOUNATTEND="$W32_VM_DIR/autounattend.img"
 OVMF_CODE="/usr/share/edk2/ovmf/OVMF_CODE.secboot.fd"
 
 # Logging functions
@@ -477,10 +477,174 @@ build_mingw64() {
     log_info "Binary and DLLs: ${MINGW_BUILD_DIR}/src/.libs/"
 }
 
+# --- macOS cross-compilation (osxcross) ---
+
+build_osxcross() {
+    log_info "Cross-compiling for macOS (osxcross)..."
+
+    local OSXCROSS_BUILD_DIR="build-osxcross"
+    local DEPS_DIR="deps"
+    local MACOS_PREFIX
+    MACOS_PREFIX="$(pwd)/${DEPS_DIR}/macos-prefix"
+    local VTERM_VERSION="0.3.3"
+    local VTERM_URL="https://www.leonerd.org.uk/code/libvterm/libvterm-${VTERM_VERSION}.tar.gz"
+    local VTERM_DIR="${DEPS_DIR}/libvterm-${VTERM_VERSION}"
+    local VTERM_TARBALL="${DEPS_DIR}/libvterm-${VTERM_VERSION}.tar.gz"
+
+    # Detect osxcross cross-compiler
+    local OSXCROSS_CC=""
+    local OSXCROSS_HOST=""
+    if command -v x86_64-apple-darwin23-clang &>/dev/null; then
+        OSXCROSS_CC="x86_64-apple-darwin23-clang"
+        OSXCROSS_HOST="x86_64-apple-darwin23"
+    elif command -v x86_64-apple-darwin22-clang &>/dev/null; then
+        OSXCROSS_CC="x86_64-apple-darwin22-clang"
+        OSXCROSS_HOST="x86_64-apple-darwin22"
+    elif command -v o64-clang &>/dev/null; then
+        OSXCROSS_CC="o64-clang"
+        # Detect host triple from o64-clang
+        OSXCROSS_HOST=$(o64-clang -dumpmachine 2>/dev/null || echo "x86_64-apple-darwin23")
+    else
+        log_error "osxcross cross-compiler not found"
+        log_error "Expected: x86_64-apple-darwin*-clang or o64-clang in PATH"
+        log_error "See: https://github.com/tpoechtrager/osxcross"
+        exit 1
+    fi
+    local OSXCROSS_AR="${OSXCROSS_HOST}-ar"
+    if ! command -v "$OSXCROSS_AR" &>/dev/null; then
+        OSXCROSS_AR="$(dirname "$(command -v "$OSXCROSS_CC")")/llvm-ar"
+    fi
+
+    log_info "Using cross-compiler: $OSXCROSS_CC (host: $OSXCROSS_HOST)"
+
+    # Build macOS dependencies if needed
+    if [ ! -f "${MACOS_PREFIX}/lib/pkgconfig/sdl3.pc" ]; then
+        log_info "Building macOS dependencies (this may take a while on first run)..."
+        if [ ! -x "scripts/build-macos-deps.sh" ]; then
+            log_error "scripts/build-macos-deps.sh not found"
+            exit 1
+        fi
+        OSXCROSS_HOST="$OSXCROSS_HOST" MACOS_PREFIX="$MACOS_PREFIX" \
+            scripts/build-macos-deps.sh
+        if [ $? -ne 0 ]; then
+            log_error "Failed to build macOS dependencies"
+            exit 1
+        fi
+    else
+        log_info "Using cached macOS dependencies: ${MACOS_PREFIX}/"
+    fi
+
+    # --- Cross-compile libvterm ---
+    mkdir -p "$DEPS_DIR"
+
+    if [ ! -f "$VTERM_TARBALL" ]; then
+        log_info "Downloading libvterm ${VTERM_VERSION}..."
+        curl -L -o "$VTERM_TARBALL" "$VTERM_URL"
+        if [ $? -ne 0 ]; then
+            log_error "Failed to download libvterm"
+            rm -f "$VTERM_TARBALL"
+            exit 1
+        fi
+    fi
+
+    if [ ! -d "$VTERM_DIR" ]; then
+        log_info "Extracting libvterm..."
+        tar -xzf "$VTERM_TARBALL" -C "$DEPS_DIR"
+    fi
+
+    local VTERM_BUILD="${VTERM_DIR}/build-osxcross"
+    if [ ! -f "${VTERM_BUILD}/libvterm.a" ]; then
+        log_info "Cross-compiling libvterm for macOS..."
+        mkdir -p "$VTERM_BUILD"
+        for f in "${VTERM_DIR}"/src/*.c; do
+            local base
+            base=$(basename "$f" .c)
+            "$OSXCROSS_CC" -Wall -I"${VTERM_DIR}/include" -c "$f" \
+                -o "${VTERM_BUILD}/${base}.o"
+        done
+        "$OSXCROSS_AR" rcs "${VTERM_BUILD}/libvterm.a" "${VTERM_BUILD}"/*.o
+        log_info "libvterm cross-compiled: ${VTERM_BUILD}/libvterm.a"
+    else
+        log_info "Using cached libvterm: ${VTERM_BUILD}/libvterm.a"
+    fi
+
+    local VTERM_ABS
+    VTERM_ABS=$(cd "$VTERM_DIR" && pwd)
+
+    # --- Generate configure script ---
+    if ! generate_configure; then
+        exit 1
+    fi
+
+    # --- Configure for cross-compilation ---
+    if [ -d "$OSXCROSS_BUILD_DIR" ]; then
+        rm -rf "$OSXCROSS_BUILD_DIR"
+    fi
+    mkdir -p "$OSXCROSS_BUILD_DIR"
+    cd "$OSXCROSS_BUILD_DIR"
+
+    local CONFIGURE_CMD="../configure"
+    CONFIGURE_CMD="$CONFIGURE_CMD --host=${OSXCROSS_HOST}"
+    CONFIGURE_CMD="$CONFIGURE_CMD --prefix=${MACOS_PREFIX}"
+    local OSXCROSS_CC_ABS
+    OSXCROSS_CC_ABS=$(command -v "$OSXCROSS_CC")
+    CONFIGURE_CMD="$CONFIGURE_CMD CC=${OSXCROSS_CC_ABS}"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG=pkg-config"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${MACOS_PREFIX}/lib/pkgconfig"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_LIBDIR=${MACOS_PREFIX}/lib/pkgconfig"
+    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_CFLAGS=-I${VTERM_ABS}/include"
+    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_LIBS=\"-L${VTERM_ABS}/build-osxcross -lvterm\""
+
+    # Link compiler-rt builtins (for ___isPlatformVersionAtLeast etc.)
+    local OSXCROSS_ROOT
+    OSXCROSS_ROOT=$(dirname "$(dirname "$OSXCROSS_CC_ABS")")
+    local RT_LIB="${OSXCROSS_ROOT}/lib/darwin/libclang_rt.osx.a"
+    if [ ! -f "$RT_LIB" ]; then
+        log_error "compiler-rt not found: $RT_LIB"
+        log_error "Run: ./scripts/setup-osxcross.sh (it builds compiler-rt automatically)"
+        exit 1
+    fi
+    CONFIGURE_CMD="$CONFIGURE_CMD LIBS=\"$RT_LIB\""
+
+    if [ "$ENABLE_DEBUG" = true ]; then
+        CONFIGURE_CMD="$CONFIGURE_CMD CFLAGS='-O0 -g3 -DDEBUG'"
+    fi
+
+    log_info "Running: $CONFIGURE_CMD"
+    eval "$CONFIGURE_CMD"
+
+    if [ $? -ne 0 ]; then
+        log_error "Cross-compilation configure failed"
+        if [ -f "config.log" ]; then
+            log_error "Last 50 lines of config.log:"
+            tail -50 config.log
+        fi
+        cd ..
+        exit 1
+    fi
+
+    cd ..
+
+    # --- Build ---
+    cd "$OSXCROSS_BUILD_DIR"
+    log_info "Building with $PARALLEL_JOBS parallel jobs..."
+    make -j"$PARALLEL_JOBS"
+
+    if [ $? -ne 0 ]; then
+        log_error "Cross-compilation build failed"
+        cd ..
+        exit 1
+    fi
+    cd ..
+
+    log_info "Cross-compilation complete!"
+    log_info "Binary: ${OSXCROSS_BUILD_DIR}/src/bloom-terminal"
+}
+
 # --- Windows VM (QEMU/KVM) functions ---
 
 # Download ISOs, create disk image, UEFI vars, autounattend floppy
-vm_setup() {
+w32_vm_setup() {
     log_info "Setting up Windows VM..."
 
     # Check prerequisites
@@ -497,7 +661,7 @@ vm_setup() {
         exit 1
     fi
 
-    mkdir -p "$VM_DIR" "$VM_TPM_DIR"
+    mkdir -p "$W32_VM_DIR" "$VM_TPM_DIR"
 
     # Download Windows 11 LTSC evaluation ISO
     if [ ! -f "$VM_ISO" ]; then
@@ -534,7 +698,7 @@ vm_setup() {
     # Create autounattend floppy (bypasses TPM/SecureBoot/storage checks)
     if [ ! -f "$VM_AUTOUNATTEND" ]; then
         log_info "Creating autounattend floppy image..."
-        local XML_FILE="$VM_DIR/autounattend.xml"
+        local XML_FILE="$W32_VM_DIR/autounattend.xml"
         cat >"$XML_FILE" <<'XML'
 <?xml version="1.0" encoding="utf-8"?>
 <unattend xmlns="urn:schemas-microsoft-com:unattend"
@@ -576,15 +740,15 @@ XML
     fi
 
     log_info "VM setup complete!"
-    log_info "Next: ./build.sh --vm-install  (install Windows)"
+    log_info "Next: ./build.sh --w32-vm-install  (install Windows)"
 }
 
 # Launch the VM (install mode or normal boot)
-vm_launch() {
+w32_vm_launch() {
     local mode="$1"
 
     if [ ! -f "$VM_DISK" ]; then
-        log_error "VM disk not found. Run: ./build.sh --vm-setup"
+        log_error "VM disk not found. Run: ./build.sh --w32-vm-setup"
         exit 1
     fi
 
@@ -617,7 +781,7 @@ vm_launch() {
 
     if [ "$mode" = "install" ]; then
         if [ ! -f "$VM_ISO" ]; then
-            log_error "Windows ISO not found. Run: ./build.sh --vm-setup"
+            log_error "Windows ISO not found. Run: ./build.sh --w32-vm-setup"
             exit 1
         fi
         log_info "Booting VM in install mode..."
@@ -645,7 +809,7 @@ vm_launch() {
 }
 
 # Cross-compile and write exe + DLLs to transfer disk
-vm_deploy() {
+w32_vm_deploy() {
     build_mingw64
 
     local EXE_DIR="build-mingw64/src/.libs"
@@ -664,7 +828,189 @@ vm_deploy() {
 
     log_info "Transfer disk contents:"
     mdir -i "${VM_TRANSFER}${MTOOLS_OFFSET}" ::/
-    log_info "Next: ./build.sh --vm  (boot VM, files on second drive)"
+    log_info "Next: ./build.sh --w32-vm  (boot VM, files on second drive)"
+}
+
+# --- macOS VM (QEMU/KVM + OSX-KVM) functions ---
+
+MAC_VM_DIR="vm-macos"
+MAC_VM_DISK="$MAC_VM_DIR/macos.qcow2"
+MAC_VM_TRANSFER="$MAC_VM_DIR/transfer.img"
+MAC_VM_OPENCORE="$MAC_VM_DIR/OpenCore.qcow2"
+MAC_VM_BASEIMG="$MAC_VM_DIR/BaseSystem.dmg"
+MAC_VM_OSX_KVM="$MAC_VM_DIR/OSX-KVM"
+
+mac_vm_setup() {
+    log_info "Setting up macOS VM..."
+
+    # Check prerequisites
+    for cmd in qemu-system-x86_64 qemu-img mcopy mkfs.fat; do
+        if ! command -v "$cmd" &>/dev/null; then
+            log_error "$cmd not found"
+            log_error "Install with: sudo dnf install qemu-system-x86 qemu-img mtools dosfstools"
+            exit 1
+        fi
+    done
+
+    mkdir -p "$MAC_VM_DIR"
+
+    # Clone or update OSX-KVM for OpenCore and fetch scripts
+    if [ ! -d "$MAC_VM_OSX_KVM" ]; then
+        log_info "Cloning OSX-KVM..."
+        git clone --depth 1 https://github.com/kholia/OSX-KVM.git "$MAC_VM_OSX_KVM"
+    fi
+
+    # Download macOS recovery image
+    if [ ! -f "$MAC_VM_BASEIMG" ]; then
+        log_info "Downloading macOS recovery image..."
+        cd "$MAC_VM_OSX_KVM"
+        # Fetch the latest macOS (Sonoma by default)
+        python3 fetch-macOS-v2.py --action download
+        local dmg
+        dmg=$(find . -name "BaseSystem.dmg" -print -quit 2>/dev/null)
+        if [ -z "$dmg" ]; then
+            log_error "BaseSystem.dmg not found after download"
+            cd ..
+            exit 1
+        fi
+        cp "$dmg" "../$(basename "$MAC_VM_BASEIMG")"
+        cd ..
+        log_info "Recovery image: $MAC_VM_BASEIMG"
+    else
+        log_info "Recovery image already exists: $MAC_VM_BASEIMG"
+    fi
+
+    # Copy OpenCore bootloader
+    if [ ! -f "$MAC_VM_OPENCORE" ]; then
+        log_info "Copying OpenCore bootloader..."
+        local oc_src="${MAC_VM_OSX_KVM}/OpenCore/OpenCore.qcow2"
+        if [ ! -f "$oc_src" ]; then
+            log_error "OpenCore.qcow2 not found in OSX-KVM"
+            exit 1
+        fi
+        cp "$oc_src" "$MAC_VM_OPENCORE"
+    fi
+
+    # Create disk image
+    if [ ! -f "$MAC_VM_DISK" ]; then
+        log_info "Creating 64GB disk image..."
+        qemu-img create -f qcow2 "$MAC_VM_DISK" 64G
+    else
+        log_info "Disk image already exists: $MAC_VM_DISK"
+    fi
+
+    # Create transfer disk image with MBR partition table
+    if [ ! -f "$MAC_VM_TRANSFER" ]; then
+        log_info "Creating 256MB transfer disk image..."
+        dd if=/dev/zero of="$MAC_VM_TRANSFER" bs=1M count=256 2>/dev/null
+        printf 'o\nn\np\n1\n\n\nt\nc\nw\n' | fdisk "$MAC_VM_TRANSFER" >/dev/null 2>&1
+        mkfs.fat -F 32 --offset 2048 "$MAC_VM_TRANSFER" >/dev/null
+    fi
+
+    log_info "macOS VM setup complete!"
+    log_info "Next: ./build.sh --mac-vm-install  (install macOS)"
+}
+
+mac_vm_launch() {
+    local mode="$1"
+
+    if [ ! -f "$MAC_VM_DISK" ]; then
+        log_error "VM disk not found. Run: ./build.sh --mac-vm-setup"
+        exit 1
+    fi
+    if [ ! -f "$MAC_VM_OPENCORE" ]; then
+        log_error "OpenCore not found. Run: ./build.sh --mac-vm-setup"
+        exit 1
+    fi
+
+    local QEMU_ARGS=(
+        -enable-kvm
+        -cpu "host,vendor=GenuineIntel,+invtsc,+avx2,vmware-cpuid-freq=on"
+        -m 4G
+        -smp 4,cores=4,sockets=1
+        -machine q35
+
+        # OpenCore bootloader
+        -drive "id=OpenCore,if=virtio,file=${MAC_VM_OPENCORE},format=qcow2,snapshot=on"
+
+        # Main disk
+        -drive "id=MacHDD,if=virtio,file=${MAC_VM_DISK},format=qcow2"
+
+        # USB input
+        -device usb-ehci,id=ehci
+        -device usb-kbd
+        -device usb-tablet
+
+        # Display
+        -device virtio-vga-gl
+        -display sdl,gl=on
+
+        # Networking
+        -device virtio-net-pci,netdev=net0
+        -netdev user,id=net0
+
+        # Audio
+        -device ich9-intel-hda
+        -device hda-duplex
+    )
+
+    if [ "$mode" = "install" ]; then
+        if [ ! -f "$MAC_VM_BASEIMG" ]; then
+            log_error "Recovery image not found. Run: ./build.sh --mac-vm-setup"
+            exit 1
+        fi
+        log_info "Booting macOS VM in install mode..."
+        log_info "Select 'macOS Base System' in OpenCore, then use Disk Utility to format the virtio disk"
+        QEMU_ARGS+=(
+            -device qemu-xhci,id=xhci
+            -device usb-storage,drive=BaseSystem,bus=xhci.0
+            -drive "id=BaseSystem,if=none,file=${MAC_VM_BASEIMG},format=raw,readonly=on"
+        )
+    else
+        log_info "Booting macOS VM..."
+        QEMU_ARGS+=(
+            -device qemu-xhci,id=xhci
+            -device usb-storage,drive=transfer,bus=xhci.0
+            -drive "id=transfer,if=none,file=${MAC_VM_TRANSFER},format=raw,readonly=on"
+        )
+    fi
+
+    exec qemu-system-x86_64 "${QEMU_ARGS[@]}"
+}
+
+mac_vm_deploy() {
+    build_osxcross
+
+    local BIN_DIR="build-osxcross/src"
+
+    # Recreate transfer image with MBR partition table
+    log_info "Writing files to macOS transfer disk..."
+    dd if=/dev/zero of="$MAC_VM_TRANSFER" bs=1M count=256 2>/dev/null
+    printf 'o\nn\np\n1\n\n\nt\nc\nw\n' | fdisk "$MAC_VM_TRANSFER" >/dev/null 2>&1
+    mkfs.fat -F 32 --offset 2048 "$MAC_VM_TRANSFER" >/dev/null
+
+    local MTOOLS_OFFSET="@@1048576"
+
+    # Copy the binary
+    if [ -f "${BIN_DIR}/bloom-terminal" ]; then
+        mcopy -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" "${BIN_DIR}/bloom-terminal" ::/
+    elif [ -f "${BIN_DIR}/.libs/bloom-terminal" ]; then
+        mcopy -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" "${BIN_DIR}/.libs/bloom-terminal" ::/
+    else
+        log_error "bloom-terminal binary not found in ${BIN_DIR}/"
+        exit 1
+    fi
+
+    # Copy any dylibs alongside the binary
+    local dylibs
+    dylibs=$(find "${BIN_DIR}" "${BIN_DIR}/.libs" -name "*.dylib" 2>/dev/null || true)
+    for f in $dylibs; do
+        mcopy -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" "$f" ::/
+    done
+
+    log_info "Transfer disk contents:"
+    mdir -i "${MAC_VM_TRANSFER}${MTOOLS_OFFSET}" ::/
+    log_info "Next: ./build.sh --mac-vm  (boot VM, files on USB drive)"
 }
 
 # Default build action
@@ -739,20 +1085,40 @@ main() {
                 ACTION=mingw64
                 shift
                 ;;
-            --vm-setup)
-                ACTION=vm_setup
+            --osxcross)
+                ACTION=osxcross
                 shift
                 ;;
-            --vm-install)
-                ACTION=vm_install
+            --w32-vm-setup)
+                ACTION=w32_vm_setup
                 shift
                 ;;
-            --vm)
-                ACTION=vm
+            --w32-vm-install)
+                ACTION=w32_vm_install
                 shift
                 ;;
-            --vm-deploy)
-                ACTION=vm_deploy
+            --w32-vm)
+                ACTION=w32_vm
+                shift
+                ;;
+            --w32-vm-deploy)
+                ACTION=w32_vm_deploy
+                shift
+                ;;
+            --mac-vm-setup)
+                ACTION=mac_vm_setup
+                shift
+                ;;
+            --mac-vm-install)
+                ACTION=mac_vm_install
+                shift
+                ;;
+            --mac-vm)
+                ACTION=mac_vm
+                shift
+                ;;
+            --mac-vm-deploy)
+                ACTION=mac_vm_deploy
                 shift
                 ;;
             --profiling)
@@ -792,10 +1158,15 @@ main() {
                 echo "  --bear            Generate compile_commands.json using bear"
                 echo "  --no-debug        Disable debug build"
                 echo "  --mingw64         Cross-compile for Windows using mingw64"
-                echo "  --vm-setup        Download ISOs and create Windows VM disk images"
-                echo "  --vm-install      Boot VM from ISO for Windows installation"
-                echo "  --vm              Boot the Windows VM"
-                echo "  --vm-deploy       Cross-compile and write files to VM transfer disk"
+                echo "  --osxcross        Cross-compile for macOS using osxcross"
+                echo "  --w32-vm-setup    Download ISOs and create Windows VM disk images"
+                echo "  --w32-vm-install  Boot VM from ISO for Windows installation"
+                echo "  --w32-vm          Boot the Windows VM"
+                echo "  --w32-vm-deploy   Cross-compile and write files to VM transfer disk"
+                echo "  --mac-vm-setup    Download macOS recovery image and create VM disks"
+                echo "  --mac-vm-install  Boot macOS VM from recovery for installation"
+                echo "  --mac-vm          Boot the macOS VM"
+                echo "  --mac-vm-deploy   Cross-compile and write files to VM transfer disk"
                 echo "  --profiling       Build with gprof, run benchmark, generate profile report"
                 echo "  --format          Format source files with clang-format, shfmt, and prettier"
                 echo "  --ref-png T OUT   Generate reference PNG of text T using hb-view"
@@ -821,17 +1192,32 @@ main() {
         mingw64)
             build_mingw64
             ;;
-        vm_setup)
-            vm_setup
+        osxcross)
+            build_osxcross
             ;;
-        vm_install)
-            vm_launch install
+        w32_vm_setup)
+            w32_vm_setup
             ;;
-        vm)
-            vm_launch run
+        w32_vm_install)
+            w32_vm_launch install
             ;;
-        vm_deploy)
-            vm_deploy
+        w32_vm)
+            w32_vm_launch run
+            ;;
+        w32_vm_deploy)
+            w32_vm_deploy
+            ;;
+        mac_vm_setup)
+            mac_vm_setup
+            ;;
+        mac_vm_install)
+            mac_vm_launch install
+            ;;
+        mac_vm)
+            mac_vm_launch run
+            ;;
+        mac_vm_deploy)
+            mac_vm_deploy
             ;;
         profiling)
             run_profiling

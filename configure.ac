@@ -9,12 +9,14 @@ LT_INIT([dlopen])
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 
-# Detect Windows cross-compilation
+# Detect cross-compilation target
 case "$host_os" in
-  mingw*|msys*) host_windows=yes ;;
-  *) host_windows=no ;;
+  mingw*|msys*) host_windows=yes; host_macos=no ;;
+  darwin*)      host_windows=no;  host_macos=yes ;;
+  *)            host_windows=no;  host_macos=no ;;
 esac
 AM_CONDITIONAL([HOST_WINDOWS], [test "x$host_windows" = "xyes"])
+AM_CONDITIONAL([HOST_MACOS], [test "x$host_macos" = "xyes"])
 
 # dlopen support (POSIX only)
 if test "x$host_windows" = "xno"; then
@@ -42,7 +44,7 @@ fi
 # Check for libraries
 PKG_CHECK_MODULES([VTERM], [vterm])
 PKG_CHECK_MODULES([SDL3], [sdl3])
-if test "x$host_windows" = "xno"; then
+if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
 fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
@@ -56,8 +58,8 @@ AC_ARG_ENABLE([gtk4],
   [enable_gtk4=$enableval],
   [enable_gtk4=auto])
 
-# Force-disable GTK4 on Windows
-if test "x$host_windows" = "xyes"; then
+# Force-disable GTK4 on Windows and macOS
+if test "x$host_windows" = "xyes" || test "x$host_macos" = "xyes"; then
   enable_gtk4=no
 fi
 

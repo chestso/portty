@@ -3,7 +3,11 @@
 #include "common.h"
 #include <errno.h>
 #include <fcntl.h>
+#if defined(__APPLE__)
+#include <util.h>
+#else
 #include <pty.h>
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>

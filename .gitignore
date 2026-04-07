@@ -26,8 +26,11 @@ ltmain.sh
 # Build directories
 build/
 build-mingw64/
+build-osxcross/
 deps/
 vm/
+vm-w32/
+vm-macos/
 _build/
 .deps/
 .dirstamp

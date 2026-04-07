@@ -2,7 +2,7 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Cross-compiles for Windows using ConPTY, a native font resolver, and Windows 11 DWM styling.
+Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Cross-compiles for Windows (ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Features
 
@@ -11,9 +11,9 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
-- Bold, italic, and bold-italic font styles (variable font axes, fontconfig resolution, synthetic fallback)
+- Bold, italic, and bold-italic font styles (variable font axes, platform-native resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
-- Dynamic font fallback via Fontconfig (up to 8 runtime fallback fonts with codepoint cache)
+- Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Support for Unicode characters and emoji (COLR v1 color fonts supported; experimental)
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
@@ -55,6 +55,7 @@ bloom-terminal uses a modular backend abstraction design:
 
 - **Font Resolver Backend**: Handles font discovery and selection
   - Linux: Fontconfig (`font_resolve_backend_fc`)
+  - macOS: Core Text (`font_resolve_backend_ct`) with `CTFontCreateForString` codepoint fallback
   - Windows: Native registry-based resolver (`font_resolve_backend_win32`) with FreeType codepoint fallback
 
 Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`, `RendererBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
@@ -111,6 +112,9 @@ Available options:
 - `--ref-png TEXT OUT` - Generate reference PNG of text using hb-view
 - `--ref-layers TEXT PREFIX` - Export COLR layers for debugging (requires blackrenderer)
 - `--mingw64` - Cross-compile for Windows using mingw64
+- `--osxcross` - Cross-compile for macOS using osxcross
+- `--w32-vm-setup/install/deploy` - Windows VM management (QEMU/KVM)
+- `--mac-vm-setup/install/deploy` - macOS VM management (QEMU/KVM + OSX-KVM)
 - `--prefix=PATH` - Set installation prefix (default: $HOME/.local)
 - `--help` - Show help message
 
@@ -219,14 +223,23 @@ infocmp bloom-terminal-256color | ssh remote-host 'tic -x -'
 
 ## Dependencies
 
+All platforms:
+
 - libvterm
 - SDL3
-- fontconfig
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
 - libpng
 
-Optional:
+Linux only:
+
+- fontconfig (font discovery)
+
+macOS only:
+
+- Core Text + Core Foundation (system frameworks, always available)
+
+Optional (Linux):
 
 - gtk4 + libadwaita-1 (for `--gtk4` platform backend)
 - EGL + GBM + libdrm (for zero-copy DMA-BUF rendering in GTK4 backend)
@@ -272,10 +285,10 @@ This produces `build-mingw64/src/.libs/bloom-terminal.exe` with all required DLL
 For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU/KVM:
 
 ```bash
-./build.sh --vm-setup       # Download ISOs, create disk images (one-time)
-./build.sh --vm-install      # Boot VM from ISO to install Windows
-./build.sh --vm-deploy       # Cross-compile and write files to VM transfer disk
-./build.sh --vm              # Boot the VM (transfer disk appears as second drive)
+./build.sh --w32-vm-setup    # Download ISOs, create disk images (one-time)
+./build.sh --w32-vm-install  # Boot VM from ISO to install Windows
+./build.sh --w32-vm-deploy   # Cross-compile and write files to VM transfer disk
+./build.sh --w32-vm          # Boot the VM (transfer disk appears as second drive)
 ```
 
 The installer requires a virtio storage driver: **Load driver** → **Browse** → `F:` → `viostor/w11/amd64`.
@@ -286,6 +299,54 @@ The installer requires a virtio storage driver: **Load driver** → **Browse** �
 - **Font resolver**: Native Windows registry-based font discovery (`src/font_resolve_win32.c`) replaces Fontconfig. Default fallback chain: Cascadia Mono → Consolas → Courier New.
 - **DWM styling**: Dark title bar, Mica backdrop, custom caption color, rounded corners on Windows 11 (degrades gracefully on older versions)
 - **Platform**: SDL3 only (GTK4 backend is not available on Windows)
+
+## macOS Cross-Compilation
+
+bloom-terminal can be cross-compiled for macOS using [osxcross](https://github.com/tpoechtrager/osxcross). The macOS build uses native Core Text font resolution — no Homebrew or external dependencies needed at runtime.
+
+### Prerequisites
+
+1. Set up the osxcross toolchain (downloads ~700 MB SDK from Apple, requires free Apple ID):
+
+```bash
+# Download "Command Line Tools for Xcode" .dmg from https://developer.apple.com/download/all/
+./scripts/setup-osxcross.sh ~/Downloads/Command_Line_Tools_for_Xcode_*.dmg
+```
+
+2. Add osxcross to your PATH:
+
+```bash
+export PATH="$HOME/osxcross/target/bin:$PATH"
+```
+
+All dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) are cross-compiled automatically on first build. No sudo required.
+
+### Building
+
+```bash
+./build.sh --osxcross
+```
+
+This produces `build-osxcross/src/bloom-terminal` (Mach-O 64-bit x86_64). The osxcross build uses a separate directory so it doesn't conflict with the Linux `build/` or Windows `build-mingw64/`.
+
+### Testing with QEMU/KVM
+
+For interactive testing, use a macOS VM with QEMU/KVM via [OSX-KVM](https://github.com/kholia/OSX-KVM):
+
+```bash
+./build.sh --mac-vm-setup    # Download recovery image, create disk images (one-time)
+./build.sh --mac-vm-install  # Boot from recovery to install macOS
+./build.sh --mac-vm-deploy   # Cross-compile and write binary to VM transfer disk
+./build.sh --mac-vm          # Boot the VM (transfer disk appears as USB drive)
+```
+
+The transfer disk mounts as a USB drive — copy `bloom-terminal` from it and run. No Homebrew or extra packages needed.
+
+### macOS Details
+
+- **PTY**: Standard BSD `forkpty()` from `<util.h>` — same POSIX implementation as Linux (`src/pty.c`)
+- **Font resolver**: Native Core Text (`src/font_resolve_ct.c`). Default fallback chain: SF Mono → Menlo → Monaco → Courier. Emoji via Apple Color Emoji.
+- **Platform**: SDL3 only (GTK4 backend is not available on macOS)
 
 ## Testing
 
