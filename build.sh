@@ -388,6 +388,9 @@ build_mingw64() {
                 -o "${VTERM_BUILD}/${base}.o"
         done
         "$MINGW_AR" rcs "${VTERM_BUILD}/libvterm.a" "${VTERM_BUILD}"/*.o
+        # Generate pkg-config file from template
+        sed -e "s|@LIBDIR@|${VTERM_BUILD}|" -e "s|@INCDIR@|${VTERM_DIR}/include|" \
+            "${VTERM_DIR}/vterm.pc.in" > "${VTERM_BUILD}/vterm.pc"
         log_info "libvterm cross-compiled: ${VTERM_BUILD}/libvterm.a"
     else
         log_info "Using cached libvterm: ${VTERM_BUILD}/libvterm.a"
@@ -412,6 +415,7 @@ build_mingw64() {
     CONFIGURE_CMD="$CONFIGURE_CMD --host=${MINGW_HOST}"
     CONFIGURE_CMD="$CONFIGURE_CMD --prefix=${MINGW_SYSROOT}"
     CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG=${MINGW_PKG_CONFIG}"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${VTERM_ABS}/build-mingw64"
     CONFIGURE_CMD="$CONFIGURE_CMD VTERM_CFLAGS=-I${VTERM_ABS}/include"
     CONFIGURE_CMD="$CONFIGURE_CMD VTERM_LIBS=\"-L${VTERM_ABS}/build-mingw64 -lvterm\""
 
@@ -562,6 +566,9 @@ build_osxcross() {
                 -o "${VTERM_BUILD}/${base}.o"
         done
         "$OSXCROSS_AR" rcs "${VTERM_BUILD}/libvterm.a" "${VTERM_BUILD}"/*.o
+        # Generate pkg-config file from template
+        sed -e "s|@LIBDIR@|${VTERM_BUILD}|" -e "s|@INCDIR@|${VTERM_DIR}/include|" \
+            "${VTERM_DIR}/vterm.pc.in" > "${VTERM_BUILD}/vterm.pc"
         log_info "libvterm cross-compiled: ${VTERM_BUILD}/libvterm.a"
     else
         log_info "Using cached libvterm: ${VTERM_BUILD}/libvterm.a"
@@ -589,7 +596,7 @@ build_osxcross() {
     OSXCROSS_CC_ABS=$(command -v "$OSXCROSS_CC")
     CONFIGURE_CMD="$CONFIGURE_CMD CC=${OSXCROSS_CC_ABS}"
     CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG=pkg-config"
-    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${MACOS_PREFIX}/lib/pkgconfig"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${VTERM_ABS}/build-osxcross:${MACOS_PREFIX}/lib/pkgconfig"
     CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_LIBDIR=${MACOS_PREFIX}/lib/pkgconfig"
     CONFIGURE_CMD="$CONFIGURE_CMD VTERM_CFLAGS=-I${VTERM_ABS}/include"
     CONFIGURE_CMD="$CONFIGURE_CMD VTERM_LIBS=\"-L${VTERM_ABS}/build-osxcross -lvterm\""

@@ -52,7 +52,8 @@ PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 
 # Capture dependency versions and build info for --help output
-AC_DEFINE_UNQUOTED([BUILD_CC], ["$CC"], [C compiler used for build])
+BUILD_CC_VERSION=$($CC --version 2>/dev/null | head -1 || echo "$CC")
+AC_DEFINE_UNQUOTED([BUILD_CC], ["$BUILD_CC_VERSION"], [C compiler version string])
 DEP_VTERM_VER=$($PKG_CONFIG --modversion vterm 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_VTERM_VERSION], ["$DEP_VTERM_VER"], [libvterm version])
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
