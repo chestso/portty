@@ -1564,17 +1564,21 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 uint32_t gid = shaped->glyph_ids[gi];
                 if (gid == 0)
                     continue;
-                RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, gid, color_key);
+                // Tag the gid so 1-cell and 2-cell rasters of the same glyph
+                // get separate atlas entries (matches single-glyph path bit 29).
+                uint32_t atlas_gid = (columns_to_consume >= 2) ? (gid | (1u << 29)) : gid;
+                RendSdl3AtlasEntry *entry =
+                    rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
                 if (!entry) {
                     GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
                                                            render_r, render_g, render_b);
                     if (gb) {
-                        entry = cache_glyph(&data->atlas, font_data, gid, color_key,
+                        entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
                                             gb, emoji_render && color_baked,
                                             cache_w, cache_h);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
-                        rend_sdl3_atlas_insert_empty(&data->atlas, font_data, gid, color_key);
+                        rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
                     }
                 }
                 if (!populate_only) {
