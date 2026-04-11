@@ -20,6 +20,10 @@ bool is_regional_indicator(uint32_t cp);
 bool is_zwj(uint32_t cp);
 bool is_skin_tone_modifier(uint32_t cp);
 
+// Returns true if any codepoint in the cell's chars[] is U+FE0F (VS16).
+// Used to enforce the "VS16 → 2 cells" rule of the emoji width paradigm.
+bool unicode_cell_has_vs16(const uint32_t *chars, int max);
+
 // UTF-8 conversion
 int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out);
 

@@ -7,11 +7,11 @@
 static void test_emoji_base_range(void)
 {
     /* Inside ranges */
-    ASSERT_TRUE(is_emoji_base_range(0x1F600));  /* grinning face */
-    ASSERT_TRUE(is_emoji_base_range(0x1F680));  /* rocket */
-    ASSERT_TRUE(is_emoji_base_range(0x1F300));  /* cyclone */
-    ASSERT_TRUE(is_emoji_base_range(0x1F9D1));  /* person */
-    ASSERT_TRUE(is_emoji_base_range(0x1FA70));  /* ballet shoes */
+    ASSERT_TRUE(is_emoji_base_range(0x1F600)); /* grinning face */
+    ASSERT_TRUE(is_emoji_base_range(0x1F680)); /* rocket */
+    ASSERT_TRUE(is_emoji_base_range(0x1F300)); /* cyclone */
+    ASSERT_TRUE(is_emoji_base_range(0x1F9D1)); /* person */
+    ASSERT_TRUE(is_emoji_base_range(0x1FA70)); /* ballet shoes */
 
     /* Outside ranges */
     ASSERT_FALSE(is_emoji_base_range(0x0041));  /* 'A' */
@@ -21,10 +21,10 @@ static void test_emoji_base_range(void)
 
 static void test_ambiguous_emoji(void)
 {
-    ASSERT_TRUE(is_ambiguous_emoji(0x2600));   /* sun */
-    ASSERT_TRUE(is_ambiguous_emoji(0x231A));   /* watch */
-    ASSERT_TRUE(is_ambiguous_emoji(0x2328));   /* keyboard */
-    ASSERT_TRUE(is_ambiguous_emoji(0x23E9));   /* fast forward */
+    ASSERT_TRUE(is_ambiguous_emoji(0x2600)); /* sun */
+    ASSERT_TRUE(is_ambiguous_emoji(0x231A)); /* watch */
+    ASSERT_TRUE(is_ambiguous_emoji(0x2328)); /* keyboard */
+    ASSERT_TRUE(is_ambiguous_emoji(0x23E9)); /* fast forward */
 
     ASSERT_FALSE(is_ambiguous_emoji(0x0041));  /* 'A' */
     ASSERT_FALSE(is_ambiguous_emoji(0x1F1E6)); /* regional indicator */
@@ -38,10 +38,10 @@ static void test_ambiguous_emoji(void)
 static void test_emoji_presentation(void)
 {
     /* Should include both base range and ambiguous */
-    ASSERT_TRUE(is_emoji_presentation(0x1F600));  /* base range */
-    ASSERT_TRUE(is_emoji_presentation(0x2600));    /* ambiguous */
+    ASSERT_TRUE(is_emoji_presentation(0x1F600)); /* base range */
+    ASSERT_TRUE(is_emoji_presentation(0x2600));  /* ambiguous */
 
-    ASSERT_FALSE(is_emoji_presentation(0x0041));   /* 'A' */
+    ASSERT_FALSE(is_emoji_presentation(0x0041)); /* 'A' */
 }
 
 /* --- Codepoint classification --- */
@@ -56,21 +56,51 @@ static void test_zwj(void)
 
 static void test_skin_tone_modifier(void)
 {
-    ASSERT_TRUE(is_skin_tone_modifier(0x1F3FB));   /* light skin */
-    ASSERT_TRUE(is_skin_tone_modifier(0x1F3FF));   /* dark skin */
-    ASSERT_TRUE(is_skin_tone_modifier(0x1F3FD));   /* medium */
+    ASSERT_TRUE(is_skin_tone_modifier(0x1F3FB)); /* light skin */
+    ASSERT_TRUE(is_skin_tone_modifier(0x1F3FF)); /* dark skin */
+    ASSERT_TRUE(is_skin_tone_modifier(0x1F3FD)); /* medium */
 
-    ASSERT_FALSE(is_skin_tone_modifier(0x1F3FA));  /* just below */
-    ASSERT_FALSE(is_skin_tone_modifier(0x1F400));  /* just above */
+    ASSERT_FALSE(is_skin_tone_modifier(0x1F3FA)); /* just below */
+    ASSERT_FALSE(is_skin_tone_modifier(0x1F400)); /* just above */
 }
 
 static void test_regional_indicator(void)
 {
-    ASSERT_TRUE(is_regional_indicator(0x1F1E6));   /* A */
-    ASSERT_TRUE(is_regional_indicator(0x1F1FF));   /* Z */
+    ASSERT_TRUE(is_regional_indicator(0x1F1E6)); /* A */
+    ASSERT_TRUE(is_regional_indicator(0x1F1FF)); /* Z */
 
-    ASSERT_FALSE(is_regional_indicator(0x1F1E5));  /* below range */
-    ASSERT_FALSE(is_regional_indicator(0x1F200));  /* above range */
+    ASSERT_FALSE(is_regional_indicator(0x1F1E5)); /* below range */
+    ASSERT_FALSE(is_regional_indicator(0x1F200)); /* above range */
+}
+
+static void test_unicode_cell_has_vs16(void)
+{
+    /* Bare ambiguous emoji: no VS16 */
+    uint32_t bare_warn[] = { 0x26A0, 0 };
+    ASSERT_FALSE(unicode_cell_has_vs16(bare_warn, 8));
+
+    /* Ambiguous emoji + VS16 */
+    uint32_t warn_vs16[] = { 0x26A0, 0xFE0F, 0 };
+    ASSERT_TRUE(unicode_cell_has_vs16(warn_vs16, 8));
+
+    /* Emoji base range + VS16 (beach with umbrella) */
+    uint32_t beach_vs16[] = { 0x1F3D6, 0xFE0F, 0 };
+    ASSERT_TRUE(unicode_cell_has_vs16(beach_vs16, 8));
+
+    /* Plain ASCII */
+    uint32_t ascii[] = { 'A', 0 };
+    ASSERT_FALSE(unicode_cell_has_vs16(ascii, 8));
+
+    /* Empty cell */
+    uint32_t empty[] = { 0 };
+    ASSERT_FALSE(unicode_cell_has_vs16(empty, 8));
+
+    /* ZWJ sequence with VS16 mid-cluster (man + ZWJ + heart + VS16 + ZWJ + man) */
+    uint32_t zwj_heart[] = { 0x1F468, 0x200D, 0x2764, 0xFE0F, 0x200D, 0x1F468, 0 };
+    ASSERT_TRUE(unicode_cell_has_vs16(zwj_heart, 8));
+
+    /* NULL safety */
+    ASSERT_FALSE(unicode_cell_has_vs16(NULL, 8));
 }
 
 /* --- UTF-8 decoding --- */
@@ -158,6 +188,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_zwj);
     RUN_TEST(test_skin_tone_modifier);
     RUN_TEST(test_regional_indicator);
+    RUN_TEST(test_unicode_cell_has_vs16);
 
     printf("\nUTF-8 decoding\n");
 

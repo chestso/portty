@@ -1480,27 +1480,13 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     bool emoji_render = (style == FONT_STYLE_EMOJI);
 
-    // Ambiguous emoji with FE0F: render at full 2-cell emoji size.
-    // Without FE0F: use emoji font (colored) but stay at 1 cell.
-    bool has_fe0f = false;
-    for (int i = 1; i < cp_count; i++) {
-        if (cps[i] == 0xFE0F) {
-            has_fe0f = true;
-            break;
-        }
-    }
-    bool ambiguous_text = (style == FONT_STYLE_EMOJI && cp_count > 0 &&
-                           is_ambiguous_emoji(cps[0]) && !has_fe0f &&
-                           columns_to_consume < 2);
-    if (style == FONT_STYLE_EMOJI && !ambiguous_text &&
-        columns_to_consume < 2 && is_ambiguous_emoji(cps[0]))
-        columns_to_consume = 2;
+    // Width is authoritative from cell.width (the term backend enforces the
+    // "VS16 → 2 cells" rule in convert_vterm_screen_cell). No render-time
+    // width override needed here. See README.md "Emoji Width Paradigm".
 
     if (cps[0] > 0x7F)
-        vlog("render_cell: U+%04X style=%d emoji=%d fe0f=%d ambig_text=%d "
-             "cols=%d cell.w=%d\n",
-             cps[0], style, emoji_render, has_fe0f, ambiguous_text,
-             columns_to_consume, cell.width);
+        vlog("render_cell: U+%04X style=%d emoji=%d cols=%d cell.w=%d\n",
+             cps[0], style, emoji_render, columns_to_consume, cell.width);
 
     int cell_x = data->pad_left + col * data->cell_width;
     int cell_y = data->pad_top + row * data->cell_height;
@@ -1649,8 +1635,6 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
         // Tag glyph_index so glyphs at different presentation widths
         // get separate atlas entries (different rasterization sizes).
         uint32_t atlas_glyph_id = glyph_index;
-        if (ambiguous_text && atlas_glyph_id != 0)
-            atlas_glyph_id |= (1u << 30);
         if (columns_to_consume >= 2 && atlas_glyph_id != 0)
             atlas_glyph_id |= (1u << 29);
 

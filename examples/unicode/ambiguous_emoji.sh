@@ -1,6 +1,8 @@
 #!/bin/sh
 # Ambiguous emoji: text presentation (bare) vs emoji presentation (with U+FE0F)
-# These characters have East Asian Width "Ambiguous" and should stay in one cell.
+# Bare symbol: 1 cell (text presentation).
+# With VS16 (U+FE0F): 2 cells (emoji presentation), per bloom's emoji width
+# paradigm (README.md "Emoji Width Paradigm").
 printf "Ambiguous emoji — text vs emoji presentation:\r\n"
 printf "\r\n"
 printf "  Bare    FE0F    Name\r\n"
@@ -39,7 +41,8 @@ printf "  ⛹  vs  ⛹️   Person bouncing ball\r\n"
 printf "  ⛺  vs  ⛺️   Tent\r\n"
 printf "  ⛽  vs  ⛽️   Fuel pump\r\n"
 printf "\r\n"
-printf "Alignment check (columns should line up):\r\n"
-printf "  |⚠|☀|☁|⚡|⛔|  bare\r\n"
-printf "  |⚠️|☀️|☁️|⚡️|⛔️|  with FE0F\r\n"
-printf "  |A|B|C|D|E|  ASCII reference\r\n"
+printf "Alignment check (bare = 1 cell each, VS16 = 2 cells each):\r\n"
+printf "  |⚠|☀|☁|⚡|⛔|  bare (1 cell each)\r\n"
+printf "  |A|B|C|D|E|  ASCII reference (1 cell each)\r\n"
+printf "  |⚠️|☀️|☁️|⚡️|⛔️|  with VS16 (2 cells each)\r\n"
+printf "  |AB|CD|EF|GH|IJ|  ASCII reference (2 chars each)\r\n"

@@ -48,6 +48,17 @@ bool is_skin_tone_modifier(uint32_t cp)
     return (cp >= 0x1F3FB && cp <= 0x1F3FF);
 }
 
+bool unicode_cell_has_vs16(const uint32_t *chars, int max)
+{
+    if (!chars)
+        return false;
+    for (int i = 0; i < max && chars[i] != 0; i++) {
+        if (chars[i] == UNICODE_VARIATION_SELECTOR_16)
+            return true;
+    }
+    return false;
+}
+
 /* Convert UTF-8 string to an array of Unicode codepoints.
  * Returns number of codepoints written, or -1 on error. */
 int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out)

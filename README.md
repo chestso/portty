@@ -15,6 +15,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Variable-font support (MM_Var) and axis control
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Support for Unicode characters and emoji (COLR v1 color fonts)
+- Emoji width paradigm: color glyphs preferred regardless of VS16; ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
@@ -210,6 +211,16 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `word_chars` | Character string                  | `A-Za-z0-9_-/` | Characters treated as word for double-click |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
+
+## Emoji Width Paradigm
+
+bloom-terminal enforces three rules for how emoji and symbols are rendered:
+
+1. **Color preferred.** When a color glyph is available in the primary or fallback font, it is used. This decision is independent of VS16 (the emoji presentation selector) — the emoji font is chosen based on whether the base codepoint is in an emoji range or whether a fallback font supplies a color raster.
+2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell regardless of whether they render with the color emoji font. They stay 1 cell wide unless followed by VS16.
+3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the cell is widened to 2 cells — e.g. `⚠` is 1 cell but `⚠️` is 2 cells. This is enforced at the terminal-backend layer (in `convert_vterm_screen_cell()` in `src/term_vt.c`) so `cell.width` is authoritative everywhere the renderer reads it: background fill, glyph blit, underline/strikethrough spans, selection highlight, and clipboard copy.
+
+libvterm itself has no VS16-aware width API (it reports width=1 for the cell regardless of VS16); bloom-terminal applies the override at the cell-conversion layer so the rest of the renderer can treat `cell.width` as authoritative.
 
 ## Terminfo
 
