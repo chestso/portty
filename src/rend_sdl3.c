@@ -1260,23 +1260,6 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
         SDL_SetTextureColorMod(atlas->texture, 255, 255, 255);
 }
 
-// Helper to get a cell considering scroll offset
-static int get_cell_with_scroll(RendererSdl3Data *data, TerminalBackend *term, int display_row,
-                                int col, TerminalCell *cell)
-{
-    int scroll_offset = data->scroll_offset;
-    int scrollback_row = scroll_offset - 1 - display_row;
-
-    if (scrollback_row >= 0) {
-        // Fetch from scrollback buffer
-        return terminal_get_scrollback_cell(term, scrollback_row, col, cell);
-    } else {
-        // Fetch from visible terminal
-        int terminal_row = display_row - scroll_offset;
-        return terminal_get_cell(term, terminal_row, col, cell);
-    }
-}
-
 // Look up or query fontconfig for a fallback font covering the given codepoint.
 // Returns the cached font_path (may be NULL if no font was found).
 static const char *fallback_cache_lookup(RendererSdl3Data *data, uint32_t codepoint)
@@ -1384,88 +1367,44 @@ static bool ensure_fallback_font(RendererSdl3Data *data, const char *font_path)
     return true;
 }
 
-// Returns the visual width (in cells) for drawing this cell.
-// For VS16-marked emoji-presentation base codepoints, returns 2 even
-// though libvterm reports the cell as 1 wide. See README.md "Emoji
-// Width Paradigm".
-static int cell_presentation_width(const TerminalCell *c)
+// Draw cell background only. Cell must be pre-fetched by the caller.
+// row:     display row (for draw position).
+// vis_col: visual column for draw position (may exceed vt_col on rows
+//          with VS16-widened emoji).
+// pres_w:  presentation width from the iterator (for bg rect width).
+static void render_cell_bg(RendererSdl3Data *data, int row, int vis_col,
+                           int pres_w, const TerminalCell *cell)
 {
-    if (c->width >= 2)
-        return c->width;
-    if (unicode_cell_is_vs16_emoji(c->chars, TERM_MAX_CHARS_PER_CELL))
-        return 2;
-    return c->width;
+    if (cell->bg.is_default)
+        return;
+    if (pres_w <= 0)
+        pres_w = 1;
+    SDL_FRect bg_rect = {
+        (float)(data->pad_left + vis_col * data->cell_width),
+        (float)(data->pad_top + row * data->cell_height),
+        (float)(pres_w * data->cell_width),
+        (float)data->cell_height
+    };
+    SDL_SetRenderDrawColor(data->renderer, cell->bg.r, cell->bg.g, cell->bg.b, 255);
+    SDL_RenderFillRect(data->renderer, &bg_rect);
 }
 
-// Compute the libvterm-column advance for an iteration step. Normally
-// equals cell.width, but a VS16-widened cell whose next libvterm cell
-// is empty (chars[0]=0) "absorbs" that empty cell and advances by 2 in
-// libvterm space. The visual column advances by cell_presentation_width
-// regardless.
-//
-// data, term, display_row are needed to peek at the next cell.
-static int cell_vt_advance(RendererSdl3Data *data, TerminalBackend *term,
-                           int display_row, int vt_col, const TerminalCell *cell)
+// Render a single cell.
+// Cell must be pre-fetched by the caller (typically via TerminalRowIter).
+// row:     display row (for draw position and cursor compare).
+// vt_col:  libvterm column (for cursor compare, selection check).
+// vis_col: visual column for draw position (may differ from vt_col on rows
+//          with VS16-widened emoji).
+// pres_w:  presentation width in cells (from iterator).
+static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
+                        int row, int vt_col, int vis_col, int pres_w,
+                        const TerminalCell *cell_in, TerminalPos cursor_pos,
+                        bool show_cursor, bool populate_only)
 {
-    int vt_advance = cell->width > 0 ? cell->width : 1;
-    int pres_w = cell_presentation_width(cell);
-    if (pres_w > vt_advance) {
-        // VS16-widened: peek next libvterm cell
-        TerminalCell next;
-        if (get_cell_with_scroll(data, term, display_row, vt_col + 1, &next) >= 0 &&
-            next.chars[0] == 0) {
-            // Next cell is empty (emacs/Claude already inserted padding) — absorb it
-            vt_advance = 2;
-        }
-        // Else: next cell has content; vt_advance stays at 1, vis advances
-        // by 2, shifting subsequent content right by 1 visual column.
-    }
-    return vt_advance;
-}
-
-// Draw cell background only; returns libvterm columns consumed.
-// vt_col: libvterm column for cell fetch.
-// vis_col: visual column for draw position.
-static int render_cell_bg(RendererSdl3Data *data, TerminalBackend *term,
-                          int row, int vt_col, int vis_col)
-{
-    TerminalCell cell;
-    if (get_cell_with_scroll(data, term, row, vt_col, &cell) < 0)
-        return 1;
-
-    if (!cell.bg.is_default) {
-        int pres_w = cell_presentation_width(&cell);
-        if (pres_w <= 0)
-            pres_w = 1;
-        SDL_FRect bg_rect = {
-            (float)(data->pad_left + vis_col * data->cell_width),
-            (float)(data->pad_top + row * data->cell_height),
-            (float)(pres_w * data->cell_width),
-            (float)data->cell_height
-        };
-        SDL_SetRenderDrawColor(data->renderer, cell.bg.r, cell.bg.g, cell.bg.b, 255);
-        SDL_RenderFillRect(data->renderer, &bg_rect);
-    }
-
-    return cell.width > 0 ? cell.width : 1;
-}
-
-// vt_col: libvterm column (used for cell fetch, cursor compare, selection check).
-// vis_col: visual column (used for drawing position). vis_col >= vt_col for rows
-// containing VS16-widened emoji whose next libvterm cell is non-empty.
-// Returns the libvterm-column advance for the iteration loop.
-static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
-                       int row, int vt_col, int vis_col, TerminalPos cursor_pos,
-                       bool show_cursor, bool populate_only)
-{
-    TerminalCell cell;
-    if (get_cell_with_scroll(data, term, row, vt_col, &cell) < 0)
-        return 1;
-
+    TerminalCell cell = *cell_in;
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
 
-    // Default to consuming 1 column; updated for wide characters below
-    int columns_to_consume = 1;
+    int columns_to_consume = pres_w > 0 ? pres_w : 1;
 
     if (cell.chars[0] == 0) {
         // Empty cell - jump to cursor drawing, then return
@@ -1475,11 +1414,6 @@ static int render_cell(RendererSdl3Data *data, TerminalBackend *term,
     // Collect codepoints from cell
     uint32_t cps[TERM_MAX_CHARS_PER_CELL];
     int cp_count = 0;
-    // Visual width for glyph extent / atlas keying / selection rect.
-    // May exceed cell.width for VS16-marked emoji (libvterm reports 1,
-    // we draw 2). The function still returns cell.width so the iteration
-    // loop advances by libvterm width and visits the next cell.
-    columns_to_consume = cell_presentation_width(&cell);
 
     for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
         cps[cp_count++] = cell.chars[i];
@@ -1750,9 +1684,6 @@ render_cursor:
             SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
         }
     }
-
-    // Advance by libvterm width — iteration must not skip cells.
-    return cell.width > 0 ? cell.width : 1;
 }
 
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
@@ -1768,75 +1699,81 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                        (data->scroll_offset == 0) && terminal_get_cursor_visible(term);
 
     for (int row = 0; row < display_rows; row++) {
+        int unified_row = row - data->scroll_offset;
+        TerminalRowIter it;
+
         // Pass 1: draw all cell backgrounds for this row
         if (!populate_only) {
-            int vt_col = 0, vis_col = 0;
-            while (vt_col < display_cols) {
-                TerminalCell cell;
-                if (get_cell_with_scroll(data, term, row, vt_col, &cell) < 0) {
-                    vt_col++;
-                    vis_col++;
-                    continue;
-                }
-                render_cell_bg(data, term, row, vt_col, vis_col);
-                int pres_w = cell_presentation_width(&cell);
-                vt_col += cell_vt_advance(data, term, row, vt_col, &cell);
-                vis_col += pres_w > 0 ? pres_w : 1;
+            terminal_row_iter_init(&it, term, unified_row, display_cols);
+            while (terminal_row_iter_next(&it)) {
+                render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
             }
         }
         // Pass 2: draw glyphs, cursors, and selection overlays
-        {
-            int vt_col = 0, vis_col = 0;
-            while (vt_col < display_cols) {
-                TerminalCell cell;
-                if (get_cell_with_scroll(data, term, row, vt_col, &cell) < 0) {
-                    vt_col++;
-                    vis_col++;
-                    continue;
-                }
-                render_cell(data, term, row, vt_col, vis_col, cursor_pos, show_cursor,
-                            populate_only);
-                int pres_w = cell_presentation_width(&cell);
-                vt_col += cell_vt_advance(data, term, row, vt_col, &cell);
-                vis_col += pres_w > 0 ? pres_w : 1;
-            }
+        terminal_row_iter_init(&it, term, unified_row, display_cols);
+        while (terminal_row_iter_next(&it)) {
+            render_cell(data, term, row, it.vt_col, it.vis_col, it.pres_w,
+                        &it.cell, cursor_pos, show_cursor, populate_only);
         }
         // Pass 3: draw underlines as continuous spans across consecutive cells
         if (!populate_only) {
-            int vt_col = 0, vis_col = 0;
-            while (vt_col < display_cols) {
-                TerminalCell cell;
-                if (get_cell_with_scroll(data, term, row, vt_col, &cell) < 0 ||
-                    !cell.attrs.underline) {
-                    vt_col++;
-                    vis_col++;
-                    continue;
-                }
-                // Start of an underline run
-                unsigned int style = cell.attrs.underline;
-                Uint8 ul_r = cell.ul_color.is_default ? UNDERLINE_COLOR_R : cell.ul_color.r;
-                Uint8 ul_g = cell.ul_color.is_default ? UNDERLINE_COLOR_G : cell.ul_color.g;
-                Uint8 ul_b = cell.ul_color.is_default ? UNDERLINE_COLOR_B : cell.ul_color.b;
-                int vis_run_start = vis_col;
-                int pres_w0 = cell_presentation_width(&cell);
-                vt_col += cell_vt_advance(data, term, row, vt_col, &cell);
-                vis_col += pres_w0 > 0 ? pres_w0 : 1;
-                // Extend run while next cell has same underline style and color
-                while (vt_col < display_cols) {
-                    TerminalCell next;
-                    if (get_cell_with_scroll(data, term, row, vt_col, &next) < 0 ||
-                        next.attrs.underline != style)
+            terminal_row_iter_init(&it, term, unified_row, display_cols);
+            int vis_run_start = -1;
+            int vis_run_end = 0;
+            unsigned int run_style = 0;
+            Uint8 run_r = 0, run_g = 0, run_b = 0;
+            while (terminal_row_iter_next(&it)) {
+                unsigned int cs = it.cell.attrs.underline;
+                Uint8 cr = it.cell.ul_color.is_default ? UNDERLINE_COLOR_R : it.cell.ul_color.r;
+                Uint8 cg = it.cell.ul_color.is_default ? UNDERLINE_COLOR_G : it.cell.ul_color.g;
+                Uint8 cb = it.cell.ul_color.is_default ? UNDERLINE_COLOR_B : it.cell.ul_color.b;
+                bool same_run = (run_style != 0 && cs == run_style && cr == run_r &&
+                                 cg == run_g && cb == run_b);
+                if (run_style != 0 && !same_run) {
+                    // Flush current run
+                    float pd = data->content_scale;
+                    int thickness = (int)roundf(1.0f * pd);
+                    if (thickness < 1)
+                        thickness = 1;
+                    int cell_y = data->pad_top + row * data->cell_height;
+                    int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
+                    if (underline_y + thickness > cell_y + data->cell_height)
+                        underline_y = cell_y + data->cell_height - thickness;
+                    int run_x = data->pad_left + vis_run_start * data->cell_width;
+                    int run_w = (vis_run_end - vis_run_start) * data->cell_width;
+                    SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b,
+                                           UNDERLINE_COLOR_A);
+                    switch (run_style) {
+                    case 1:
+                        draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
                         break;
-                    Uint8 nr = next.ul_color.is_default ? UNDERLINE_COLOR_R : next.ul_color.r;
-                    Uint8 ng = next.ul_color.is_default ? UNDERLINE_COLOR_G : next.ul_color.g;
-                    Uint8 nb = next.ul_color.is_default ? UNDERLINE_COLOR_B : next.ul_color.b;
-                    if (nr != ul_r || ng != ul_g || nb != ul_b)
+                    case 2:
+                        draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
                         break;
-                    int pres_wn = cell_presentation_width(&next);
-                    vt_col += cell_vt_advance(data, term, row, vt_col, &next);
-                    vis_col += pres_wn > 0 ? pres_wn : 1;
+                    case 3:
+                        draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd,
+                                             run_r, run_g, run_b);
+                        break;
+                    case 4:
+                        draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
+                        break;
+                    case 5:
+                        draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
+                        break;
+                    }
+                    run_style = 0;
                 }
-                // Render the full run at visual columns
+                if (cs != 0 && run_style == 0) {
+                    vis_run_start = it.vis_col;
+                    run_style = cs;
+                    run_r = cr;
+                    run_g = cg;
+                    run_b = cb;
+                }
+                vis_run_end = it.vis_col + it.pres_w;
+            }
+            if (run_style != 0) {
+                // Flush final run
                 float pd = data->content_scale;
                 int thickness = (int)roundf(1.0f * pd);
                 if (thickness < 1)
@@ -1846,10 +1783,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 if (underline_y + thickness > cell_y + data->cell_height)
                     underline_y = cell_y + data->cell_height - thickness;
                 int run_x = data->pad_left + vis_run_start * data->cell_width;
-                int run_w = (vis_col - vis_run_start) * data->cell_width;
-
-                SDL_SetRenderDrawColor(data->renderer, ul_r, ul_g, ul_b, UNDERLINE_COLOR_A);
-                switch (style) {
+                int run_w = (vis_run_end - vis_run_start) * data->cell_width;
+                SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, UNDERLINE_COLOR_A);
+                switch (run_style) {
                 case 1:
                     draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
                     break;
@@ -1857,8 +1793,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
                     break;
                 case 3:
-                    draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd, ul_r,
-                                         ul_g, ul_b);
+                    draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd, run_r,
+                                         run_g, run_b);
                     break;
                 case 4:
                     draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
@@ -1871,43 +1807,42 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
         }
         // Pass 4: draw strikethroughs as continuous spans across consecutive cells
         if (!populate_only) {
-            int vt_col = 0, vis_col = 0;
-            while (vt_col < display_cols) {
-                TerminalCell cell;
-                if (get_cell_with_scroll(data, term, row, vt_col, &cell) < 0 ||
-                    !cell.attrs.strikethrough) {
-                    vt_col++;
-                    vis_col++;
-                    continue;
+            terminal_row_iter_init(&it, term, unified_row, display_cols);
+            int vis_run_start = -1;
+            int vis_run_end = 0;
+            bool in_run = false;
+            Uint8 run_r = 0, run_g = 0, run_b = 0;
+            while (terminal_row_iter_next(&it)) {
+                bool cs = it.cell.attrs.strikethrough;
+                Uint8 cr = it.cell.fg.r, cg = it.cell.fg.g, cb = it.cell.fg.b;
+                bool same_run = in_run && cs && cr == run_r && cg == run_g && cb == run_b;
+                if (in_run && !same_run) {
+                    // Flush current run
+                    float pd = data->content_scale;
+                    int cell_y = data->pad_top + row * data->cell_height;
+                    int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
+                    int run_x = data->pad_left + vis_run_start * data->cell_width;
+                    int run_w = (vis_run_end - vis_run_start) * data->cell_width;
+                    SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, 255);
+                    draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
+                    in_run = false;
                 }
-                // Start of a strikethrough run — use cell's foreground color
-                Uint8 st_r = cell.fg.r;
-                Uint8 st_g = cell.fg.g;
-                Uint8 st_b = cell.fg.b;
-                int vis_run_start = vis_col;
-                int pres_w0 = cell_presentation_width(&cell);
-                vt_col += cell_vt_advance(data, term, row, vt_col, &cell);
-                vis_col += pres_w0 > 0 ? pres_w0 : 1;
-                // Extend run while next cell has strikethrough with same fg color
-                while (vt_col < display_cols) {
-                    TerminalCell next;
-                    if (get_cell_with_scroll(data, term, row, vt_col, &next) < 0 ||
-                        !next.attrs.strikethrough)
-                        break;
-                    if (next.fg.r != st_r || next.fg.g != st_g || next.fg.b != st_b)
-                        break;
-                    int pres_wn = cell_presentation_width(&next);
-                    vt_col += cell_vt_advance(data, term, row, vt_col, &next);
-                    vis_col += pres_wn > 0 ? pres_wn : 1;
+                if (cs && !in_run) {
+                    vis_run_start = it.vis_col;
+                    in_run = true;
+                    run_r = cr;
+                    run_g = cg;
+                    run_b = cb;
                 }
-                // Render the full run at visual columns
+                vis_run_end = it.vis_col + it.pres_w;
+            }
+            if (in_run) {
                 float pd = data->content_scale;
                 int cell_y = data->pad_top + row * data->cell_height;
                 int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
                 int run_x = data->pad_left + vis_run_start * data->cell_width;
-                int run_w = (vis_col - vis_run_start) * data->cell_width;
-
-                SDL_SetRenderDrawColor(data->renderer, st_r, st_g, st_b, 255);
+                int run_w = (vis_run_end - vis_run_start) * data->cell_width;
+                SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, 255);
                 draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
             }
         }
@@ -2179,7 +2114,7 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
         if (terminal_get_cell(term, 0, col, &cell) == 0 && cell.chars[0] != 0) {
             // Use presentation width so the PNG includes any VS16 emoji
             // overflow into col+1.
-            last_col = col + cell_presentation_width(&cell);
+            last_col = col + terminal_cell_presentation_width(&cell);
         }
     }
     if (last_col <= 0)

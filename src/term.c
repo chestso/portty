@@ -568,34 +568,81 @@ void terminal_scroll_sixel_images(TerminalBackend *term, int delta)
     }
 }
 
-// VS16 widening shift logic.
+// Emoji width paradigm — owned by the term layer.
 //
-// A row's libvterm columns map to visual columns with a per-row shift
-// offset. The offset increments by 1 every time we walk past a
-// VS16-marked emoji-presentation cell whose immediate next libvterm cell
-// is non-empty (i.e. the application emitted naive output without a
-// cursor advance — cat / glow / etc.). When the next cell is empty
-// (chars[0] == 0), the application already inserted padding (emacs /
-// Claude Code style), so we "absorb" the empty cell into the emoji's
-// 2-cell visual extent and don't shift.
+// libvterm has no VS16 awareness and reports ambiguous-width symbols as
+// width=1. Bloom's paradigm treats VS16-marked emoji-presentation cells
+// as 2 cells visually. The row iterator below walks libvterm cells and
+// produces (vt_col, vis_col, pres_w) triples, handling the shift-vs-
+// absorb decision transparently:
 //
-// Both helpers walk the row in vt space, applying the shift logic.
-// Cost: O(target_col) per call. Selection / cursor / mouse events are
-// infrequent, so this is acceptable.
+//   - vt_col+1 is empty (emacs/Claude inserted a cursor advance):
+//     absorb the empty cell into the 2-cell extent, no shift.
+//   - vt_col+1 is non-empty (cat/glow emitted a literal space or content):
+//     shift subsequent content right by 1 visual column.
 
-// Returns true if (cell at vt_col, peek of vt_col+1) implies we should
-// emit a shift after rendering vt_col. Caller fetches the cell.
-static bool vs16_shift_after(TerminalBackend *term, int unified_row, int vt_col,
-                             const TerminalCell *cell, int rows_unused)
+int terminal_cell_presentation_width(const TerminalCell *cell)
 {
-    (void)rows_unused;
-    if (!unicode_cell_is_vs16_emoji(cell->chars, TERM_MAX_CHARS_PER_CELL))
+    if (!cell)
+        return 0;
+    if (cell->width >= 2)
+        return cell->width;
+    if (unicode_cell_is_vs16_emoji(cell->chars, TERM_MAX_CHARS_PER_CELL))
+        return 2;
+    return cell->width;
+}
+
+void terminal_row_iter_init(TerminalRowIter *it, TerminalBackend *term,
+                            int unified_row, int max_vt_cols)
+{
+    if (!it)
+        return;
+    it->term = term;
+    it->unified_row = unified_row;
+    it->max_vt_cols = max_vt_cols;
+    it->next_vt_col = 0;
+    it->next_vis_col = 0;
+    it->vt_col = 0;
+    it->vis_col = 0;
+    it->pres_w = 0;
+    memset(&it->cell, 0, sizeof(it->cell));
+}
+
+bool terminal_row_iter_next(TerminalRowIter *it)
+{
+    if (!it || !it->term || it->next_vt_col >= it->max_vt_cols)
         return false;
-    TerminalCell next;
-    if (read_cell_unified(term, unified_row, vt_col + 1, &next) < 0)
-        return false;
-    // Empty cell at vt+1 → emacs/Claude already shifted, no extra shift
-    return next.chars[0] != 0;
+
+    it->vt_col = it->next_vt_col;
+    it->vis_col = it->next_vis_col;
+
+    if (read_cell_unified(it->term, it->unified_row, it->vt_col, &it->cell) < 0) {
+        memset(&it->cell, 0, sizeof(it->cell));
+        it->pres_w = 1;
+        it->next_vt_col = it->vt_col + 1;
+        it->next_vis_col = it->vis_col + 1;
+        return true;
+    }
+
+    int vt_advance = it->cell.width > 0 ? it->cell.width : 1;
+    it->pres_w = terminal_cell_presentation_width(&it->cell);
+    if (it->pres_w <= 0)
+        it->pres_w = 1;
+
+    // VS16 widening: peek next libvterm cell to decide shift vs absorb.
+    if (it->pres_w > vt_advance) {
+        TerminalCell next;
+        if (read_cell_unified(it->term, it->unified_row, it->vt_col + 1, &next) >= 0 &&
+            next.chars[0] == 0) {
+            // Empty cell at vt+1 — emacs/Claude already shifted; absorb it
+            vt_advance = 2;
+        }
+        // Else: naive output; vt_advance stays 1, vis_col shifts +1
+    }
+
+    it->next_vt_col = it->vt_col + vt_advance;
+    it->next_vis_col = it->vis_col + it->pres_w;
+    return true;
 }
 
 int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col)
@@ -603,21 +650,13 @@ int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_co
     if (!term || vt_col <= 0)
         return vt_col < 0 ? 0 : vt_col;
 
-    int vis = 0;
-    for (int c = 0; c < vt_col; c++) {
-        TerminalCell cell;
-        if (read_cell_unified(term, unified_row, c, &cell) < 0) {
-            vis++;
-            continue;
-        }
-        // Visual span of this libvterm cell
-        int span = cell.width > 0 ? cell.width : 1;
-        // VS16 widening adds an extra visual cell (the +1 shift)
-        if (vs16_shift_after(term, unified_row, c, &cell, 0))
-            span++;
-        vis += span;
+    TerminalRowIter it;
+    terminal_row_iter_init(&it, term, unified_row, vt_col + 1);
+    while (terminal_row_iter_next(&it)) {
+        if (it.vt_col >= vt_col)
+            return it.vis_col;
     }
-    return vis;
+    return it.next_vis_col;
 }
 
 int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col)
@@ -625,25 +664,13 @@ int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_c
     if (!term || vis_col <= 0)
         return vis_col < 0 ? 0 : vis_col;
 
-    int vis = 0;
-    int vt = 0;
-    while (vis < vis_col) {
-        TerminalCell cell;
-        if (read_cell_unified(term, unified_row, vt, &cell) < 0) {
-            vis++;
-            vt++;
-            continue;
-        }
-        int span = cell.width > 0 ? cell.width : 1;
-        if (vs16_shift_after(term, unified_row, vt, &cell, 0))
-            span++;
-        if (vis + span > vis_col) {
-            // The target visual column lands inside this cell — return
-            // the cell's vt col (the visible cell the user pointed at).
-            return vt;
-        }
-        vis += span;
-        vt++;
+    TerminalRowIter it;
+    // Upper bound: vis_col+1 is a safe vt_col upper bound since widening
+    // only increases vis, never vt.
+    terminal_row_iter_init(&it, term, unified_row, vis_col + 1);
+    while (terminal_row_iter_next(&it)) {
+        if (it.vis_col + it.pres_w > vis_col)
+            return it.vt_col;
     }
-    return vt;
+    return it.next_vt_col;
 }

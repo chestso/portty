@@ -241,17 +241,54 @@ void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars)
 void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionChangeFn cb,
                                      void *user_data);
 
-// Visual ↔ libvterm column translation for VS16 emoji widening.
+// Emoji width paradigm — owned by the term layer.
 //
 // libvterm tracks columns in its native grid where every cell is 1 column
-// wide. The renderer widens VS16-marked emoji-presentation cells to 2
-// visual columns and may shift subsequent content right by 1 visual column
-// when libvterm has non-empty content at the cell immediately following
-// the emoji. These helpers walk a row in libvterm space and apply the
-// shift logic to translate between the two coordinate systems.
-//
+// wide. VS16-marked emoji-presentation cells have a PRESENTATION WIDTH of
+// 2 visual cells. To render a row, the renderer must walk cells in
+// libvterm space while tracking an independent visual column that may
+// drift ahead when a VS16 emoji is followed by non-empty libvterm content
+// (cat/glow/naive output). The term layer encapsulates this walk logic
+// so the renderer — and any future non-libvterm backend — can iterate
+// without knowing about VS16.
+
+// Returns the visual width (in cells) for drawing this cell. Returns
+// cell->width for normal cells, 2 for VS16-widened emoji-presentation
+// cells. Stateless single-cell query; for row iteration use
+// TerminalRowIter which handles the shift logic.
+int terminal_cell_presentation_width(const TerminalCell *cell);
+
+// Row iterator that applies the emoji width paradigm. Each _next() step
+// yields the next libvterm cell in the row along with its visual column
+// and presentation width. VS16-widened emoji are handled transparently:
+// when the libvterm cell immediately following a VS16 emoji is empty
+// (emacs/Claude-style pre-shifted output), the iterator absorbs it;
+// when non-empty (cat/glow-style naive output), subsequent cells shift
+// right by 1 visual column.
+typedef struct
+{
+    // Inputs
+    TerminalBackend *term;
+    int unified_row;
+    int max_vt_cols;
+    // Current step — valid after terminal_row_iter_next() returns true
+    int vt_col;        // libvterm column of the current cell
+    int vis_col;       // visual column where the current cell starts drawing
+    int pres_w;        // presentation width (1 for normal, 2 for VS16 emoji)
+    TerminalCell cell; // fetched cell contents
+    // Internal state
+    int next_vt_col;
+    int next_vis_col;
+} TerminalRowIter;
+
 // `unified_row` is in unified-row space (negative for scrollback,
 // non-negative for visible area). See rend_sdl3.c "Coordinate Spaces".
+void terminal_row_iter_init(TerminalRowIter *it, TerminalBackend *term,
+                            int unified_row, int max_vt_cols);
+bool terminal_row_iter_next(TerminalRowIter *it);
+
+// Visual ↔ libvterm column translation for mouse, cursor, selection.
+// Thin wrappers around TerminalRowIter.
 int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col);
 int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col);
 
