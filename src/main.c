@@ -307,19 +307,26 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     if (!pixel_to_cell(ctx, pixel_x, pixel_y, &display_row, &display_col))
         return false;
 
-    // Clamp to terminal dimensions
+    // Clamp to terminal dimensions (display_row in display space; display_col
+    // is a visual column that gets translated to libvterm space below).
     int term_rows, term_cols;
     terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
-    if (display_col >= term_cols)
-        display_col = term_cols - 1;
-    if (display_col < 0)
-        display_col = 0;
     if (display_row >= term_rows)
         display_row = term_rows - 1;
     if (display_row < 0)
         display_row = 0;
+    if (display_col < 0)
+        display_col = 0;
 
     int unified_row = display_row_to_unified(ctx->rend, display_row);
+
+    // Translate visual column → libvterm column for VS16-widened rows. The
+    // selection API and mouse-event reporting both work in libvterm space.
+    display_col = terminal_vis_col_to_vt_col(ctx->term, unified_row, display_col);
+    if (display_col >= term_cols)
+        display_col = term_cols - 1;
+    if (display_col < 0)
+        display_col = 0;
 
     // Left button press — start selection (or defer for char mode)
     if (button == 1 && pressed) {

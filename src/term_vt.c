@@ -2,7 +2,6 @@
 #include "common.h"
 #include "sixel.h"
 #include "term.h"
-#include "unicode.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -674,17 +673,11 @@ static void convert_vterm_screen_cell(const VTermScreenCell *vcell, VTermState *
         cell->chars[i] = 0;
     }
 
-    // Copy width
+    // Copy width — keep libvterm's value as-is. Presentation width for
+    // VS16-marked emoji is computed renderer-locally so iteration loops
+    // (bg fill, span runs, selection) don't skip the cell at col+1.
+    // See README.md "Emoji Width Paradigm".
     cell->width = vcell->width;
-
-    // Emoji width paradigm: VS16 (U+FE0F) forces 2-cell width for
-    // emoji-presentation base codepoints. See README.md "Emoji Width
-    // Paradigm". Enforced here so cell->width is authoritative for all
-    // downstream readers (bg fill, span loops, selection, clipboard).
-    if (cell->width < 2 && cell->chars[0] != 0 &&
-        is_emoji_presentation(cell->chars[0]) &&
-        unicode_cell_has_vs16(cell->chars, TERM_MAX_CHARS_PER_CELL))
-        cell->width = 2;
 
     // Copy attributes
     cell->attrs.bold = vcell->attrs.bold;

@@ -1,5 +1,6 @@
 #include "term.h"
 #include "sixel.h"
+#include "unicode.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -565,4 +566,84 @@ void terminal_scroll_sixel_images(TerminalBackend *term, int delta)
     for (int i = 0; i < term->sixel_image_count; i++) {
         term->sixel_images[i]->cursor_row -= delta;
     }
+}
+
+// VS16 widening shift logic.
+//
+// A row's libvterm columns map to visual columns with a per-row shift
+// offset. The offset increments by 1 every time we walk past a
+// VS16-marked emoji-presentation cell whose immediate next libvterm cell
+// is non-empty (i.e. the application emitted naive output without a
+// cursor advance — cat / glow / etc.). When the next cell is empty
+// (chars[0] == 0), the application already inserted padding (emacs /
+// Claude Code style), so we "absorb" the empty cell into the emoji's
+// 2-cell visual extent and don't shift.
+//
+// Both helpers walk the row in vt space, applying the shift logic.
+// Cost: O(target_col) per call. Selection / cursor / mouse events are
+// infrequent, so this is acceptable.
+
+// Returns true if (cell at vt_col, peek of vt_col+1) implies we should
+// emit a shift after rendering vt_col. Caller fetches the cell.
+static bool vs16_shift_after(TerminalBackend *term, int unified_row, int vt_col,
+                             const TerminalCell *cell, int rows_unused)
+{
+    (void)rows_unused;
+    if (!unicode_cell_is_vs16_emoji(cell->chars, TERM_MAX_CHARS_PER_CELL))
+        return false;
+    TerminalCell next;
+    if (read_cell_unified(term, unified_row, vt_col + 1, &next) < 0)
+        return false;
+    // Empty cell at vt+1 → emacs/Claude already shifted, no extra shift
+    return next.chars[0] != 0;
+}
+
+int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col)
+{
+    if (!term || vt_col <= 0)
+        return vt_col < 0 ? 0 : vt_col;
+
+    int vis = 0;
+    for (int c = 0; c < vt_col; c++) {
+        TerminalCell cell;
+        if (read_cell_unified(term, unified_row, c, &cell) < 0) {
+            vis++;
+            continue;
+        }
+        // Visual span of this libvterm cell
+        int span = cell.width > 0 ? cell.width : 1;
+        // VS16 widening adds an extra visual cell (the +1 shift)
+        if (vs16_shift_after(term, unified_row, c, &cell, 0))
+            span++;
+        vis += span;
+    }
+    return vis;
+}
+
+int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col)
+{
+    if (!term || vis_col <= 0)
+        return vis_col < 0 ? 0 : vis_col;
+
+    int vis = 0;
+    int vt = 0;
+    while (vis < vis_col) {
+        TerminalCell cell;
+        if (read_cell_unified(term, unified_row, vt, &cell) < 0) {
+            vis++;
+            vt++;
+            continue;
+        }
+        int span = cell.width > 0 ? cell.width : 1;
+        if (vs16_shift_after(term, unified_row, vt, &cell, 0))
+            span++;
+        if (vis + span > vis_col) {
+            // The target visual column lands inside this cell — return
+            // the cell's vt col (the visible cell the user pointed at).
+            return vt;
+        }
+        vis += span;
+        vt++;
+    }
+    return vt;
 }

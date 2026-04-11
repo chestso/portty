@@ -241,6 +241,20 @@ void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars)
 void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionChangeFn cb,
                                      void *user_data);
 
+// Visual ↔ libvterm column translation for VS16 emoji widening.
+//
+// libvterm tracks columns in its native grid where every cell is 1 column
+// wide. The renderer widens VS16-marked emoji-presentation cells to 2
+// visual columns and may shift subsequent content right by 1 visual column
+// when libvterm has non-empty content at the cell immediately following
+// the emoji. These helpers walk a row in libvterm space and apply the
+// shift logic to translate between the two coordinate systems.
+//
+// `unified_row` is in unified-row space (negative for scrollback,
+// non-negative for visible area). See rend_sdl3.c "Coordinate Spaces".
+int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col);
+int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col);
+
 // Sixel image API
 void terminal_add_sixel_image(TerminalBackend *term, SixelImage *image);
 void terminal_clear_sixel_images(TerminalBackend *term);

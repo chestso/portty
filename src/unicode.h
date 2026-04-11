@@ -24,6 +24,11 @@ bool is_skin_tone_modifier(uint32_t cp);
 // Used to enforce the "VS16 → 2 cells" rule of the emoji width paradigm.
 bool unicode_cell_has_vs16(const uint32_t *chars, int max);
 
+// Returns true if the cell's char[] is a VS16-widened emoji: base codepoint
+// is in the emoji-presentation set AND the cell contains U+FE0F. These cells
+// have a presentation width of 2 even though libvterm reports them as 1.
+bool unicode_cell_is_vs16_emoji(const uint32_t *chars, int max);
+
 // UTF-8 conversion
 int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out);
 

@@ -59,6 +59,15 @@ bool unicode_cell_has_vs16(const uint32_t *chars, int max)
     return false;
 }
 
+bool unicode_cell_is_vs16_emoji(const uint32_t *chars, int max)
+{
+    if (!chars || max < 1 || chars[0] == 0)
+        return false;
+    if (!is_emoji_presentation(chars[0]))
+        return false;
+    return unicode_cell_has_vs16(chars, max);
+}
+
 /* Convert UTF-8 string to an array of Unicode codepoints.
  * Returns number of codepoints written, or -1 on error. */
 int utf8_to_codepoints(const char *utf8, uint32_t *out, int max_out)

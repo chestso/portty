@@ -218,9 +218,9 @@ bloom-terminal enforces three rules for how emoji and symbols are rendered:
 
 1. **Color preferred.** When a color glyph is available in the primary or fallback font, it is used. This decision is independent of VS16 (the emoji presentation selector) — the emoji font is chosen based on whether the base codepoint is in an emoji range or whether a fallback font supplies a color raster.
 2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell regardless of whether they render with the color emoji font. They stay 1 cell wide unless followed by VS16.
-3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the cell is widened to 2 cells — e.g. `⚠` is 1 cell but `⚠️` is 2 cells. This is enforced at the terminal-backend layer (in `convert_vterm_screen_cell()` in `src/term_vt.c`) so `cell.width` is authoritative everywhere the renderer reads it: background fill, glyph blit, underline/strikethrough spans, selection highlight, and clipboard copy.
+3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the renderer draws the cell across 2 cells of pixels — e.g. `⚠` is 1 cell but `⚠️` is 2 cells. The visual width is computed locally in the renderer (`cell_presentation_width()` in `src/rend_sdl3.c`), so libvterm's grid coordinates remain authoritative. Every libvterm cell is iterated normally for background fill, underline spans, selection, and clipboard — only glyph extent and bg fill width are widened.
 
-libvterm itself has no VS16-aware width API (it reports width=1 for the cell regardless of VS16); bloom-terminal applies the override at the cell-conversion layer so the rest of the renderer can treat `cell.width` as authoritative.
+libvterm itself has no VS16-aware width API (it reports width=1 for the cell regardless of VS16); bloom-terminal computes the presentation width on the fly when drawing, leaving `cell.width` at libvterm's value so iteration loops never skip the cell at col+1 (which usually contains a space the application emitted to align the emoji).
 
 ## Terminfo
 
