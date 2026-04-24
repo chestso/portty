@@ -22,5 +22,6 @@ install-data-local:
 
 uninstall-local:
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-vty-256color
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal
 endif

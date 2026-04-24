@@ -28,7 +28,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Terminal resize handling with optional reflow (`--reflow`)
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
-- Custom terminfo entry (`TERM=bloom-terminal-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
+- Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
 - Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 
 ## Architecture
@@ -224,12 +224,17 @@ libvterm itself has no VS16-aware width API (it reports width=1 for the cell reg
 
 ## Terminfo
 
-bloom-terminal ships a custom terminfo entry (`bloom-terminal-256color`) based on `xterm-256color`. On Linux, it is compiled and installed automatically by `./build.sh --install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install it natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
+bloom-terminal ships two terminfo entries based on `xterm-256color`:
 
-If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
+- **`bloom-terminal-vty-256color`** (default `TERM`) — inherits `setaf`/`setab` from `xterm-256color` so its capability strings use only the restricted operator subset that Haskell `vty-unix`'s terminfo parser supports. 24-bit colour still works via `Tc`/`RGB` flags and `COLORTERM=truecolor` for any app using modern detection. This is the default so `brick`/`matterhorn` and other vty-based TUIs work without a workaround.
+- **`bloom-terminal-256color`** — full entry with 24-bit `setaf`/`setab`/`Setulc` strings (use `%/` division, which ncurses parses fine but vty-unix does not). Apps that want to query truecolor via `tparm(setaf, 0xRRGGBB)` should opt in by setting `TERM=bloom-terminal-256color`.
+
+On Linux, both are compiled and installed automatically by `./build.sh --install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
+
+If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy either compiled entry to the remote host:
 
 ```bash
-infocmp bloom-terminal-256color | ssh remote-host 'tic -x -'
+infocmp bloom-terminal-vty-256color | ssh remote-host 'tic -x -'
 ```
 
 ## Dependencies
