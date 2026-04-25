@@ -36,6 +36,26 @@ static void cursor_to(BvtTerm *vt, int row, int col) {
     vt->cursor.pending_wrap = false;
 }
 
+/* CUP/HVP/VPA destination — applies DECOM (origin mode): when on, the
+ * `row` argument is relative to the scroll region, and the cursor is
+ * clamped to the scroll region. When off, behaves like cursor_to. */
+static void cursor_to_origin(BvtTerm *vt, int row, int col) {
+    if (vt->decom) {
+        int top = vt->scroll_top;
+        int bot = vt->scroll_bottom;
+        if (row < 0) row = 0;
+        row += top;
+        if (row > bot) row = bot;
+        if (col < 0) col = 0;
+        if (col >= vt->cols) col = vt->cols - 1;
+        vt->cursor.row = row;
+        vt->cursor.col = col;
+        vt->cursor.pending_wrap = false;
+        return;
+    }
+    cursor_to(vt, row, col);
+}
+
 static void reset_pen(BvtTerm *vt) {
     memset(&vt->cursor.pen, 0, sizeof(vt->cursor.pen));
     vt->cursor.pen.color_flags =
@@ -205,6 +225,14 @@ static void mode_set(BvtTerm *vt, bool on) {
             case 1: /* DECCKM */
                 vt->decckm = on;
                 break;
+            case 6: /* DECOM origin mode */
+                vt->decom = on;
+                /* Setting DECOM also homes the cursor: with origin mode
+                 * on, home is the top-left of the scroll region. */
+                vt->cursor.row = on ? vt->scroll_top : 0;
+                vt->cursor.col = 0;
+                vt->cursor.pending_wrap = false;
+                break;
             case 25: /* DECTCEM cursor visible */
                 vt->modes[BVT_MODE_CURSOR_VISIBLE] = on;
                 vt->cursor.visible = on;
@@ -280,9 +308,9 @@ void bvt_csi_dispatch(BvtTerm *vt, uint8_t final) {
         case 'F': cursor_to(vt, vt->cursor.row - p1, 0);              break;            /* CPL */
         case 'G': cursor_to(vt, vt->cursor.row, p1 - 1);              break;            /* CHA */
         case 'H': case 'f':                                                              /* CUP / HVP */
-            cursor_to(vt, p1 - 1, p2 - 1);
+            cursor_to_origin(vt, p1 - 1, p2 - 1);
             break;
-        case 'd': cursor_to(vt, p1 - 1, vt->cursor.col);              break;            /* VPA */
+        case 'd': cursor_to_origin(vt, p1 - 1, vt->cursor.col);       break;            /* VPA */
 
         case 'J': bvt_erase_in_display(vt, param_or(vt, 0, 0)); break;
         case 'K': bvt_erase_in_line(vt,    param_or(vt, 0, 0)); break;
@@ -290,13 +318,26 @@ void bvt_csi_dispatch(BvtTerm *vt, uint8_t final) {
         case 'S': bvt_scroll_up(vt, p1);   break;
         case 'T': bvt_scroll_down(vt, p1); break;
 
-        case 'r': /* DECSTBM */
-            vt->scroll_top    = param_or(vt, 0, 1) - 1;
-            vt->scroll_bottom = param_or(vt, 1, vt->rows) - 1;
-            if (vt->scroll_top < 0) vt->scroll_top = 0;
-            if (vt->scroll_bottom >= vt->rows) vt->scroll_bottom = vt->rows - 1;
-            cursor_to(vt, 0, 0);
+        case 'r': { /* DECSTBM — Set Top and Bottom Margins */
+            int top    = param_or(vt, 0, 1) - 1;
+            int bottom = param_or(vt, 1, vt->rows) - 1;
+            if (top    < 0)              top    = 0;
+            if (bottom >= vt->rows)      bottom = vt->rows - 1;
+            /* Per VT100/xterm: an invalid region (top >= bottom) is
+             * rejected — leave the previous scroll region and cursor
+             * unchanged. brick (Haskell vty) emits `CSI 1;1 r` as part
+             * of its inline-render setup; if we accepted that as a
+             * one-row region, every subsequent `\n` would be pinned to
+             * that single row and inline UIs would draw at row 0,
+             * clobbering the prompts above. */
+            if (top >= bottom) break;
+            vt->scroll_top    = top;
+            vt->scroll_bottom = bottom;
+            /* DECSTBM homes the cursor: with origin mode on, home is
+             * the top-left of the new scroll region. */
+            cursor_to(vt, vt->decom ? top : 0, 0);
             break;
+        }
 
         case 'h': mode_set(vt, true);  break;
         case 'l': mode_set(vt, false); break;

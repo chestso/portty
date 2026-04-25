@@ -473,6 +473,136 @@ static void test_dsr_cpr(void) {
     bvt_free(vt);
 }
 
+/* DECOM origin mode: CUP coordinates are relative to the scroll region. */
+static void test_decom_cup(void) {
+    BvtTerm *vt = make_term(40, 80);
+    feed(vt, "\x1b[17;39r");  /* scroll region rows 17..39 (1-indexed) */
+    /* Origin mode off — CUP 1;1 → absolute (0,0) */
+    feed(vt, "\x1b[1;1H");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[1;1R");
+    /* Origin mode on — CUP 1;1 → (16,0) (top of scroll region) */
+    feed(vt, "\x1b[?6h");
+    feed(vt, "\x1b[1;1H");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[17;1R");
+    /* CUP 7;1 in origin mode → (16+6, 0) = (22, 0) → "\x1b[23;1R" */
+    feed(vt, "\x1b[7;1H");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[23;1R");
+    /* Origin mode off resets cursor to home (per spec) */
+    feed(vt, "\x1b[?6l");
+    feed(vt, "\x1b[1;1H");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[1;1R");
+    bvt_free(vt);
+}
+
+/* DECSTBM with invalid margins (top >= bottom) must be rejected. */
+static void test_decstbm_invalid_rejected(void) {
+    BvtTerm *vt = make_term(24, 80);
+    /* Set a real scroll region first. */
+    feed(vt, "\x1b[5;15r");
+    feed(vt, "\x1b[10;1H");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[10;1R");
+    /* Try CSI 1;1 r — invalid (top == bottom). Must NOT change anything. */
+    feed(vt, "\x1b[1;1r");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    /* Cursor should stay at row 10 — the rejected DECSTBM must not home it. */
+    ASSERT_STR_EQ(g_output_buf, "\x1b[10;1R");
+    bvt_free(vt);
+}
+
+/* Faithful replay of the bytes cf sends (captured from the integration
+ * test). After processing, the cursor must land at scroll_top, not at
+ * (0,0), so that subsequent menu drawing lands at the right place. */
+static void test_cf_byte_replay(void) {
+    BvtTerm *vt = make_term(40, 120);
+    /* 16 prompts as if printed by the shell. */
+    for (int i = 0; i < 16; ++i) {
+        char line[32]; snprintf(line, sizeof line, "prompt %d\r\n", i + 1);
+        feed(vt, line);
+    }
+    /* cf sends DSR + DECSTBM + DECOM + CUP. After this, cursor should be
+     * at the top of the scroll region (row 16 0-indexed, 17 1-indexed). */
+    feed(vt, "\x1b[6n");
+    g_output_len = 0;
+    feed(vt, "\x1b[17;39r");   /* DECSTBM 17;39 → top=16, bot=38 */
+    feed(vt, "\x1b[?6h");      /* DECOM on */
+    feed(vt, "\x1b[?25l");     /* hide cursor */
+    feed(vt, "\x1b[1;1H");     /* CUP 1;1 — origin mode → (16, 0) */
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[17;1R");
+    bvt_free(vt);
+}
+
+/* Reproduces the cf-launcher (brick) inline-render setup:
+ * 1. Print 16 lines (cursor advances to row 16)
+ * 2. DSR 6 → expect row 17 (1-indexed)
+ * 3. Print 16 \r\n (brick reserves vertical space)
+ * 4. DECSTBM with full scroll region, then scroll-region narrow
+ * 5. Cursor positioning to draw menu at original row
+ *
+ * If this passes but the cf integration test fails, the bug is in how
+ * we handle a sequence we have not yet covered with a unit test. */
+static void test_brick_inline_setup(void) {
+    BvtTerm *vt = make_term(40, 120);
+    /* Fill 16 lines, cursor should land at row 16 col 0. */
+    for (int i = 0; i < 16; ++i) {
+        char line[32]; snprintf(line, sizeof line, "prompt %d\r\n", i + 1);
+        feed(vt, line);
+    }
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    ASSERT_STR_EQ(g_output_buf, "\x1b[17;1R");
+
+    /* Brick now prints \r\n × N and DECSTBM. The cursor row after the
+     * setup determines where it starts drawing. After 17 \r\n's from
+     * row 16, the cursor would land at row 33 (still on screen). */
+    for (int i = 0; i < 17; ++i) feed(vt, "\r\n");
+    g_output_len = 0;
+    feed(vt, "\x1b[6n");
+    /* Expected: row 34 (16 + 17 + 1 1-indexed). */
+    ASSERT_STR_EQ(g_output_buf, "\x1b[34;1R");
+
+    /* Step through brick's setup in isolation. After each emission,
+     * dump the current cursor row+col so we can see exactly which
+     * sequence shifts the cursor away from row 33. */
+    struct { const char *seq; const char *desc; } steps[] = {
+        {"\x1b[0;0r",     "DECSTBM default"},
+        {"\x1b[?6h",      "origin mode on"},
+        {"\x1b[?25l",     "hide cursor"},
+        {"\x1b[?1049l",   "exit altscreen"},
+        {"\x1b[23;0;0t",  "XTWINOPS restore"},
+        {"\x1b[?12l",     "blink off"},
+        {"\x1b[?25h",     "show cursor"},
+        {"\x1b(B",        "G0 = ASCII"},
+        {"\x1b[m",        "SGR reset"},
+        {"\x1b[?12l",     "blink off"},
+        {"\x1b[?25h",     "show cursor"},
+        {"\x1b[?6l",      "origin mode off"},
+        {"\x1b[1;1r",     "DECSTBM 1;1"},
+        {"\x1b[0;1H",     "CUP 0;1"},
+        {"\r\n",          "CR LF"},
+    };
+    for (size_t i = 0; i < sizeof(steps)/sizeof(steps[0]); ++i) {
+        feed(vt, steps[i].seq);
+        g_output_len = 0;
+        feed(vt, "\x1b[6n");
+        fprintf(stderr, "  after [%s]: DSR=%s\n", steps[i].desc, g_output_buf);
+    }
+
+    bvt_free(vt);
+}
+
 static void test_da1(void) {
     BvtTerm *vt = make_term(24, 80);
     g_output_len = 0;
@@ -685,6 +815,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_send_text_alt);
     RUN_TEST(test_send_text_ctrl);
     RUN_TEST(test_dsr_cpr);
+    RUN_TEST(test_decom_cup);
+    RUN_TEST(test_decstbm_invalid_rejected);
+    RUN_TEST(test_cf_byte_replay);
+    RUN_TEST(test_brick_inline_setup);
     RUN_TEST(test_da1);
     RUN_TEST(test_altscreen_save_restore);
     RUN_TEST(test_ich_dch);

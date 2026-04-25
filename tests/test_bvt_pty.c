@@ -75,6 +75,14 @@ static int find_row_with(BvtTerm *vt, const char *needle) {
     return -1;
 }
 
+/* Output callback: bvt wants to send bytes back upstream (DSR replies, DA,
+ * mouse reports, etc). Forward them to the PTY so the child receives them
+ * exactly as a real terminal would. */
+static void cb_output_to_pty(const uint8_t *bytes, size_t len, void *user) {
+    PtyContext *pty = (PtyContext *)user;
+    if (pty) (void)pty_write(pty, (const char *)bytes, len);
+}
+
 /* Spawn `sh -c cmd`, drain up to timeout_ms, return the BvtTerm grid for
  * inspection. Caller frees the term and pty. */
 static BvtTerm *run_cmd(const char *cmd, int rows, int cols,
@@ -84,6 +92,11 @@ static BvtTerm *run_cmd(const char *cmd, int rows, int cols,
     if (!pty) return NULL;
     BvtTerm *vt = bvt_new(rows, cols);
     if (!vt) { pty_destroy(pty); return NULL; }
+    /* Wire the output callback so apps that probe the terminal (DSR, DA,
+     * mouse mode acks) get their replies. Without this, brick/curses apps
+     * sit waiting for `\x1b[...R` and never start drawing. */
+    BvtCallbacks cb = { .output = cb_output_to_pty };
+    bvt_set_callbacks(vt, &cb, pty);
     drain_pty(vt, pty, timeout_ms);
     if (out_pty) *out_pty = pty;
     else pty_destroy(pty);
@@ -216,6 +229,139 @@ static void test_altscreen_swap(void) {
     pty_destroy(pty);
 }
 
+/* Reproducer for the "cf menu wipes the screen" report. cf is a brick TUI
+ * (Haskell vty) that runs in inline mode (no altscreen). It probes the
+ * terminal with DSR 6 to learn the cursor row before drawing, so the menu
+ * starts where the user invoked it instead of at row 0. If the cursor
+ * row reported by DSR is wrong (e.g. always 1), the menu appears at the
+ * top and the prompts above are clobbered — exactly the user-visible bug.
+ *
+ * Test: synthesize 16 lines of output to advance the cursor naturally,
+ * then send DSR 6 directly. We expect `\x1b[17;1R` (1-indexed row 17). */
+static char g_dsr_buf[64];
+static size_t g_dsr_len = 0;
+static void cb_capture_dsr(const uint8_t *b, size_t n, void *u) {
+    (void)u;
+    for (size_t i = 0; i < n && g_dsr_len + 1 < sizeof(g_dsr_buf); ++i)
+        g_dsr_buf[g_dsr_len++] = (char)b[i];
+    g_dsr_buf[g_dsr_len] = 0;
+}
+
+/* End-to-end repro for the user-reported "cf wipes the screen" bug.
+ * Skipped if the cf binary isn't installed. */
+static void test_cf_brick_inline_preserves_history(void) {
+    if (access("/home/thomasc/.local/bin/cf", X_OK) != 0) {
+        printf("    (skipping: cf not installed)\n");
+        return;
+    }
+    int rows = 40, cols = 120;
+    char *const argv[] = { "sh", "-c",
+        /* Fill the screen with 16 prompts, then run cf. cf is a brick TUI
+         * that draws inline (no altscreen) and uses DSR 6 to discover the
+         * cursor row before drawing. Matches the user-reported geometry
+         * (`bloom-terminal -g 120x40`). */
+        "for i in $(seq 1 16); do echo \"prompt $i\"; done; "
+        "/home/thomasc/.local/bin/cf",
+        NULL };
+    PtyContext *pty = pty_create(rows, cols, argv);
+    ASSERT_NOT_NULL(pty);
+    BvtTerm *vt = bvt_new(rows, cols);
+    ASSERT_NOT_NULL(vt);
+
+    /* Output callback writes back to the PTY so cf's DSR query is answered. */
+    BvtCallbacks cb = { .output = cb_output_to_pty };
+    bvt_set_callbacks(vt, &cb, pty);
+
+    long long deadline = now_ms() + 2500;
+    int fd = pty_get_master_fd(pty);
+    char rbuf[4096];
+    while (now_ms() < deadline) {
+        struct pollfd pfd = { .fd = fd, .events = POLLIN };
+        int wait = (int)(deadline - now_ms());
+        if (wait <= 0) break;
+        int r = poll(&pfd, 1, wait);
+        if (r <= 0) {
+            if (!pty_is_running(pty)) break;
+            continue;
+        }
+        if (pfd.revents & POLLIN) {
+            ssize_t n = pty_read(pty, rbuf, sizeof(rbuf));
+            if (n <= 0) break;
+            bvt_input_write(vt, (const uint8_t *)rbuf, (size_t)n);
+        }
+        if (pfd.revents & (POLLHUP | POLLERR)) break;
+    }
+
+    /* The brick TUI starts the menu with `× Carrion Fields`. Find it. */
+    int menu_row = find_row_with(vt, "Carrion Fields");
+    if (menu_row < 0 || menu_row == 0) {
+        /* Failure path — dump the grid so the regression is debuggable. */
+        if (menu_row < 0)
+            fprintf(stderr, "  'Carrion Fields' not found anywhere\n");
+        else
+            fprintf(stderr, "  REPRO: cf menu at row 0 — prompts above were wiped\n");
+        for (int r = 0; r < rows; ++r) {
+            char line[256];
+            int n = 0;
+            for (int c = 0; c < cols && n + 1 < (int)sizeof(line); ++c) {
+                const BvtCell *cell = bvt_get_cell(vt, r, c);
+                uint32_t cp = (cell && cell->cp) ? cell->cp : 0;
+                line[n++] = (cp >= 0x20 && cp < 0x7f) ? (char)cp : (cp ? '?' : ':');
+            }
+            line[n] = 0;
+            while (n > 0 && line[n-1] == ':') line[--n] = 0;
+            if (n > 0) fprintf(stderr, "    row %2d: %s\n", r, line);
+        }
+    }
+    ASSERT_TRUE(menu_row > 0);
+    /* Sanity: at least one of the recent prompts should still be visible
+     * above the menu. */
+    int found_prompt = 0;
+    for (int row = 0; row < menu_row; ++row) {
+        for (int c = 0; c + 6 < cols; ++c) {
+            const BvtCell *cell = bvt_get_cell(vt, row, c);
+            if (cell && cell->cp == (uint32_t)'p') {
+                /* check for "prompt" prefix */
+                const char *needle = "prompt";
+                int ok = 1;
+                for (size_t i = 0; i < strlen(needle); ++i) {
+                    const BvtCell *x = bvt_get_cell(vt, row, c + (int)i);
+                    if (!x || x->cp != (uint32_t)needle[i]) { ok = 0; break; }
+                }
+                if (ok) { found_prompt = 1; break; }
+            }
+        }
+        if (found_prompt) break;
+    }
+    ASSERT_TRUE(found_prompt);
+
+    bvt_free(vt);
+    pty_destroy(pty);
+}
+
+static void test_dsr_after_natural_scroll(void) {
+    int rows = 24, cols = 80;
+    char *const argv[] = { "sh", "-c",
+        "for i in $(seq 1 16); do echo line$i; done; printf '\\033[6n'",
+        NULL };
+    PtyContext *pty = pty_create(rows, cols, argv);
+    ASSERT_NOT_NULL(pty);
+    BvtTerm *vt = bvt_new(rows, cols);
+    ASSERT_NOT_NULL(vt);
+
+    g_dsr_len = 0; g_dsr_buf[0] = 0;
+    BvtCallbacks cb = { .output = cb_capture_dsr };
+    bvt_set_callbacks(vt, &cb, NULL);
+
+    drain_pty(vt, pty, 1500);
+
+    /* Cursor advanced to row 16 (after 16 lines from row 0).
+     * DSR should report `\x1b[17;1R`. */
+    ASSERT_STR_EQ(g_dsr_buf, "\x1b[17;1R");
+    bvt_free(vt);
+    pty_destroy(pty);
+}
+
 static void test_scrollback_push(void) {
     /* Print 50 lines into a 24-row terminal; expect ≥ 25 lines pushed to
      * scrollback and the most recent lines visible at the bottom. */
@@ -253,7 +399,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_zwj_family_full);
     RUN_TEST(test_cjk_echo);
     RUN_TEST(test_altscreen_swap);
+    RUN_TEST(test_dsr_after_natural_scroll);
     RUN_TEST(test_scrollback_push);
+    RUN_TEST(test_cf_brick_inline_preserves_history);
 
     pty_signal_cleanup();
     TEST_SUMMARY();

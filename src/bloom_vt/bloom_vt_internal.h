@@ -188,6 +188,10 @@ struct BvtTerm {
     bool decckm;
     /* Keypad application mode (DECKPAM). */
     bool deckpam;
+    /* Origin mode (DECOM). When true, CUP/HVP/VPA coordinates are
+     * relative to the active scroll region instead of the full screen,
+     * and the cursor is confined to the scroll region. */
+    bool decom;
 
     /* Title — owned, NUL-terminated. */
     char *title;
