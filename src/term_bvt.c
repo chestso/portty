@@ -250,17 +250,17 @@ static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst) {
 static int bvt_back_get_cell(TerminalBackend *term, int row, int col,
                              TerminalCell *cell) {
     BvtBackendData *d = term->backend_data;
-    if (!d || !cell) return 0;
+    if (!d || !cell) return -1;
     const BvtCell *src = bvt_get_cell(d->vt, row, col);
     convert_cell(d->vt, src, cell);
-    return 1;
+    return 0;
 }
 
 static int bvt_back_get_dimensions(TerminalBackend *term, int *rows, int *cols) {
     BvtBackendData *d = term->backend_data;
-    if (!d) return 0;
+    if (!d) return -1;
     bvt_get_dimensions(d->vt, rows, cols);
-    return 1;
+    return 0;
 }
 
 static TerminalPos bvt_back_get_cursor_pos(TerminalBackend *term) {
@@ -315,10 +315,10 @@ static int bvt_back_get_scrollback_lines(TerminalBackend *term) {
 static int bvt_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
                                         int col, TerminalCell *cell) {
     BvtBackendData *d = term->backend_data;
-    if (!d || !cell) return 0;
+    if (!d || !cell) return -1;
     const BvtCell *src = bvt_get_scrollback_cell(d->vt, sb_row, col);
     convert_cell(d->vt, src, cell);
-    return 1;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ */

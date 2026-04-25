@@ -7,9 +7,11 @@
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
+#include "term_bvt.h"
 #include "term_vt.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 int png_render_text(const char *text, const char *output_path,
@@ -49,8 +51,17 @@ int png_render_text(const char *text, const char *output_path,
         cols = 10;
     int rows = 1;
 
-    // Initialize terminal and feed text
-    term = terminal_init(&terminal_backend_vt, cols, rows);
+    // Initialize terminal and feed text — honor BLOOM_TERMINAL_VT
+    TerminalBackend *vt_backend = &terminal_backend_vt;
+    {
+        const char *vt_choice = getenv("BLOOM_TERMINAL_VT");
+        if (vt_choice && (strcmp(vt_choice, "bloomvt") == 0 ||
+                          strcmp(vt_choice, "bloom-vt") == 0 ||
+                          strcmp(vt_choice, "bvt") == 0)) {
+            vt_backend = &terminal_backend_bvt;
+        }
+    }
+    term = terminal_init(vt_backend, cols, rows);
     if (!term) {
         fprintf(stderr, "ERROR: Failed to initialize terminal for PNG\n");
         goto cleanup;
