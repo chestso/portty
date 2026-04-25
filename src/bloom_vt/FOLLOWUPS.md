@@ -39,22 +39,57 @@ they get worked on. Order is roughly priority, not strict dependency.
 
 A goes in first (gating, in CI). B is opt-in for sweeps.
 
-## Soak test (after harness B lands)
+## Soak test status (PNG mode A/B via `-P --exec`)
 
-Drive each through both backends, diff PNGs:
+**Byte-identical to libvterm** (acceptance: pass without further work):
+- echo, ls, uname, env probes, multi-line for loops
+- SGR fg 30-37, tput setaf/setab, tput cup, ED/EL (`\033[2J\033[H`)
+- bold, italic, curly underline (`4:3`), dashed underline (`4:5`)
+- truecolor `38;2;R;G;B`
+- box-drawing characters `┌─┬─┐`
+- CJK ideographs (你好世界) — width=2 cells with width=0 continuation
+- VS16 ⚠️
+- 100-line scrollback push
+- 200-char line wrap
+- CR overprint (`AAAA\rB`)
+- 8-step tabs
+- Scrolling region (DECSTBM `\033[2;5r`), IL/DL, ECH
+- glow markdown render of `#` / `##` / fenced code
+
+**Accepted divergences** (bvt is correct; libvterm path is non-standard
+and goes away in step 15):
+- 256-color cube — bvt: xterm-standard `0/95/135/175/215/255`;
+  libvterm: naive `0/51/102/153/204/255`.
+- Plain `\033[4m` — bvt: single underline (per ECMA-48);
+  libvterm path at `term_vt.c:307`: deliberately maps to dotted.
+- 7-cp ZWJ family (👨‍👩‍👧‍👦) — bvt stores the full cluster;
+  libvterm caps at 6 codepoints.
+- Single RI flag (🇩🇰), skin-tone modifiers (👋🏽) — bvt honors UAX
+  cluster width; libvterm reports per-codepoint widths.
+
+**Open** (low-priority edge cases, may resolve once libvterm is gone):
+- `printf 'A\033[s\nB\033[uC'` (DECSC/DECRC across newline) — small
+  PNG diff (18 bytes). Likely a difference in how cursor row tracks
+  through LF when a save was taken before LF.
+- `printf 'A\tB\tC\033[3g\rX\tY'` (CSI 3 g + tab after clear) — bvt
+  vs libvterm differ on the post-clear `\t`. ECMA-48: with no tabs,
+  HT advances by one. Verify bvt's HT handling matches xterm.
+
+**Non-deterministic** (PNG cmp not meaningful — use harness A
+assertions instead):
+- htop / btop / live monitors
+
+## Manual interactive sweep (workstation with display only)
+
+Run the binary directly with `BLOOM_TERMINAL_VT=bloomvt`:
 
 - `vim`, `nvim`, `emacs -nw`
 - `htop`, `btop`, `lazygit`, `claude-code`
-- `glow README.md`, `bat src/term.c`, `cat unicode-demo.txt`
-- `tput`, `tic -L`, `infocmp`
+- `bat src/term.c`, `cat unicode-demo.txt`
 - `chafa --format sixel image.png` (DCS sixel passthrough)
-- vttest visual diff against libvterm
-
-Acceptance: byte-identical for non-emoji, structurally-correct
-bvt-only divergence accepted with a one-line note in CLAUDE.md.
-
-Live interactive sweep (workstation only): mouse scroll + click + drag
-selection in tmux, window resize reflow, altscreen swap via vim.
+- mouse scroll + click + drag selection in tmux
+- window resize reflow
+- altscreen swap via vim
 
 ## Step 15 — Default flip + libvterm removal
 
@@ -145,3 +180,9 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
   bvt uses the xterm-standard ramp `(0, 95, 135, 175, 215, 255)` and
   produces `#FFD700`, matching xterm / iTerm / foot / Alacritty. Document
   in CLAUDE.md when default flips.
+- ~~Plain `\033[4m` underline diverged from libvterm~~ — *accepted
+  divergence*. bloom-terminal's libvterm wrapper at `src/term_vt.c:307`
+  deliberately rewrites plain SGR 4 to dotted (`ext_ul_style = 4`).
+  Standard ECMA-48 SGR 4 = single underline. bvt follows the standard
+  and renders `\033[4m` as single underline, matching vim, less, man,
+  etc. The divergence vanishes once libvterm is removed (step 15).
