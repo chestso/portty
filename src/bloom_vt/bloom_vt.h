@@ -39,17 +39,19 @@ typedef struct BvtTerm BvtTerm;
  * Continuation cells (the second cell of a width-2 cluster) have
  * width == 0 and are skipped by callers.
  */
-typedef struct {
+typedef struct
+{
     uint32_t cp;
     uint32_t grapheme_id;
     uint32_t style_id;
-    uint8_t  width;
-    uint8_t  flags;
+    uint8_t width;
+    uint8_t flags;
     uint16_t hyperlink_id;
 } BvtCell;
 
 /* Cell flags */
-enum {
+enum
+{
     BVT_CELL_WRAPLINE = 1u << 0, /* set on the last cell of a soft-wrapped logical row */
 };
 
@@ -58,29 +60,32 @@ enum {
 /* ------------------------------------------------------------------ */
 
 /* Style attribute bits (matching the term.h order to ease term_bvt.c) */
-enum {
-    BVT_ATTR_BOLD          = 1u << 0,
-    BVT_ATTR_ITALIC        = 1u << 1,
-    BVT_ATTR_BLINK         = 1u << 2,
-    BVT_ATTR_REVERSE       = 1u << 3,
+enum
+{
+    BVT_ATTR_BOLD = 1u << 0,
+    BVT_ATTR_ITALIC = 1u << 1,
+    BVT_ATTR_BLINK = 1u << 2,
+    BVT_ATTR_REVERSE = 1u << 3,
     BVT_ATTR_STRIKETHROUGH = 1u << 4,
-    BVT_ATTR_DWL           = 1u << 5, /* double-width line */
-    BVT_ATTR_DHL_TOP       = 1u << 6, /* double-height line, top half */
-    BVT_ATTR_DHL_BOTTOM    = 1u << 7, /* double-height line, bottom half */
+    BVT_ATTR_DWL = 1u << 5,        /* double-width line */
+    BVT_ATTR_DHL_TOP = 1u << 6,    /* double-height line, top half */
+    BVT_ATTR_DHL_BOTTOM = 1u << 7, /* double-height line, bottom half */
 };
 
 /* Underline styles: SGR 4:N */
-typedef enum {
-    BVT_UL_NONE   = 0,
+typedef enum
+{
+    BVT_UL_NONE = 0,
     BVT_UL_SINGLE = 1,
     BVT_UL_DOUBLE = 2,
-    BVT_UL_CURLY  = 3,
+    BVT_UL_CURLY = 3,
     BVT_UL_DOTTED = 4,
     BVT_UL_DASHED = 5,
 } BvtUnderline;
 
 /* Color flags */
-enum {
+enum
+{
     BVT_COLOR_DEFAULT_FG = 1u << 0,
     BVT_COLOR_DEFAULT_BG = 1u << 1,
     BVT_COLOR_DEFAULT_UL = 1u << 2,
@@ -88,13 +93,14 @@ enum {
     BVT_COLOR_INDEXED_BG = 1u << 4,
 };
 
-typedef struct {
+typedef struct
+{
     uint32_t fg_rgb; /* 0x00RRGGBB if RGB; low byte = index if indexed */
     uint32_t bg_rgb;
     uint32_t ul_rgb;
     uint16_t attrs;       /* BVT_ATTR_* bitmask */
-    uint8_t  underline;   /* BvtUnderline */
-    uint8_t  font;        /* font select (0 = primary, 1-9 alt fonts via SGR 10-19) */
+    uint8_t underline;    /* BvtUnderline */
+    uint8_t font;         /* font select (0 = primary, 1-9 alt fonts via SGR 10-19) */
     uint16_t color_flags; /* BVT_COLOR_* */
 } BvtStyle;
 
@@ -112,19 +118,22 @@ size_t bvt_cell_get_grapheme(const BvtTerm *vt, const BvtCell *cell,
 /* Geometry                                                            */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
+typedef struct
+{
     int row;
     int col;
 } BvtPos;
 
-typedef struct {
+typedef struct
+{
     int start_row, start_col; /* inclusive */
     int end_row, end_col;     /* inclusive */
 } BvtRect;
 
-typedef struct {
-    int  row;
-    int  col;
+typedef struct
+{
+    int row;
+    int col;
     bool visible;
     bool blink;
 } BvtCursor;
@@ -133,35 +142,38 @@ typedef struct {
 /* Modes                                                               */
 /* ------------------------------------------------------------------ */
 
-typedef enum {
+typedef enum
+{
     BVT_MODE_ALTSCREEN,
     BVT_MODE_CURSOR_VISIBLE,
     BVT_MODE_CURSOR_BLINK,
-    BVT_MODE_REVERSE_VIDEO,    /* DECSCNM */
+    BVT_MODE_REVERSE_VIDEO, /* DECSCNM */
     BVT_MODE_BRACKETED_PASTE,
-    BVT_MODE_MOUSE_X10,        /* DECSET 9 */
-    BVT_MODE_MOUSE_BTN_EVENT,  /* DECSET 1000 */
-    BVT_MODE_MOUSE_DRAG,       /* DECSET 1002 */
-    BVT_MODE_MOUSE_ANY_EVENT,  /* DECSET 1003 */
-    BVT_MODE_MOUSE_SGR,        /* DECSET 1006 */
-    BVT_MODE_FOCUS_REPORTING,  /* DECSET 1004 */
-    BVT_MODE_GRAPHEME_CLUSTERS,/* mode 2027 (Contour) */
-    BVT_MODE_SYNC_OUTPUT,      /* mode 2026 */
+    BVT_MODE_MOUSE_X10,         /* DECSET 9 */
+    BVT_MODE_MOUSE_BTN_EVENT,   /* DECSET 1000 */
+    BVT_MODE_MOUSE_DRAG,        /* DECSET 1002 */
+    BVT_MODE_MOUSE_ANY_EVENT,   /* DECSET 1003 */
+    BVT_MODE_MOUSE_SGR,         /* DECSET 1006 */
+    BVT_MODE_FOCUS_REPORTING,   /* DECSET 1004 */
+    BVT_MODE_GRAPHEME_CLUSTERS, /* mode 2027 (Contour) */
+    BVT_MODE_SYNC_OUTPUT,       /* mode 2026 */
 } BvtMode;
 
 /* ------------------------------------------------------------------ */
 /* Keyboard / mouse                                                    */
 /* ------------------------------------------------------------------ */
 
-typedef enum {
-    BVT_MOD_NONE  = 0,
+typedef enum
+{
+    BVT_MOD_NONE = 0,
     BVT_MOD_SHIFT = 1u << 0,
-    BVT_MOD_ALT   = 1u << 1,
-    BVT_MOD_CTRL  = 1u << 2,
-    BVT_MOD_META  = 1u << 3,
+    BVT_MOD_ALT = 1u << 1,
+    BVT_MOD_CTRL = 1u << 2,
+    BVT_MOD_META = 1u << 3,
 } BvtMods;
 
-typedef enum {
+typedef enum
+{
     BVT_KEY_NONE = 0,
     BVT_KEY_ENTER,
     BVT_KEY_TAB,
@@ -177,11 +189,28 @@ typedef enum {
     BVT_KEY_END,
     BVT_KEY_PAGEUP,
     BVT_KEY_PAGEDOWN,
-    BVT_KEY_F1, BVT_KEY_F2, BVT_KEY_F3,  BVT_KEY_F4,
-    BVT_KEY_F5, BVT_KEY_F6, BVT_KEY_F7,  BVT_KEY_F8,
-    BVT_KEY_F9, BVT_KEY_F10, BVT_KEY_F11, BVT_KEY_F12,
-    BVT_KEY_KP_0, BVT_KEY_KP_1, BVT_KEY_KP_2, BVT_KEY_KP_3, BVT_KEY_KP_4,
-    BVT_KEY_KP_5, BVT_KEY_KP_6, BVT_KEY_KP_7, BVT_KEY_KP_8, BVT_KEY_KP_9,
+    BVT_KEY_F1,
+    BVT_KEY_F2,
+    BVT_KEY_F3,
+    BVT_KEY_F4,
+    BVT_KEY_F5,
+    BVT_KEY_F6,
+    BVT_KEY_F7,
+    BVT_KEY_F8,
+    BVT_KEY_F9,
+    BVT_KEY_F10,
+    BVT_KEY_F11,
+    BVT_KEY_F12,
+    BVT_KEY_KP_0,
+    BVT_KEY_KP_1,
+    BVT_KEY_KP_2,
+    BVT_KEY_KP_3,
+    BVT_KEY_KP_4,
+    BVT_KEY_KP_5,
+    BVT_KEY_KP_6,
+    BVT_KEY_KP_7,
+    BVT_KEY_KP_8,
+    BVT_KEY_KP_9,
     BVT_KEY_KP_MULTIPLY,
     BVT_KEY_KP_PLUS,
     BVT_KEY_KP_COMMA,
@@ -192,7 +221,8 @@ typedef enum {
     BVT_KEY_KP_EQUAL,
 } BvtKey;
 
-typedef enum {
+typedef enum
+{
     BVT_MOUSE_NONE = 0,
     BVT_MOUSE_LEFT,
     BVT_MOUSE_MIDDLE,
@@ -205,7 +235,8 @@ typedef enum {
 /* Callbacks                                                           */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
+typedef struct
+{
     /* damage: a rectangular region of the visible grid changed */
     void (*damage)(BvtRect rect, void *user);
 
@@ -247,10 +278,11 @@ typedef struct {
 /* Allocator hooks                                                     */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
+typedef struct
+{
     void *(*alloc)(size_t size, void *user);
     void *(*realloc)(void *ptr, size_t size, void *user);
-    void  (*free)(void *ptr, void *user);
+    void (*free)(void *ptr, void *user);
     void *user;
 } BvtAllocator;
 
@@ -304,15 +336,15 @@ const BvtCell *bvt_get_cell(const BvtTerm *vt, int row, int col);
 
 void bvt_get_dimensions(const BvtTerm *vt, int *out_rows, int *out_cols);
 
-int  bvt_get_scrollback_lines(const BvtTerm *vt);
+int bvt_get_scrollback_lines(const BvtTerm *vt);
 const BvtCell *bvt_get_scrollback_cell(const BvtTerm *vt, int sb_row, int col);
 bool bvt_get_scrollback_wrapline(const BvtTerm *vt, int sb_row);
 
-BvtCursor   bvt_get_cursor(const BvtTerm *vt);
+BvtCursor bvt_get_cursor(const BvtTerm *vt);
 const char *bvt_get_title(const BvtTerm *vt);
-bool        bvt_is_altscreen(const BvtTerm *vt);
-bool        bvt_get_mode(const BvtTerm *vt, BvtMode mode);
-bool        bvt_get_line_continuation(const BvtTerm *vt, int row);
+bool bvt_is_altscreen(const BvtTerm *vt);
+bool bvt_get_mode(const BvtTerm *vt, BvtMode mode);
+bool bvt_get_line_continuation(const BvtTerm *vt, int row);
 
 #ifdef __cplusplus
 }

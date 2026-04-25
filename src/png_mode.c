@@ -20,9 +20,10 @@ static TerminalBackend *select_backend(void) { return &terminal_backend_bvt; }
 
 /* Common SDL + renderer setup. Caller must free the resources via
  * cleanup_render_context() in reverse order. */
-typedef struct {
-    SDL_Window      *window;
-    SDL_Renderer    *sdl_rend;
+typedef struct
+{
+    SDL_Window *window;
+    SDL_Renderer *sdl_rend;
     TerminalBackend *term;
     RendererBackend *rend;
 } RenderContext;
@@ -66,10 +67,14 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
 
 static void cleanup_render_context(RenderContext *ctx)
 {
-    if (ctx->rend)     renderer_destroy(ctx->rend);
-    if (ctx->sdl_rend) SDL_DestroyRenderer(ctx->sdl_rend);
-    if (ctx->window)   SDL_DestroyWindow(ctx->window);
-    if (ctx->term)     terminal_destroy(ctx->term);
+    if (ctx->rend)
+        renderer_destroy(ctx->rend);
+    if (ctx->sdl_rend)
+        SDL_DestroyRenderer(ctx->sdl_rend);
+    if (ctx->window)
+        SDL_DestroyWindow(ctx->window);
+    if (ctx->term)
+        terminal_destroy(ctx->term);
     SDL_Quit();
 }
 
@@ -80,7 +85,8 @@ int png_render_text(const char *text, const char *output_path,
 
     /* Generous column count — renderer trims to actual content. */
     int cols = (int)strlen(text) + 4;
-    if (cols < 10) cols = 10;
+    if (cols < 10)
+        cols = 10;
     int rows = 1;
 
     RenderContext ctx;
@@ -137,7 +143,8 @@ int png_render_exec(const char *cmd, int wait_ms, int cols, int rows,
     while (now_ms() < deadline) {
         struct pollfd pfd = { .fd = fd, .events = POLLIN };
         int wait = (int)(deadline - now_ms());
-        if (wait <= 0) break;
+        if (wait <= 0)
+            break;
         int r = poll(&pfd, 1, wait);
         if (r <= 0) {
             if (!pty_is_running(pty)) {
@@ -150,10 +157,12 @@ int png_render_exec(const char *cmd, int wait_ms, int cols, int rows,
         }
         if (pfd.revents & POLLIN) {
             ssize_t n = pty_read(pty, buf, sizeof(buf));
-            if (n <= 0) break;
+            if (n <= 0)
+                break;
             terminal_process_input(ctx.term, buf, (size_t)n);
         }
-        if (pfd.revents & (POLLHUP | POLLERR)) break;
+        if (pfd.revents & (POLLHUP | POLLERR))
+            break;
     }
 
     ret = renderer_render_to_png(ctx.rend, ctx.term, output_path);

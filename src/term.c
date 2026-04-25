@@ -510,8 +510,11 @@ char *terminal_selection_get_text(TerminalBackend *term)
                 cps[0] = cell.cp;
                 if (cell.grapheme_id != 0) {
                     n_cps = terminal_cell_get_grapheme(term, row, col,
-                                                      cps, sizeof(cps)/sizeof(cps[0]));
-                    if (n_cps == 0) { cps[0] = cell.cp; n_cps = 1; }
+                                                       cps, sizeof(cps) / sizeof(cps[0]));
+                    if (n_cps == 0) {
+                        cps[0] = cell.cp;
+                        n_cps = 1;
+                    }
                 }
                 for (size_t i = 0; i < n_cps; i++) {
                     char utf8[4];
@@ -636,12 +639,14 @@ bool terminal_row_iter_next(TerminalRowIter *it)
 // they will be deleted along with their callsites in a follow-up.
 int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col)
 {
-    (void)term; (void)unified_row;
+    (void)term;
+    (void)unified_row;
     return vt_col < 0 ? 0 : vt_col;
 }
 
 int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col)
 {
-    (void)term; (void)unified_row;
+    (void)term;
+    (void)unified_row;
     return vis_col < 0 ? 0 : vis_col;
 }

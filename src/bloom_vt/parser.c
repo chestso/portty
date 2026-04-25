@@ -26,41 +26,381 @@
 
 static const uint8_t utf8d[] = {
     /* The first part of the table maps bytes to character classes. */
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    0,0,0,0,0,0,0,0, 0,0,0,0,0,0,0,0,
-    1,1,1,1,1,1,1,1, 1,1,1,1,1,1,1,1,
-    9,9,9,9,9,9,9,9, 9,9,9,9,9,9,9,9,
-    7,7,7,7,7,7,7,7, 7,7,7,7,7,7,7,7,
-    7,7,7,7,7,7,7,7, 7,7,7,7,7,7,7,7,
-    8,8,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,
-    2,2,2,2,2,2,2,2, 2,2,2,2,2,2,2,2,
-    10,3,3,3,3,3,3,3, 3,3,3,3,3,4,3,3,
-    11,6,6,6,5,8,8,8, 8,8,8,8,8,8,8,8,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    1,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    9,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    7,
+    8,
+    8,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    2,
+    10,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    3,
+    4,
+    3,
+    3,
+    11,
+    6,
+    6,
+    6,
+    5,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
+    8,
     /* The second part maps a state and class to a new state. */
-    0,12,24,36,60,96,84,12,12,12,48,72,
-    12,12,12,12,12,12,12,12,12,12,12,12,
-    12, 0,12,12,12,12,12, 0,12, 0,12,12,
-    12,24,12,12,12,12,12,24,12,24,12,12,
-    12,12,12,12,12,12,12,24,12,12,12,12,
-    12,24,12,12,12,12,12,12,12,24,12,12,
-    12,12,12,12,12,12,12,36,12,36,12,12,
-    12,36,12,12,12,12,12,36,12,36,12,12,
-    12,36,12,12,12,12,12,12,12,12,12,12,
+    0,
+    12,
+    24,
+    36,
+    60,
+    96,
+    84,
+    12,
+    12,
+    12,
+    48,
+    72,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    0,
+    12,
+    12,
+    12,
+    12,
+    12,
+    0,
+    12,
+    0,
+    12,
+    12,
+    12,
+    24,
+    12,
+    12,
+    12,
+    12,
+    12,
+    24,
+    12,
+    24,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    24,
+    12,
+    12,
+    12,
+    12,
+    12,
+    24,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    24,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    36,
+    12,
+    36,
+    12,
+    12,
+    12,
+    36,
+    12,
+    12,
+    12,
+    12,
+    12,
+    36,
+    12,
+    36,
+    12,
+    12,
+    12,
+    36,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
+    12,
 };
 
 /* Returns the new state. UTF8_ACCEPT means a full codepoint is now in
  * `*codep`. UTF8_REJECT means the byte sequence is invalid. */
-static uint32_t utf8_decode(uint32_t *state, uint32_t *codep, uint8_t byte) {
+static uint32_t utf8_decode(uint32_t *state, uint32_t *codep, uint8_t byte)
+{
     uint32_t type = utf8d[byte];
     *codep = (*state != UTF8_ACCEPT)
-        ? (byte & 0x3fu) | (*codep << 6)
-        : (0xffu >> type) & byte;
+                 ? (byte & 0x3fu) | (*codep << 6)
+                 : (0xffu >> type) & byte;
     *state = utf8d[256 + *state + type];
     return *state;
 }
@@ -69,14 +409,16 @@ static uint32_t utf8_decode(uint32_t *state, uint32_t *codep, uint8_t byte) {
 /* Action helpers                                                      */
 /* ------------------------------------------------------------------ */
 
-static void clear_seq(BvtParser *p) {
+static void clear_seq(BvtParser *p)
+{
     p->param_count = 0;
     p->param_present = false;
     p->params[0] = 0;
     p->intermediate_count = 0;
 }
 
-static void param_digit(BvtParser *p, uint8_t b) {
+static void param_digit(BvtParser *p, uint8_t b)
+{
     if (p->param_count == 0) {
         p->param_count = 1;
         p->params[0] = 0;
@@ -85,12 +427,14 @@ static void param_digit(BvtParser *p, uint8_t b) {
     /* Cap at 65535 like xterm. */
     if (*slot < 65535) {
         *slot = (*slot * 10u) + (uint32_t)(b - '0');
-        if (*slot > 65535) *slot = 65535;
+        if (*slot > 65535)
+            *slot = 65535;
     }
     p->param_present = true;
 }
 
-static void param_separator(BvtParser *p) {
+static void param_separator(BvtParser *p)
+{
     if (p->param_count < BVT_CSI_PARAM_MAX) {
         p->param_count = (p->param_count == 0) ? 2 : p->param_count + 1;
         p->params[p->param_count - 1] = 0;
@@ -98,18 +442,21 @@ static void param_separator(BvtParser *p) {
     p->param_present = false;
 }
 
-static void collect_intermediate(BvtParser *p, uint8_t b) {
+static void collect_intermediate(BvtParser *p, uint8_t b)
+{
     if (p->intermediate_count < BVT_INTERMEDIATE_MAX) {
         p->intermediates[p->intermediate_count++] = b;
     }
 }
 
-static void osc_start(BvtParser *p) {
+static void osc_start(BvtParser *p)
+{
     p->osc_len = 0;
     p->osc_truncated = false;
 }
 
-static void osc_put(BvtParser *p, uint8_t b) {
+static void osc_put(BvtParser *p, uint8_t b)
+{
     if (p->osc_len < BVT_OSC_BUF_BYTES) {
         p->osc_buf[p->osc_len++] = b;
     } else {
@@ -121,7 +468,8 @@ static void osc_put(BvtParser *p, uint8_t b) {
 /* DCS streaming                                                       */
 /* ------------------------------------------------------------------ */
 
-static void dcs_finish(BvtTerm *vt) {
+static void dcs_finish(BvtTerm *vt)
+{
     /* Final empty chunk to signal end of DCS to the consumer. */
     if (vt->parser.dcs_initial_sent && vt->callbacks.dcs) {
         vt->callbacks.dcs((const char *)vt->parser.dcs_intro,
@@ -136,7 +484,7 @@ static void dcs_finish(BvtTerm *vt) {
 /* ------------------------------------------------------------------ */
 
 static bool is_intermediate(uint8_t b) { return b >= 0x20 && b <= 0x2f; }
-static bool is_final(uint8_t b)        { return b >= 0x40 && b <= 0x7e; }
+static bool is_final(uint8_t b) { return b >= 0x40 && b <= 0x7e; }
 
 /*
  * "Anywhere" transitions per the Williams diagram. Returns true if the
@@ -151,20 +499,24 @@ static bool is_final(uint8_t b)        { return b >= 0x40 && b <= 0x7e; }
  * the parser only consumes 7-bit-clean control bytes in those paths;
  * payload bytes in OSC/DCS pass through their state handlers directly.
  */
-static bool anywhere_transition(BvtTerm *vt, uint8_t b) {
+static bool anywhere_transition(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
 
     /* CAN, SUB → cancel current sequence and return to ground */
     if (b == 0x18 || b == 0x1a) {
-        if (p->state == BVT_STATE_DCS_PASSTHROUGH) dcs_finish(vt);
-        if (b == 0x1a) bvt_execute_c0(vt, b);
+        if (p->state == BVT_STATE_DCS_PASSTHROUGH)
+            dcs_finish(vt);
+        if (b == 0x1a)
+            bvt_execute_c0(vt, b);
         p->state = BVT_STATE_GROUND;
         clear_seq(p);
         return true;
     }
     /* ESC: enter ESCAPE state regardless. */
     if (b == 0x1b) {
-        if (p->state == BVT_STATE_DCS_PASSTHROUGH) dcs_finish(vt);
+        if (p->state == BVT_STATE_DCS_PASSTHROUGH)
+            dcs_finish(vt);
         p->state = BVT_STATE_ESCAPE;
         clear_seq(p);
         p->utf8_state = UTF8_ACCEPT;
@@ -173,7 +525,8 @@ static bool anywhere_transition(BvtTerm *vt, uint8_t b) {
     return false;
 }
 
-static void state_ground(BvtTerm *vt, uint8_t b) {
+static void state_ground(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     if (b < 0x20) {
         bvt_execute_c0(vt, b);
@@ -200,7 +553,8 @@ static void state_ground(BvtTerm *vt, uint8_t b) {
     /* Otherwise still waiting for continuation bytes. */
 }
 
-static void state_escape(BvtTerm *vt, uint8_t b) {
+static void state_escape(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     if (b < 0x20) {
         bvt_execute_c0(vt, b);
@@ -213,19 +567,32 @@ static void state_escape(BvtTerm *vt, uint8_t b) {
     }
     /* Final byte. */
     switch (b) {
-        case 0x5b: p->state = BVT_STATE_CSI_ENTRY; clear_seq(p); return; /* [ */
-        case 0x5d: p->state = BVT_STATE_OSC_STRING; osc_start(p);  return; /* ] */
-        case 0x50: p->state = BVT_STATE_DCS_ENTRY;  clear_seq(p); return; /* P */
-        case 0x58: case 0x5e: case 0x5f:
-            p->state = BVT_STATE_SOS_PM_APC_STRING; return; /* X ^ _ */
-        default:
-            bvt_esc_dispatch(vt, b);
-            p->state = BVT_STATE_GROUND;
-            return;
+    case 0x5b:
+        p->state = BVT_STATE_CSI_ENTRY;
+        clear_seq(p);
+        return; /* [ */
+    case 0x5d:
+        p->state = BVT_STATE_OSC_STRING;
+        osc_start(p);
+        return; /* ] */
+    case 0x50:
+        p->state = BVT_STATE_DCS_ENTRY;
+        clear_seq(p);
+        return; /* P */
+    case 0x58:
+    case 0x5e:
+    case 0x5f:
+        p->state = BVT_STATE_SOS_PM_APC_STRING;
+        return; /* X ^ _ */
+    default:
+        bvt_esc_dispatch(vt, b);
+        p->state = BVT_STATE_GROUND;
+        return;
     }
 }
 
-static void state_escape_intermediate(BvtTerm *vt, uint8_t b) {
+static void state_escape_intermediate(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     if (b < 0x20) {
         bvt_execute_c0(vt, b);
@@ -240,7 +607,8 @@ static void state_escape_intermediate(BvtTerm *vt, uint8_t b) {
     p->state = BVT_STATE_GROUND;
 }
 
-static void state_csi_entry(BvtTerm *vt, uint8_t b) {
+static void state_csi_entry(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     if (b < 0x20) {
         bvt_execute_c0(vt, b);
@@ -274,14 +642,21 @@ static void state_csi_entry(BvtTerm *vt, uint8_t b) {
     p->state = BVT_STATE_CSI_IGNORE;
 }
 
-static void state_csi_param(BvtTerm *vt, uint8_t b) {
+static void state_csi_param(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     if (b < 0x20) {
         bvt_execute_c0(vt, b);
         return;
     }
-    if (b >= '0' && b <= '9') { param_digit(p, b); return; }
-    if (b == ';' || b == ':') { param_separator(p); return; }
+    if (b >= '0' && b <= '9') {
+        param_digit(p, b);
+        return;
+    }
+    if (b == ';' || b == ':') {
+        param_separator(p);
+        return;
+    }
     if (b >= '<' && b <= '?') {
         /* Mid-parameter private markers are ignored after CSI_ENTRY. */
         p->state = BVT_STATE_CSI_IGNORE;
@@ -300,13 +675,17 @@ static void state_csi_param(BvtTerm *vt, uint8_t b) {
     p->state = BVT_STATE_CSI_IGNORE;
 }
 
-static void state_csi_intermediate(BvtTerm *vt, uint8_t b) {
+static void state_csi_intermediate(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     if (b < 0x20) {
         bvt_execute_c0(vt, b);
         return;
     }
-    if (is_intermediate(b)) { collect_intermediate(p, b); return; }
+    if (is_intermediate(b)) {
+        collect_intermediate(p, b);
+        return;
+    }
     if (b >= 0x30 && b <= 0x3f) {
         p->state = BVT_STATE_CSI_IGNORE;
         return;
@@ -319,20 +698,45 @@ static void state_csi_intermediate(BvtTerm *vt, uint8_t b) {
     p->state = BVT_STATE_CSI_IGNORE;
 }
 
-static void state_csi_ignore(BvtTerm *vt, uint8_t b) {
+static void state_csi_ignore(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
-    if (b < 0x20) { bvt_execute_c0(vt, b); return; }
-    if (is_final(b)) { p->state = BVT_STATE_GROUND; return; }
+    if (b < 0x20) {
+        bvt_execute_c0(vt, b);
+        return;
+    }
+    if (is_final(b)) {
+        p->state = BVT_STATE_GROUND;
+        return;
+    }
     /* swallow */
 }
 
-static void state_dcs_entry(BvtTerm *vt, uint8_t b) {
+static void state_dcs_entry(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
-    if (b < 0x20) return; /* ignore */
-    if (b >= '0' && b <= '9') { param_digit(p, b);     p->state = BVT_STATE_DCS_PARAM;        return; }
-    if (b == ';' || b == ':') { param_separator(p);    p->state = BVT_STATE_DCS_PARAM;        return; }
-    if (b >= '<' && b <= '?') { collect_intermediate(p, b); p->state = BVT_STATE_DCS_PARAM;   return; }
-    if (is_intermediate(b))   { collect_intermediate(p, b); p->state = BVT_STATE_DCS_INTERMEDIATE; return; }
+    if (b < 0x20)
+        return; /* ignore */
+    if (b >= '0' && b <= '9') {
+        param_digit(p, b);
+        p->state = BVT_STATE_DCS_PARAM;
+        return;
+    }
+    if (b == ';' || b == ':') {
+        param_separator(p);
+        p->state = BVT_STATE_DCS_PARAM;
+        return;
+    }
+    if (b >= '<' && b <= '?') {
+        collect_intermediate(p, b);
+        p->state = BVT_STATE_DCS_PARAM;
+        return;
+    }
+    if (is_intermediate(b)) {
+        collect_intermediate(p, b);
+        p->state = BVT_STATE_DCS_INTERMEDIATE;
+        return;
+    }
     if (is_final(b)) {
         bvt_dcs_hook(vt, b);
         p->state = BVT_STATE_DCS_PASSTHROUGH;
@@ -341,45 +745,72 @@ static void state_dcs_entry(BvtTerm *vt, uint8_t b) {
     p->state = BVT_STATE_DCS_IGNORE;
 }
 
-static void state_dcs_param(BvtTerm *vt, uint8_t b) {
+static void state_dcs_param(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
-    if (b < 0x20) return;
-    if (b >= '0' && b <= '9') { param_digit(p, b); return; }
-    if (b == ';' || b == ':') { param_separator(p); return; }
-    if (is_intermediate(b))   { collect_intermediate(p, b); p->state = BVT_STATE_DCS_INTERMEDIATE; return; }
+    if (b < 0x20)
+        return;
+    if (b >= '0' && b <= '9') {
+        param_digit(p, b);
+        return;
+    }
+    if (b == ';' || b == ':') {
+        param_separator(p);
+        return;
+    }
+    if (is_intermediate(b)) {
+        collect_intermediate(p, b);
+        p->state = BVT_STATE_DCS_INTERMEDIATE;
+        return;
+    }
     if (is_final(b)) {
         bvt_dcs_hook(vt, b);
         p->state = BVT_STATE_DCS_PASSTHROUGH;
         return;
     }
-    if (b >= '<' && b <= '?') { p->state = BVT_STATE_DCS_IGNORE; return; }
+    if (b >= '<' && b <= '?') {
+        p->state = BVT_STATE_DCS_IGNORE;
+        return;
+    }
     p->state = BVT_STATE_DCS_IGNORE;
 }
 
-static void state_dcs_intermediate(BvtTerm *vt, uint8_t b) {
+static void state_dcs_intermediate(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
-    if (b < 0x20) return;
-    if (is_intermediate(b)) { collect_intermediate(p, b); return; }
+    if (b < 0x20)
+        return;
+    if (is_intermediate(b)) {
+        collect_intermediate(p, b);
+        return;
+    }
     if (is_final(b)) {
         bvt_dcs_hook(vt, b);
         p->state = BVT_STATE_DCS_PASSTHROUGH;
         return;
     }
-    if (b >= 0x30 && b <= 0x3f) { p->state = BVT_STATE_DCS_IGNORE; return; }
+    if (b >= 0x30 && b <= 0x3f) {
+        p->state = BVT_STATE_DCS_IGNORE;
+        return;
+    }
     p->state = BVT_STATE_DCS_IGNORE;
 }
 
-static void state_dcs_passthrough(BvtTerm *vt, uint8_t b) {
+static void state_dcs_passthrough(BvtTerm *vt, uint8_t b)
+{
     /* ESC and 0x9C terminate; both are handled by anywhere_transition. */
     bvt_dcs_put(vt, b);
 }
 
-static void state_dcs_ignore(BvtTerm *vt, uint8_t b) {
-    (void)vt; (void)b;
+static void state_dcs_ignore(BvtTerm *vt, uint8_t b)
+{
+    (void)vt;
+    (void)b;
     /* Swallow until ST (handled by anywhere_transition). */
 }
 
-static void state_osc_string(BvtTerm *vt, uint8_t b) {
+static void state_osc_string(BvtTerm *vt, uint8_t b)
+{
     BvtParser *p = &vt->parser;
     /* BEL terminates per xterm extension. ST (ESC \ or 0x9C) handled
      * by anywhere_transition / state_escape. */
@@ -390,20 +821,24 @@ static void state_osc_string(BvtTerm *vt, uint8_t b) {
     }
     if (b < 0x20) {
         /* xterm tolerates CR/LF in OSC; otherwise the C0 control aborts. */
-        if (b == 0x0a || b == 0x0d) return;
+        if (b == 0x0a || b == 0x0d)
+            return;
         p->state = BVT_STATE_GROUND;
         return;
     }
     osc_put(p, b);
 }
 
-static void state_sos_pm_apc(BvtTerm *vt, uint8_t b) {
-    (void)vt; (void)b;
+static void state_sos_pm_apc(BvtTerm *vt, uint8_t b)
+{
+    (void)vt;
+    (void)b;
     /* Swallow until terminated by ESC \ / 0x9C / 0x18 / 0x1A. */
 }
 
 /* Special: ESCAPE state on 0x5C (\) terminates strings (ST). */
-static void escape_st_check(BvtTerm *vt, uint8_t b, bool *handled) {
+static void escape_st_check(BvtTerm *vt, uint8_t b, bool *handled)
+{
     BvtParser *p = &vt->parser;
     if (p->state != BVT_STATE_ESCAPE || b != 0x5c) {
         *handled = false;
@@ -424,13 +859,15 @@ static void escape_st_check(BvtTerm *vt, uint8_t b, bool *handled) {
 /* Entry points                                                        */
 /* ------------------------------------------------------------------ */
 
-void bvt_parser_init(BvtParser *p) {
+void bvt_parser_init(BvtParser *p)
+{
     memset(p, 0, sizeof(*p));
     p->state = BVT_STATE_GROUND;
     p->utf8_state = UTF8_ACCEPT;
 }
 
-void bvt_parser_feed(BvtTerm *vt, const uint8_t *bytes, size_t len) {
+void bvt_parser_feed(BvtTerm *vt, const uint8_t *bytes, size_t len)
+{
     BvtParser *p = &vt->parser;
     for (size_t i = 0; i < len; ++i) {
         uint8_t b = bytes[i];
@@ -458,7 +895,8 @@ void bvt_parser_feed(BvtTerm *vt, const uint8_t *bytes, size_t len) {
             continue;
         }
 
-        if (anywhere_transition(vt, b)) continue;
+        if (anywhere_transition(vt, b))
+            continue;
 
         /* ESC then 0x5C → ST. Handled before state dispatch so we
          * don't try to esc_dispatch a backslash. */
@@ -468,20 +906,47 @@ void bvt_parser_feed(BvtTerm *vt, const uint8_t *bytes, size_t len) {
         }
 
         switch (p->state) {
-            case BVT_STATE_GROUND:               state_ground(vt, b);              break;
-            case BVT_STATE_ESCAPE:               state_escape(vt, b);              break;
-            case BVT_STATE_ESCAPE_INTERMEDIATE:  state_escape_intermediate(vt, b); break;
-            case BVT_STATE_CSI_ENTRY:            state_csi_entry(vt, b);           break;
-            case BVT_STATE_CSI_PARAM:            state_csi_param(vt, b);           break;
-            case BVT_STATE_CSI_INTERMEDIATE:     state_csi_intermediate(vt, b);    break;
-            case BVT_STATE_CSI_IGNORE:           state_csi_ignore(vt, b);          break;
-            case BVT_STATE_DCS_ENTRY:            state_dcs_entry(vt, b);           break;
-            case BVT_STATE_DCS_PARAM:            state_dcs_param(vt, b);           break;
-            case BVT_STATE_DCS_INTERMEDIATE:     state_dcs_intermediate(vt, b);    break;
-            case BVT_STATE_DCS_PASSTHROUGH:      state_dcs_passthrough(vt, b);     break;
-            case BVT_STATE_DCS_IGNORE:           state_dcs_ignore(vt, b);          break;
-            case BVT_STATE_OSC_STRING:           /* handled above */                break;
-            case BVT_STATE_SOS_PM_APC_STRING:    state_sos_pm_apc(vt, b);          break;
+        case BVT_STATE_GROUND:
+            state_ground(vt, b);
+            break;
+        case BVT_STATE_ESCAPE:
+            state_escape(vt, b);
+            break;
+        case BVT_STATE_ESCAPE_INTERMEDIATE:
+            state_escape_intermediate(vt, b);
+            break;
+        case BVT_STATE_CSI_ENTRY:
+            state_csi_entry(vt, b);
+            break;
+        case BVT_STATE_CSI_PARAM:
+            state_csi_param(vt, b);
+            break;
+        case BVT_STATE_CSI_INTERMEDIATE:
+            state_csi_intermediate(vt, b);
+            break;
+        case BVT_STATE_CSI_IGNORE:
+            state_csi_ignore(vt, b);
+            break;
+        case BVT_STATE_DCS_ENTRY:
+            state_dcs_entry(vt, b);
+            break;
+        case BVT_STATE_DCS_PARAM:
+            state_dcs_param(vt, b);
+            break;
+        case BVT_STATE_DCS_INTERMEDIATE:
+            state_dcs_intermediate(vt, b);
+            break;
+        case BVT_STATE_DCS_PASSTHROUGH:
+            state_dcs_passthrough(vt, b);
+            break;
+        case BVT_STATE_DCS_IGNORE:
+            state_dcs_ignore(vt, b);
+            break;
+        case BVT_STATE_OSC_STRING: /* handled above */
+            break;
+        case BVT_STATE_SOS_PM_APC_STRING:
+            state_sos_pm_apc(vt, b);
+            break;
         }
     }
     /* Suppress unused warning for the helper kept for documentation. */

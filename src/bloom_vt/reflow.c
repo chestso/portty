@@ -32,40 +32,50 @@
 #include <stdlib.h>
 #include <string.h>
 
-typedef struct {
-    BvtCell        cell;
+typedef struct
+{
+    BvtCell cell;
     const BvtPage *src_page;
 } CellRef;
 
-typedef struct {
-    uint32_t start;   /* inclusive index into cells[] */
-    uint32_t end;     /* exclusive */
-    bool     wraps;
+typedef struct
+{
+    uint32_t start; /* inclusive index into cells[] */
+    uint32_t end;   /* exclusive */
+    bool wraps;
 } NewRow;
 
-typedef struct {
-    CellRef  *cells;
-    uint32_t  cells_count, cells_cap;
-    uint32_t *line_ends;        /* exclusive cell-index where each logical line ends */
-    uint32_t  lines_count, lines_cap;
+typedef struct
+{
+    CellRef *cells;
+    uint32_t cells_count, cells_cap;
+    uint32_t *line_ends; /* exclusive cell-index where each logical line ends */
+    uint32_t lines_count, lines_cap;
 } Collected;
 
-static bool grow_cells(BvtTerm *vt, Collected *c, uint32_t need) {
-    if (c->cells_count + need <= c->cells_cap) return true;
+static bool grow_cells(BvtTerm *vt, Collected *c, uint32_t need)
+{
+    if (c->cells_count + need <= c->cells_cap)
+        return true;
     uint32_t nc = c->cells_cap ? c->cells_cap : 256;
-    while (c->cells_count + need > nc) nc *= 2;
+    while (c->cells_count + need > nc)
+        nc *= 2;
     CellRef *p = bvt_realloc(vt, c->cells, (size_t)nc * sizeof(CellRef));
-    if (!p) return false;
+    if (!p)
+        return false;
     c->cells = p;
     c->cells_cap = nc;
     return true;
 }
 
-static bool grow_lines(BvtTerm *vt, Collected *c) {
-    if (c->lines_count < c->lines_cap) return true;
+static bool grow_lines(BvtTerm *vt, Collected *c)
+{
+    if (c->lines_count < c->lines_cap)
+        return true;
     uint32_t nc = c->lines_cap ? c->lines_cap * 2 : 32;
     uint32_t *p = bvt_realloc(vt, c->line_ends, (size_t)nc * sizeof(uint32_t));
-    if (!p) return false;
+    if (!p)
+        return false;
     c->line_ends = p;
     c->lines_cap = nc;
     return true;
@@ -75,12 +85,15 @@ static bool grow_lines(BvtTerm *vt, Collected *c) {
 /* Clamp-only resize (altscreen / reflow disabled).                    */
 /* ------------------------------------------------------------------ */
 
-void bvt_resize_clamp(BvtTerm *vt, int new_rows, int new_cols) {
-    if (new_rows <= 0 || new_cols <= 0) return;
+void bvt_resize_clamp(BvtTerm *vt, int new_rows, int new_cols)
+{
+    if (new_rows <= 0 || new_cols <= 0)
+        return;
     BvtPage *old_grid = vt->grid;
 
     BvtPage *new_grid = bvt_page_new(vt, new_rows, new_cols);
-    if (!new_grid) return;
+    if (!new_grid)
+        return;
 
     if (old_grid) {
         int copy_rows = (new_rows < vt->rows) ? new_rows : vt->rows;
@@ -113,10 +126,14 @@ void bvt_resize_clamp(BvtTerm *vt, int new_rows, int new_cols) {
     vt->cols = new_cols;
     vt->scroll_top = 0;
     vt->scroll_bottom = new_rows - 1;
-    if (vt->cursor.row >= new_rows) vt->cursor.row = new_rows - 1;
-    if (vt->cursor.col >= new_cols) vt->cursor.col = new_cols - 1;
-    if (vt->cursor.row < 0) vt->cursor.row = 0;
-    if (vt->cursor.col < 0) vt->cursor.col = 0;
+    if (vt->cursor.row >= new_rows)
+        vt->cursor.row = new_rows - 1;
+    if (vt->cursor.col >= new_cols)
+        vt->cursor.col = new_cols - 1;
+    if (vt->cursor.row < 0)
+        vt->cursor.row = 0;
+    if (vt->cursor.col < 0)
+        vt->cursor.col = 0;
     vt->cursor.pending_wrap = false;
 
     /* Resize tabstops. */
@@ -135,10 +152,14 @@ void bvt_resize_clamp(BvtTerm *vt, int new_rows, int new_cols) {
 /* Reflow                                                              */
 /* ------------------------------------------------------------------ */
 
-void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
-    if (!vt) return;
-    if (new_rows <= 0 || new_cols <= 0) return;
-    if (new_rows == vt->rows && new_cols == vt->cols) return;
+void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols)
+{
+    if (!vt)
+        return;
+    if (new_rows <= 0 || new_cols <= 0)
+        return;
+    if (new_rows == vt->rows && new_cols == vt->cols)
+        return;
 
     /* Altscreen and reflow-disabled fall through to clamp resize. */
     if (vt->in_altscreen || !vt->reflow_enabled) {
@@ -160,22 +181,24 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
     int cursor_col = vt->cursor.col;
 
     /* ---------- Phase 1: collect ---------- */
-    Collected c = (Collected){0};
+    Collected c = (Collected){ 0 };
     int32_t cursor_offset = -1;
     int32_t cursor_line = -1;
-    bool    cursor_line_pending = false;
+    bool cursor_line_pending = false;
 
     for (int r = 0; r < old_rows; ++r) {
         uint32_t row_start_idx = c.cells_count;
         int32_t cursor_in_row = -1;
 
-        if (!grow_cells(vt, &c, (uint32_t)old_cols)) goto fail;
+        if (!grow_cells(vt, &c, (uint32_t)old_cols))
+            goto fail;
 
         for (int col = 0; col < old_cols; ++col) {
             if (r == cursor_row && col == cursor_col)
                 cursor_in_row = (int32_t)(c.cells_count - row_start_idx);
             const BvtCell *cell = &old_grid->cells[(size_t)r * old_cols + col];
-            if (cell->width == 0) continue;
+            if (cell->width == 0)
+                continue;
             c.cells[c.cells_count].cell = *cell;
             c.cells[c.cells_count].src_page = old_grid;
             c.cells_count++;
@@ -189,7 +212,8 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
 
         bool wrap = (old_grid->row_flags[r] & BVT_CELL_WRAPLINE) != 0u;
         if (!wrap) {
-            if (!grow_lines(vt, &c)) goto fail;
+            if (!grow_lines(vt, &c))
+                goto fail;
             c.line_ends[c.lines_count++] = c.cells_count;
             if (cursor_line_pending) {
                 cursor_line = (int32_t)(c.lines_count - 1);
@@ -200,15 +224,18 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
     /* Force-close any unclosed final line. */
     if (c.lines_count == 0 ||
         c.line_ends[c.lines_count - 1] != c.cells_count) {
-        if (!grow_lines(vt, &c)) goto fail;
+        if (!grow_lines(vt, &c))
+            goto fail;
         c.line_ends[c.lines_count++] = c.cells_count;
         if (cursor_line_pending) {
             cursor_line = (int32_t)(c.lines_count - 1);
             cursor_line_pending = false;
         }
     }
-    if (cursor_offset < 0) cursor_offset = (int32_t)c.cells_count;
-    if (cursor_line < 0)   cursor_line   = (int32_t)c.lines_count - 1;
+    if (cursor_offset < 0)
+        cursor_offset = (int32_t)c.cells_count;
+    if (cursor_line < 0)
+        cursor_line = (int32_t)c.lines_count - 1;
 
     /* Trim trailing empty logical lines that don't host the cursor.
      * The original grid often has uninitialized rows below content;
@@ -217,19 +244,21 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
     while (c.lines_count > 0) {
         uint32_t end = c.line_ends[c.lines_count - 1];
         uint32_t start = (c.lines_count > 1)
-            ? c.line_ends[c.lines_count - 2]
-            : 0u;
-        if (start != end) break;
-        if (cursor_line == (int32_t)(c.lines_count - 1)) break;
+                             ? c.line_ends[c.lines_count - 2]
+                             : 0u;
+        if (start != end)
+            break;
+        if (cursor_line == (int32_t)(c.lines_count - 1))
+            break;
         c.lines_count--;
     }
 
     /* ---------- Phase 2: rewrap ---------- */
     NewRow *new_rows_arr = NULL;
     uint32_t new_rows_count = 0, new_rows_cap = 0;
-    int32_t  new_cursor_row = 0;
-    int      new_cursor_col = 0;
-    bool     cursor_placed  = false;
+    int32_t new_cursor_row = 0;
+    int new_cursor_col = 0;
+    bool cursor_placed = false;
 
     uint32_t line_start = 0;
     for (uint32_t li = 0; li < c.lines_count; ++li) {
@@ -244,28 +273,34 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
 
             while (i < line_end) {
                 int w = c.cells[i].cell.width;
-                if (w <= 0) { ++i; continue; }
-                if (row_used + w > new_cols) break;
+                if (w <= 0) {
+                    ++i;
+                    continue;
+                }
+                if (row_used + w > new_cols)
+                    break;
                 row_used += w;
                 ++i;
             }
-            if (i == row_start && i < line_end) ++i;
+            if (i == row_start && i < line_end)
+                ++i;
 
             if (new_rows_count == new_rows_cap) {
                 uint32_t nc = new_rows_cap ? new_rows_cap * 2 : 32;
                 NewRow *np = bvt_realloc(vt, new_rows_arr,
                                          (size_t)nc * sizeof(NewRow));
-                if (!np) goto fail2;
+                if (!np)
+                    goto fail2;
                 new_rows_arr = np;
                 new_rows_cap = nc;
             }
             new_rows_arr[new_rows_count].start = row_start;
-            new_rows_arr[new_rows_count].end   = i;
+            new_rows_arr[new_rows_count].end = i;
             new_rows_arr[new_rows_count].wraps = (i < line_end);
 
             if (!cursor_placed && is_cursor_line) {
                 if ((uint32_t)cursor_offset >= row_start &&
-                    (uint32_t)cursor_offset <  i) {
+                    (uint32_t)cursor_offset < i) {
                     int w = 0;
                     for (uint32_t k = row_start;
                          k < (uint32_t)cursor_offset; ++k) {
@@ -290,12 +325,13 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
                 uint32_t nc = new_rows_cap ? new_rows_cap * 2 : 32;
                 NewRow *np = bvt_realloc(vt, new_rows_arr,
                                          (size_t)nc * sizeof(NewRow));
-                if (!np) goto fail2;
+                if (!np)
+                    goto fail2;
                 new_rows_arr = np;
                 new_rows_cap = nc;
             }
             new_rows_arr[new_rows_count].start = line_start;
-            new_rows_arr[new_rows_count].end   = line_start;
+            new_rows_arr[new_rows_count].end = line_start;
             new_rows_arr[new_rows_count].wraps = false;
             if (!cursor_placed && is_cursor_line) {
                 new_cursor_row = (int32_t)new_rows_count;
@@ -308,19 +344,23 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
     }
     if (!cursor_placed) {
         new_cursor_row = (new_rows_count > 0)
-            ? (int32_t)(new_rows_count - 1) : 0;
+                             ? (int32_t)(new_rows_count - 1)
+                             : 0;
         new_cursor_col = 0;
     }
 
     /* ---------- Phase 3: distribute ---------- */
     int total = (int)new_rows_count;
     int sb_count = total - new_rows;
-    if (sb_count < 0) sb_count = 0;
+    if (sb_count < 0)
+        sb_count = 0;
     int visible_count = total - sb_count;
-    if (visible_count > new_rows) visible_count = new_rows;
+    if (visible_count > new_rows)
+        visible_count = new_rows;
 
     BvtPage *new_grid = bvt_page_new(vt, new_rows, new_cols);
-    if (!new_grid) goto fail2;
+    if (!new_grid)
+        goto fail2;
 
     /* Push sb_count oldest rows to scrollback. We need a temporary
      * row buffer at new_cols width and route through bvt_scrollback_push.
@@ -340,10 +380,11 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
         for (uint32_t k = nr.start; k < nr.end && col < new_cols; ++k) {
             CellRef *ref = &c.cells[k];
             int w = ref->cell.width;
-            if (col + w > new_cols) break;
+            if (col + w > new_cols)
+                break;
             row_buf[col] = ref->cell;
             if (w == 2 && col + 1 < new_cols) {
-                BvtCell cont = (BvtCell){0};
+                BvtCell cont = (BvtCell){ 0 };
                 cont.width = 0;
                 cont.style_id = ref->cell.style_id;
                 row_buf[col + 1] = cont;
@@ -361,7 +402,8 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
         for (uint32_t k = nr.start; k < nr.end && col < new_cols; ++k) {
             CellRef *ref = &c.cells[k];
             int w = ref->cell.width;
-            if (col + w > new_cols) break;
+            if (col + w > new_cols)
+                break;
 
             const BvtStyle *st =
                 bvt_style_lookup(ref->src_page, ref->cell.style_id);
@@ -377,11 +419,11 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
                                                           (uint32_t)n);
             }
             BvtCell new_cell = ref->cell;
-            new_cell.style_id    = new_style_id;
+            new_cell.style_id = new_style_id;
             new_cell.grapheme_id = new_grapheme_id;
             new_grid->cells[(size_t)i * new_cols + col] = new_cell;
             if (w == 2 && col + 1 < new_cols) {
-                BvtCell cont = (BvtCell){0};
+                BvtCell cont = (BvtCell){ 0 };
                 cont.width = 0;
                 cont.style_id = new_style_id;
                 new_grid->cells[(size_t)i * new_cols + col + 1] = cont;
@@ -407,7 +449,8 @@ void bvt_reflow(BvtTerm *vt, int new_rows, int new_cols) {
         vt->cursor.row = 0;
         vt->cursor.col = 0;
     } else {
-        if (target_visible_row >= new_rows) target_visible_row = new_rows - 1;
+        if (target_visible_row >= new_rows)
+            target_visible_row = new_rows - 1;
         vt->cursor.row = target_visible_row;
         vt->cursor.col =
             (new_cursor_col >= new_cols) ? new_cols - 1 : new_cursor_col;

@@ -24,9 +24,10 @@
 
 #include <string.h>
 
-#define DEDUP_EMPTY 0u  /* offset 0 reserved as sentinel */
+#define DEDUP_EMPTY 0u /* offset 0 reserved as sentinel */
 
-static uint32_t fnv1a_words(const uint32_t *data, uint32_t len) {
+static uint32_t fnv1a_words(const uint32_t *data, uint32_t len)
+{
     const uint8_t *b = (const uint8_t *)data;
     size_t bytes = (size_t)len * sizeof(uint32_t);
     uint32_t h = 2166136261u;
@@ -38,13 +39,17 @@ static uint32_t fnv1a_words(const uint32_t *data, uint32_t len) {
     return h ? h : 1u;
 }
 
-static bool ensure_init(BvtTerm *vt, BvtPage *page) {
-    if (page->graphemes.codepoints) return true;
+static bool ensure_init(BvtTerm *vt, BvtPage *page)
+{
+    if (page->graphemes.codepoints)
+        return true;
     /* Initial codepoint pool — small power of two. */
     uint32_t cap_words = BVT_ARENA_CP_INIT / sizeof(uint32_t);
-    if (cap_words < 8) cap_words = 8;
+    if (cap_words < 8)
+        cap_words = 8;
     page->graphemes.codepoints = bvt_alloc(vt, cap_words * sizeof(uint32_t));
-    if (!page->graphemes.codepoints) return false;
+    if (!page->graphemes.codepoints)
+        return false;
     page->graphemes.capacity = cap_words;
     /* Reserve offset 0 as the "no extended grapheme" sentinel. We
      * stash a zero-length stub there so reads at id 0 are well-defined. */
@@ -68,29 +73,36 @@ static bool ensure_init(BvtTerm *vt, BvtPage *page) {
     return true;
 }
 
-static bool grow_codepoints(BvtTerm *vt, BvtPage *page, uint32_t need_words) {
+static bool grow_codepoints(BvtTerm *vt, BvtPage *page, uint32_t need_words)
+{
     uint32_t new_cap = page->graphemes.capacity;
-    while (new_cap < page->graphemes.used + need_words) new_cap *= 2;
-    if (new_cap == page->graphemes.capacity) return true;
+    while (new_cap < page->graphemes.used + need_words)
+        new_cap *= 2;
+    if (new_cap == page->graphemes.capacity)
+        return true;
     uint32_t *nc = bvt_realloc(
         vt, page->graphemes.codepoints, new_cap * sizeof(uint32_t));
-    if (!nc) return false;
+    if (!nc)
+        return false;
     page->graphemes.codepoints = nc;
     page->graphemes.capacity = new_cap;
     return true;
 }
 
-static bool grow_dedup(BvtTerm *vt, BvtPage *page) {
+static bool grow_dedup(BvtTerm *vt, BvtPage *page)
+{
     uint32_t new_cap = page->graphemes.dedup_capacity * 2;
     uint32_t *new_idx = bvt_alloc(vt, new_cap * sizeof(uint32_t));
-    if (!new_idx) return false;
-    for (uint32_t i = 0; i < new_cap; ++i) new_idx[i] = DEDUP_EMPTY;
+    if (!new_idx)
+        return false;
+    for (uint32_t i = 0; i < new_cap; ++i)
+        new_idx[i] = DEDUP_EMPTY;
     uint32_t mask = new_cap - 1;
     /* Walk the arena and re-insert every entry. */
     uint32_t off = 2; /* skip sentinel */
     while (off < page->graphemes.used) {
         uint32_t hash = page->graphemes.codepoints[off];
-        uint32_t len  = page->graphemes.codepoints[off + 1];
+        uint32_t len = page->graphemes.codepoints[off + 1];
         uint32_t slot = hash & mask;
         while (new_idx[slot] != DEDUP_EMPTY)
             slot = (slot + 1) & mask;
@@ -104,9 +116,12 @@ static bool grow_dedup(BvtTerm *vt, BvtPage *page) {
 }
 
 uint32_t bvt_grapheme_intern(BvtTerm *vt, BvtPage *page,
-                             const uint32_t *cps, uint32_t len) {
-    if (!page || len < 2) return 0;
-    if (!ensure_init(vt, page)) return 0;
+                             const uint32_t *cps, uint32_t len)
+{
+    if (!page || len < 2)
+        return 0;
+    if (!ensure_init(vt, page))
+        return 0;
 
     uint32_t hash = fnv1a_words(cps, len);
     uint32_t mask = page->graphemes.dedup_capacity - 1;
@@ -118,10 +133,11 @@ uint32_t bvt_grapheme_intern(BvtTerm *vt, BvtPage *page,
             /* Insert: ensure space, append. */
             uint32_t need = 2 + len;
             if (page->graphemes.used + need > page->graphemes.capacity) {
-                if (!grow_codepoints(vt, page, need)) return 0;
+                if (!grow_codepoints(vt, page, need))
+                    return 0;
             }
             uint32_t new_off = page->graphemes.used;
-            page->graphemes.codepoints[new_off]     = hash;
+            page->graphemes.codepoints[new_off] = hash;
             page->graphemes.codepoints[new_off + 1] = len;
             memcpy(&page->graphemes.codepoints[new_off + 2], cps,
                    (size_t)len * sizeof(uint32_t));
@@ -130,14 +146,13 @@ uint32_t bvt_grapheme_intern(BvtTerm *vt, BvtPage *page,
             page->graphemes.dedup_count++;
 
             /* Keep load factor below 70%. */
-            if (page->graphemes.dedup_count * 10
-                > page->graphemes.dedup_capacity * 7) {
+            if (page->graphemes.dedup_count * 10 > page->graphemes.dedup_capacity * 7) {
                 grow_dedup(vt, page);
             }
             return new_off;
         }
         uint32_t stored_hash = page->graphemes.codepoints[off];
-        uint32_t stored_len  = page->graphemes.codepoints[off + 1];
+        uint32_t stored_len = page->graphemes.codepoints[off + 1];
         if (stored_hash == hash && stored_len == len &&
             memcmp(&page->graphemes.codepoints[off + 2], cps,
                    (size_t)len * sizeof(uint32_t)) == 0) {
@@ -148,12 +163,17 @@ uint32_t bvt_grapheme_intern(BvtTerm *vt, BvtPage *page,
 }
 
 size_t bvt_grapheme_read(const BvtPage *page, uint32_t id,
-                         uint32_t *out, size_t out_cap) {
-    if (!page || id == 0 || !out || out_cap == 0) return 0;
-    if (!page->graphemes.codepoints) return 0;
-    if (id + 1 >= page->graphemes.used) return 0;
+                         uint32_t *out, size_t out_cap)
+{
+    if (!page || id == 0 || !out || out_cap == 0)
+        return 0;
+    if (!page->graphemes.codepoints)
+        return 0;
+    if (id + 1 >= page->graphemes.used)
+        return 0;
     uint32_t len = page->graphemes.codepoints[id + 1];
-    if (id + 2 + len > page->graphemes.used) return 0;
+    if (id + 2 + len > page->graphemes.used)
+        return 0;
     size_t to_copy = (len < out_cap) ? (size_t)len : out_cap;
     memcpy(out, &page->graphemes.codepoints[id + 2],
            to_copy * sizeof(uint32_t));

@@ -33,6 +33,7 @@ A goes in first (gating, in CI). B is opt-in for sweeps.
 ## Soak test status (PNG mode A/B via `-P --exec`)
 
 **Byte-identical to libvterm** (acceptance: pass without further work):
+
 - echo, ls, uname, env probes, multi-line for loops
 - SGR fg 30-37, tput setaf/setab, tput cup, ED/EL (`\033[2J\033[H`)
 - bold, italic, curly underline (`4:3`), dashed underline (`4:5`)
@@ -52,6 +53,7 @@ A goes in first (gating, in CI). B is opt-in for sweeps.
 
 **Accepted divergences** (bvt is correct; libvterm path is non-standard
 and goes away in step 15):
+
 - 256-color cube — bvt: xterm-standard `0/95/135/175/215/255`;
   libvterm: naive `0/51/102/153/204/255`.
 - Plain `\033[4m` — bvt: single underline (per ECMA-48);
@@ -62,6 +64,7 @@ and goes away in step 15):
   cluster width; libvterm reports per-codepoint widths.
 
 **Open** (low-priority edge cases, may resolve once libvterm is gone):
+
 - `printf 'A\033[s\nB\033[uC'` (DECSC/DECRC across newline) — small
   PNG diff (18 bytes). Likely a difference in how cursor row tracks
   through LF when a save was taken before LF.
@@ -71,6 +74,7 @@ and goes away in step 15):
 
 **Non-deterministic** (PNG cmp not meaningful — use harness A
 assertions instead):
+
 - htop / btop / live monitors
 
 ## Manual interactive sweep (workstation with display only)
@@ -138,7 +142,7 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
 - ~~DEC special graphics (line drawing) was unimplemented — `\033(0`
   designation was silently swallowed and `lqk\nx x\nmqj` rendered as
   literal ASCII instead of `┌─┐ │ │ └─┘`~~ — added charset slot
-  tracking on BvtTerm, ESC ( ) * + dispatch, SO / SI shifts, and the
+  tracking on BvtTerm, ESC ( ) \* + dispatch, SO / SI shifts, and the
   standard VT100 0x5F..0x7E translation table at print time. Coverage
   in `test_bvt_parser.c::test_dec_graphics_g0` and `::test_dec_graphics_si_so`.
 - ~~Wrap-aware selection broke at the visible/scrollback boundary, and
@@ -180,13 +184,13 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
   then set to defaults after first SGR reset~~ — initialize pen with
   `BVT_COLOR_DEFAULT_FG | _BG | _UL` in `bvt_new`.
 - ~~256-color SGR (`\033[48;5;220m`) PNG diverged from libvterm~~ —
-  *accepted divergence*. libvterm uses a naive 51-step ramp
+  _accepted divergence_. libvterm uses a naive 51-step ramp
   `(0, 51, 102, 153, 204, 255)` and produces `#FFCC00` for color 220.
   bvt uses the xterm-standard ramp `(0, 95, 135, 175, 215, 255)` and
   produces `#FFD700`, matching xterm / iTerm / foot / Alacritty. Document
   in CLAUDE.md when default flips.
-- ~~Plain `\033[4m` underline diverged from libvterm~~ — *accepted
-  divergence*. bloom-terminal's libvterm wrapper at `src/term_vt.c:307`
+- ~~Plain `\033[4m` underline diverged from libvterm~~ — _accepted
+  divergence_. bloom-terminal's libvterm wrapper at `src/term_vt.c:307`
   deliberately rewrites plain SGR 4 to dotted (`ext_ul_style = 4`).
   Standard ECMA-48 SGR 4 = single underline. bvt follows the standard
   and renders `\033[4m` as single underline, matching vim, less, man,

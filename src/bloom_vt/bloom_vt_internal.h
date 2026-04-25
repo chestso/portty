@@ -16,28 +16,29 @@
 /* Tunables                                                            */
 /* ------------------------------------------------------------------ */
 
-#define BVT_PAGE_BYTES        (64u * 1024u)
-#define BVT_OSC_BUF_BYTES     4096u
-#define BVT_CSI_PARAM_MAX     32u
-#define BVT_INTERMEDIATE_MAX  4u
+#define BVT_PAGE_BYTES         (64u * 1024u)
+#define BVT_OSC_BUF_BYTES      4096u
+#define BVT_CSI_PARAM_MAX      32u
+#define BVT_INTERMEDIATE_MAX   4u
 #define BVT_DEFAULT_SCROLLBACK 1000
-#define BVT_SB_PAGE_ROWS      64u  /* rows per scrollback page */
+#define BVT_SB_PAGE_ROWS       64u /* rows per scrollback page */
 
 /* Grapheme arena: codepoints / dedup table initial sizes (bytes). */
-#define BVT_ARENA_CP_INIT     1024u
-#define BVT_ARENA_DEDUP_INIT  64u
-#define BVT_STYLES_INIT       16u
+#define BVT_ARENA_CP_INIT    1024u
+#define BVT_ARENA_DEDUP_INIT 64u
+#define BVT_STYLES_INIT      16u
 
 /* ------------------------------------------------------------------ */
 /* Style intern table                                                  */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
-    BvtStyle *entries;     /* index 0 reserved for the default style */
-    uint32_t  count;
-    uint32_t  capacity;    /* power of two */
-    uint32_t *index;       /* open-addressed: hash slot -> entries[] index */
-    uint32_t  index_capacity;
+typedef struct
+{
+    BvtStyle *entries; /* index 0 reserved for the default style */
+    uint32_t count;
+    uint32_t capacity; /* power of two */
+    uint32_t *index;   /* open-addressed: hash slot -> entries[] index */
+    uint32_t index_capacity;
 } BvtStyleTable;
 
 /* ------------------------------------------------------------------ */
@@ -49,30 +50,32 @@ typedef struct {
  * The grapheme_id stored on the cell is the offset of the first u32
  * (the hash word). offset 0 is reserved (single-cp cell sentinel).
  */
-typedef struct {
+typedef struct
+{
     uint32_t *codepoints;
-    uint32_t  used;
-    uint32_t  capacity;
-    uint32_t *dedup_index;     /* open-addressed: hash slot -> arena offset */
-    uint32_t  dedup_capacity;  /* power of two */
-    uint32_t  dedup_count;     /* live entries in dedup_index */
+    uint32_t used;
+    uint32_t capacity;
+    uint32_t *dedup_index;   /* open-addressed: hash slot -> arena offset */
+    uint32_t dedup_capacity; /* power of two */
+    uint32_t dedup_count;    /* live entries in dedup_index */
 } BvtGraphemeArena;
 
 /* ------------------------------------------------------------------ */
 /* Page                                                                */
 /* ------------------------------------------------------------------ */
 
-typedef struct BvtPage {
+typedef struct BvtPage
+{
     struct BvtPage *prev, *next;
     uint16_t cols;
     uint16_t row_count;
     uint16_t row_capacity;
     uint16_t _pad;
 
-    BvtCell *cells;        /* row_capacity * cols */
-    uint8_t *row_flags;    /* per-row flags (currently: WRAPLINE on last cell of row) */
+    BvtCell *cells;     /* row_capacity * cols */
+    uint8_t *row_flags; /* per-row flags (currently: WRAPLINE on last cell of row) */
 
-    BvtStyleTable    styles;
+    BvtStyleTable styles;
     BvtGraphemeArena graphemes;
 
     /* No flexible array yet — initial scaffold uses sub-allocations.
@@ -84,7 +87,8 @@ typedef struct BvtPage {
 /* Parser state                                                        */
 /* ------------------------------------------------------------------ */
 
-typedef enum {
+typedef enum
+{
     BVT_STATE_GROUND = 0,
     BVT_STATE_ESCAPE,
     BVT_STATE_ESCAPE_INTERMEDIATE,
@@ -101,51 +105,54 @@ typedef enum {
     BVT_STATE_SOS_PM_APC_STRING,
 } BvtParserState;
 
-typedef struct {
+typedef struct
+{
     BvtParserState state;
-    uint32_t       params[BVT_CSI_PARAM_MAX];
-    uint8_t        param_count;
-    bool           param_present;     /* whether the current slot has a digit */
-    uint8_t        intermediates[BVT_INTERMEDIATE_MAX];
-    uint8_t        intermediate_count;
+    uint32_t params[BVT_CSI_PARAM_MAX];
+    uint8_t param_count;
+    bool param_present; /* whether the current slot has a digit */
+    uint8_t intermediates[BVT_INTERMEDIATE_MAX];
+    uint8_t intermediate_count;
     /* UTF-8 decoder state (Bjoern Hoehrmann) */
-    uint32_t       utf8_state;
-    uint32_t       utf8_codepoint;
+    uint32_t utf8_state;
+    uint32_t utf8_codepoint;
     /* OSC accumulator */
-    uint8_t        osc_buf[BVT_OSC_BUF_BYTES];
-    uint16_t       osc_len;
-    bool           osc_truncated;
+    uint8_t osc_buf[BVT_OSC_BUF_BYTES];
+    uint16_t osc_len;
+    bool osc_truncated;
     /* DCS streaming state — passthrough emits chunks via callback */
-    bool           dcs_initial_sent;
-    uint8_t        dcs_intro[BVT_INTERMEDIATE_MAX + 4]; /* params + final */
-    uint8_t        dcs_intro_len;
+    bool dcs_initial_sent;
+    uint8_t dcs_intro[BVT_INTERMEDIATE_MAX + 4]; /* params + final */
+    uint8_t dcs_intro_len;
 } BvtParser;
 
 /* ------------------------------------------------------------------ */
 /* Cursor / pen state                                                  */
 /* ------------------------------------------------------------------ */
 
-#define BVT_CLUSTER_MAX 16  /* max codepoints in a single grapheme cluster */
+#define BVT_CLUSTER_MAX 16 /* max codepoints in a single grapheme cluster */
 
-typedef struct {
-    int       row, col;
-    bool      visible;
-    bool      blink;
-    bool      pending_wrap;  /* "deferred wrap" — DEC behavior at right margin */
-    BvtStyle  pen;           /* current SGR pen */
-    uint16_t  hyperlink_id;  /* OSC 8 active link, 0 = none */
+typedef struct
+{
+    int row, col;
+    bool visible;
+    bool blink;
+    bool pending_wrap;     /* "deferred wrap" — DEC behavior at right margin */
+    BvtStyle pen;          /* current SGR pen */
+    uint16_t hyperlink_id; /* OSC 8 active link, 0 = none */
     /* Pending grapheme cluster — codepoints accumulated since the last
      * boundary. Committed as a single cell on the next break or on any
      * forced flush (CSI dispatch, C0 control, etc.). */
-    uint32_t  cluster_buf[BVT_CLUSTER_MAX];
-    uint8_t   cluster_len;
+    uint32_t cluster_buf[BVT_CLUSTER_MAX];
+    uint8_t cluster_len;
 } BvtCursorState;
 
 /* ------------------------------------------------------------------ */
 /* The terminal                                                        */
 /* ------------------------------------------------------------------ */
 
-struct BvtTerm {
+struct BvtTerm
+{
     int rows;
     int cols;
 
@@ -154,13 +161,13 @@ struct BvtTerm {
 
     /* Alternate screen — saved when in altscreen. */
     BvtPage *altgrid;
-    bool     in_altscreen;
+    bool in_altscreen;
 
     /* Scrollback page ring (head = most recent). */
     BvtPage *sb_head;
     BvtPage *sb_tail;
-    int      sb_lines;
-    int      sb_capacity;
+    int sb_lines;
+    int sb_capacity;
 
     BvtCursorState cursor;
     BvtCursorState saved_cursor;
@@ -174,7 +181,7 @@ struct BvtTerm {
 
     BvtParser parser;
     BvtCallbacks callbacks;
-    void        *callback_user;
+    void *callback_user;
     BvtAllocator alloc;
 
     /* Modes. Indexed by BvtMode enum value. */
@@ -206,7 +213,7 @@ struct BvtTerm {
 
     /* Damage accumulator (rectangular union since last clear). */
     BvtRect damage;
-    bool    damage_dirty;
+    bool damage_dirty;
 };
 
 /* ------------------------------------------------------------------ */
@@ -216,11 +223,11 @@ struct BvtTerm {
 /* Allocator helpers — route through vt->alloc. */
 void *bvt_alloc(BvtTerm *vt, size_t size);
 void *bvt_realloc(BvtTerm *vt, void *ptr, size_t size);
-void  bvt_dealloc(BvtTerm *vt, void *ptr);
+void bvt_dealloc(BvtTerm *vt, void *ptr);
 
 /* Page lifecycle. */
 BvtPage *bvt_page_new(BvtTerm *vt, int rows, int cols);
-void     bvt_page_free(BvtTerm *vt, BvtPage *page);
+void bvt_page_free(BvtTerm *vt, BvtPage *page);
 
 /* Style intern. Returns 0 for the default style. */
 uint32_t bvt_style_intern(BvtTerm *vt, BvtPage *page, const BvtStyle *style);
@@ -229,8 +236,8 @@ const BvtStyle *bvt_style_lookup(const BvtPage *page, uint32_t id);
 /* Grapheme arena. */
 uint32_t bvt_grapheme_intern(BvtTerm *vt, BvtPage *page,
                              const uint32_t *cps, uint32_t len);
-size_t   bvt_grapheme_read(const BvtPage *page, uint32_t id,
-                           uint32_t *out, size_t out_cap);
+size_t bvt_grapheme_read(const BvtPage *page, uint32_t id,
+                         uint32_t *out, size_t out_cap);
 
 /* Parser entry. */
 void bvt_parser_init(BvtParser *p);

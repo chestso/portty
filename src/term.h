@@ -7,7 +7,7 @@
 
 #include "sixel.h"
 
-#define TERM_MAX_SIXEL_IMAGES   64
+#define TERM_MAX_SIXEL_IMAGES 64
 
 // Forward declarations
 struct TerminalBackend;

@@ -1427,11 +1427,14 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         int scroll_offset = data->scroll_offset;
         int scrollback_row = scroll_offset - 1 - row;
         int unified_row = (scrollback_row >= 0)
-            ? -(scrollback_row + 1)
-            : (row - scroll_offset);
+                              ? -(scrollback_row + 1)
+                              : (row - scroll_offset);
         size_t n = terminal_cell_get_grapheme(term, unified_row, vt_col,
-                                              cps, sizeof(cps)/sizeof(cps[0]));
-        if (n == 0) { cps[0] = cell.cp; n = 1; }
+                                              cps, sizeof(cps) / sizeof(cps[0]));
+        if (n == 0) {
+            cps[0] = cell.cp;
+            n = 1;
+        }
         cp_count = (int)n;
     }
 

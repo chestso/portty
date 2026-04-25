@@ -12,15 +12,19 @@
 /* Altscreen toggle. With save_restore_cursor, mimics DECSET 1049 (the
  * "smcup/rmcup" variant): save cursor on entry, restore on exit. With
  * save_restore_cursor=false this matches DECSET 47 / 1047 (raw alt). */
-void bvt_set_altscreen(BvtTerm *vt, bool on, bool save_restore_cursor) {
-    if (!vt) return;
-    if (on == vt->in_altscreen) return;
+void bvt_set_altscreen(BvtTerm *vt, bool on, bool save_restore_cursor)
+{
+    if (!vt)
+        return;
+    if (on == vt->in_altscreen)
+        return;
 
     /* Flush any pending cluster before swapping grids. */
     bvt_flush_cluster(vt);
 
     if (on) {
-        if (save_restore_cursor) vt->saved_cursor = vt->cursor;
+        if (save_restore_cursor)
+            vt->saved_cursor = vt->cursor;
 
         /* Lazily allocate or resize the alt grid to current geometry. */
         if (!vt->altgrid ||
@@ -31,7 +35,8 @@ void bvt_set_altscreen(BvtTerm *vt, bool on, bool save_restore_cursor) {
                 vt->altgrid = NULL;
             }
             vt->altgrid = bvt_page_new(vt, vt->rows, vt->cols);
-            if (!vt->altgrid) return; /* OOM — leave altscreen flag off */
+            if (!vt->altgrid)
+                return; /* OOM — leave altscreen flag off */
         }
 
         /* Swap. The current grid is preserved in vt->altgrid; the
@@ -55,7 +60,8 @@ void bvt_set_altscreen(BvtTerm *vt, bool on, bool save_restore_cursor) {
 
         vt->in_altscreen = false;
         vt->modes[BVT_MODE_ALTSCREEN] = false;
-        if (save_restore_cursor) vt->cursor = vt->saved_cursor;
+        if (save_restore_cursor)
+            vt->cursor = vt->saved_cursor;
     }
 
     bvt_damage_all(vt);

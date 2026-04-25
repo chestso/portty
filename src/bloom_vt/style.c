@@ -23,17 +23,18 @@
 #define STYLE_INDEX_EMPTY UINT32_MAX
 
 static const BvtStyle DEFAULT_STYLE = {
-    .fg_rgb      = 0,
-    .bg_rgb      = 0,
-    .ul_rgb      = 0,
-    .attrs       = 0,
-    .underline   = 0,
-    .font        = 0,
+    .fg_rgb = 0,
+    .bg_rgb = 0,
+    .ul_rgb = 0,
+    .attrs = 0,
+    .underline = 0,
+    .font = 0,
     .color_flags = BVT_COLOR_DEFAULT_FG | BVT_COLOR_DEFAULT_BG | BVT_COLOR_DEFAULT_UL,
 };
 
 /* FNV-1a 32-bit. */
-static uint32_t fnv1a(const void *data, size_t len) {
+static uint32_t fnv1a(const void *data, size_t len)
+{
     const uint8_t *b = data;
     uint32_t h = 2166136261u;
     for (size_t i = 0; i < len; ++i) {
@@ -43,8 +44,10 @@ static uint32_t fnv1a(const void *data, size_t len) {
     return h;
 }
 
-static bool ensure_init(BvtTerm *vt, BvtPage *page) {
-    if (page->styles.entries) return true;
+static bool ensure_init(BvtTerm *vt, BvtPage *page)
+{
+    if (page->styles.entries)
+        return true;
     page->styles.capacity = BVT_STYLES_INIT;
     page->styles.entries = bvt_alloc(vt, page->styles.capacity * sizeof(BvtStyle));
     if (!page->styles.entries) {
@@ -72,10 +75,12 @@ static bool ensure_init(BvtTerm *vt, BvtPage *page) {
     return true;
 }
 
-static bool grow_index(BvtTerm *vt, BvtPage *page) {
+static bool grow_index(BvtTerm *vt, BvtPage *page)
+{
     uint32_t new_cap = page->styles.index_capacity * 2;
     uint32_t *new_index = bvt_alloc(vt, new_cap * sizeof(uint32_t));
-    if (!new_index) return false;
+    if (!new_index)
+        return false;
     for (uint32_t i = 0; i < new_cap; ++i)
         new_index[i] = STYLE_INDEX_EMPTY;
     /* Re-insert each non-default entry. */
@@ -93,22 +98,28 @@ static bool grow_index(BvtTerm *vt, BvtPage *page) {
     return true;
 }
 
-static bool grow_entries(BvtTerm *vt, BvtPage *page) {
+static bool grow_entries(BvtTerm *vt, BvtPage *page)
+{
     uint32_t new_cap = page->styles.capacity * 2;
     BvtStyle *ne = bvt_realloc(
         vt, page->styles.entries, new_cap * sizeof(BvtStyle));
-    if (!ne) return false;
+    if (!ne)
+        return false;
     page->styles.entries = ne;
     page->styles.capacity = new_cap;
     return true;
 }
 
-uint32_t bvt_style_intern(BvtTerm *vt, BvtPage *page, const BvtStyle *style) {
-    if (!page) return 0;
+uint32_t bvt_style_intern(BvtTerm *vt, BvtPage *page, const BvtStyle *style)
+{
+    if (!page)
+        return 0;
     /* Default style → reserved id 0, no allocation. */
-    if (memcmp(style, &DEFAULT_STYLE, sizeof(*style)) == 0) return 0;
+    if (memcmp(style, &DEFAULT_STYLE, sizeof(*style)) == 0)
+        return 0;
 
-    if (!ensure_init(vt, page)) return 0;
+    if (!ensure_init(vt, page))
+        return 0;
 
     uint32_t hash = fnv1a(style, sizeof(*style));
     uint32_t mask = page->styles.index_capacity - 1;
@@ -120,7 +131,8 @@ uint32_t bvt_style_intern(BvtTerm *vt, BvtPage *page, const BvtStyle *style) {
         if (entry_idx == STYLE_INDEX_EMPTY) {
             /* Insert. */
             if (page->styles.count >= page->styles.capacity) {
-                if (!grow_entries(vt, page)) return 0;
+                if (!grow_entries(vt, page))
+                    return 0;
             }
             uint32_t new_id = page->styles.count++;
             page->styles.entries[new_id] = *style;
@@ -139,15 +151,18 @@ uint32_t bvt_style_intern(BvtTerm *vt, BvtPage *page, const BvtStyle *style) {
     }
 }
 
-const BvtStyle *bvt_style_lookup(const BvtPage *page, uint32_t id) {
+const BvtStyle *bvt_style_lookup(const BvtPage *page, uint32_t id)
+{
     if (id == 0) {
         /* If the page has been initialized, entries[0] holds the
          * default; otherwise return the static default. Both yield
          * stable pointers within a single page lifetime, which is what
          * callers need. */
-        if (page && page->styles.entries) return &page->styles.entries[0];
+        if (page && page->styles.entries)
+            return &page->styles.entries[0];
         return &DEFAULT_STYLE;
     }
-    if (!page || id >= page->styles.count) return NULL;
+    if (!page || id >= page->styles.count)
+        return NULL;
     return &page->styles.entries[id];
 }
