@@ -25,6 +25,7 @@
 #include "rend_sdl3.h"
 #include "term.h"
 #include "term_vt.h"
+#include "term_bvt.h"
 #include <SDL3/SDL.h>
 #include <getopt.h>
 #include <limits.h>
@@ -648,8 +649,20 @@ int main(int argc, char *argv[])
     // FreeType is initialized in renderer_init, not here
     vlog("FreeType will be initialized in renderer\n");
 
-    // Initialize terminal with cell dimensions (cols x rows)
-    term = terminal_init(&terminal_backend_vt, init_cols, init_rows);
+    // Initialize terminal with cell dimensions (cols x rows). Backend
+    // selectable via BLOOM_TERMINAL_VT={libvterm|bloomvt}; libvterm
+    // remains the default during the parallel-development window.
+    TerminalBackend *vt_backend = &terminal_backend_vt;
+    {
+        const char *vt_choice = getenv("BLOOM_TERMINAL_VT");
+        if (vt_choice && (strcmp(vt_choice, "bloomvt") == 0 ||
+                          strcmp(vt_choice, "bloom-vt") == 0 ||
+                          strcmp(vt_choice, "bvt") == 0)) {
+            vt_backend = &terminal_backend_bvt;
+            vlog("Using bloom-vt backend (BLOOM_TERMINAL_VT=%s)\n", vt_choice);
+        }
+    }
+    term = terminal_init(vt_backend, init_cols, init_rows);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
         platform_destroy(plat);

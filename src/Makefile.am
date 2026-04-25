@@ -15,10 +15,16 @@ FONT_RESOLVE_SOURCE = font_resolve_fc.c
 endif
 endif
 
-bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_vt.c rend.c rend_sdl3.c \
+bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_vt.c term_bvt.c \
+    rend.c rend_sdl3.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
-    platform.c platform_sdl3.c png_mode.c timer.c sixel.c
+    platform.c platform_sdl3.c png_mode.c timer.c sixel.c \
+    bloom_vt/term.c bloom_vt/parser.c bloom_vt/grid.c bloom_vt/style.c \
+    bloom_vt/grapheme.c bloom_vt/width.c bloom_vt/print.c bloom_vt/csi.c \
+    bloom_vt/osc.c bloom_vt/dcs.c bloom_vt/esc.c bloom_vt/damage.c \
+    bloom_vt/scrollback.c bloom_vt/palette.c bloom_vt/keys.c bloom_vt/modes.c \
+    bloom_vt/reflow.c
 
 # Compiler flags
 AM_CFLAGS = $(VTERM_CFLAGS) $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
