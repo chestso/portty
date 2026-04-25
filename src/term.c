@@ -1,6 +1,5 @@
 #include "term.h"
 #include "sixel.h"
-#include "unicode.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -568,29 +567,14 @@ void terminal_scroll_sixel_images(TerminalBackend *term, int delta)
     }
 }
 
-// Emoji width paradigm — owned by the term layer.
+// Emoji width paradigm.
 //
-// libvterm has no VS16 awareness and reports ambiguous-width symbols as
-// width=1. Bloom's paradigm treats VS16-marked emoji-presentation cells
-// as 2 cells visually. The row iterator below walks libvterm cells and
-// produces (vt_col, vis_col, pres_w) triples, handling the shift-vs-
-// absorb decision transparently:
-//
-//   - vt_col+1 is empty (emacs/Claude inserted a cursor advance):
-//     absorb the empty cell into the 2-cell extent, no shift.
-//   - vt_col+1 is non-empty (cat/glow emitted a literal space or content):
-//     shift subsequent content right by 1 visual column.
-
-int terminal_cell_presentation_width(const TerminalCell *cell)
-{
-    if (!cell)
-        return 0;
-    if (cell->width >= 2)
-        return cell->width;
-    if (unicode_cell_is_vs16_emoji(cell->chars, TERM_MAX_CHARS_PER_CELL))
-        return 2;
-    return cell->width;
-}
+// bloom-vt computes UAX #11 + #29 cluster widths at insertion time and
+// stores them on the cell, so VS16 emoji come through with width=2 and
+// continuation cells with width=0. The renderer walks the row in plain
+// vt-column order and increments by `cell.width` — no peek-ahead, no
+// dual coordinate spaces. The iterator is kept for renderer-side
+// scrollback-aware lookups.
 
 void terminal_row_iter_init(TerminalRowIter *it, TerminalBackend *term,
                             int unified_row, int max_vt_cols)
@@ -624,53 +608,24 @@ bool terminal_row_iter_next(TerminalRowIter *it)
         return true;
     }
 
-    int vt_advance = it->cell.width > 0 ? it->cell.width : 1;
-    it->pres_w = terminal_cell_presentation_width(&it->cell);
-    if (it->pres_w <= 0)
-        it->pres_w = 1;
-
-    // VS16 widening: peek next libvterm cell to decide shift vs absorb.
-    if (it->pres_w > vt_advance) {
-        TerminalCell next;
-        if (read_cell_unified(it->term, it->unified_row, it->vt_col + 1, &next) >= 0 &&
-            next.chars[0] == 0) {
-            // Empty cell at vt+1 — emacs/Claude already shifted; absorb it
-            vt_advance = 2;
-        }
-        // Else: naive output; vt_advance stays 1, vis_col shifts +1
-    }
-
-    it->next_vt_col = it->vt_col + vt_advance;
-    it->next_vis_col = it->vis_col + it->pres_w;
+    int advance = it->cell.width > 0 ? it->cell.width : 1;
+    it->pres_w = advance;
+    it->next_vt_col = it->vt_col + advance;
+    it->next_vis_col = it->vis_col + advance;
     return true;
 }
 
+// vt and visual column space are now identical (bvt stores width on the
+// cell). These wrappers stay as identity so existing callers compile;
+// they will be deleted along with their callsites in a follow-up.
 int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col)
 {
-    if (!term || vt_col <= 0)
-        return vt_col < 0 ? 0 : vt_col;
-
-    TerminalRowIter it;
-    terminal_row_iter_init(&it, term, unified_row, vt_col + 1);
-    while (terminal_row_iter_next(&it)) {
-        if (it.vt_col >= vt_col)
-            return it.vis_col;
-    }
-    return it.next_vis_col;
+    (void)term; (void)unified_row;
+    return vt_col < 0 ? 0 : vt_col;
 }
 
 int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col)
 {
-    if (!term || vis_col <= 0)
-        return vis_col < 0 ? 0 : vis_col;
-
-    TerminalRowIter it;
-    // Upper bound: vis_col+1 is a safe vt_col upper bound since widening
-    // only increases vis, never vt.
-    terminal_row_iter_init(&it, term, unified_row, vis_col + 1);
-    while (terminal_row_iter_next(&it)) {
-        if (it.vis_col + it.pres_w > vis_col)
-            return it.vt_col;
-    }
-    return it.next_vt_col;
+    (void)term; (void)unified_row;
+    return vis_col < 0 ? 0 : vis_col;
 }

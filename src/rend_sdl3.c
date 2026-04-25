@@ -2114,9 +2114,7 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
         for (int col = 0; col < term_cols; col++) {
             TerminalCell cell;
             if (terminal_get_cell(term, row, col, &cell) == 0 && cell.chars[0] != 0) {
-                // Use presentation width so the PNG includes any VS16 emoji
-                // overflow into col+1.
-                int end = col + terminal_cell_presentation_width(&cell);
+                int end = col + (cell.width > 0 ? cell.width : 1);
                 if (end > last_col)
                     last_col = end;
             }

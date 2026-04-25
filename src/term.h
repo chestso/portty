@@ -241,30 +241,10 @@ void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars)
 void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionChangeFn cb,
                                      void *user_data);
 
-// Emoji width paradigm — owned by the term layer.
-//
-// libvterm tracks columns in its native grid where every cell is 1 column
-// wide. VS16-marked emoji-presentation cells have a PRESENTATION WIDTH of
-// 2 visual cells. To render a row, the renderer must walk cells in
-// libvterm space while tracking an independent visual column that may
-// drift ahead when a VS16 emoji is followed by non-empty libvterm content
-// (cat/glow/naive output). The term layer encapsulates this walk logic
-// so the renderer — and any future non-libvterm backend — can iterate
-// without knowing about VS16.
-
-// Returns the visual width (in cells) for drawing this cell. Returns
-// cell->width for normal cells, 2 for VS16-widened emoji-presentation
-// cells. Stateless single-cell query; for row iteration use
-// TerminalRowIter which handles the shift logic.
-int terminal_cell_presentation_width(const TerminalCell *cell);
-
-// Row iterator that applies the emoji width paradigm. Each _next() step
-// yields the next libvterm cell in the row along with its visual column
-// and presentation width. VS16-widened emoji are handled transparently:
-// when the libvterm cell immediately following a VS16 emoji is empty
-// (emacs/Claude-style pre-shifted output), the iterator absorbs it;
-// when non-empty (cat/glow-style naive output), subsequent cells shift
-// right by 1 visual column.
+// Row iterator over a terminal row. bloom-vt stores UAX #11 + #29
+// cluster widths on the cell, so the iterator is now a plain
+// `vt_col += cell.width` walk. `vis_col` is kept identical to `vt_col`
+// for source-compatibility with renderer code that still passes both.
 typedef struct
 {
     // Inputs
@@ -272,9 +252,9 @@ typedef struct
     int unified_row;
     int max_vt_cols;
     // Current step — valid after terminal_row_iter_next() returns true
-    int vt_col;        // libvterm column of the current cell
-    int vis_col;       // visual column where the current cell starts drawing
-    int pres_w;        // presentation width (1 for normal, 2 for VS16 emoji)
+    int vt_col;        // column of the current cell
+    int vis_col;       // == vt_col
+    int pres_w;        // == cell.width (1 normal, 2 wide, 0 continuation)
     TerminalCell cell; // fetched cell contents
     // Internal state
     int next_vt_col;
