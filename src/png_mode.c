@@ -17,16 +17,14 @@
 #include <string.h>
 #include <time.h>
 
-/* Backend chosen by BLOOM_TERMINAL_VT (libvterm by default). */
+/* Backend defaults to bloom-vt; legacy libvterm path stays opt-in via
+ * BLOOM_TERMINAL_VT=libvterm during the removal window. */
 static TerminalBackend *select_backend(void)
 {
     const char *vt_choice = getenv("BLOOM_TERMINAL_VT");
-    if (vt_choice && (strcmp(vt_choice, "bloomvt") == 0 ||
-                      strcmp(vt_choice, "bloom-vt") == 0 ||
-                      strcmp(vt_choice, "bvt") == 0)) {
-        return &terminal_backend_bvt;
-    }
-    return &terminal_backend_vt;
+    if (vt_choice && strcmp(vt_choice, "libvterm") == 0)
+        return &terminal_backend_vt;
+    return &terminal_backend_bvt;
 }
 
 /* Common SDL + renderer setup. Caller must free the resources via

@@ -673,17 +673,15 @@ int main(int argc, char *argv[])
     // FreeType is initialized in renderer_init, not here
     vlog("FreeType will be initialized in renderer\n");
 
-    // Initialize terminal with cell dimensions (cols x rows). Backend
-    // selectable via BLOOM_TERMINAL_VT={libvterm|bloomvt}; libvterm
-    // remains the default during the parallel-development window.
-    TerminalBackend *vt_backend = &terminal_backend_vt;
+    // Initialize terminal with cell dimensions (cols x rows). bloom-vt
+    // is the default; legacy libvterm path remains opt-in via
+    // BLOOM_TERMINAL_VT=libvterm while we finish the removal.
+    TerminalBackend *vt_backend = &terminal_backend_bvt;
     {
         const char *vt_choice = getenv("BLOOM_TERMINAL_VT");
-        if (vt_choice && (strcmp(vt_choice, "bloomvt") == 0 ||
-                          strcmp(vt_choice, "bloom-vt") == 0 ||
-                          strcmp(vt_choice, "bvt") == 0)) {
-            vt_backend = &terminal_backend_bvt;
-            vlog("Using bloom-vt backend (BLOOM_TERMINAL_VT=%s)\n", vt_choice);
+        if (vt_choice && strcmp(vt_choice, "libvterm") == 0) {
+            vt_backend = &terminal_backend_vt;
+            vlog("Using libvterm backend (BLOOM_TERMINAL_VT=%s)\n", vt_choice);
         }
     }
     term = terminal_init(vt_backend, init_cols, init_rows);
