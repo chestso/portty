@@ -243,8 +243,14 @@ static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst) {
                                (st->color_flags & BVT_COLOR_DEFAULT_UL) != 0,
                                default_fg);
 
-    /* Apply reverse video here? The renderer currently swaps. We leave
-     * it untouched and let the existing renderer logic handle reverse. */
+    /* Match libvterm backend: pre-swap fg/bg for reverse video so the
+     * renderer sees visual colors. */
+    if (dst->attrs.reverse) {
+        TerminalColor tmp = dst->fg;
+        dst->fg = dst->bg;
+        dst->bg = tmp;
+        dst->bg.is_default = false;
+    }
 }
 
 static int bvt_back_get_cell(TerminalBackend *term, int row, int col,

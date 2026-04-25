@@ -25,9 +25,19 @@ test_bvt_parser_CFLAGS = $(TEST_CFLAGS)
 
 # test_pty_pause depends on POSIX PTY APIs
 if !HOST_WINDOWS
-check_PROGRAMS += test_pty_pause
+check_PROGRAMS += test_pty_pause test_bvt_pty
 test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/platform.c ../src/term.c ../src/unicode.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
+
+test_bvt_pty_SOURCES = test_bvt_pty.c $(TEST_COMMON) ../src/pty.c \
+    ../src/bloom_vt/term.c ../src/bloom_vt/parser.c ../src/bloom_vt/grid.c \
+    ../src/bloom_vt/style.c ../src/bloom_vt/grapheme.c ../src/bloom_vt/width.c \
+    ../src/bloom_vt/print.c ../src/bloom_vt/csi.c ../src/bloom_vt/osc.c \
+    ../src/bloom_vt/dcs.c ../src/bloom_vt/esc.c ../src/bloom_vt/damage.c \
+    ../src/bloom_vt/scrollback.c ../src/bloom_vt/palette.c \
+    ../src/bloom_vt/keys.c ../src/bloom_vt/modes.c ../src/bloom_vt/reflow.c
+test_bvt_pty_CFLAGS = $(TEST_CFLAGS)
+test_bvt_pty_LDADD = -lutil
 endif
 
 TESTS = $(check_PROGRAMS)
