@@ -2107,14 +2107,19 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
 
-    // Find last non-empty column on the first row to avoid trailing whitespace
+    // Find the rightmost non-empty column across all rows so multi-row
+    // outputs (e.g. -P --exec) aren't trimmed to row 0's width.
     int last_col = 0;
-    for (int col = 0; col < term_cols; col++) {
-        TerminalCell cell;
-        if (terminal_get_cell(term, 0, col, &cell) == 0 && cell.chars[0] != 0) {
-            // Use presentation width so the PNG includes any VS16 emoji
-            // overflow into col+1.
-            last_col = col + terminal_cell_presentation_width(&cell);
+    for (int row = 0; row < term_rows; row++) {
+        for (int col = 0; col < term_cols; col++) {
+            TerminalCell cell;
+            if (terminal_get_cell(term, row, col, &cell) == 0 && cell.chars[0] != 0) {
+                // Use presentation width so the PNG includes any VS16 emoji
+                // overflow into col+1.
+                int end = col + terminal_cell_presentation_width(&cell);
+                if (end > last_col)
+                    last_col = end;
+            }
         }
     }
     if (last_col <= 0)

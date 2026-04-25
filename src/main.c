@@ -420,6 +420,8 @@ int main(int argc, char *argv[])
     int list_fonts = 0;
     int ft_hint_target = FT_LOAD_TARGET_LIGHT; // Default: light hinting
     char *png_text = NULL;
+    const char *png_exec = NULL;
+    int png_wait_ms = 200;
     char *demo_text = NULL;
     const char *font_name = NULL;
     const char *colr_debug_path = NULL;
@@ -438,6 +440,8 @@ int main(int argc, char *argv[])
         { "gtk4", no_argument, NULL, 'G' },
         { "sdl3", no_argument, NULL, 'S' },
         { "demo", required_argument, NULL, 'd' },
+        { "exec", required_argument, NULL, 'X' },
+        { "wait", required_argument, NULL, 'W' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -515,6 +519,16 @@ int main(int argc, char *argv[])
         case 'P':
             png_text = optarg;
             break;
+        case 'X':
+            png_exec = optarg;
+            break;
+        case 'W':
+            png_wait_ms = atoi(optarg);
+            if (png_wait_ms <= 0) {
+                fprintf(stderr, "ERROR: --wait requires a positive millisecond value\n");
+                return 1;
+            }
+            break;
         case 'D':
             colr_debug_path = optarg;
             break;
@@ -559,12 +573,22 @@ int main(int argc, char *argv[])
         vlog("COLR layer debug enabled, prefix: %s\n", colr_debug_path);
     }
 
-    // PNG render mode: skip interactive mode, render text to PNG and exit
-    if (png_text) {
+    // PNG render mode: skip interactive mode, render to PNG and exit.
+    // Two flavors:
+    //   -P "text" out.png             — feed literal text into the term
+    //   -P "" --exec CMD [--wait MS] out.png  — spawn CMD on a PTY, drain
+    //                                            its output for MS ms (default
+    //                                            200), then render.
+    if (png_text || png_exec) {
         if (optind >= argc) {
             fprintf(stderr, "ERROR: -P requires output PNG path as positional argument\n");
             fprintf(stderr, "Usage: %s -P \"text\" output.png\n", argv[0]);
+            fprintf(stderr, "       %s -P \"\" --exec 'cmd' [--wait 500] output.png\n", argv[0]);
             return 1;
+        }
+        if (png_exec) {
+            return png_render_exec(png_exec, png_wait_ms, init_cols, init_rows,
+                                   argv[optind], font_name, ft_hint_target);
         }
         return png_render_text(png_text, argv[optind], font_name, ft_hint_target);
     }

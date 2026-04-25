@@ -5,16 +5,6 @@ they get worked on. Order is roughly priority, not strict dependency.
 
 ## Open items (resolve before flipping default)
 
-- **256-color background SGR (`\033[48;5;220m`)** — PNG-mode A/B against
-  libvterm differs by ~4 bytes. Likely a palette-lookup or default-bg-flag
-  nuance. Inspect SGR `48;5;N` branch in `src/bloom_vt/csi.c` and the
-  `unpack_rgb` path in `src/term_bvt.c`. Reproducer:
-  ```
-  BLOOM_TERMINAL_VT=libvterm ./build/src/bloom-terminal -P "$(printf '\033[48;5;220mbg yellow\033[0m')" /tmp/lv.png
-  BLOOM_TERMINAL_VT=bloomvt   ./build/src/bloom-terminal -P "$(printf '\033[48;5;220mbg yellow\033[0m')" /tmp/bv.png
-  cmp /tmp/lv.png /tmp/bv.png
-  ```
-
 - **Cluster truncation at the renderer boundary** — `src/term_bvt.c::convert_cell`
   copies bvt clusters into `dst->chars[TERM_MAX_CHARS_PER_CELL]` (= 6) to fit
   the existing `TerminalCell` struct. bvt's grid stores arbitrary-length
@@ -149,3 +139,9 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
 - ~~`test_style_intern_dedup` failed: pen color_flags was 0 initially,
   then set to defaults after first SGR reset~~ — initialize pen with
   `BVT_COLOR_DEFAULT_FG | _BG | _UL` in `bvt_new`.
+- ~~256-color SGR (`\033[48;5;220m`) PNG diverged from libvterm~~ —
+  *accepted divergence*. libvterm uses a naive 51-step ramp
+  `(0, 51, 102, 153, 204, 255)` and produces `#FFCC00` for color 220.
+  bvt uses the xterm-standard ramp `(0, 95, 135, 175, 215, 255)` and
+  produces `#FFD700`, matching xterm / iTerm / foot / Alacritty. Document
+  in CLAUDE.md when default flips.
