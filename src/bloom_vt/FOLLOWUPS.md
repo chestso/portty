@@ -94,34 +94,21 @@ Run the binary directly with `BLOOM_TERMINAL_VT=bloomvt`:
 - window resize reflow
 - altscreen swap via vim
 
-## Step 15 — Default flip + libvterm removal
+## Step 15 — Default flip + libvterm removal ✅ done (d5e62d8 + aae22d7)
 
-Once soak passes:
+bloom-vt is the default and the only backend. `src/term_vt.c` (1372
+LOC), the libvterm `pkg-config` check, the `BLOOM_TERMINAL_VT`
+env-var dispatch, the `ext_grid` SGR rewriting, the mingw64 +
+osxcross libvterm cross-compile blocks in `build.sh`, and the
+"--reflow UNSTABLE" warning are gone.
 
-1. Flip default in `src/main.c` and `src/png_mode.c` to
-   `&terminal_backend_bvt`.
-2. Delete `src/term_vt.c` and the libvterm `pkg-config` line in
-   `configure.ac`.
-3. Remove the `BLOOM_TERMINAL_VT` env-var dispatch.
-4. Drop the `ext_grid` SGR rewriting (it lives in `term_vt.c`, dies with it).
-5. Remove the libvterm stanza from `src/Makefile.am`.
+## Step 16 — VS16 shift hack removal ✅ done (7225bd7)
 
-## Step 16 — VS16 shift hack removal (blocked on step 15)
-
-Cannot ship while libvterm is still wired up — the iterator's shift-vs-absorb
-logic at `src/term.c:611-646` is the only thing widening libvterm's
-width=1 VS16 cells without dropping the trailing space in naive output
-(cat / glow / bat). Once `term_vt.c` is gone, all cells carry the correct
-UAX-derived width.
-
-- Simplify `TerminalRowIter` in `src/term.c:595-646` to a plain
-  `vt += cell.width` walk; delete the peek-ahead branch.
-- Delete `terminal_cell_presentation_width()` (`src/term.c:584-593`);
-  replace its one caller in `src/rend_sdl3.c:2117` with `cell.width`.
-- Collapse `terminal_vt_col_to_vis_col` / `terminal_vis_col_to_vt_col`
-  (`src/term.c:648-676`) to identity; update the mouse handler at
-  `src/main.c:326`.
-- Update CLAUDE.md "Emoji Width Paradigm" section.
+`TerminalRowIter` is a plain `vt_col += cell.width` walk;
+`terminal_cell_presentation_width` is deleted;
+`terminal_vt_col_to_vis_col` / `terminal_vis_col_to_vt_col` are
+identity wrappers retained for source compatibility. CLAUDE.md
+"Emoji Width Paradigm" rewritten.
 
 ## Step 17 — Renderer migration (cell.chars → grapheme accessor)
 
