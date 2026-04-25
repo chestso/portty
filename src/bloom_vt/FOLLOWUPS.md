@@ -155,6 +155,17 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
 
 ## Resolved during soak
 
+- ~~DEC special graphics (line drawing) was unimplemented — `\033(0`
+  designation was silently swallowed and `lqk\nx x\nmqj` rendered as
+  literal ASCII instead of `┌─┐ │ │ └─┘`~~ — added charset slot
+  tracking on BvtTerm, ESC ( ) * + dispatch, SO / SI shifts, and the
+  standard VT100 0x5F..0x7E translation table at print time. Coverage
+  in `test_bvt_parser.c::test_dec_graphics_g0` and `::test_dec_graphics_si_so`.
+- ~~Wrap-aware selection broke at the visible/scrollback boundary, and
+  resize never reflowed because reflow was off by default~~ — backend
+  adapter now translates wrapline semantics across the boundary and
+  flips reflow on by default for bvt. Tests in `test_term_bvt.c`. See
+  cae5f69.
 - ~~Ctrl+letter key combos didn't work in bloom-vt — Ctrl+C produced raw
   `c` instead of 0x03~~ — `bvt_send_text` now applies the standard
   Ctrl-byte transformation (Ctrl+@ → 0x00, Ctrl+A..Z → 0x01..0x1A, etc.)

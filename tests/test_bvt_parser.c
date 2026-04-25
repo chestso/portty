@@ -771,6 +771,33 @@ static void test_reflow_disabled(void) {
     bvt_free(vt);
 }
 
+/* DEC special graphics charset — `tput smacs` / `\033(0` selects a line-
+ * drawing alphabet on G0. Apps like tmux and ncurses rely on it for
+ * borders. While selected, ASCII bytes 0x5F..0x7E translate to box-
+ * drawing codepoints. SI/SO toggle between G0 and G1. */
+static void test_dec_graphics_g0(void) {
+    BvtTerm *vt = make_term(2, 10);
+    feed(vt, "\x1b(0lqk\x1b(B");
+    /* l→┌ (0x250C), q→─ (0x2500), k→┐ (0x2510). */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 0)->cp, 0x250Cu);
+    ASSERT_EQ(bvt_get_cell(vt, 0, 1)->cp, 0x2500u);
+    ASSERT_EQ(bvt_get_cell(vt, 0, 2)->cp, 0x2510u);
+    bvt_free(vt);
+}
+static void test_dec_graphics_si_so(void) {
+    BvtTerm *vt = make_term(2, 10);
+    /* Designate G1 as DEC graphics, then SO (0x0E) shifts G1 into GL. */
+    feed(vt, "\x1b)0Aa\x0e" "ax\x0f" "Z");
+    /* G0 stays ASCII: 'A','a' pass through. After SO: 'a' → ▒
+     * (0x2592), 'x' → │ (0x2502). After SI: 'Z' is plain ASCII. */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 0)->cp, (uint32_t)'A');
+    ASSERT_EQ(bvt_get_cell(vt, 0, 1)->cp, (uint32_t)'a');
+    ASSERT_EQ(bvt_get_cell(vt, 0, 2)->cp, 0x2592u);
+    ASSERT_EQ(bvt_get_cell(vt, 0, 3)->cp, 0x2502u);
+    ASSERT_EQ(bvt_get_cell(vt, 0, 4)->cp, (uint32_t)'Z');
+    bvt_free(vt);
+}
+
 static void test_wrap(void) {
     BvtTerm *vt = make_term(2, 5);
     feed(vt, "abcdef"); /* 6 chars in 5-col grid → wrap */
@@ -817,6 +844,8 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_dsr_cpr);
     RUN_TEST(test_decom_cup);
     RUN_TEST(test_decstbm_invalid_rejected);
+    RUN_TEST(test_dec_graphics_g0);
+    RUN_TEST(test_dec_graphics_si_so);
     RUN_TEST(test_cf_byte_replay);
     RUN_TEST(test_brick_inline_setup);
     RUN_TEST(test_da1);

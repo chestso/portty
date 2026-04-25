@@ -136,6 +136,8 @@ void bvt_execute_c0(BvtTerm *vt, uint8_t b) {
             return;
         case 0x08: backspace(vt); return;
         case 0x09: horizontal_tab(vt); return;
+        case 0x0e: vt->charset_active = 1; return; /* SO / LS1 */
+        case 0x0f: vt->charset_active = 0; return; /* SI / LS0 */
         case 0x0a: /* LF */
         case 0x0b: /* VT */
         case 0x0c: /* FF */
@@ -227,7 +229,55 @@ void bvt_flush_cluster(BvtTerm *vt) {
     vt->cursor.cluster_len = 0;
 }
 
+/* DEC special graphics charset: ESC ( 0 selects this for G0. While the
+ * current GL slot is set to '0', GL bytes 0x5F..0x7E translate to the
+ * graphic codepoints below. The table is the standard VT100 mapping
+ * (xterm "Special Graphics and Line Drawing"). Bytes outside the range
+ * pass through unchanged. */
+static const uint16_t dec_graphics_table[32] = {
+    /* 0x5F */ 0x00A0, /* NBSP */
+    /* 0x60 */ 0x25C6, /* ◆ */
+    /* 0x61 */ 0x2592, /* ▒ */
+    /* 0x62 */ 0x2409, /* HT */
+    /* 0x63 */ 0x240C, /* FF */
+    /* 0x64 */ 0x240D, /* CR */
+    /* 0x65 */ 0x240A, /* LF */
+    /* 0x66 */ 0x00B0, /* ° */
+    /* 0x67 */ 0x00B1, /* ± */
+    /* 0x68 */ 0x2424, /* NL */
+    /* 0x69 */ 0x240B, /* VT */
+    /* 0x6A */ 0x2518, /* ┘ */
+    /* 0x6B */ 0x2510, /* ┐ */
+    /* 0x6C */ 0x250C, /* ┌ */
+    /* 0x6D */ 0x2514, /* └ */
+    /* 0x6E */ 0x253C, /* ┼ */
+    /* 0x6F */ 0x23BA, /* ⎺ */
+    /* 0x70 */ 0x23BB, /* ⎻ */
+    /* 0x71 */ 0x2500, /* ─ */
+    /* 0x72 */ 0x23BC, /* ⎼ */
+    /* 0x73 */ 0x23BD, /* ⎽ */
+    /* 0x74 */ 0x251C, /* ├ */
+    /* 0x75 */ 0x2524, /* ┤ */
+    /* 0x76 */ 0x2534, /* ┴ */
+    /* 0x77 */ 0x252C, /* ┬ */
+    /* 0x78 */ 0x2502, /* │ */
+    /* 0x79 */ 0x2264, /* ≤ */
+    /* 0x7A */ 0x2265, /* ≥ */
+    /* 0x7B */ 0x03C0, /* π */
+    /* 0x7C */ 0x2260, /* ≠ */
+    /* 0x7D */ 0x00A3, /* £ */
+    /* 0x7E */ 0x00B7, /* · */
+};
+
+static uint32_t apply_charset(BvtTerm *vt, uint32_t cp) {
+    uint8_t designation = vt->charset[vt->charset_active];
+    if (designation == '0' && cp >= 0x5F && cp <= 0x7E)
+        return dec_graphics_table[cp - 0x5F];
+    return cp;
+}
+
 void bvt_print_codepoint(BvtTerm *vt, uint32_t cp) {
+    cp = apply_charset(vt, cp);
     /* Empty cluster — start one with this codepoint. */
     if (vt->cursor.cluster_len == 0) {
         vt->cursor.cluster_buf[0] = cp;

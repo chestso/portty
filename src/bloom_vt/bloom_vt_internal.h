@@ -180,6 +180,14 @@ struct BvtTerm {
     /* Modes. Indexed by BvtMode enum value. */
     bool modes[32];
 
+    /* Character set designations. ESC ( c | ) c | * c | + c stores the
+     * intermediate `c` here. 'B' = ASCII (default), '0' = DEC special
+     * graphics. `charset_active` selects which slot GL maps to: 0 (G0)
+     * via SI / ESC n, 1 (G1) via SO / ESC o. We honor only G0/G1
+     * because that's all anything in the wild uses. */
+    uint8_t charset[4];
+    uint8_t charset_active;
+
     /* Settings. */
     bool reflow_enabled;
     bool ambiguous_wide;

@@ -75,6 +75,8 @@ BvtTerm *bvt_new_with_allocator(int rows, int cols, const BvtAllocator *alloc) {
         BVT_COLOR_DEFAULT_FG | BVT_COLOR_DEFAULT_BG | BVT_COLOR_DEFAULT_UL;
     vt->modes[BVT_MODE_CURSOR_VISIBLE] = true;
     vt->modes[BVT_MODE_CURSOR_BLINK]   = true;
+    vt->charset[0] = vt->charset[1] = vt->charset[2] = vt->charset[3] = 'B';
+    vt->charset_active = 0;
 
     bvt_parser_init(&vt->parser);
 

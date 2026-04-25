@@ -14,12 +14,15 @@ void bvt_esc_dispatch(BvtTerm *vt, uint8_t final) {
     BvtParser *p = &vt->parser;
 
     /* Charset designation: ESC ( c | ) c | * c | + c — single-char
-     * intermediate captured during ESCAPE_INTERMEDIATE. */
+     * intermediate captured during ESCAPE_INTERMEDIATE. We track only
+     * the designation here; the GL translation runs at print time. */
     if (p->intermediate_count == 1) {
         uint8_t inter = p->intermediates[0];
         if (inter == '(' || inter == ')' || inter == '*' || inter == '+') {
-            /* TODO: charsets.c — DEC special graphics, ASCII, UK, etc. */
-            (void)final;
+            int slot = (inter == '(') ? 0 :
+                       (inter == ')') ? 1 :
+                       (inter == '*') ? 2 : 3;
+            vt->charset[slot] = final;
             return;
         }
     }
@@ -29,6 +32,8 @@ void bvt_esc_dispatch(BvtTerm *vt, uint8_t final) {
         case '8':                                            /* DECRC */
             vt->cursor = vt->saved_cursor;
             break;
+        case 'n': vt->charset_active = 2; break;             /* LS2 */
+        case 'o': vt->charset_active = 3; break;             /* LS3 */
         case '=': vt->deckpam = true;  break; /* DECKPAM */
         case '>': vt->deckpam = false; break; /* DECKPNM */
         case 'D': /* IND */
