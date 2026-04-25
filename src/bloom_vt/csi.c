@@ -471,6 +471,19 @@ void bvt_csi_dispatch(BvtTerm *vt, uint8_t final)
         bvt_delete_lines(vt, p1);
         break; /* DL  */
 
+    case 'g': { /* TBC — Tab Clear */
+        int mode = param_or(vt, 0, 0);
+        if (!vt->tabstops)
+            break;
+        if (mode == 0) {
+            if (vt->cursor.col >= 0 && vt->cursor.col < vt->cols)
+                vt->tabstops[vt->cursor.col] = 0;
+        } else if (mode == 3) {
+            memset(vt->tabstops, 0, (size_t)vt->cols);
+        }
+        break;
+    }
+
     case 's': /* CSI s — Save Cursor (ANSI.SYS form). Only the bare
                * variant; `CSI ? s` is XTSAVE for DEC private modes
                * and `CSI < s` / `CSI > s` are vendor extensions we

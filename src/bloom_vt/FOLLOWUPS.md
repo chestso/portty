@@ -63,15 +63,6 @@ and goes away in step 15):
 - Single RI flag (🇩🇰), skin-tone modifiers (👋🏽) — bvt honors UAX
   cluster width; libvterm reports per-codepoint widths.
 
-**Open** (low-priority edge cases, may resolve once libvterm is gone):
-
-- `printf 'A\033[s\nB\033[uC'` (DECSC/DECRC across newline) — small
-  PNG diff (18 bytes). Likely a difference in how cursor row tracks
-  through LF when a save was taken before LF.
-- `printf 'A\tB\tC\033[3g\rX\tY'` (CSI 3 g + tab after clear) — bvt
-  vs libvterm differ on the post-clear `\t`. ECMA-48: with no tabs,
-  HT advances by one. Verify bvt's HT handling matches xterm.
-
 **Non-deterministic** (PNG cmp not meaningful — use harness A
 assertions instead):
 
@@ -139,6 +130,16 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
 
 ## Resolved during soak
 
+- ~~`printf 'A\033[s\nB\033[uC'` (DECSC across LF) reported an 18-byte
+  PNG diff against libvterm~~ — bvt was already correct per spec
+  (DECSC saves cursor pos; LF preserves column; DECRC restores
+  exactly). Coverage in `tests/test_bvt_parser.c::test_decsc_across_lf`.
+- ~~`printf 'A\tB\tC\033[3g\rX\tY'` (HT after CSI 3 g) diverged from
+  xterm~~ — TBC (CSI g) was unimplemented; `\033[3g` was silently
+  dropped so default 8-column tab stops survived. Implemented in
+  `csi.c` (mode 0 clears stop at cursor; mode 3 clears all). HT then
+  advances to the last column when no stops remain, matching xterm /
+  foot / alacritty. Coverage in `tests/test_bvt_parser.c::test_tbc_*`.
 - ~~DEC special graphics (line drawing) was unimplemented — `\033(0`
   designation was silently swallowed and `lqk\nx x\nmqj` rendered as
   literal ASCII instead of `┌─┐ │ │ └─┘`~~ — added charset slot

@@ -803,6 +803,55 @@ static void test_csi_u_with_intermediate_ignored(void) {
     bvt_free(vt);
 }
 
+/* DECSC across LF: save (0,1), LF moves to (1,1), B printed there,
+ * DECRC restores to (0,1), C overwrites the saved position. The
+ * cursor's column must not drift through LF — the saved position is
+ * the one captured at DECSC. */
+static void test_decsc_across_lf(void) {
+    BvtTerm *vt = make_term(3, 10);
+    feed(vt, "A\x1b[s\nB\x1b[uC");
+    /* Row 0: A C ........ */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 0)->cp, (uint32_t)'A');
+    ASSERT_EQ(bvt_get_cell(vt, 0, 1)->cp, (uint32_t)'C');
+    /* Row 1: . B ........ */
+    ASSERT_EQ(bvt_get_cell(vt, 1, 0)->cp, (uint32_t)0);
+    ASSERT_EQ(bvt_get_cell(vt, 1, 1)->cp, (uint32_t)'B');
+    BvtCursor c = bvt_get_cursor(vt);
+    ASSERT_EQ(c.row, 0);
+    ASSERT_EQ(c.col, 2);
+    bvt_free(vt);
+}
+
+/* TBC (CSI g): `CSI 3 g` clears all tab stops; bare HT then advances
+ * the cursor to the last column instead of the next 8-column boundary
+ * (xterm/foot/alacritty behavior). Without TBC implemented, `\033[3g`
+ * is silently dropped and HT lands on the next default stop. */
+static void test_tbc_clear_all_then_ht(void) {
+    BvtTerm *vt = make_term(3, 30);
+    /* Default stops at 0, 8, 16, 24. */
+    feed(vt, "A\tB\tC");           /* A@0, B@8, C@16, cursor at 17 */
+    feed(vt, "\x1b[3g");           /* clear all stops */
+    feed(vt, "\rX\tY");             /* X@0, HT must go to col 29 */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 0)->cp, (uint32_t)'X');
+    ASSERT_EQ(bvt_get_cell(vt, 0, 8)->cp, (uint32_t)'B');   /* untouched */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 16)->cp, (uint32_t)'C');  /* untouched */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 29)->cp, (uint32_t)'Y');
+    bvt_free(vt);
+}
+
+/* Bare `CSI g` (or `CSI 0 g`) clears only the stop at the current
+ * column. */
+static void test_tbc_clear_at_cursor(void) {
+    BvtTerm *vt = make_term(3, 30);
+    feed(vt, "\t");                 /* cursor → col 8 (a default stop) */
+    feed(vt, "\x1b[g");             /* clear stop at col 8 */
+    feed(vt, "\rA\tB");             /* A@0, HT skips col-8 (cleared), lands at col 16 */
+    ASSERT_EQ(bvt_get_cell(vt, 0, 0)->cp, (uint32_t)'A');
+    ASSERT_EQ(bvt_get_cell(vt, 0, 8)->cp, (uint32_t)0);
+    ASSERT_EQ(bvt_get_cell(vt, 0, 16)->cp, (uint32_t)'B');
+    bvt_free(vt);
+}
+
 static void test_osc_title_utf8_with_9c_byte(void) {
     BvtTerm *vt = make_term(2, 10);
     g_title = NULL;
@@ -887,6 +936,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_decom_cup);
     RUN_TEST(test_decstbm_invalid_rejected);
     RUN_TEST(test_csi_u_with_intermediate_ignored);
+    RUN_TEST(test_decsc_across_lf);
+    RUN_TEST(test_tbc_clear_all_then_ht);
+    RUN_TEST(test_tbc_clear_at_cursor);
     RUN_TEST(test_osc_title_utf8_with_9c_byte);
     RUN_TEST(test_dec_graphics_g0);
     RUN_TEST(test_dec_graphics_si_so);
