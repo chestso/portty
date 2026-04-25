@@ -491,19 +491,24 @@ char *terminal_selection_get_text(TerminalBackend *term)
         size_t row_start_pos = pos;
         size_t last_nonspace_pos = row_start_pos;
 
-        for (int col = col_start; col <= col_end; col++) {
+        // Walk by cell width: width=2 cells advance by 2 (skipping their
+        // continuation half), so we never land on a wide-char right half.
+        // A width=0 cell here means the position is genuinely empty/cleared
+        // (TAB or cursor movement left it untouched, EL/ECH erased it) — emit
+        // a space for it. Previously we treated width=0 as "always skip",
+        // which dropped the spaces between TAB-advanced columns on copy.
+        int col = col_start;
+        while (col <= col_end) {
             TerminalCell cell;
-            if (read_cell_unified(term, row, col, &cell) < 0)
+            if (read_cell_unified(term, row, col, &cell) < 0) {
+                col++;
                 continue;
-
-            // Skip continuation cells (width == 0 means right-half of wide char)
-            if (cell.width == 0)
-                continue;
+            }
 
             if (cell.cp == 0) {
-                // Empty cell → space
                 if (pos < buf_size - 1)
                     buf[pos++] = ' ';
+                col++;
             } else {
                 uint32_t cps[16];
                 size_t n_cps = 1;
@@ -525,6 +530,7 @@ char *terminal_selection_get_text(TerminalBackend *term)
                     }
                 }
                 last_nonspace_pos = pos;
+                col += (cell.width == 2) ? 2 : 1;
             }
         }
 

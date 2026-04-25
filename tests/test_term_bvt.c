@@ -17,6 +17,7 @@
 #include "term.h"
 #include "term_bvt.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 extern TerminalBackend terminal_backend_bvt;
@@ -139,6 +140,94 @@ static void test_long_cluster_survives_accessor(void) {
     terminal_destroy(&t);
 }
 
+/* Spaces between words must round-trip through the clipboard. Typed spaces
+ * land as cp=0x20, width=1 cells and were always preserved — this guards
+ * the simple case while the harder cases (TAB, CUF) sit below. */
+static void test_selection_preserves_spaces(void) {
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    feed(&t, "hello world");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 10);
+
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "hello world");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
+static void test_selection_across_rows(void) {
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    feed(&t, "hello world\r\nfoo bar\r\nbaz");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 2, 2);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "hello world\nfoo bar\nbaz");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
+/* TAB advances the cursor by 8 columns without writing anything; the cells
+ * between the cursor's old and new positions stay cleared (cp=0, width=0).
+ * The selection-extraction logic must treat those as spaces, not skip them. */
+static void test_selection_with_tab(void) {
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
+    feed(&t, "foo\tbar");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 10);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    /* TAB stops at column 8 → "foo" + 5 spaces + "bar". */
+    ASSERT_STR_EQ(text, "foo     bar");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
+/* CSI <n> C (CUF) is a common way for shells/applications to position
+ * content with gaps; the gap cells must round-trip as spaces. */
+static void test_selection_after_cursor_movement(void) {
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    feed(&t, "foo\x1b[5Cbar");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 10);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "foo     bar");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
+/* Wide CJK chars must not have their right-half continuation cell turn into
+ * a space — the width-2 advance should skip past it. */
+static void test_selection_skips_wide_continuation(void) {
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    /* "中x" — '中' is a 2-cell CJK char (U+4E2D, UTF-8 e4 b8 ad). */
+    feed(&t, "\xe4\xb8\xad" "x");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 5);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "\xe4\xb8\xad" "x");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[]) {
     test_parse_args(argc, argv);
     printf("Running term_bvt tests:\n");
@@ -147,6 +236,11 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_resize_grows_and_reflows);
     RUN_TEST(test_resize_shrinks_and_reflows);
     RUN_TEST(test_long_cluster_survives_accessor);
+    RUN_TEST(test_selection_preserves_spaces);
+    RUN_TEST(test_selection_across_rows);
+    RUN_TEST(test_selection_with_tab);
+    RUN_TEST(test_selection_after_cursor_movement);
+    RUN_TEST(test_selection_skips_wide_continuation);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }
