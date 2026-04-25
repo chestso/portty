@@ -2,11 +2,11 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Cross-compiles for Windows (ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Cross-compiles for Windows (ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Features
 
-- Full terminal emulation using libvterm
+- Full terminal emulation using bloom-vt — in-tree VT engine with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
 - Rendering with SDL3
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
@@ -15,7 +15,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Variable-font support (MM_Var) and axis control
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Support for Unicode characters and emoji (COLR v1 color fonts)
-- Emoji width paradigm: color glyphs preferred regardless of VS16; ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells
+- Emoji width paradigm: color glyphs preferred regardless of VS16; ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells. Widths are computed at insertion time (UAX #11 + #29) and stored on the cell, so the renderer walks rows in plain column order.
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
@@ -25,7 +25,7 @@ Currently ships with libvterm (terminal), SDL3 (renderer/platform), FreeType/Har
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
-- Terminal resize handling with optional reflow (`--reflow`)
+- Terminal resize handling with reflow on by default (WRAPLINE-tagged, scrollback-aware)
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
 - Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
@@ -40,7 +40,7 @@ bloom-terminal uses a modular backend abstraction design:
   - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Uses zero-copy DMA-BUF rendering (GBM → EGL → `glBlitFramebuffer` → `GdkDmabufTexture`) when EGL/GBM are available, with `SDL_RenderReadPixels` fallback.
 
 - **Terminal Backend**: Handles terminal emulation and screen state
-  - Current implementation: libvterm (`terminal_backend_vt`)
+  - Current implementation: bloom-vt (`terminal_backend_bvt`) — in-tree VT engine in `src/bloom_vt/` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
 
 - **Renderer Backend**: Handles graphics output
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
@@ -153,7 +153,7 @@ build/src/bloom-terminal -P "😀" output.png
 | `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
 | `-L` / `--list-fonts`     | List available monospace fonts and exit                         |
 | `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)       |
-| `-R` / `--reflow`         | Enable text reflow on resize (unstable, libvterm bug)           |
+| `-R` / `--reflow`         | Enable text reflow on resize (default: enabled)                 |
 | `-N` / `--padding`        | Enable padding around terminal content                          |
 | `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                            |
 | `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)               |
@@ -218,9 +218,11 @@ bloom-terminal enforces three rules for how emoji and symbols are rendered:
 
 1. **Color preferred.** When a color glyph is available in the primary or fallback font, it is used. This decision is independent of VS16 (the emoji presentation selector) — the emoji font is chosen based on whether the base codepoint is in an emoji range or whether a fallback font supplies a color raster.
 2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell regardless of whether they render with the color emoji font. They stay 1 cell wide unless followed by VS16.
-3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the renderer draws the cell across 2 cells of pixels — e.g. `⚠` is 1 cell but `⚠️` is 2 cells. The logic lives in the term layer (`TerminalRowIter` + `terminal_cell_presentation_width()` in `src/term.c`), not in the renderer or in any backend. The iterator walks libvterm cells and yields `(vt_col, vis_col, pres_w, cell)` tuples, applying a smart shift-vs-absorb decision per VS16 cell: when the next libvterm cell is empty (the upstream app already pre-shifted, like emacs or Claude Code), the empty cell is absorbed; when the next cell has content (naive output from cat / glow / bat), subsequent visual columns shift right by 1. Both paths preserve the literal space that would otherwise be overdrawn by the emoji's right half.
+3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the cell width is 2 — e.g. `⚠` is 1 cell but `⚠️` is 2 cells.
 
-libvterm itself has no VS16-aware width API (it reports width=1 for the cell regardless of VS16). `cell.width` stays at libvterm's value throughout; the renderer receives the visual column from the iterator and is unaware of VS16.
+bloom-vt computes UAX #11 + UAX #29 cluster widths at insertion time and stores them on the cell, so VS16 emoji come through with `cell.width == 2` and the cell immediately to its right is a continuation cell with `cell.width == 0`. The renderer walks rows in plain column order via `TerminalRowIter` and increments by `cell.width` — no peek-ahead, no shift-vs-absorb decision, no separate "visual" column space. Mouse, cursor, and selection coordinates all share the same single column space.
+
+Multi-codepoint clusters (ZWJ family chains, flag sequences, long combining-mark runs) are stored in a per-page grapheme arena and accessed via `terminal_cell_get_grapheme()` — there is no per-cell codepoint cap, so 7-codepoint sequences like 👨‍👩‍👧‍👦 round-trip through the renderer without truncation.
 
 ## Terminfo
 
@@ -241,11 +243,12 @@ infocmp bloom-terminal-vty-256color | ssh remote-host 'tic -x -'
 
 All platforms:
 
-- libvterm
 - SDL3
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
 - libpng
+
+The terminal emulation engine (bloom-vt) is in-tree under `src/bloom_vt/` and has no external dependency.
 
 Linux only:
 
@@ -267,7 +270,7 @@ Optional (Linux):
 sudo dnf install gcc autoconf automake libtool pkgconf-pkg-config
 
 # Required libraries
-sudo dnf install libvterm-devel SDL3-devel fontconfig-devel freetype-devel harfbuzz-devel libpng-devel
+sudo dnf install SDL3-devel fontconfig-devel freetype-devel harfbuzz-devel libpng-devel
 
 # Optional: GTK4 backend
 sudo dnf install gtk4-devel libadwaita-devel mesa-libEGL-devel mesa-libgbm-devel libdrm-devel
@@ -285,8 +288,6 @@ bloom-terminal can be cross-compiled for Windows using Fedora's mingw64 toolchai
 ```bash
 sudo dnf install mingw64-gcc mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-fontconfig mingw64-libpng
 ```
-
-libvterm is downloaded and cross-compiled automatically (no mingw64 package exists).
 
 ### Building
 
@@ -380,6 +381,9 @@ Current test suites:
 - **test_pty_pause** — PTY pause/resume during selection: platform wrapper delegation, pause on select, resume on clear/copy/resize, full select-copy cycles
 - **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
 - **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
+- **test_bvt_parser** — bloom-vt unit tests: parser, UTF-8, CSI dispatch (cursor moves, SGR, DECSTBM, DECOM, TBC), OSC titles, DEC special graphics charset, scrollback, reflow, altscreen, ICH/DCH/IL/DL, key encoding, DSR/DA, width tables (CJK / emoji / VS16 / RI / ZWJ / skin tone)
+- **test_term_bvt** — `term_bvt.c` adapter: wrap-aware selection across the visible/scrollback boundary, resize reflow, arbitrary-length cluster round-trip via `terminal_cell_get_grapheme`
+- **test_bvt_pty** — Engine-only PTY soak: spawns a child shell on a real PTY, pipes raw output into `bvt_input_write`, asserts on grid + cursor + scrollback. Covers `tput cup`, altscreen swap, scrollback push, ZWJ family preservation, the cf brick-inline regression, and the claude exit-cursor regression
 - **test_dmabuf_copy** — DMA-BUF zero-copy: `glCopyImageSubData` vs `glBlitFramebuffer` across GBM pixel formats, isolates the EGL/GBM copy path from SDL and GTK4
 
 All tests support `-v` for verbose output. Visual testing of rendering and terminal features is done manually using example scripts.
