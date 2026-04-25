@@ -117,6 +117,22 @@ void bvt_send_text(BvtTerm *vt, const char *utf8, size_t len, BvtMods mods) {
     /* Alt-prefix: emit ESC, then the bytes. Standard xterm meta-sends-esc. */
     if (mods & BVT_MOD_ALT)
         bvt_emit_bytes(vt, (const uint8_t *)"\x1b", 1);
+
+    /* Ctrl+<key>: transform single-byte ASCII to its control code so the
+     * PTY's line discipline produces SIGINT for Ctrl+C, NUL for Ctrl+Space
+     * etc. Multi-byte input is passed through unchanged. */
+    if ((mods & BVT_MOD_CTRL) && len == 1) {
+        uint8_t b = (uint8_t)utf8[0];
+        uint8_t out = b;
+        if (b == ' ' || b == '@')           out = 0x00;
+        else if (b == '?')                  out = 0x7F;
+        else if (b >= 'A' && b <= 'Z')      out = (uint8_t)(b - 0x40);
+        else if (b >= 'a' && b <= 'z')      out = (uint8_t)(b - 0x60);
+        else if (b >= '[' && b <= '_')      out = (uint8_t)(b - 0x40);
+        bvt_emit_bytes(vt, &out, 1);
+        return;
+    }
+
     bvt_emit_bytes(vt, (const uint8_t *)utf8, len);
 }
 

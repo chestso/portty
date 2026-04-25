@@ -436,6 +436,34 @@ static void test_send_text_alt(void) {
     bvt_free(vt);
 }
 
+static void test_send_text_ctrl(void) {
+    /* Ctrl+letter must produce the corresponding control byte so the PTY
+     * line discipline can deliver SIGINT for Ctrl+C, etc. */
+    BvtTerm *vt = make_term(24, 80);
+    struct { char in; uint8_t out; } cases[] = {
+        {'c', 0x03}, {'C', 0x03},
+        {'a', 0x01}, {'z', 0x1A},
+        {'@', 0x00}, {' ', 0x00},  /* Ctrl+Space */
+        {'?', 0x7F},               /* Ctrl+?  → DEL */
+        {'[', 0x1B},               /* Ctrl+[  → ESC */
+        {'\\', 0x1C}, {']', 0x1D}, {'^', 0x1E}, {'_', 0x1F},
+    };
+    for (size_t i = 0; i < sizeof(cases)/sizeof(cases[0]); ++i) {
+        g_output_len = 0;
+        char in = cases[i].in;
+        bvt_send_text(vt, &in, 1, BVT_MOD_CTRL);
+        ASSERT_EQ((int)g_output_len, 1);
+        ASSERT_EQ((int)(uint8_t)g_output_buf[0], (int)cases[i].out);
+    }
+    /* Ctrl+Alt+C → ESC then 0x03 */
+    g_output_len = 0;
+    bvt_send_text(vt, "c", 1, BVT_MOD_CTRL | BVT_MOD_ALT);
+    ASSERT_EQ((int)g_output_len, 2);
+    ASSERT_EQ((int)(uint8_t)g_output_buf[0], 0x1B);
+    ASSERT_EQ((int)(uint8_t)g_output_buf[1], 0x03);
+    bvt_free(vt);
+}
+
 static void test_dsr_cpr(void) {
     BvtTerm *vt = make_term(24, 80);
     feed(vt, "\x1b[5;7H");
@@ -655,6 +683,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_send_key_arrow);
     RUN_TEST(test_decckm_arrow);
     RUN_TEST(test_send_text_alt);
+    RUN_TEST(test_send_text_ctrl);
     RUN_TEST(test_dsr_cpr);
     RUN_TEST(test_da1);
     RUN_TEST(test_altscreen_save_restore);
