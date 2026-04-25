@@ -447,11 +447,13 @@ void bvt_parser_feed(BvtTerm *vt, const uint8_t *bytes, size_t len) {
                 p->utf8_state = UTF8_ACCEPT;
                 continue;
             }
-            if (b == 0x9c) {
-                bvt_osc_dispatch(vt, p->osc_buf, p->osc_len);
-                p->state = BVT_STATE_GROUND;
-                continue;
-            }
+            /* Note: in UTF-8 mode (always, for bvt) we do NOT treat bare
+             * 0x9C as the C1 ST. Many UTF-8 codepoints encode 0x9C as
+             * their trailing continuation byte (e.g. U+201C "left double
+             * quotation mark" is 0xE2 0x80 0x9C); aborting the OSC there
+             * would emit a partial codepoint and break consumers like
+             * GTK/Pango that validate UTF-8 strictly. Only ESC \ and BEL
+             * terminate. */
             state_osc_string(vt, b);
             continue;
         }

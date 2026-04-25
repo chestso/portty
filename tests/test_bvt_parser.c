@@ -775,6 +775,24 @@ static void test_reflow_disabled(void) {
  * drawing alphabet on G0. Apps like tmux and ncurses rely on it for
  * borders. While selected, ASCII bytes 0x5F..0x7E translate to box-
  * drawing codepoints. SI/SO toggle between G0 and G1. */
+/* Regression: OSC titles with UTF-8 codepoints whose trailing continuation
+ * byte is 0x9C (e.g. U+201C "left double quote" = E2 80 9C) used to abort
+ * the OSC because 0x9C was treated as a bare C1 ST. In UTF-8 mode the
+ * only OSC terminators are ESC\ and BEL. */
+static void test_osc_title_utf8_with_9c_byte(void) {
+    BvtTerm *vt = make_term(2, 10);
+    g_title = NULL;
+    /* OSC 2 ; "Claude" U+201C "x" BEL — note the U+201C byte sequence
+     * E2 80 9C lives inside the title body. The parser must not split
+     * on the 9C and ship a partial codepoint. */
+    feed(vt, "\x1b]2;Claude\xe2\x80\x9cx\x07");
+    /* The title we kept should be the full sequence — a fully-formed
+     * UTF-8 string. Validate by walking it through a small decoder. */
+    ASSERT_NOT_NULL(g_title);
+    ASSERT_STR_EQ(g_title, "Claude\xe2\x80\x9cx");
+    bvt_free(vt);
+}
+
 static void test_dec_graphics_g0(void) {
     BvtTerm *vt = make_term(2, 10);
     feed(vt, "\x1b(0lqk\x1b(B");
@@ -844,6 +862,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_dsr_cpr);
     RUN_TEST(test_decom_cup);
     RUN_TEST(test_decstbm_invalid_rejected);
+    RUN_TEST(test_osc_title_utf8_with_9c_byte);
     RUN_TEST(test_dec_graphics_g0);
     RUN_TEST(test_dec_graphics_si_so);
     RUN_TEST(test_cf_byte_replay);
