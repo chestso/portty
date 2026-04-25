@@ -82,8 +82,8 @@ static void test_resize_grows_and_reflows(void) {
     TerminalCell c0, c5;
     ASSERT_EQ(terminal_get_cell(&t, 0, 0, &c0), 0);
     ASSERT_EQ(terminal_get_cell(&t, 0, 5, &c5), 0);
-    ASSERT_EQ(c0.chars[0], (uint32_t)'a');
-    ASSERT_EQ(c5.chars[0], (uint32_t)'f');
+    ASSERT_EQ(c0.cp, (uint32_t)'a');
+    ASSERT_EQ(c5.cp, (uint32_t)'f');
     ASSERT_FALSE(terminal_get_line_continuation(&t, 1));
 
     terminal_destroy(&t);
@@ -100,8 +100,41 @@ static void test_resize_shrinks_and_reflows(void) {
 
     TerminalCell c5;
     ASSERT_EQ(terminal_get_cell(&t, 1, 0, &c5), 0);
-    ASSERT_EQ(c5.chars[0], (uint32_t)'f');
+    ASSERT_EQ(c5.cp, (uint32_t)'f');
     ASSERT_TRUE(terminal_get_line_continuation(&t, 1));
+
+    terminal_destroy(&t);
+}
+
+/* The 7-codepoint ZWJ family 👨‍👩‍👧‍👦 used to truncate at the renderer
+ * boundary because TerminalCell stored at most 6 codepoints inline. After
+ * step 17, the cell carries (cp, grapheme_id) and the caller fetches the
+ * full sequence via terminal_cell_get_grapheme. Verify all 7 cps survive. */
+static void test_long_cluster_survives_accessor(void) {
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    /* U+1F468 ZWJ U+1F469 ZWJ U+1F467 ZWJ U+1F466 — 7 codepoints. */
+    feed(&t,
+         "\xf0\x9f\x91\xa8\xe2\x80\x8d"
+         "\xf0\x9f\x91\xa9\xe2\x80\x8d"
+         "\xf0\x9f\x91\xa7\xe2\x80\x8d"
+         "\xf0\x9f\x91\xa6");
+
+    TerminalCell cell;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &cell), 0);
+    ASSERT_EQ(cell.cp, (uint32_t)0x1F468);
+    ASSERT_TRUE(cell.grapheme_id != 0);
+
+    uint32_t cps[16];
+    size_t n = terminal_cell_get_grapheme(&t, 0, 0, cps, 16);
+    ASSERT_EQ(n, (size_t)7);
+    ASSERT_EQ(cps[0], (uint32_t)0x1F468);
+    ASSERT_EQ(cps[1], (uint32_t)0x200D);
+    ASSERT_EQ(cps[2], (uint32_t)0x1F469);
+    ASSERT_EQ(cps[3], (uint32_t)0x200D);
+    ASSERT_EQ(cps[4], (uint32_t)0x1F467);
+    ASSERT_EQ(cps[5], (uint32_t)0x200D);
+    ASSERT_EQ(cps[6], (uint32_t)0x1F466);
 
     terminal_destroy(&t);
 }
@@ -113,6 +146,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_scrollback_wrap_continuation);
     RUN_TEST(test_resize_grows_and_reflows);
     RUN_TEST(test_resize_shrinks_and_reflows);
+    RUN_TEST(test_long_cluster_survives_accessor);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

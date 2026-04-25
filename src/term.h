@@ -7,7 +7,6 @@
 
 #include "sixel.h"
 
-#define TERM_MAX_CHARS_PER_CELL 6
 #define TERM_MAX_SIXEL_IMAGES   64
 
 // Forward declarations
@@ -71,7 +70,14 @@ typedef struct
 
 typedef struct
 {
-    uint32_t chars[TERM_MAX_CHARS_PER_CELL];
+    // Primary codepoint of the cell's grapheme cluster. 0 for an empty cell.
+    uint32_t cp;
+    // Opaque cluster handle. 0 ⇒ single-codepoint cluster, use `cp` directly.
+    // Non-zero ⇒ multi-codepoint cluster (emoji ZWJ, flag, long combining
+    // run); fetch the full sequence with `terminal_cell_get_grapheme(term,
+    // row, col, ...)`. The value is backend-private and lifetime-tied to
+    // the cell at (row, col) — never store across reads.
+    uint32_t grapheme_id;
     int width;
     TerminalCellAttr attrs;
     TerminalColor fg;
@@ -113,6 +119,14 @@ struct TerminalBackend
     int (*get_scrollback_lines)(TerminalBackend *term);
     int (*get_scrollback_cell)(TerminalBackend *term, int scrollback_row, int col,
                                TerminalCell *cell);
+    /* Read the full codepoint sequence for a multi-codepoint cluster.
+     * `unified_row` follows the same convention as the renderer: visible
+     * rows >= 0, scrollback rows < 0 (-1 = most recent). For
+     * single-codepoint cells the caller should use `cell.cp` directly
+     * instead of going through this hook. Returns the number of
+     * codepoints written (clamped to `cap`). */
+    size_t (*get_grapheme)(TerminalBackend *term, int unified_row, int col,
+                           uint32_t *out, size_t cap);
 
     // Alternate screen and mouse mode support
     bool (*is_altscreen)(TerminalBackend *term);
@@ -152,6 +166,13 @@ bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
 int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
                                  TerminalCell *cell);
+/* Fill `out` with the full codepoint sequence at unified row `unified_row`
+ * (visible >= 0, scrollback < 0; -1 == most recent). Returns the count
+ * written (clamped to `cap`). For single-codepoint cells, prefer
+ * `cell.cp` directly — this entry exists for the multi-cp clusters bvt
+ * stores in its grapheme arena (ZWJ, flags, long combining runs, etc.). */
+size_t terminal_cell_get_grapheme(TerminalBackend *term, int unified_row, int col,
+                                  uint32_t *out, size_t cap);
 
 // Alternate screen and mouse mode support
 bool terminal_is_altscreen(TerminalBackend *term);

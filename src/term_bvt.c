@@ -224,16 +224,18 @@ static int bvt_back_process_input(TerminalBackend *term, const char *input,
 /* ------------------------------------------------------------------ */
 
 static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst) {
+    (void)vt;
     memset(dst, 0, sizeof(*dst));
     if (!src) return;
     /* Width: continuation cells (width=0) are passed through; the
      * renderer treats them as continuation. */
     dst->width = src->width;
-    /* Codepoints: copy up to TERM_MAX_CHARS_PER_CELL. */
-    uint32_t cps[TERM_MAX_CHARS_PER_CELL];
-    size_t n = bvt_cell_get_grapheme(vt, src, cps, TERM_MAX_CHARS_PER_CELL);
-    for (size_t i = 0; i < n && i < TERM_MAX_CHARS_PER_CELL; ++i)
-        dst->chars[i] = cps[i];
+    /* Primary codepoint + opaque cluster handle. The renderer fetches the
+     * full multi-codepoint sequence (if any) via terminal_cell_get_grapheme,
+     * which routes back through bvt_cell_get_grapheme — no truncation at
+     * the renderer boundary. */
+    dst->cp           = src->cp;
+    dst->grapheme_id  = src->grapheme_id;
 
     /* Style. */
     const BvtStyle *st = bvt_cell_style(vt, src);
@@ -346,6 +348,17 @@ static int bvt_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
     const BvtCell *src = bvt_get_scrollback_cell(d->vt, sb_row, col);
     convert_cell(d->vt, src, cell);
     return 0;
+}
+
+static size_t bvt_back_get_grapheme(TerminalBackend *term, int unified_row,
+                                    int col, uint32_t *out, size_t cap) {
+    BvtBackendData *d = term->backend_data;
+    if (!d || !out || cap == 0) return 0;
+    const BvtCell *src = (unified_row >= 0)
+        ? bvt_get_cell(d->vt, unified_row, col)
+        : bvt_get_scrollback_cell(d->vt, -(unified_row + 1), col);
+    if (!src) return 0;
+    return bvt_cell_get_grapheme(d->vt, src, out, cap);
 }
 
 /* ------------------------------------------------------------------ */
@@ -512,6 +525,7 @@ TerminalBackend terminal_backend_bvt = {
     .get_damage_rect       = bvt_back_get_damage_rect,
     .get_scrollback_lines  = bvt_back_get_scrollback_lines,
     .get_scrollback_cell   = bvt_back_get_scrollback_cell,
+    .get_grapheme          = bvt_back_get_grapheme,
     .is_altscreen          = bvt_back_is_altscreen,
     .get_mouse_mode        = bvt_back_get_mouse_mode,
     .send_mouse_event      = bvt_back_send_mouse_event,

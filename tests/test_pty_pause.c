@@ -75,7 +75,7 @@ static int mock_get_cell(TerminalBackend *term, int row, int col,
     (void)row;
     (void)col;
     memset(cell, 0, sizeof(*cell));
-    cell->chars[0] = ' ';
+    cell->cp = ' ';
     return 0;
 }
 
@@ -86,7 +86,7 @@ static int mock_get_scrollback_cell(TerminalBackend *term, int sb_row,
     (void)sb_row;
     (void)col;
     memset(cell, 0, sizeof(*cell));
-    cell->chars[0] = ' ';
+    cell->cp = ' ';
     return 0;
 }
 

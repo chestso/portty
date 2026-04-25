@@ -186,6 +186,14 @@ int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int 
     return term->get_scrollback_cell(term, scrollback_row, col, cell);
 }
 
+size_t terminal_cell_get_grapheme(TerminalBackend *term, int unified_row, int col,
+                                  uint32_t *out, size_t cap)
+{
+    if (!term || !term->get_grapheme || !out || cap == 0)
+        return 0;
+    return term->get_grapheme(term, unified_row, col, out, cap);
+}
+
 bool terminal_is_altscreen(TerminalBackend *term)
 {
     if (!term || !term->is_altscreen)
@@ -308,7 +316,7 @@ static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *ou
         *out_end = (TerminalPos){ row, col };
         return;
     }
-    int cls = char_class(cell.chars[0], wchars);
+    int cls = char_class(cell.cp, wchars);
 
     // Scan left — cross soft-wrapped line boundaries
     int scan_row = row, left = col;
@@ -317,7 +325,7 @@ static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *ou
             TerminalCell c;
             if (read_cell_unified(term, scan_row, left - 1, &c) < 0)
                 break;
-            if (char_class(c.chars[0], wchars) != cls)
+            if (char_class(c.cp, wchars) != cls)
                 break;
             left--;
         } else {
@@ -330,7 +338,7 @@ static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *ou
             TerminalCell c;
             if (read_cell_unified(term, scan_row, left, &c) < 0)
                 break;
-            if (char_class(c.chars[0], wchars) != cls)
+            if (char_class(c.cp, wchars) != cls)
                 break;
         }
     }
@@ -342,7 +350,7 @@ static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *ou
             TerminalCell c;
             if (read_cell_unified(term, scan_row_r, right + 1, &c) < 0)
                 break;
-            if (char_class(c.chars[0], wchars) != cls)
+            if (char_class(c.cp, wchars) != cls)
                 break;
             right++;
         } else {
@@ -354,7 +362,7 @@ static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *ou
             TerminalCell c;
             if (read_cell_unified(term, scan_row_r, right, &c) < 0)
                 break;
-            if (char_class(c.chars[0], wchars) != cls)
+            if (char_class(c.cp, wchars) != cls)
                 break;
         }
     }
@@ -492,14 +500,22 @@ char *terminal_selection_get_text(TerminalBackend *term)
             if (cell.width == 0)
                 continue;
 
-            if (cell.chars[0] == 0) {
+            if (cell.cp == 0) {
                 // Empty cell → space
                 if (pos < buf_size - 1)
                     buf[pos++] = ' ';
             } else {
-                for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++) {
+                uint32_t cps[16];
+                size_t n_cps = 1;
+                cps[0] = cell.cp;
+                if (cell.grapheme_id != 0) {
+                    n_cps = terminal_cell_get_grapheme(term, row, col,
+                                                      cps, sizeof(cps)/sizeof(cps[0]));
+                    if (n_cps == 0) { cps[0] = cell.cp; n_cps = 1; }
+                }
+                for (size_t i = 0; i < n_cps; i++) {
                     char utf8[4];
-                    int n = codepoint_to_utf8(cell.chars[i], utf8);
+                    int n = codepoint_to_utf8(cps[i], utf8);
                     if (pos + n < buf_size) {
                         memcpy(buf + pos, utf8, n);
                         pos += n;

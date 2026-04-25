@@ -3,15 +3,6 @@
 Living checklist for the `feature/bloom-vt` branch. Promote items to PRs as
 they get worked on. Order is roughly priority, not strict dependency.
 
-## Open items (resolve before flipping default)
-
-- **Cluster truncation at the renderer boundary** — `src/term_bvt.c::convert_cell`
-  copies bvt clusters into `dst->chars[TERM_MAX_CHARS_PER_CELL]` (= 6) to fit
-  the existing `TerminalCell` struct. bvt's grid stores arbitrary-length
-  clusters correctly, but anything > 6 codepoints (e.g. 7-cp ZWJ family
-  👨‍👩‍👧‍👦, very long combining-mark sequences) loses the tail at the
-  renderer boundary. See "Renderer migration" below.
-
 ## Headless interactive testing infrastructure
 
 - **A. `tests/test_bvt_pty.c`** — engine-only PTY harness. Spawns a child
@@ -110,18 +101,17 @@ osxcross libvterm cross-compile blocks in `build.sh`, and the
 identity wrappers retained for source compatibility. CLAUDE.md
 "Emoji Width Paradigm" rewritten.
 
-## Step 17 — Renderer migration (cell.chars → grapheme accessor)
+## Step 17 — Renderer migration (cell.chars → grapheme accessor) ✅ done
 
-Lifts the 6-codepoint-per-cell cap that bvt currently honors only for
-parity with `TerminalCell.chars[TERM_MAX_CHARS_PER_CELL]`.
-
-- Replace `chars[6]` on `TerminalCell` with a `uint32_t grapheme_id` (and
-  keep `cp` for the single-codepoint fast path).
-- Add `terminal_cell_get_grapheme(term, cell, out, cap)` that calls
-  `bvt_cell_get_grapheme()` for the bvt path.
-- Renderer's font-shaping path consumes the codepoint array via this
-  accessor — `src/rend_sdl3.c` glyph lookup keys move from `cell.chars[]`
-  to `(cell.cp, cell.grapheme_id)`.
+The 6-codepoint-per-cell cap is gone. `TerminalCell` now carries
+`(uint32_t cp, uint32_t grapheme_id)` instead of `chars[6]`; the full
+sequence is fetched by the new `terminal_cell_get_grapheme(term,
+unified_row, col, out, cap)` accessor (vtable hook on `TerminalBackend`).
+The bvt backend implements it via `bvt_cell_get_grapheme()`. Updated
+call-sites: `src/rend_sdl3.c` (glyph lookup + PNG trim scan),
+`src/term.c` (selection char_class + clipboard text extraction). Coverage
+in `tests/test_term_bvt.c::test_long_cluster_survives_accessor`
+exercising the 7-cp ZWJ family 👨‍👩‍👧‍👦.
 
 ## Step 18 — Extract to `/home/thomasc/git/bloom-vt`
 

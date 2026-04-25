@@ -1406,17 +1406,34 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     int columns_to_consume = pres_w > 0 ? pres_w : 1;
 
-    if (cell.chars[0] == 0) {
+    if (cell.cp == 0) {
         // Empty cell - jump to cursor drawing, then return
         goto render_cursor;
     }
 
-    // Collect codepoints from cell
-    uint32_t cps[TERM_MAX_CHARS_PER_CELL];
-    int cp_count = 0;
-
-    for (int i = 0; i < TERM_MAX_CHARS_PER_CELL && cell.chars[i] != 0; i++)
-        cps[cp_count++] = cell.chars[i];
+    // Collect the cell's codepoint sequence. Single-codepoint cells —
+    // ~99% of the grid — take the fast path with zero backend calls.
+    // Multi-codepoint clusters (emoji ZWJ chains, flags, long combining
+    // runs) come through `terminal_cell_get_grapheme` which routes to
+    // bvt's grapheme arena and returns the full sequence regardless of
+    // length. The 32-element local cap matches BVT_CLUSTER_MAX*2 — well
+    // above any cluster the parser will commit.
+    uint32_t cps[32];
+    int cp_count;
+    if (cell.grapheme_id == 0) {
+        cps[0] = cell.cp;
+        cp_count = 1;
+    } else {
+        int scroll_offset = data->scroll_offset;
+        int scrollback_row = scroll_offset - 1 - row;
+        int unified_row = (scrollback_row >= 0)
+            ? -(scrollback_row + 1)
+            : (row - scroll_offset);
+        size_t n = terminal_cell_get_grapheme(term, unified_row, vt_col,
+                                              cps, sizeof(cps)/sizeof(cps[0]));
+        if (n == 0) { cps[0] = cell.cp; n = 1; }
+        cp_count = (int)n;
+    }
 
     // NERD FONTS HACK: Translate obsolete v2 codepoints to v3 equivalents
     for (int i = 0; i < cp_count; i++)
@@ -2113,7 +2130,7 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     for (int row = 0; row < term_rows; row++) {
         for (int col = 0; col < term_cols; col++) {
             TerminalCell cell;
-            if (terminal_get_cell(term, row, col, &cell) == 0 && cell.chars[0] != 0) {
+            if (terminal_get_cell(term, row, col, &cell) == 0 && cell.cp != 0) {
                 int end = col + (cell.width > 0 ? cell.width : 1);
                 if (end > last_col)
                     last_col = end;
