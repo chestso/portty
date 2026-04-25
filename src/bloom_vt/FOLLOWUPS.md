@@ -47,6 +47,7 @@ A goes in first (gating, in CI). B is opt-in for sweeps.
 - bold, italic, curly underline (`4:3`), dashed underline (`4:5`)
 - truecolor `38;2;R;G;B`
 - box-drawing characters `┌─┬─┐`
+- DEC special graphics line drawing (`\033(0lqk\nx x\nmqj\033(B`)
 - CJK ideographs (你好世界) — width=2 cells with width=0 continuation
 - VS16 ⚠️
 - 100-line scrollback push
@@ -55,6 +56,8 @@ A goes in first (gating, in CI). B is opt-in for sweeps.
 - 8-step tabs
 - Scrolling region (DECSTBM `\033[2;5r`), IL/DL, ECH
 - glow markdown render of `#` / `##` / fenced code
+- vim --version, bat plain, tmux ls, htop -d 5 (1s timeout), btop -p 0
+  (1s timeout), chafa --format=symbols, ls --color, ps aux, date, uname
 
 **Accepted divergences** (bvt is correct; libvterm path is non-standard
 and goes away in step 15):
