@@ -24,7 +24,6 @@
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
-#include "term_vt.h"
 #include "term_bvt.h"
 #include <SDL3/SDL.h>
 #include <getopt.h>
@@ -674,16 +673,8 @@ int main(int argc, char *argv[])
     vlog("FreeType will be initialized in renderer\n");
 
     // Initialize terminal with cell dimensions (cols x rows). bloom-vt
-    // is the default; legacy libvterm path remains opt-in via
-    // BLOOM_TERMINAL_VT=libvterm while we finish the removal.
+    // is the only backend now that libvterm has been removed.
     TerminalBackend *vt_backend = &terminal_backend_bvt;
-    {
-        const char *vt_choice = getenv("BLOOM_TERMINAL_VT");
-        if (vt_choice && strcmp(vt_choice, "libvterm") == 0) {
-            vt_backend = &terminal_backend_vt;
-            vlog("Using libvterm backend (BLOOM_TERMINAL_VT=%s)\n", vt_choice);
-        }
-    }
     term = terminal_init(vt_backend, init_cols, init_rows);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
@@ -691,11 +682,10 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    // Enable reflow if requested
-    if (reflow_enabled) {
+    // Reflow is on by default in bvt; --reflow / config "reflow=true" is a
+    // no-op kept for backwards compatibility with the libvterm-era flag.
+    if (reflow_enabled)
         terminal_set_reflow(term, true);
-        vlog("Text reflow enabled (UNSTABLE: may crash on extreme resize)\n");
-    }
 
     if (conf.word_chars)
         terminal_selection_set_word_chars(term, conf.word_chars);
@@ -905,7 +895,7 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
 static void print_usage(const char *progname)
 {
     printf("Usage: %s [OPTIONS] [-- COMMAND [ARGS...]]\n", progname);
-    printf("Terminal emulator using libvterm and SDL3\n\n");
+    printf("Terminal emulator using bloom-vt and SDL3\n\n");
     printf("Options:\n");
     printf("  -h          Show this help message\n");
     printf("  -v          Verbose output (debug information)\n");
@@ -918,8 +908,7 @@ static void print_usage(const char *progname)
     printf("  --padding     Enable padding around terminal content\n");
     printf("  --gtk4        Use GTK4/libadwaita platform backend (native CSD)\n");
     printf("  --sdl3        Use SDL3 platform backend (overrides config file)\n");
-    printf("  --reflow    Enable text reflow on resize (UNSTABLE: may crash on extreme\n");
-    printf("              window sizes due to libvterm bug, see github.com/neovim/neovim/issues/25234)\n");
+    printf("  --reflow    Enable text reflow on resize (default: enabled)\n");
     printf("  --demo TEXT Display TEXT in terminal without spawning a shell (for testing)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
@@ -939,8 +928,8 @@ static void print_usage(const char *progname)
     printf("Build info:\n");
     printf("  %s\n", PACKAGE_STRING);
     printf("  CC: %s\n", BUILD_CC);
-    printf("  libvterm %s, SDL3 %s, FreeType %s\n",
-           DEP_VTERM_VERSION, DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
+    printf("  bloom-vt (in-tree), SDL3 %s, FreeType %s\n",
+           DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
     printf("  HarfBuzz %s, libpng %s\n",
            DEP_HARFBUZZ_VERSION, DEP_LIBPNG_VERSION);
 #ifdef DEP_FONTCONFIG_VERSION

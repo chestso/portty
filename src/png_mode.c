@@ -9,7 +9,6 @@
 #include "rend_sdl3.h"
 #include "term.h"
 #include "term_bvt.h"
-#include "term_vt.h"
 #include <SDL3/SDL.h>
 #include <poll.h>
 #include <stdio.h>
@@ -17,15 +16,7 @@
 #include <string.h>
 #include <time.h>
 
-/* Backend defaults to bloom-vt; legacy libvterm path stays opt-in via
- * BLOOM_TERMINAL_VT=libvterm during the removal window. */
-static TerminalBackend *select_backend(void)
-{
-    const char *vt_choice = getenv("BLOOM_TERMINAL_VT");
-    if (vt_choice && strcmp(vt_choice, "libvterm") == 0)
-        return &terminal_backend_vt;
-    return &terminal_backend_bvt;
-}
+static TerminalBackend *select_backend(void) { return &terminal_backend_bvt; }
 
 /* Common SDL + renderer setup. Caller must free the resources via
  * cleanup_render_context() in reverse order. */

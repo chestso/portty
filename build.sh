@@ -352,12 +352,6 @@ build_mingw64() {
     local MINGW_AR="${MINGW_HOST}-ar"
     local MINGW_PKG_CONFIG="${MINGW_HOST}-pkg-config"
     local MINGW_SYSROOT="/usr/x86_64-w64-mingw32/sys-root/mingw"
-    local DEPS_DIR="deps"
-    local VTERM_VERSION="0.3.3"
-    local VTERM_URL="https://www.leonerd.org.uk/code/libvterm/libvterm-${VTERM_VERSION}.tar.gz"
-    local VTERM_DIR="${DEPS_DIR}/libvterm-${VTERM_VERSION}"
-    local VTERM_TARBALL="${DEPS_DIR}/libvterm-${VTERM_VERSION}.tar.gz"
-
     # Check for cross-compiler
     if ! command -v "$MINGW_CC" &>/dev/null; then
         log_error "mingw64 cross-compiler not found: $MINGW_CC"
@@ -378,46 +372,6 @@ build_mingw64() {
         exit 1
     fi
 
-    # --- Cross-compile libvterm ---
-    mkdir -p "$DEPS_DIR"
-
-    if [ ! -f "$VTERM_TARBALL" ]; then
-        log_info "Downloading libvterm ${VTERM_VERSION}..."
-        curl -L -o "$VTERM_TARBALL" "$VTERM_URL"
-        if [ $? -ne 0 ]; then
-            log_error "Failed to download libvterm"
-            rm -f "$VTERM_TARBALL"
-            exit 1
-        fi
-    fi
-
-    if [ ! -d "$VTERM_DIR" ]; then
-        log_info "Extracting libvterm..."
-        tar -xzf "$VTERM_TARBALL" -C "$DEPS_DIR"
-    fi
-
-    local VTERM_BUILD="${VTERM_DIR}/build-mingw64"
-    if [ ! -f "${VTERM_BUILD}/libvterm.a" ]; then
-        log_info "Cross-compiling libvterm for mingw64..."
-        mkdir -p "$VTERM_BUILD"
-        for f in "${VTERM_DIR}"/src/*.c; do
-            local base
-            base=$(basename "$f" .c)
-            "$MINGW_CC" -Wall -I"${VTERM_DIR}/include" -c "$f" \
-                -o "${VTERM_BUILD}/${base}.o"
-        done
-        "$MINGW_AR" rcs "${VTERM_BUILD}/libvterm.a" "${VTERM_BUILD}"/*.o
-        # Generate pkg-config file from template
-        sed -e "s|@LIBDIR@|${VTERM_BUILD}|" -e "s|@INCDIR@|${VTERM_DIR}/include|" \
-            "${VTERM_DIR}/vterm.pc.in" > "${VTERM_BUILD}/vterm.pc"
-        log_info "libvterm cross-compiled: ${VTERM_BUILD}/libvterm.a"
-    else
-        log_info "Using cached libvterm: ${VTERM_BUILD}/libvterm.a"
-    fi
-
-    local VTERM_ABS
-    VTERM_ABS=$(cd "$VTERM_DIR" && pwd)
-
     # --- Generate configure script ---
     if ! generate_configure; then
         exit 1
@@ -434,9 +388,6 @@ build_mingw64() {
     CONFIGURE_CMD="$CONFIGURE_CMD --host=${MINGW_HOST}"
     CONFIGURE_CMD="$CONFIGURE_CMD --prefix=${MINGW_SYSROOT}"
     CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG=${MINGW_PKG_CONFIG}"
-    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${VTERM_ABS}/build-mingw64"
-    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_CFLAGS=-I${VTERM_ABS}/include"
-    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_LIBS=\"-L${VTERM_ABS}/build-mingw64 -lvterm\""
 
     if [ "$ENABLE_DEBUG" = true ]; then
         CONFIGURE_CMD="$CONFIGURE_CMD CFLAGS='-O0 -g3 -DDEBUG'"
@@ -509,10 +460,6 @@ build_osxcross() {
     local DEPS_DIR="deps"
     local MACOS_PREFIX
     MACOS_PREFIX="$(pwd)/${DEPS_DIR}/macos-prefix"
-    local VTERM_VERSION="0.3.3"
-    local VTERM_URL="https://www.leonerd.org.uk/code/libvterm/libvterm-${VTERM_VERSION}.tar.gz"
-    local VTERM_DIR="${DEPS_DIR}/libvterm-${VTERM_VERSION}"
-    local VTERM_TARBALL="${DEPS_DIR}/libvterm-${VTERM_VERSION}.tar.gz"
 
     # Add local osxcross to PATH and LD_LIBRARY_PATH if present
     if [ -d "osxcross/target/bin" ]; then
@@ -556,46 +503,6 @@ build_osxcross() {
         log_info "Using cached macOS dependencies: ${MACOS_PREFIX}/"
     fi
 
-    # --- Cross-compile libvterm ---
-    mkdir -p "$DEPS_DIR"
-
-    if [ ! -f "$VTERM_TARBALL" ]; then
-        log_info "Downloading libvterm ${VTERM_VERSION}..."
-        curl -L -o "$VTERM_TARBALL" "$VTERM_URL"
-        if [ $? -ne 0 ]; then
-            log_error "Failed to download libvterm"
-            rm -f "$VTERM_TARBALL"
-            exit 1
-        fi
-    fi
-
-    if [ ! -d "$VTERM_DIR" ]; then
-        log_info "Extracting libvterm..."
-        tar -xzf "$VTERM_TARBALL" -C "$DEPS_DIR"
-    fi
-
-    local VTERM_BUILD="${VTERM_DIR}/build-osxcross"
-    if [ ! -f "${VTERM_BUILD}/libvterm.a" ]; then
-        log_info "Cross-compiling libvterm for macOS..."
-        mkdir -p "$VTERM_BUILD"
-        for f in "${VTERM_DIR}"/src/*.c; do
-            local base
-            base=$(basename "$f" .c)
-            "$OSXCROSS_CC" -Wall -I"${VTERM_DIR}/include" -c "$f" \
-                -o "${VTERM_BUILD}/${base}.o"
-        done
-        "$OSXCROSS_AR" rcs "${VTERM_BUILD}/libvterm.a" "${VTERM_BUILD}"/*.o
-        # Generate pkg-config file from template
-        sed -e "s|@LIBDIR@|${VTERM_BUILD}|" -e "s|@INCDIR@|${VTERM_DIR}/include|" \
-            "${VTERM_DIR}/vterm.pc.in" > "${VTERM_BUILD}/vterm.pc"
-        log_info "libvterm cross-compiled: ${VTERM_BUILD}/libvterm.a"
-    else
-        log_info "Using cached libvterm: ${VTERM_BUILD}/libvterm.a"
-    fi
-
-    local VTERM_ABS
-    VTERM_ABS=$(cd "$VTERM_DIR" && pwd)
-
     # --- Generate configure script ---
     if ! generate_configure; then
         exit 1
@@ -615,10 +522,8 @@ build_osxcross() {
     OSXCROSS_CC_ABS=$(command -v "$OSXCROSS_CC")
     CONFIGURE_CMD="$CONFIGURE_CMD CC=${OSXCROSS_CC_ABS}"
     CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG=pkg-config"
-    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${VTERM_ABS}/build-osxcross:${MACOS_PREFIX}/lib/pkgconfig"
+    CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_PATH=${MACOS_PREFIX}/lib/pkgconfig"
     CONFIGURE_CMD="$CONFIGURE_CMD PKG_CONFIG_LIBDIR=${MACOS_PREFIX}/lib/pkgconfig"
-    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_CFLAGS=-I${VTERM_ABS}/include"
-    CONFIGURE_CMD="$CONFIGURE_CMD VTERM_LIBS=\"-L${VTERM_ABS}/build-osxcross -lvterm\""
 
     # Link compiler-rt builtins (for ___isPlatformVersionAtLeast etc.)
     local OSXCROSS_ROOT

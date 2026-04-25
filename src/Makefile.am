@@ -15,7 +15,7 @@ FONT_RESOLVE_SOURCE = font_resolve_fc.c
 endif
 endif
 
-bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_vt.c term_bvt.c \
+bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_bvt.c \
     rend.c rend_sdl3.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
@@ -27,11 +27,11 @@ bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_vt.c term_bvt.c \
     bloom_vt/reflow.c
 
 # Compiler flags
-AM_CFLAGS = $(VTERM_CFLAGS) $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
+AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
     $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) -DBLOOM_DATADIR='"$(datadir)"' -Wall -Wextra
 
 # Linker flags
-bloom_terminal_LDADD = $(VTERM_LIBS) $(SDL3_LIBS) \
+bloom_terminal_LDADD = $(SDL3_LIBS) \
     $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) -lm
 
 if HOST_WINDOWS
@@ -56,7 +56,7 @@ AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'
 if HAVE_GTK4
 pkglib_LTLIBRARIES = bloom-terminal-gtk4.la
 bloom_terminal_gtk4_la_SOURCES = platform_gtk4.c
-bloom_terminal_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) $(VTERM_CFLAGS) \
+bloom_terminal_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) \
     $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
     $(EGL_CFLAGS) $(LIBDRM_CFLAGS) $(GBM_CFLAGS) \
     -DBLOOM_DATADIR='"$(datadir)"' -Wall -Wextra

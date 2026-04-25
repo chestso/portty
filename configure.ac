@@ -43,7 +43,6 @@ else
 fi
 
 # Check for libraries
-PKG_CHECK_MODULES([VTERM], [vterm])
 PKG_CHECK_MODULES([SDL3], [sdl3])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
@@ -55,8 +54,6 @@ PKG_CHECK_MODULES([LIBPNG], [libpng])
 # Capture dependency versions and build info for --help output
 BUILD_CC_VERSION=$($CC --version 2>/dev/null | head -1 || echo "$CC")
 AC_DEFINE_UNQUOTED([BUILD_CC], ["$BUILD_CC_VERSION"], [C compiler version string])
-DEP_VTERM_VER=$($PKG_CONFIG --modversion vterm 2>/dev/null || echo "unknown")
-AC_DEFINE_UNQUOTED([DEP_VTERM_VERSION], ["$DEP_VTERM_VER"], [libvterm version])
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
 DEP_FREETYPE_VER=$($PKG_CONFIG --modversion freetype2 2>/dev/null || echo "unknown")
