@@ -153,6 +153,20 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
   the existing sixel layer.
 - Right-to-left text shaping — handled at HarfBuzz, not VT.
 
+## Resolved during soak
+
+- ~~Ctrl+letter key combos didn't work in bloom-vt — Ctrl+C produced raw
+  `c` instead of 0x03~~ — `bvt_send_text` now applies the standard
+  Ctrl-byte transformation (Ctrl+@ → 0x00, Ctrl+A..Z → 0x01..0x1A, etc.)
+  before forwarding. Fixed in 2de4465.
+- ~~cf wiped the screen on launch — the brick (Haskell vty) inline TUI
+  drew at row 0 instead of preserving prompts above~~ — bvt was missing
+  DECOM (origin mode 6) entirely, and DECSTBM accepted the degenerate
+  `CSI 1;1 r` brick emits during setup. Both fixed; see 04f4854.
+  Repro lives in `tests/test_bvt_pty.c::test_cf_brick_inline_preserves_history`
+  and unit coverage in `tests/test_bvt_parser.c::test_decom_cup` /
+  `::test_decstbm_invalid_rejected` / `::test_cf_byte_replay`.
+
 ## Resolved during scaffolding (kept here for context)
 
 - ~~`get_cell` / `get_dimensions` / `get_scrollback_cell` returned `0/1`
