@@ -779,6 +779,30 @@ static void test_reflow_disabled(void) {
  * byte is 0x9C (e.g. U+201C "left double quote" = E2 80 9C) used to abort
  * the OSC because 0x9C was treated as a bare C1 ST. In UTF-8 mode the
  * only OSC terminators are ESC\ and BEL. */
+/* Regression: `CSI < u` is the Kitty keyboard-protocol "pop stack"
+ * sequence, not ANSI "restore cursor". claude emits it on exit; if we
+ * treat it as bare `CSI u` we restore the cursor to the saved position
+ * from claude's startup DECSC, jumping it back over all of claude's
+ * UI so the next shell prompt overprints claude's first line.
+ *
+ * Bare CSI u still restores; only the form with an intermediate is
+ * ignored. */
+static void test_csi_u_with_intermediate_ignored(void) {
+    BvtTerm *vt = make_term(10, 20);
+    feed(vt, "\x1b[5;5H");      /* CUP to (4, 4) */
+    feed(vt, "\x1b[s");          /* save cursor */
+    feed(vt, "\x1b[8;8H");      /* CUP to (7, 7) */
+    feed(vt, "\x1b[<u");         /* kitty pop — must NOT restore */
+    BvtCursor c = bvt_get_cursor(vt);
+    ASSERT_EQ(c.row, 7);
+    ASSERT_EQ(c.col, 7);
+    feed(vt, "\x1b[u");          /* bare restore — should jump back */
+    c = bvt_get_cursor(vt);
+    ASSERT_EQ(c.row, 4);
+    ASSERT_EQ(c.col, 4);
+    bvt_free(vt);
+}
+
 static void test_osc_title_utf8_with_9c_byte(void) {
     BvtTerm *vt = make_term(2, 10);
     g_title = NULL;
@@ -862,6 +886,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST(test_dsr_cpr);
     RUN_TEST(test_decom_cup);
     RUN_TEST(test_decstbm_invalid_rejected);
+    RUN_TEST(test_csi_u_with_intermediate_ignored);
     RUN_TEST(test_osc_title_utf8_with_9c_byte);
     RUN_TEST(test_dec_graphics_g0);
     RUN_TEST(test_dec_graphics_si_so);

@@ -350,8 +350,24 @@ void bvt_csi_dispatch(BvtTerm *vt, uint8_t final) {
         case 'L': bvt_insert_lines(vt, p1); break;     /* IL  */
         case 'M': bvt_delete_lines(vt, p1); break;     /* DL  */
 
-        case 's': vt->saved_cursor = vt->cursor; break; /* CSI s */
-        case 'u': vt->cursor = vt->saved_cursor; break; /* CSI u */
+        case 's': /* CSI s — Save Cursor (ANSI.SYS form). Only the bare
+                   * variant; `CSI ? s` is XTSAVE for DEC private modes
+                   * and `CSI < s` / `CSI > s` are vendor extensions we
+                   * do not implement. */
+            if (p->intermediate_count == 0)
+                vt->saved_cursor = vt->cursor;
+            break;
+        case 'u': /* CSI u — Restore Cursor (ANSI.SYS form). Only the
+                   * bare variant; `CSI ? u`, `CSI > u`, `CSI < u` are
+                   * Kitty / xterm keyboard-protocol push/pop and a
+                   * couple of vendor extensions we do not implement.
+                   * claude (and other modern CLIs) emit `CSI < u` to
+                   * pop the kitty keyboard stack on exit — treating it
+                   * as ANSI restore-cursor jumped the cursor back to
+                   * the launch position. */
+            if (p->intermediate_count == 0)
+                vt->cursor = vt->saved_cursor;
+            break;
 
         case 'n': /* DSR */
             if (param_or(vt, 0, 0) == 6) {
