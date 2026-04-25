@@ -153,6 +153,9 @@ static bool bvt_back_init(TerminalBackend *term, int width, int height) {
     if (!d->vt) { free(d); return false; }
     d->cursor_visible = true;
     d->cursor_blink   = true;
+    /* bloom-vt reflow is the stable WRAPLINE-tagged path (reflow.c). The
+     * libvterm-era "UNSTABLE" warning does not apply, so default it on. */
+    bvt_set_reflow(d->vt, true);
 
     BvtCallbacks cb = {
         .damage      = cb_damage,
@@ -452,7 +455,21 @@ static void bvt_back_set_reflow(TerminalBackend *term, bool enabled) {
 }
 static bool bvt_back_get_line_continuation(TerminalBackend *term, int row) {
     BvtBackendData *d = term->backend_data;
-    return d ? bvt_get_line_continuation(d->vt, row) : false;
+    if (!d) return false;
+    /* Unified coordinate space: visible rows are >= 0, scrollback rows are
+     * negative (-1 = most recent). The selection layer (`term.c`) wants
+     * libvterm semantics: "row N is a continuation of N-1" — true when
+     * the previous logical row ended in a soft wrap.
+     *
+     * bvt's WRAPLINE flag sits on the row that *wrapped into* the next,
+     * the inverse direction. So is_continuation(row) = wrapline(row - 1).
+     * We have to walk across the visible/scrollback boundary too. */
+    int prev = row - 1;
+    if (prev >= 0) {
+        return bvt_get_line_continuation(d->vt, prev);
+    }
+    int sb_row = -(prev + 1);
+    return bvt_get_scrollback_wrapline(d->vt, sb_row);
 }
 
 /* ------------------------------------------------------------------ */
