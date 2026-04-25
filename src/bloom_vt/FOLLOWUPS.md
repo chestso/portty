@@ -28,7 +28,35 @@ they get worked on. Order is roughly priority, not strict dependency.
   from `-g` (default 80x24). Lets us A/B `glow README.md`, `vim`, `htop`,
   vttest snapshots etc. against libvterm with byte-identical comparison.
 
-A goes in first (gating, in CI). B is opt-in for sweeps.
+- **C. `bloom-terminal --headless --trace=PATH`** — full-stack harness.
+  Same binary, same `term_bvt` / `bvt` plumbing as the real run, but
+  stub out SDL3 (no window, no renderer) and accept synthetic key
+  events from stdin in a small text protocol (`KEY shift+enter`,
+  `TEXT hello`, `MOUSE click 5,10`). All bytes in both directions are
+  appended to PATH with direction + timestamp markers. Catches bugs
+  the engine-only harness (A) and the PTY recorder (`scripts/pty_record.py`)
+  cannot — anything in the SDL → on_key → terminal_send_key chain,
+  e.g. modifier mapping in `platform_sdl3.c` or the `term_bvt.c` map_key
+  table. ~100-200 LOC including the stdin parser. Justified the next
+  time a "key foo doesn't work in TUI bar" bug shows up.
+
+- **D. `--exec` with input scripting**. Extend B with `--input=BYTES`
+  (decoded `\xNN` escapes) and `--input-after=MS`. Runs CMD on a PTY,
+  waits, injects bytes, waits again, renders PNG. Exercises full
+  round-trip: keystroke → bvt encoding → PTY → CMD → response →
+  PNG. Useful for regression-testing things like Shift+Enter in
+  Claude Code without a workstation.
+
+A is the CI gate. B / C / D are opt-in tools for specific
+investigations; build them when a bug demands them rather than
+upfront.
+
+`scripts/pty_record.py` is a simpler cousin to C — Python, no SDL,
+no bloom-vt — for diagnosing what a TUI emits _before_ any terminal
+renders it. Used to find Claude Code's `TERM_PROGRAM` allowlist that
+gates kitty kb push (ghostty / kitty / WezTerm / iTerm.app). Keep
+this in mind whenever a TUI's progressive enhancement seems to
+silently fail: the answer is often that the TUI never tried.
 
 ## Soak test status (PNG mode A/B via `-P --exec`)
 
@@ -127,6 +155,37 @@ Once everything above is stable, lift `src/bloom_vt/` into its own repo:
 - Image-cell underlay protocol — sixel scrolling is already handled by
   the existing sixel layer.
 - Right-to-left text shaping — handled at HarfBuzz, not VT.
+
+## Kitty keyboard protocol — deferred flags
+
+Implemented: **flag 0x1** (Disambiguate escape codes) and **flag 0x8**
+(Report all keys as escape codes). Push/pop/set/query of the flag
+stack is wired in `csi.c` and the four special-key paths plus the
+Ctrl/Alt+ASCII text path in `keys.c` honour the active flags.
+Coverage in `tests/test_bvt_keys.c`.
+
+The remaining three flags are accepted-and-stored on the stack but
+have no behavioural effect:
+
+- **0x2 — Report event types** (press / repeat / release). Requires
+  the platform layer to emit key-up events. SDL3 delivers
+  `SDL_EVENT_KEY_UP` and a `repeat` flag on `SDL_EVENT_KEY_DOWN`, so
+  this is plumbing work in `platform_sdl3.c` + `platform_gtk4.c` + the
+  `terminal_send_key` API (add an event-type argument) more than VT
+  work. Encoding: `CSI <code>;<mods>:<event>u` where event is 1=press,
+  2=repeat, 3=release.
+- **0x4 — Report alternate keys**. Sends both the keysym and the
+  shifted/base alternate (`CSI <code>:<alt>:<base>;<mods>u`). Requires
+  the platform to surface the unmodified-layout keysym alongside the
+  shifted one — SDL3 exposes both via `SDL_Keycode` + `SDL_Scancode` →
+  `SDL_GetKeyFromScancode(.., 0)`, so feasible.
+- **0x10 — Report associated text**. Appends UTF-8 text after the
+  keysym: `CSI <code>;<mods>;<text-codepoints>u`. Needs the platform
+  to pair the key event with its text-input result; today these
+  arrive through separate SDL events.
+
+None of these are needed by Claude Code or the common TUIs. Defer
+until a concrete consumer asks for them.
 
 ## Resolved during soak
 

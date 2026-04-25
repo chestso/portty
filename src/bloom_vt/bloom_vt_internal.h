@@ -208,6 +208,19 @@ struct BvtTerm
      * and the cursor is confined to the scroll region. */
     bool decom;
 
+    /* Kitty keyboard protocol flag stack. Index 0 is always the active
+     * baseline (zero = protocol off, identical to legacy behaviour);
+     * pushes increment depth, pops decrement it. The stack is bounded:
+     * pushing past depth 15 silently overwrites the top, matching
+     * kitty's own implementation. The currently active flag mask is
+     * always kitty_kb_stack[kitty_kb_depth]. We honour bits 0x1
+     * (Disambiguate escape codes) and 0x8 (Report all keys as escape
+     * codes); the other documented flags (0x2 event types, 0x4 alt
+     * keys, 0x10 associated text) are accepted-and-stored but do not
+     * yet affect emit behaviour — see FOLLOWUPS.md. */
+    uint32_t kitty_kb_stack[16];
+    uint8_t kitty_kb_depth;
+
     /* Title — owned, NUL-terminated. */
     char *title;
 

@@ -29,6 +29,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
 - Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
+- Kitty keyboard protocol (push/pop/set/query plus the Disambiguate and Report-all flags) — modern TUIs like Claude Code can tell Shift+Enter apart from plain Enter, and Ctrl+letter combos no longer collide with their literal control bytes
 - Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 
 ## Architecture
@@ -382,6 +383,7 @@ Current test suites:
 - **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
 - **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
 - **test_bvt_parser** — bloom-vt unit tests: parser, UTF-8, CSI dispatch (cursor moves, SGR, DECSTBM, DECOM, TBC), OSC titles, DEC special graphics charset, scrollback, reflow, altscreen, ICH/DCH/IL/DL, key encoding, DSR/DA, width tables (CJK / emoji / VS16 / RI / ZWJ / skin tone)
+- **test_bvt_keys** — kitty keyboard protocol: push / pop / set / query of the flag stack, CSI-u encoding for Shift+Enter and Ctrl/Alt+letter under Disambiguate, Report-all flag for unmodified keys, and the modifyOtherKeys-vs-SGR disambiguation that keeps `CSI > 4 ; 2 m` from painting everything underlined
 - **test_term_bvt** — `term_bvt.c` adapter: wrap-aware selection across the visible/scrollback boundary, resize reflow, arbitrary-length cluster round-trip via `terminal_cell_get_grapheme`
 - **test_bvt_pty** — Engine-only PTY soak: spawns a child shell on a real PTY, pipes raw output into `bvt_input_write`, asserts on grid + cursor + scrollback. Covers `tput cup`, altscreen swap, scrollback push, ZWJ family preservation, the cf brick-inline regression, and the claude exit-cursor regression
 - **test_dmabuf_copy** — DMA-BUF zero-copy: `glCopyImageSubData` vs `glBlitFramebuffer` across GBM pixel formats, isolates the EGL/GBM copy path from SDL and GTK4

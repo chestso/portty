@@ -206,6 +206,17 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         // Also set COLORTERM for applications that check it
         setenv("COLORTERM", "truecolor", 1);
 
+        // Advertise kitty keyboard protocol support to TUIs that
+        // gate progressive enhancement on TERM_PROGRAM rather than
+        // probing via XTVERSION. Claude Code, Helix, and Neovim all
+        // allowlist a small set of TERM_PROGRAM values; bloom-terminal
+        // isn't in that list, so we identify as `ghostty` — the
+        // architecturally closest peer (in-process VT engine, no
+        // libvterm) — to opt into the kitty kb push that Shift+Enter,
+        // Ctrl+Tab and friends rely on. terminfo lookup is unaffected
+        // because that uses TERM, not TERM_PROGRAM.
+        setenv("TERM_PROGRAM", "ghostty", 1);
+
         // Set window title via PROMPT_COMMAND for bash.
         // Fedora's /etc/bashrc guards its PROMPT_COMMAND setup with
         // [ -z "$PROMPT_COMMAND" ], so pre-setting it here causes bash

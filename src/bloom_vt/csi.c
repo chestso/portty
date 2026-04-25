@@ -452,6 +452,15 @@ void bvt_csi_dispatch(BvtTerm *vt, uint8_t final)
         break;
 
     case 'm':
+        if (has_intermediate(vt, '>')) {
+            /* CSI > Pp ; Pv m — xterm `modifyOtherKeys` and friends
+             * (key-resource set/reset). We provide the same coverage
+             * via the kitty keyboard protocol, so this is a no-op.
+             * Critical: do NOT fall through to sgr_dispatch — that
+             * would interpret "4;2" as SGR underline + faint and
+             * paint Claude Code's hyperlink-tagged words underlined. */
+            break;
+        }
         sgr_dispatch(vt);
         break;
 
@@ -492,16 +501,51 @@ void bvt_csi_dispatch(BvtTerm *vt, uint8_t final)
         if (p->intermediate_count == 0)
             vt->saved_cursor = vt->cursor;
         break;
-    case 'u': /* CSI u — Restore Cursor (ANSI.SYS form). Only the
-               * bare variant; `CSI ? u`, `CSI > u`, `CSI < u` are
-               * Kitty / xterm keyboard-protocol push/pop and a
-               * couple of vendor extensions we do not implement.
-               * claude (and other modern CLIs) emit `CSI < u` to
-               * pop the kitty keyboard stack on exit — treating it
-               * as ANSI restore-cursor jumped the cursor back to
-               * the launch position. */
-        if (p->intermediate_count == 0)
+    case 'u':
+        if (p->intermediate_count == 0) {
+            /* CSI u — ANSI.SYS Restore Cursor. */
             vt->cursor = vt->saved_cursor;
+        } else if (has_intermediate(vt, '?')) {
+            /* CSI ? u — kitty keyboard query. Reply with the active
+             * flags at the top of the stack as `CSI ? <flags> u`. The
+             * `u` is the final byte; no space separator. */
+            char buf[32];
+            int n = snprintf(buf, sizeof(buf), "\x1b[?%uu",
+                             (unsigned)vt->kitty_kb_stack[vt->kitty_kb_depth]);
+            bvt_emit_bytes(vt, (const uint8_t *)buf, (size_t)n);
+        } else if (has_intermediate(vt, '>')) {
+            /* CSI > flags u — kitty keyboard push. The new top of the
+             * stack is `flags`. If the stack is full, overwrite the
+             * top in place rather than dropping the request. */
+            uint32_t flags = (uint32_t)param_or(vt, 0, 0);
+            if (vt->kitty_kb_depth + 1 < 16)
+                vt->kitty_kb_depth++;
+            vt->kitty_kb_stack[vt->kitty_kb_depth] = flags;
+        } else if (has_intermediate(vt, '<')) {
+            /* CSI < n u — kitty keyboard pop n levels (default 1).
+             * Never goes below depth 0; the baseline mask at index 0
+             * is left at zero so popping past the bottom restores
+             * legacy emit behaviour. */
+            int n = param_or(vt, 0, 1);
+            if (n < 1)
+                n = 1;
+            while (n-- > 0 && vt->kitty_kb_depth > 0) {
+                vt->kitty_kb_stack[vt->kitty_kb_depth] = 0;
+                vt->kitty_kb_depth--;
+            }
+        } else if (has_intermediate(vt, '=')) {
+            /* CSI = flags ; mode u — set/clear/replace the active
+             * flags. mode 1 = OR in, 2 = mask out, 3 = replace. */
+            uint32_t flags = (uint32_t)param_or(vt, 0, 0);
+            int mode = param_or(vt, 1, 1);
+            uint32_t *top = &vt->kitty_kb_stack[vt->kitty_kb_depth];
+            if (mode == 1)
+                *top |= flags;
+            else if (mode == 2)
+                *top &= ~flags;
+            else if (mode == 3)
+                *top = flags;
+        }
         break;
 
     case 'n': /* DSR */

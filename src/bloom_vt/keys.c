@@ -46,6 +46,43 @@ static int mod_value(BvtMods m)
     return v;
 }
 
+/* Kitty keyboard protocol flag bits we honour. */
+#define KITTY_FLAG_DISAMBIGUATE 0x1u
+#define KITTY_FLAG_REPORT_ALL   0x8u
+
+static bool kitty_active(BvtTerm *vt, uint32_t bit)
+{
+    return (vt->kitty_kb_stack[vt->kitty_kb_depth] & bit) != 0;
+}
+
+/* Emit a kitty `CSI <code>;<mod>u` sequence. The mod parameter is
+ * omitted when no modifier is held (`CSI <code>u`), matching the
+ * kitty spec. */
+static void emit_csi_u(BvtTerm *vt, uint32_t code, BvtMods mods)
+{
+    int mv = mod_value(mods);
+    char buf[32];
+    int n;
+    if (mv == 0)
+        n = snprintf(buf, sizeof(buf), "\x1b[%uu", code);
+    else
+        n = snprintf(buf, sizeof(buf), "\x1b[%u;%du", code, mv + 1);
+    bvt_emit_bytes(vt, (const uint8_t *)buf, (size_t)n);
+}
+
+/* Decide whether ENTER / TAB / BACKSPACE / ESCAPE should be emitted in
+ * kitty CSI-u form. Disambiguate (0x1) only kicks in when modifiers
+ * are present (its purpose is to distinguish e.g. Shift+Enter from
+ * Enter); Report-all (0x8) sends CSI-u even for the bare key. */
+static bool kitty_route_special(BvtTerm *vt, BvtMods mods)
+{
+    if (kitty_active(vt, KITTY_FLAG_REPORT_ALL))
+        return true;
+    if (kitty_active(vt, KITTY_FLAG_DISAMBIGUATE) && mod_value(mods) != 0)
+        return true;
+    return false;
+}
+
 /* Arrow / cursor keys. Honors DECCKM when no modifiers. */
 static void emit_cursor_key(BvtTerm *vt, char letter, BvtMods mods)
 {
@@ -98,19 +135,30 @@ void bvt_send_key(BvtTerm *vt, BvtKey key, BvtMods mods)
     case BVT_KEY_NONE:
         return;
     case BVT_KEY_ENTER:
-        bvt_emit_bytes(vt, (const uint8_t *)"\r", 1);
+        if (kitty_route_special(vt, mods))
+            emit_csi_u(vt, 13, mods);
+        else
+            bvt_emit_bytes(vt, (const uint8_t *)"\r", 1);
         break;
     case BVT_KEY_TAB:
-        if (mods & BVT_MOD_SHIFT)
+        if (kitty_route_special(vt, mods))
+            emit_csi_u(vt, 9, mods);
+        else if (mods & BVT_MOD_SHIFT)
             emit_str(vt, "\x1b[Z");
         else
             bvt_emit_bytes(vt, (const uint8_t *)"\t", 1);
         break;
     case BVT_KEY_BACKSPACE:
-        bvt_emit_bytes(vt, (const uint8_t *)"\x7f", 1);
+        if (kitty_route_special(vt, mods))
+            emit_csi_u(vt, 127, mods);
+        else
+            bvt_emit_bytes(vt, (const uint8_t *)"\x7f", 1);
         break;
     case BVT_KEY_ESCAPE:
-        bvt_emit_bytes(vt, (const uint8_t *)"\x1b", 1);
+        if (kitty_route_special(vt, mods))
+            emit_csi_u(vt, 27, mods);
+        else
+            bvt_emit_bytes(vt, (const uint8_t *)"\x1b", 1);
         break;
     case BVT_KEY_UP:
         emit_cursor_key(vt, 'A', mods);
@@ -188,6 +236,24 @@ void bvt_send_text(BvtTerm *vt, const char *utf8, size_t len, BvtMods mods)
 {
     if (!vt || !utf8 || len == 0)
         return;
+
+    /* Kitty Disambiguate / Report-all: when active, route Ctrl+ASCII (and
+     * Alt+ASCII) through CSI-u so the application can tell e.g. Ctrl+A
+     * apart from a literal 0x01 byte and recover the Shift modifier. The
+     * codepoint is lowercased per the kitty spec — Shift travels in the
+     * modifier bitmask, not in the codepoint. Take this branch before
+     * emitting the legacy meta-sends-esc prefix so Alt is encoded in the
+     * mod parameter, not as a stray ESC. */
+    if (len == 1 && (mods & (BVT_MOD_CTRL | BVT_MOD_ALT)) &&
+        (kitty_active(vt, KITTY_FLAG_DISAMBIGUATE) ||
+         kitty_active(vt, KITTY_FLAG_REPORT_ALL))) {
+        uint8_t b = (uint8_t)utf8[0];
+        uint32_t cp = (b >= 'A' && b <= 'Z') ? (uint32_t)(b + 0x20)
+                                             : (uint32_t)b;
+        emit_csi_u(vt, cp, mods);
+        return;
+    }
+
     /* Alt-prefix: emit ESC, then the bytes. Standard xterm meta-sends-esc. */
     if (mods & BVT_MOD_ALT)
         bvt_emit_bytes(vt, (const uint8_t *)"\x1b", 1);
