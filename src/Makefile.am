@@ -19,20 +19,16 @@ bloom_terminal_SOURCES = main.c bloom_conf.c term.c term_bvt.c \
     rend.c rend_sdl3.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
-    platform.c platform_sdl3.c png_mode.c timer.c sixel.c \
-    bloom_vt/term.c bloom_vt/parser.c bloom_vt/grid.c bloom_vt/style.c \
-    bloom_vt/grapheme.c bloom_vt/width.c bloom_vt/print.c bloom_vt/csi.c \
-    bloom_vt/osc.c bloom_vt/dcs.c bloom_vt/esc.c bloom_vt/damage.c \
-    bloom_vt/scrollback.c bloom_vt/palette.c bloom_vt/keys.c bloom_vt/modes.c \
-    bloom_vt/reflow.c
+    platform.c platform_sdl3.c png_mode.c timer.c sixel.c
 
 # Compiler flags
 AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
-    $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) -DBLOOM_DATADIR='"$(datadir)"' -Wall -Wextra
+    $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) $(BLOOM_VT_CFLAGS) \
+    -DBLOOM_DATADIR='"$(datadir)"' -Wall -Wextra
 
 # Linker flags
 bloom_terminal_LDADD = $(SDL3_LIBS) \
-    $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) -lm
+    $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) $(BLOOM_VT_LIBS) -lm
 
 if HOST_WINDOWS
 bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi

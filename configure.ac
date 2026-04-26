@@ -50,6 +50,7 @@ fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
+PKG_CHECK_MODULES([BLOOM_VT], [bloom-vt])
 
 # Capture dependency versions and build info for --help output
 BUILD_CC_VERSION=$($CC --version 2>/dev/null | head -1 || echo "$CC")
@@ -62,6 +63,8 @@ DEP_HARFBUZZ_VER=$($PKG_CONFIG --modversion harfbuzz 2>/dev/null || echo "unknow
 AC_DEFINE_UNQUOTED([DEP_HARFBUZZ_VERSION], ["$DEP_HARFBUZZ_VER"], [HarfBuzz version])
 DEP_LIBPNG_VER=$($PKG_CONFIG --modversion libpng 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_LIBPNG_VERSION], ["$DEP_LIBPNG_VER"], [libpng version])
+DEP_BLOOM_VT_VER=$($PKG_CONFIG --modversion bloom-vt 2>/dev/null || echo "unknown")
+AC_DEFINE_UNQUOTED([DEP_BLOOM_VT_VERSION], ["$DEP_BLOOM_VT_VER"], [bloom-vt version])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   DEP_FONTCONFIG_VER=$($PKG_CONFIG --modversion fontconfig 2>/dev/null || echo "unknown")
   AC_DEFINE_UNQUOTED([DEP_FONTCONFIG_VERSION], ["$DEP_FONTCONFIG_VER"], [Fontconfig version])

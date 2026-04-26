@@ -9,7 +9,7 @@
  */
 
 #include "term_bvt.h"
-#include "bloom_vt/bloom_vt.h"
+#include <bloom-vt/bloom_vt.h>
 
 #include <stdbool.h>
 #include <stdint.h>

@@ -928,8 +928,8 @@ static void print_usage(const char *progname)
     printf("Build info:\n");
     printf("  %s\n", PACKAGE_STRING);
     printf("  CC: %s\n", BUILD_CC);
-    printf("  bloom-vt (in-tree), SDL3 %s, FreeType %s\n",
-           DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
+    printf("  bloom-vt %s, SDL3 %s, FreeType %s\n",
+           DEP_BLOOM_VT_VERSION, DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
     printf("  HarfBuzz %s, libpng %s\n",
            DEP_HARFBUZZ_VERSION, DEP_LIBPNG_VERSION);
 #ifdef DEP_FONTCONFIG_VERSION
