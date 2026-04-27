@@ -10,14 +10,19 @@
 
 // Forward declarations
 static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
-                                    char **family_name, float *out_size);
+                                    char **family_name, float *out_size,
+                                    bool *substituted);
 
 // Helper function to find font using fontconfig
 static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
-                                    char **family_name, float *out_size)
+                                    char **family_name, float *out_size,
+                                    bool *substituted)
 {
     FcPattern *pat;
     char *font_path = NULL;
+
+    if (substituted)
+        *substituted = false;
 
     vlog("Attempting to find font with pattern: '%s'\n", pattern);
 
@@ -34,6 +39,15 @@ static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
             *out_size = (float)parsed_size;
     }
 
+    // Capture the requested family before substitution so we can detect
+    // when fontconfig falls back to an unrelated family (e.g. typo'd name).
+    char *requested_family = NULL;
+    {
+        FcChar8 *fam = NULL;
+        if (FcPatternGetString(pat, FC_FAMILY, 0, &fam) == FcResultMatch && fam)
+            requested_family = strdup((char *)fam);
+    }
+
     FcConfigSubstitute(fc_config, pat, FcMatchPattern);
     FcDefaultSubstitute(pat);
 
@@ -45,11 +59,20 @@ static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
             font_path = strdup((char *)file);
             vlog("Found font file: '%s'\n", font_path);
 
-            // Get family name if requested
+            // Get matched family and detect substitution
+            FcChar8 *matched = NULL;
+            const char *matched_str = NULL;
+            if (FcPatternGetString(match, FC_FAMILY, 0, &matched) == FcResultMatch)
+                matched_str = (const char *)matched;
+
+            if (substituted && requested_family && matched_str &&
+                strcasecmp(requested_family, matched_str) != 0) {
+                *substituted = true;
+            }
+
             if (family_name) {
-                FcChar8 *family;
-                if (FcPatternGetString(match, FC_FAMILY, 0, &family) == FcResultMatch) {
-                    *family_name = strdup((char *)family);
+                if (matched_str) {
+                    *family_name = strdup(matched_str);
                 } else {
                     *family_name = strdup(pattern);
                 }
@@ -62,6 +85,7 @@ static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
         vlog("No matching font found for pattern: '%s'\n", pattern);
     }
 
+    free(requested_family);
     FcPatternDestroy(pat);
 
     return font_path;
@@ -110,10 +134,12 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
     result->size = 0; // 0 = not specified in pattern
 
     const char *pattern = NULL;
+    const char *fallback_pattern = NULL;
     char styled_pattern[256];
     switch (type) {
     case FONT_TYPE_NORMAL:
         pattern = family ? family : "monospace";
+        fallback_pattern = "monospace";
         break;
     case FONT_TYPE_BOLD:
         if (family) {
@@ -122,6 +148,7 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
         } else {
             pattern = "monospace:weight=bold";
         }
+        fallback_pattern = "monospace:weight=bold";
         break;
     case FONT_TYPE_ITALIC:
         if (family) {
@@ -130,6 +157,7 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
         } else {
             pattern = "monospace:slant=italic";
         }
+        fallback_pattern = "monospace:slant=italic";
         break;
     case FONT_TYPE_BOLD_ITALIC:
         if (family) {
@@ -138,6 +166,7 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
         } else {
             pattern = "monospace:weight=bold:slant=italic";
         }
+        fallback_pattern = "monospace:weight=bold:slant=italic";
         break;
     case FONT_TYPE_EMOJI:
         pattern = "emoji";
@@ -150,10 +179,34 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
         return -1;
     }
 
+    bool substituted = false;
     char *font_path = NULL;
     char *family_name = NULL;
 
-    font_path = find_font_with_pattern(fc_config, pattern, &family_name, &result->size);
+    font_path = find_font_with_pattern(fc_config, pattern, &family_name,
+                                       &result->size, &substituted);
+
+    // If the user named a family that fontconfig substituted (e.g. typo,
+    // not installed), report it and retry against the system monospace alias
+    // so the terminal still renders with sane metrics.
+    if (font_path && family && substituted && fallback_pattern) {
+        // Only emit the user-facing error once (on the normal style); bold/
+        // italic/bold-italic queries hit the same missing family and would
+        // otherwise log the same error up to four times.
+        if (type == FONT_TYPE_NORMAL) {
+            fprintf(stderr,
+                    "ERROR: font family '%s' not installed; falling back to system default monospace\n",
+                    family);
+        }
+        free(font_path);
+        free(family_name);
+        font_path = NULL;
+        family_name = NULL;
+        result->size = 0;
+        font_path = find_font_with_pattern(fc_config, fallback_pattern,
+                                           &family_name, &result->size, NULL);
+    }
+
     if (!font_path) {
         vlog("Failed to find font for pattern: %s\n", pattern);
         return -1;
