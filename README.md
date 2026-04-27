@@ -6,7 +6,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 
 ## Features
 
-- Full terminal emulation using bloom-vt — in-tree VT engine with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
+- Full terminal emulation using bloom-vt — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
 - Rendering with SDL3
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
@@ -25,7 +25,6 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
-- Terminal resize handling with reflow on by default (WRAPLINE-tagged, scrollback-aware)
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
 - Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
@@ -41,7 +40,7 @@ bloom-terminal uses a modular backend abstraction design:
   - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Uses zero-copy DMA-BUF rendering (GBM → EGL → `glBlitFramebuffer` → `GdkDmabufTexture`) when EGL/GBM are available, with `SDL_RenderReadPixels` fallback.
 
 - **Terminal Backend**: Handles terminal emulation and screen state
-  - Current implementation: bloom-vt (`terminal_backend_bvt`) — in-tree VT engine in `src/bloom_vt/` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
+  - Current implementation: bloom-vt (`terminal_backend_bvt`) — external VT engine consumed via `pkg-config bloom-vt`, bridged through `term_bvt.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
 
 - **Renderer Backend**: Handles graphics output
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
@@ -154,7 +153,6 @@ build/src/bloom-terminal -P "😀" output.png
 | `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
 | `-L` / `--list-fonts`     | List available monospace fonts and exit                         |
 | `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)       |
-| `-R` / `--reflow`         | Enable text reflow on resize (default: enabled)                 |
 | `-N` / `--padding`        | Enable padding around terminal content                          |
 | `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                            |
 | `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)               |
@@ -190,7 +188,6 @@ font = Cascadia Code-14
 geometry = 120x40
 hinting = light
 platform = gtk4
-reflow = true
 padding = false
 verbose = false
 word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
@@ -206,7 +203,6 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `geometry`   | `COLSxROWS`                       | `80x24`        | Initial terminal dimensions                 |
 | `hinting`    | `none`, `light`, `normal`, `mono` | `light`        | FreeType hinting mode                       |
 | `platform`   | `sdl3`, `gtk4`                    | `sdl3`         | Platform backend                            |
-| `reflow`     | `true`/`false`                    | `false`        | Text reflow on resize                       |
 | `padding`    | `true`/`false`                    | `false`        | Padding around terminal content             |
 | `verbose`    | `true`/`false`                    | `false`        | Debug output                                |
 | `word_chars` | Character string                  | `A-Za-z0-9_-/` | Characters treated as word for double-click |
@@ -244,12 +240,11 @@ infocmp bloom-terminal-vty-256color | ssh remote-host 'tic -x -'
 
 All platforms:
 
+- bloom-vt (VT engine, consumed via `pkg-config bloom-vt`; source at `/home/thomasc/git/bloom-vt`)
 - SDL3
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
 - libpng
-
-The terminal emulation engine (bloom-vt) is in-tree under `src/bloom_vt/` and has no external dependency.
 
 Linux only:
 
@@ -382,11 +377,9 @@ Current test suites:
 - **test_pty_pause** — PTY pause/resume during selection: platform wrapper delegation, pause on select, resume on clear/copy/resize, full select-copy cycles
 - **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
 - **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
-- **test_bvt_parser** — bloom-vt unit tests: parser, UTF-8, CSI dispatch (cursor moves, SGR, DECSTBM, DECOM, TBC), OSC titles, DEC special graphics charset, scrollback, reflow, altscreen, ICH/DCH/IL/DL, key encoding, DSR/DA, width tables (CJK / emoji / VS16 / RI / ZWJ / skin tone)
-- **test_bvt_keys** — kitty keyboard protocol: push / pop / set / query of the flag stack, CSI-u encoding for Shift+Enter and Ctrl/Alt+letter under Disambiguate, Report-all flag for unmodified keys, and the modifyOtherKeys-vs-SGR disambiguation that keeps `CSI > 4 ; 2 m` from painting everything underlined
 - **test_term_bvt** — `term_bvt.c` adapter: wrap-aware selection across the visible/scrollback boundary, resize reflow, arbitrary-length cluster round-trip via `terminal_cell_get_grapheme`
-- **test_bvt_pty** — Engine-only PTY soak: spawns a child shell on a real PTY, pipes raw output into `bvt_input_write`, asserts on grid + cursor + scrollback. Covers `tput cup`, altscreen swap, scrollback push, ZWJ family preservation, the cf brick-inline regression, and the claude exit-cursor regression
-- **test_dmabuf_copy** — DMA-BUF zero-copy: `glCopyImageSubData` vs `glBlitFramebuffer` across GBM pixel formats, isolates the EGL/GBM copy path from SDL and GTK4
+
+Engine-level tests for the VT parser, kitty keyboard protocol, and PTY soak live in the bloom-vt repository now that bloom-vt is consumed as an external library.
 
 All tests support `-v` for verbose output. Visual testing of rendering and terminal features is done manually using example scripts.
 

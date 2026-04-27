@@ -40,7 +40,6 @@ static void test_init_defaults(void)
     ASSERT_EQ(conf.cols, 0);
     ASSERT_EQ(conf.rows, 0);
     ASSERT_EQ(conf.hinting, BLOOM_HINT_UNSET);
-    ASSERT_EQ(conf.reflow, -1);
     ASSERT_EQ(conf.padding, -1);
     ASSERT_EQ(conf.verbose, -1);
     ASSERT_NULL(conf.word_chars);
@@ -94,13 +93,12 @@ static void test_parse_hinting(void)
 
 static void test_parse_booleans(void)
 {
-    char *path = write_tmp_conf("[terminal]\nreflow = true\npadding = false\nverbose = yes\n");
+    char *path = write_tmp_conf("[terminal]\npadding = false\nverbose = yes\n");
     ASSERT_NOT_NULL(path);
 
     BloomConf conf;
     bloom_conf_init(&conf);
     ASSERT_TRUE(bloom_conf_load_path(&conf, path));
-    ASSERT_EQ(conf.reflow, 1);
     ASSERT_EQ(conf.padding, 0);
     ASSERT_EQ(conf.verbose, 1);
 
@@ -146,14 +144,14 @@ static void test_comments_and_blank_lines(void)
         "font = test-font\n"
         "\n"
         "# inline comment line\n"
-        "reflow = true\n");
+        "padding = true\n");
     ASSERT_NOT_NULL(path);
 
     BloomConf conf;
     bloom_conf_init(&conf);
     ASSERT_TRUE(bloom_conf_load_path(&conf, path));
     ASSERT_STR_EQ(conf.font, "test-font");
-    ASSERT_EQ(conf.reflow, 1);
+    ASSERT_EQ(conf.padding, 1);
 
     bloom_conf_free(&conf);
     cleanup_tmp(path);

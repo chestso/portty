@@ -258,13 +258,6 @@ void terminal_end_paste(TerminalBackend *term)
     term->end_paste(term);
 }
 
-void terminal_set_reflow(TerminalBackend *term, bool enabled)
-{
-    if (!term || !term->set_reflow)
-        return;
-    term->set_reflow(term, enabled);
-}
-
 bool terminal_get_line_continuation(TerminalBackend *term, int row)
 {
     if (!term || !term->get_line_continuation)

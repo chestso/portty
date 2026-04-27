@@ -7,9 +7,7 @@
  *      backend has to translate negative rows to scrollback lookups AND
  *      flip bvt's "this row wraps into the next" flag into libvterm's
  *      "this row continues from the previous" semantic.
- *   2. Resize triggers reflow only when reflow_enabled is true. bvt's
- *      reflow path is stable, so the bvt backend now turns it on by
- *      default — verify the resize actually re-wraps content.
+ *   2. Resize must re-wrap content — bvt's reflow path is always on.
  */
 
 #include "test_helpers.h"

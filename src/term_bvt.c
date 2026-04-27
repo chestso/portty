@@ -223,8 +223,6 @@ static bool bvt_back_init(TerminalBackend *term, int width, int height)
     }
     d->cursor_visible = true;
     d->cursor_blink = true;
-    /* bloom-vt reflow is the stable WRAPLINE-tagged path (reflow.c). The
-     * libvterm-era "UNSTABLE" warning does not apply, so default it on. */
     bvt_set_reflow(d->vt, true);
 
     BvtCallbacks cb = {
@@ -632,12 +630,6 @@ static void bvt_back_end_paste(TerminalBackend *term)
     if (d)
         bvt_paste_end(d->vt);
 }
-static void bvt_back_set_reflow(TerminalBackend *term, bool enabled)
-{
-    BvtBackendData *d = term->backend_data;
-    if (d)
-        bvt_set_reflow(d->vt, enabled);
-}
 static bool bvt_back_get_line_continuation(TerminalBackend *term, int row)
 {
     BvtBackendData *d = term->backend_data;
@@ -691,6 +683,5 @@ TerminalBackend terminal_backend_bvt = {
     .send_char = bvt_back_send_char,
     .start_paste = bvt_back_start_paste,
     .end_paste = bvt_back_end_paste,
-    .set_reflow = bvt_back_set_reflow,
     .get_line_continuation = bvt_back_get_line_continuation,
 };

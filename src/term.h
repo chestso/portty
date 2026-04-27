@@ -149,9 +149,6 @@ struct TerminalBackend
     void (*start_paste)(TerminalBackend *term);
     void (*end_paste)(TerminalBackend *term);
 
-    // Reflow setting
-    void (*set_reflow)(TerminalBackend *term, bool enabled);
-
     // Line continuation (soft-wrap) query
     bool (*get_line_continuation)(TerminalBackend *term, int row);
 };
@@ -251,9 +248,6 @@ void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod);
 // Bracketed paste support
 void terminal_start_paste(TerminalBackend *term);
 void terminal_end_paste(TerminalBackend *term);
-
-// Reflow setting
-void terminal_set_reflow(TerminalBackend *term, bool enabled);
 
 // Line continuation (soft-wrap) query
 bool terminal_get_line_continuation(TerminalBackend *term, int row);

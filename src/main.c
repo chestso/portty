@@ -434,7 +434,6 @@ int main(int argc, char *argv[])
     static struct option long_options[] = {
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
-        { "reflow", no_argument, NULL, 'R' },
         { "padding", no_argument, NULL, 'N' },
         { "gtk4", no_argument, NULL, 'G' },
         { "sdl3", no_argument, NULL, 'S' },
@@ -444,7 +443,6 @@ int main(int argc, char *argv[])
         { NULL, 0, NULL, 0 }
     };
 
-    int reflow_enabled = 0;
     int padding = 0;
 
     /* Load config file (CLI flags below will override) */
@@ -465,8 +463,6 @@ int main(int argc, char *argv[])
                                         FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
         ft_hint_target = hint_map[conf.hinting];
     }
-    if (conf.reflow == 1)
-        reflow_enabled = 1;
     if (conf.padding == 1)
         padding = 1;
     if (conf.platform && strcmp(conf.platform, "gtk4") == 0)
@@ -530,9 +526,6 @@ int main(int argc, char *argv[])
             break;
         case 'D':
             colr_debug_path = optarg;
-            break;
-        case 'R':
-            reflow_enabled = 1;
             break;
         case 'N':
             padding = 1;
@@ -681,11 +674,6 @@ int main(int argc, char *argv[])
         platform_destroy(plat);
         return 1;
     }
-
-    // Reflow is on by default in bvt; --reflow / config "reflow=true" is a
-    // no-op kept for backwards compatibility with the libvterm-era flag.
-    if (reflow_enabled)
-        terminal_set_reflow(term, true);
 
     if (conf.word_chars)
         terminal_selection_set_word_chars(term, conf.word_chars);
@@ -908,7 +896,6 @@ static void print_usage(const char *progname)
     printf("  --padding     Enable padding around terminal content\n");
     printf("  --gtk4        Use GTK4/libadwaita platform backend (native CSD)\n");
     printf("  --sdl3        Use SDL3 platform backend (overrides config file)\n");
-    printf("  --reflow    Enable text reflow on resize (default: enabled)\n");
     printf("  --demo TEXT Display TEXT in terminal without spawning a shell (for testing)\n");
     printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
