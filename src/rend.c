@@ -115,16 +115,19 @@ void renderer_set_content_scale(RendererBackend *rend, float scale)
 void renderer_process_pty_data(RendererBackend *rend, TerminalBackend *term,
                                const char *data, size_t len)
 {
-    int scroll_off = renderer_get_scroll_offset(rend);
-    int old_sb = 0;
-    if (scroll_off > 0)
-        old_sb = terminal_get_scrollback_lines(term);
+    /* Drain any pushes that arrived outside this entry point (e.g. reflow
+     * during resize) so they aren't double-counted against this PTY chunk. */
+    terminal_consume_pushed_rows(term);
 
     terminal_process_input(term, data, len);
 
-    if (scroll_off > 0) {
-        int delta = terminal_get_scrollback_lines(term) - old_sb;
-        if (delta > 0)
-            renderer_scroll(rend, term, delta);
-    }
+    /* Keep a held scroll-lock view stable: advance scroll_offset by the
+     * number of rows just pushed to scrollback, so the same content stays
+     * under the user's eyes. The diff-on-scrollback-line-count approach
+     * we used before bvt fails because bvt's sb_lines saturates at the
+     * ring's capacity. renderer_scroll clamps the result to scrollback
+     * size, so eviction past the held view pins to the oldest line. */
+    int pushed = terminal_consume_pushed_rows(term);
+    if (pushed > 0 && renderer_get_scroll_offset(rend) > 0)
+        renderer_scroll(rend, term, pushed);
 }

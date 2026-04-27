@@ -117,6 +117,12 @@ struct TerminalBackend
     void (*clear_redraw)(TerminalBackend *term);
     bool (*get_damage_rect)(TerminalBackend *term, TerminalDamageRect *rect);
     int (*get_scrollback_lines)(TerminalBackend *term);
+    /* Read-and-reset count of rows pushed to scrollback since the last
+     * call. Used by the renderer to keep a held scroll-lock view stable
+     * across new PTY output and reflow — sb_lines saturates at the
+     * scrollback ring's capacity, so a before/after diff under-counts
+     * once the ring is full. */
+    int (*consume_pushed_rows)(TerminalBackend *term);
     int (*get_scrollback_cell)(TerminalBackend *term, int scrollback_row, int col,
                                TerminalCell *cell);
     /* Read the full codepoint sequence for a multi-codepoint cluster.
@@ -164,6 +170,7 @@ bool terminal_needs_redraw(TerminalBackend *term);
 void terminal_clear_redraw(TerminalBackend *term);
 bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
+int terminal_consume_pushed_rows(TerminalBackend *term);
 int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
                                  TerminalCell *cell);
 /* Fill `out` with the full codepoint sequence at unified row `unified_row`

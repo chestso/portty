@@ -34,6 +34,12 @@ typedef struct
 
     TerminalOutputCallback output_cb;
     void *output_user;
+
+    /* Rows pushed to scrollback since last consume. Renderer reads this
+     * to keep a held scroll-lock view stable as new content arrives —
+     * sb_lines saturates at sb_capacity so it can't be inferred from a
+     * before/after diff once the ring is full. */
+    int pushed_rows;
 } BvtBackendData;
 
 /* ------------------------------------------------------------------ */
@@ -186,13 +192,13 @@ static void cb_output(const uint8_t *bytes, size_t len, void *user)
 
 static void cb_bell(void *user) { (void)user; /* TODO: visual bell hook */ }
 
-/* sb_pushline: bvt owns the scrollback so we're a no-op observer. */
 static void cb_sb_push(const BvtCell *c, int n, bool w, void *u)
 {
     (void)c;
     (void)n;
     (void)w;
-    (void)u;
+    BvtBackendData *d = u;
+    d->pushed_rows++;
 }
 static void cb_sb_pop(BvtCell *o, int n, void *u)
 {
@@ -410,6 +416,15 @@ static int bvt_back_get_scrollback_lines(TerminalBackend *term)
 {
     BvtBackendData *d = term->backend_data;
     return d ? bvt_get_scrollback_lines(d->vt) : 0;
+}
+static int bvt_back_consume_pushed_rows(TerminalBackend *term)
+{
+    BvtBackendData *d = term->backend_data;
+    if (!d)
+        return 0;
+    int n = d->pushed_rows;
+    d->pushed_rows = 0;
+    return n;
 }
 static int bvt_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
                                         int col, TerminalCell *cell)
@@ -665,6 +680,7 @@ TerminalBackend terminal_backend_bvt = {
     .clear_redraw = bvt_back_clear_redraw,
     .get_damage_rect = bvt_back_get_damage_rect,
     .get_scrollback_lines = bvt_back_get_scrollback_lines,
+    .consume_pushed_rows = bvt_back_consume_pushed_rows,
     .get_scrollback_cell = bvt_back_get_scrollback_cell,
     .get_grapheme = bvt_back_get_grapheme,
     .is_altscreen = bvt_back_is_altscreen,

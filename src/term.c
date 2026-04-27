@@ -178,6 +178,13 @@ int terminal_get_scrollback_lines(TerminalBackend *term)
     return term->get_scrollback_lines(term);
 }
 
+int terminal_consume_pushed_rows(TerminalBackend *term)
+{
+    if (!term || !term->consume_pushed_rows)
+        return 0;
+    return term->consume_pushed_rows(term);
+}
+
 int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
                                  TerminalCell *cell)
 {
