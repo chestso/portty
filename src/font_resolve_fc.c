@@ -8,10 +8,37 @@
 #include <string.h>
 #include <strings.h>
 
-// Forward declarations
-static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
-                                    char **family_name, float *out_size,
-                                    bool *substituted);
+// True when at least one installed font advertises this exact family name.
+static bool family_is_installed(FcConfig *fc_config, const char *family)
+{
+    FcPattern *pat = FcPatternBuild(NULL, FC_FAMILY, FcTypeString, family, (char *)0);
+    FcObjectSet *os = FcObjectSetBuild(FC_FAMILY, (char *)0);
+    FcFontSet *set = FcFontList(fc_config, pat, os);
+    bool installed = set && set->nfont > 0;
+    if (set)
+        FcFontSetDestroy(set);
+    FcObjectSetDestroy(os);
+    FcPatternDestroy(pat);
+    return installed;
+}
+
+// True when fontconfig has an <alias> rule for this name. Alias rules with
+// <prefer> bindings insert preferred families ahead of the requested name in
+// the family list, so after FcMatchPattern substitution the requested family
+// no longer occupies index 0. A typo or unrecognised name keeps its slot at
+// index 0 (with generic sans-serif fallbacks merely appended after it).
+static bool family_is_alias(FcConfig *fc_config, const char *family)
+{
+    FcPattern *pat = FcPatternCreate();
+    FcPatternAddString(pat, FC_FAMILY, (const FcChar8 *)family);
+    FcConfigSubstitute(fc_config, pat, FcMatchPattern);
+    FcChar8 *first = NULL;
+    bool aliased = false;
+    if (FcPatternGetString(pat, FC_FAMILY, 0, &first) == FcResultMatch && first)
+        aliased = strcasecmp((const char *)first, family) != 0;
+    FcPatternDestroy(pat);
+    return aliased;
+}
 
 // Helper function to find font using fontconfig
 static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
@@ -39,13 +66,19 @@ static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
             *out_size = (float)parsed_size;
     }
 
-    // Capture the requested family before substitution so we can detect
-    // when fontconfig falls back to an unrelated family (e.g. typo'd name).
+    // Capture the requested family before substitution so we can cross-ref
+    // it against fontconfig's installed-font list and alias rules.
     char *requested_family = NULL;
     {
         FcChar8 *fam = NULL;
         if (FcPatternGetString(pat, FC_FAMILY, 0, &fam) == FcResultMatch && fam)
             requested_family = strdup((char *)fam);
+    }
+
+    if (substituted && requested_family) {
+        bool installed = family_is_installed(fc_config, requested_family);
+        bool alias = !installed && family_is_alias(fc_config, requested_family);
+        *substituted = !installed && !alias;
     }
 
     FcConfigSubstitute(fc_config, pat, FcMatchPattern);
@@ -59,20 +92,13 @@ static char *find_font_with_pattern(FcConfig *fc_config, const char *pattern,
             font_path = strdup((char *)file);
             vlog("Found font file: '%s'\n", font_path);
 
-            // Get matched family and detect substitution
             FcChar8 *matched = NULL;
-            const char *matched_str = NULL;
-            if (FcPatternGetString(match, FC_FAMILY, 0, &matched) == FcResultMatch)
-                matched_str = (const char *)matched;
-
-            if (substituted && requested_family && matched_str &&
-                strcasecmp(requested_family, matched_str) != 0) {
-                *substituted = true;
-            }
+            if (FcPatternGetString(match, FC_FAMILY, 0, &matched) != FcResultMatch)
+                matched = NULL;
 
             if (family_name) {
-                if (matched_str) {
-                    *family_name = strdup(matched_str);
+                if (matched) {
+                    *family_name = strdup((const char *)matched);
                 } else {
                     *family_name = strdup(pattern);
                 }
@@ -186,16 +212,16 @@ static int fc_find_font(FontResolveBackend *resolve, FontType type,
     font_path = find_font_with_pattern(fc_config, pattern, &family_name,
                                        &result->size, &substituted);
 
-    // If the user named a family that fontconfig substituted (e.g. typo,
-    // not installed), report it and retry against the system monospace alias
-    // so the terminal still renders with sane metrics.
+    // The user named a family that fontconfig neither has installed nor
+    // recognises as an alias — almost certainly a typo. Warn and retry against
+    // the system monospace alias so the terminal still renders with sane metrics.
     if (font_path && family && substituted && fallback_pattern) {
-        // Only emit the user-facing error once (on the normal style); bold/
+        // Only emit the user-facing warning once (on the normal style); bold/
         // italic/bold-italic queries hit the same missing family and would
-        // otherwise log the same error up to four times.
+        // otherwise log the same warning up to four times.
         if (type == FONT_TYPE_NORMAL) {
             fprintf(stderr,
-                    "ERROR: font family '%s' not installed; falling back to system default monospace\n",
+                    "WARNING: font family '%s' is not installed and not a known fontconfig alias; falling back to system default monospace\n",
                     family);
         }
         free(font_path);
