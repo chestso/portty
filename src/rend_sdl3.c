@@ -1226,32 +1226,15 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
             scaled_w, scaled_h
         };
     } else {
-        float gx = (float)cell_x + glyph_x_offset;
-        float gw = (float)entry->region.w;
-        // Center oversized glyphs horizontally within the cell so
-        // clipping removes equal amounts from both sides.
-        if (gx + gw > (float)(cell_x + avail_w)) {
-            gx = (float)cell_x + ((float)avail_w - gw) * 0.5f;
-        }
+        // Trust FreeType's bitmap bounds: anchor at cell_x + bitmap_left and
+        // let the glyph overhang the cell. Row draw is two-pass — all cell
+        // backgrounds in pass 1 before any glyph in pass 2 — so a small
+        // overhang lands on top of an already-painted neighbor background.
         dst = (SDL_FRect){
-            gx,
+            (float)cell_x + glyph_x_offset,
             (float)cell_y + font_ascent - glyph_y_offset,
-            gw, (float)entry->region.h
+            (float)entry->region.w, (float)entry->region.h
         };
-        // Clip glyphs that overflow the cell boundary.
-        float right_edge = (float)(cell_x + avail_w);
-        if (dst.x + dst.w > right_edge) {
-            float excess = (dst.x + dst.w) - right_edge;
-            src.w -= excess;
-            dst.w -= excess;
-        }
-        if (dst.x < (float)cell_x) {
-            float excess = (float)cell_x - dst.x;
-            src.x += excess;
-            src.w -= excess;
-            dst.x = (float)cell_x;
-            dst.w -= excess;
-        }
     }
     if (!color_baked)
         SDL_SetTextureColorMod(atlas->texture, mod_r, mod_g, mod_b);
