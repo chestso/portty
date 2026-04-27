@@ -33,34 +33,34 @@
 /* ------------------------------------------------------------------ */
 /* GL defines (avoid pulling in full GL headers)                      */
 /* ------------------------------------------------------------------ */
-#define GL_TEXTURE_2D           0x0DE1
-#define GL_RGBA                 0x1908
-#define GL_RGBA8                0x8058
-#define GL_UNSIGNED_BYTE        0x1401
-#define GL_FRAMEBUFFER          0x8D40
-#define GL_READ_FRAMEBUFFER     0x8CA8
-#define GL_DRAW_FRAMEBUFFER     0x8CA9
-#define GL_COLOR_ATTACHMENT0    0x8CE0
-#define GL_FRAMEBUFFER_COMPLETE 0x8CD5
-#define GL_COLOR_BUFFER_BIT     0x00004000
-#define GL_NEAREST              0x2600
-#define GL_LINEAR               0x2601
-#define GL_TEXTURE_MIN_FILTER   0x2800
-#define GL_TEXTURE_MAG_FILTER   0x2801
-#define GL_NO_ERROR             0
+#define GL_TEXTURE_2D              0x0DE1
+#define GL_RGBA                    0x1908
+#define GL_RGBA8                   0x8058
+#define GL_UNSIGNED_BYTE           0x1401
+#define GL_FRAMEBUFFER             0x8D40
+#define GL_READ_FRAMEBUFFER        0x8CA8
+#define GL_DRAW_FRAMEBUFFER        0x8CA9
+#define GL_COLOR_ATTACHMENT0       0x8CE0
+#define GL_FRAMEBUFFER_COMPLETE    0x8CD5
+#define GL_COLOR_BUFFER_BIT        0x00004000
+#define GL_NEAREST                 0x2600
+#define GL_LINEAR                  0x2601
+#define GL_TEXTURE_MIN_FILTER      0x2800
+#define GL_TEXTURE_MAG_FILTER      0x2801
+#define GL_NO_ERROR                0
 #define GL_TEXTURE_INTERNAL_FORMAT 0x1003
-#define GL_TEXTURE_RED_SIZE     0x805C
-#define GL_TEXTURE_GREEN_SIZE   0x805D
-#define GL_TEXTURE_BLUE_SIZE    0x805E
-#define GL_TEXTURE_ALPHA_SIZE   0x805F
+#define GL_TEXTURE_RED_SIZE        0x805C
+#define GL_TEXTURE_GREEN_SIZE      0x805D
+#define GL_TEXTURE_BLUE_SIZE       0x805E
+#define GL_TEXTURE_ALPHA_SIZE      0x805F
 
 typedef unsigned int GLenum;
 typedef unsigned int GLuint;
-typedef int          GLint;
-typedef int          GLsizei;
-typedef float        GLfloat;
+typedef int GLint;
+typedef int GLsizei;
+typedef float GLfloat;
 typedef unsigned char GLboolean;
-typedef void         GLvoid;
+typedef void GLvoid;
 
 /* GL function pointer types */
 typedef void (*PFNGLGENTEXTURESPROC)(GLsizei, GLuint *);
@@ -104,25 +104,25 @@ static EGLContext egl_ctx = EGL_NO_CONTEXT;
 static EGLConfig egl_cfg;
 
 /* GL function pointers */
-static PFNGLGENTEXTURESPROC              glGenTextures;
-static PFNGLDELETETEXTURESPROC           glDeleteTextures;
-static PFNGLBINDTEXTUREPROC              glBindTexture;
-static PFNGLTEXIMAGE2DPROC               glTexImage2D;
-static PFNGLTEXPARAMETERIPROC            glTexParameteri;
-static PFNGLGENFRAMEBUFFERSPROC          glGenFramebuffers;
-static PFNGLDELETEFRAMEBUFFERSPROC       glDeleteFramebuffers;
-static PFNGLBINDFRAMEBUFFERPROC          glBindFramebuffer;
-static PFNGLFRAMEBUFFERTEXTURE2DPROC     glFramebufferTexture2D;
-static PFNGLCHECKFRAMEBUFFERSTATUSPROC   glCheckFramebufferStatus;
-static PFNGLCLEARCOLORPROC               glClearColor;
-static PFNGLCLEARPROC                    glClear;
-static PFNGLREADPIXELSPROC               glReadPixels;
-static PFNGLFINISHPROC                   glFinish;
-static PFNGLGETERRORPROC                 glGetError;
-static PFNGLVIEWPORTPROC                 glViewport;
-static PFNGLGETTEXLEVELPARAMETERIVPROC   glGetTexLevelParameteriv;
-static PFNGLCOPYIMAGESUBDATAPROC         glCopyImageSubData;
-static PFNGLBLITFRAMEBUFFERPROC          glBlitFramebuffer;
+static PFNGLGENTEXTURESPROC glGenTextures;
+static PFNGLDELETETEXTURESPROC glDeleteTextures;
+static PFNGLBINDTEXTUREPROC glBindTexture;
+static PFNGLTEXIMAGE2DPROC glTexImage2D;
+static PFNGLTEXPARAMETERIPROC glTexParameteri;
+static PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
+static PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
+static PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
+static PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D;
+static PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
+static PFNGLCLEARCOLORPROC glClearColor;
+static PFNGLCLEARPROC glClear;
+static PFNGLREADPIXELSPROC glReadPixels;
+static PFNGLFINISHPROC glFinish;
+static PFNGLGETERRORPROC glGetError;
+static PFNGLVIEWPORTPROC glViewport;
+static PFNGLGETTEXLEVELPARAMETERIVPROC glGetTexLevelParameteriv;
+static PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData;
+static PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer;
 static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
 
 /* Source texture + FBO */
@@ -138,15 +138,24 @@ static GLuint src_tex, src_fbo;
 static const char *gl_format_name(GLint fmt)
 {
     switch (fmt) {
-    case 0x8058: return "GL_RGBA8";
-    case 0x8059: return "GL_RGB10_A2";
-    case 0x881A: return "GL_RGBA16F";
-    case 0x8814: return "GL_RGBA32F";
-    case 0x8051: return "GL_RGB8";
-    case 0x8C43: return "GL_SRGB8_ALPHA8";
-    case 0x1908: return "GL_RGBA";
-    case 0x1907: return "GL_RGB";
-    default: return NULL;
+    case 0x8058:
+        return "GL_RGBA8";
+    case 0x8059:
+        return "GL_RGB10_A2";
+    case 0x881A:
+        return "GL_RGBA16F";
+    case 0x8814:
+        return "GL_RGBA32F";
+    case 0x8051:
+        return "GL_RGB8";
+    case 0x8C43:
+        return "GL_SRGB8_ALPHA8";
+    case 0x1908:
+        return "GL_RGBA";
+    case 0x1907:
+        return "GL_RGB";
+    default:
+        return NULL;
     }
 }
 
@@ -174,11 +183,16 @@ static void report_tex_format(const char *label, GLuint tex)
 static const char *gbm_format_name(uint32_t fmt)
 {
     switch (fmt) {
-    case GBM_FORMAT_ABGR8888: return "ABGR8888";
-    case GBM_FORMAT_XBGR8888: return "XBGR8888";
-    case GBM_FORMAT_ARGB8888: return "ARGB8888";
-    case GBM_FORMAT_XRGB8888: return "XRGB8888";
-    default: return "UNKNOWN";
+    case GBM_FORMAT_ABGR8888:
+        return "ABGR8888";
+    case GBM_FORMAT_XBGR8888:
+        return "XBGR8888";
+    case GBM_FORMAT_ARGB8888:
+        return "ARGB8888";
+    case GBM_FORMAT_XRGB8888:
+        return "XRGB8888";
+    default:
+        return "UNKNOWN";
     }
 }
 
@@ -261,11 +275,13 @@ static bool create_egl_context(void)
     const char *extensions = eglQueryString(egl_dpy, EGL_EXTENSIONS);
     printf("EGL_EXT_image_dma_buf_import: %s\n",
            (extensions && strstr(extensions, "EGL_EXT_image_dma_buf_import"))
-               ? "yes" : "NO");
+               ? "yes"
+               : "NO");
     printf("EGL_EXT_image_dma_buf_import_modifiers: %s\n",
            (extensions && strstr(extensions,
-                "EGL_EXT_image_dma_buf_import_modifiers"))
-               ? "yes" : "NO");
+                                 "EGL_EXT_image_dma_buf_import_modifiers"))
+               ? "yes"
+               : "NO");
 
     if (!eglBindAPI(EGL_OPENGL_ES_API)) {
         fprintf(stderr, "eglBindAPI(GLES) failed\n");
@@ -306,10 +322,14 @@ static bool create_egl_context(void)
 
 static bool load_gl_functions(void)
 {
-#define LOAD(name, type) do { \
-    name = (type)eglGetProcAddress(#name); \
-    if (!name) { fprintf(stderr, "Missing GL: " #name "\n"); return false; } \
-} while (0)
+#define LOAD(name, type)                                \
+    do {                                                \
+        name = (type)eglGetProcAddress(#name);          \
+        if (!name) {                                    \
+            fprintf(stderr, "Missing GL: " #name "\n"); \
+            return false;                               \
+        }                                               \
+    } while (0)
 #define LOAD_OPT(name, type) \
     name = (type)eglGetProcAddress(#name)
 
@@ -393,7 +413,8 @@ static bool create_source_texture(void)
 /* GBM export buffer creation                                         */
 /* ------------------------------------------------------------------ */
 
-typedef struct {
+typedef struct
+{
     struct gbm_bo *bo;
     int fd;
     int stride;
@@ -598,7 +619,8 @@ static bool try_fbo_blit(ExportBuffer *buf)
     GLenum ds = glCheckFramebufferStatus(GL_DRAW_FRAMEBUFFER);
     if (rs != GL_FRAMEBUFFER_COMPLETE || ds != GL_FRAMEBUFFER_COMPLETE) {
         printf("    glBlitFramebuffer: FBO not complete "
-               "(read=0x%x draw=0x%x)\n", rs, ds);
+               "(read=0x%x draw=0x%x)\n",
+               rs, ds);
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         return false;
     }
@@ -670,9 +692,16 @@ int main(int argc, char *argv[])
         bool copy_ok = try_copy_image_sub_data(&buf);
         bool blit_ok = try_fbo_blit(&buf);
 
-        if (copy_ok) total_pass++; else if (glCopyImageSubData) total_fail++;
-            else total_skip++;
-        if (blit_ok) total_pass++; else total_fail++;
+        if (copy_ok)
+            total_pass++;
+        else if (glCopyImageSubData)
+            total_fail++;
+        else
+            total_skip++;
+        if (blit_ok)
+            total_pass++;
+        else
+            total_fail++;
 
         destroy_export_buffer(&buf);
         printf("\n");

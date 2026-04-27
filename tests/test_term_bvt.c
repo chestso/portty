@@ -20,7 +20,8 @@
 
 extern TerminalBackend terminal_backend_bvt;
 
-static void feed(TerminalBackend *t, const char *s) {
+static void feed(TerminalBackend *t, const char *s)
+{
     terminal_process_input(t, s, strlen(s));
 }
 
@@ -28,7 +29,8 @@ static void feed(TerminalBackend *t, const char *s) {
  * row 0 and "f" on row 1. Selection scanning right from row 0 col 4 must
  * cross into row 1 — that requires `get_line_continuation(row=1)` to
  * return true (libvterm semantics: "row 1 continues from row 0"). */
-static void test_visible_wrap_continuation(void) {
+static void test_visible_wrap_continuation(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 5, 2) != NULL);
     feed(&t, "abcdef");
@@ -44,7 +46,8 @@ static void test_visible_wrap_continuation(void) {
  * scrollback). Scrolling "abcde\n...content..." until "abcde" is gone:
  * the row that used to be row 0 is now sb_row=k-1, and the wrap from it
  * into the next row must still be reachable. */
-static void test_scrollback_wrap_continuation(void) {
+static void test_scrollback_wrap_continuation(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 5, 2) != NULL);
     /* "abcdef" wraps row 0 → row 1. Then push lots of newlines so both
@@ -68,7 +71,8 @@ static void test_scrollback_wrap_continuation(void) {
 }
 
 /* Resize wider → bvt should re-wrap "abcdef" from two rows into one. */
-static void test_resize_grows_and_reflows(void) {
+static void test_resize_grows_and_reflows(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 5, 2) != NULL);
     feed(&t, "abcdef");
@@ -89,7 +93,8 @@ static void test_resize_grows_and_reflows(void) {
 }
 
 /* Resize narrower → a single-row "abcdefghij" wraps into two rows. */
-static void test_resize_shrinks_and_reflows(void) {
+static void test_resize_shrinks_and_reflows(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 10, 2) != NULL);
     feed(&t, "abcdefghij");
@@ -109,7 +114,8 @@ static void test_resize_shrinks_and_reflows(void) {
  * boundary because TerminalCell stored at most 6 codepoints inline. After
  * step 17, the cell carries (cp, grapheme_id) and the caller fetches the
  * full sequence via terminal_cell_get_grapheme. Verify all 7 cps survive. */
-static void test_long_cluster_survives_accessor(void) {
+static void test_long_cluster_survives_accessor(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
     /* U+1F468 ZWJ U+1F469 ZWJ U+1F467 ZWJ U+1F466 — 7 codepoints. */
@@ -141,7 +147,8 @@ static void test_long_cluster_survives_accessor(void) {
 /* Spaces between words must round-trip through the clipboard. Typed spaces
  * land as cp=0x20, width=1 cells and were always preserved — this guards
  * the simple case while the harder cases (TAB, CUF) sit below. */
-static void test_selection_preserves_spaces(void) {
+static void test_selection_preserves_spaces(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
     feed(&t, "hello world");
@@ -157,7 +164,8 @@ static void test_selection_preserves_spaces(void) {
     terminal_destroy(&t);
 }
 
-static void test_selection_across_rows(void) {
+static void test_selection_across_rows(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
     feed(&t, "hello world\r\nfoo bar\r\nbaz");
@@ -175,7 +183,8 @@ static void test_selection_across_rows(void) {
 /* TAB advances the cursor by 8 columns without writing anything; the cells
  * between the cursor's old and new positions stay cleared (cp=0, width=0).
  * The selection-extraction logic must treat those as spaces, not skip them. */
-static void test_selection_with_tab(void) {
+static void test_selection_with_tab(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
     feed(&t, "foo\tbar");
@@ -193,7 +202,8 @@ static void test_selection_with_tab(void) {
 
 /* CSI <n> C (CUF) is a common way for shells/applications to position
  * content with gaps; the gap cells must round-trip as spaces. */
-static void test_selection_after_cursor_movement(void) {
+static void test_selection_after_cursor_movement(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
     feed(&t, "foo\x1b[5Cbar");
@@ -210,23 +220,27 @@ static void test_selection_after_cursor_movement(void) {
 
 /* Wide CJK chars must not have their right-half continuation cell turn into
  * a space — the width-2 advance should skip past it. */
-static void test_selection_skips_wide_continuation(void) {
+static void test_selection_skips_wide_continuation(void)
+{
     TerminalBackend t = terminal_backend_bvt;
     ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
     /* "中x" — '中' is a 2-cell CJK char (U+4E2D, UTF-8 e4 b8 ad). */
-    feed(&t, "\xe4\xb8\xad" "x");
+    feed(&t, "\xe4\xb8\xad"
+             "x");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
     terminal_selection_update(&t, 0, 5);
     char *text = terminal_selection_get_text(&t);
     ASSERT_NOT_NULL(text);
-    ASSERT_STR_EQ(text, "\xe4\xb8\xad" "x");
+    ASSERT_STR_EQ(text, "\xe4\xb8\xad"
+                        "x");
     free(text);
 
     terminal_destroy(&t);
 }
 
-int main(int argc, char *argv[]) {
+int main(int argc, char *argv[])
+{
     test_parse_args(argc, argv);
     printf("Running term_bvt tests:\n");
     RUN_TEST(test_visible_wrap_continuation);

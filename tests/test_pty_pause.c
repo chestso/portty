@@ -1,6 +1,6 @@
-#include "test_helpers.h"
 #include "platform.h"
 #include "term.h"
+#include "test_helpers.h"
 #include <stdlib.h>
 #include <string.h>
 

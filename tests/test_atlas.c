@@ -1,5 +1,5 @@
-#include "test_helpers.h"
 #include "rend_sdl3_atlas.h"
+#include "test_helpers.h"
 #include <stdlib.h>
 #include <string.h>
 

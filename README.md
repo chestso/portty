@@ -79,45 +79,39 @@ $PREFIX/lib/bloom-terminal/bloom-terminal-gtk4.so # Installed plugin
 
 ## Building
 
-The project uses GNU Autotools. For convenience, a build script is provided:
+The project uses GNU Autotools. From a fresh checkout:
 
 ```bash
-chmod +x build.sh
-./build.sh
+./autogen.sh
+mkdir build && cd build
+../configure --prefix=$HOME/.local --enable-debug
+make -j$(nproc)
+make check
+make install
 ```
 
-This will:
+If GTK4 and libadwaita are available, the plugin is built automatically. Pass `--disable-gtk4` to `configure` to skip it. Pass plain `CFLAGS` (e.g. `CFLAGS="-O3 -DNDEBUG"`) for a release build instead of `--enable-debug`.
 
-1. Generate the configure script
-2. Configure the build with appropriate flags
-3. Build the project with parallel jobs
-4. Create a `build/` directory with the compiled binary
+### Make Targets
 
-If GTK4 and libadwaita are available, the plugin is built automatically. Use `--disable-gtk4` to skip it.
+- `make` — build everything
+- `make check` — run the test suite
+- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`, installs the GTK4 plugin to `$prefix/lib/bloom-terminal/`
+- `make format` — clang-format on `src/` and `tests/`, shfmt on `examples/` and `scripts/`, prettier on Markdown
+- `make bear` — produce `compile_commands.json` for clangd
 
-### Build Script Options
+### Helper Scripts
 
-The build script supports several options:
-
-```bash
-./build.sh --help
-```
-
-Available options:
-
-- `--install` - Only install the project (skip build and run)
-- `--bear` - Generate compile_commands.json using bear
-- `--no-debug` - Disable debug build
-- `--profiling` - Build with gprof, run benchmark, generate profile report
-- `--format` - Format source files with clang-format, shfmt, and prettier
-- `--ref-png TEXT OUT` - Generate reference PNG of text using hb-view
-- `--ref-layers TEXT PREFIX` - Export COLR layers for debugging (requires blackrenderer)
-- `--mingw64` - Cross-compile for Windows using mingw64
-- `--osxcross` - Cross-compile for macOS using osxcross
-- `--w32-vm-setup/install/deploy` - Windows VM management (QEMU/KVM)
-- `--mac-vm-setup/install/deploy` - macOS VM management (QEMU/KVM + OSX-KVM)
-- `--prefix=PATH` - Set installation prefix (default: $HOME/.local)
-- `--help` - Show help message
+| Script                      | Purpose                                                         |
+| --------------------------- | --------------------------------------------------------------- |
+| `scripts/build-mingw64.sh`  | Cross-compile for Windows using Fedora's mingw64 toolchain      |
+| `scripts/build-osxcross.sh` | Cross-compile for macOS using osxcross                          |
+| `scripts/profile.sh`        | Build with `-pg`, run a benchmark, write `profile-report.txt`   |
+| `scripts/vm-w32.sh CMD`     | Windows VM lifecycle (`setup`/`install`/`run`/`deploy`)         |
+| `scripts/vm-mac.sh CMD`     | macOS VM lifecycle (`setup`/`install`/`run`/`deploy`)           |
+| `scripts/ref-png.sh T OUT`  | Generate reference PNG of TEXT using hb-view                    |
+| `scripts/ref-layers.sh T P` | Export each COLR v1 paint layer as `<P>_layer00.png` etc.       |
+| `scripts/setup-osxcross.sh` | One-time osxcross toolchain setup (used by `build-osxcross.sh`) |
 
 ## Usage
 
@@ -228,7 +222,7 @@ bloom-terminal ships two terminfo entries based on `xterm-256color`:
 - **`bloom-terminal-vty-256color`** (default `TERM`) — inherits `setaf`/`setab` from `xterm-256color` so its capability strings use only the restricted operator subset that Haskell `vty-unix`'s terminfo parser supports. 24-bit colour still works via `Tc`/`RGB` flags and `COLORTERM=truecolor` for any app using modern detection. This is the default so `brick`/`matterhorn` and other vty-based TUIs work without a workaround.
 - **`bloom-terminal-256color`** — full entry with 24-bit `setaf`/`setab`/`Setulc` strings (use `%/` division, which ncurses parses fine but vty-unix does not). Apps that want to query truecolor via `tparm(setaf, 0xRRGGBB)` should opt in by setting `TERM=bloom-terminal-256color`.
 
-On Linux, both are compiled and installed automatically by `./build.sh --install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
+On Linux, both are compiled and installed automatically by `make install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
 
 If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy either compiled entry to the remote host:
 
@@ -288,7 +282,7 @@ sudo dnf install mingw64-gcc mingw64-SDL3 mingw64-freetype mingw64-harfbuzz ming
 ### Building
 
 ```bash
-./build.sh --mingw64
+./scripts/build-mingw64.sh
 ```
 
 This produces `build-mingw64/src/.libs/bloom-terminal.exe` with all required DLLs copied alongside. The mingw64 build uses a separate directory so it doesn't conflict with the Linux `build/`.
@@ -298,10 +292,10 @@ This produces `build-mingw64/src/.libs/bloom-terminal.exe` with all required DLL
 For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU/KVM:
 
 ```bash
-./build.sh --w32-vm-setup    # Download ISOs, create disk images (one-time)
-./build.sh --w32-vm-install  # Boot VM from ISO to install Windows
-./build.sh --w32-vm-deploy   # Cross-compile and write files to VM transfer disk
-./build.sh --w32-vm          # Boot the VM (transfer disk appears as second drive)
+./scripts/vm-w32.sh setup    # Download ISOs, create disk images (one-time)
+./scripts/vm-w32.sh install  # Boot VM from ISO to install Windows
+./scripts/vm-w32.sh deploy   # Cross-compile and write files to VM transfer disk
+./scripts/vm-w32.sh run      # Boot the VM (transfer disk appears as second drive)
 ```
 
 The installer requires a virtio storage driver: **Load driver** → **Browse** → `F:` → `viostor/w11/amd64`.
@@ -331,7 +325,7 @@ osxcross is installed into `./osxcross/` (gitignored). All dependencies (zlib, l
 ### Building
 
 ```bash
-./build.sh --osxcross
+./scripts/build-osxcross.sh
 ```
 
 This produces `build-osxcross/src/bloom-terminal` (Mach-O 64-bit x86_64). The osxcross build uses a separate directory so it doesn't conflict with the Linux `build/` or Windows `build-mingw64/`.
@@ -341,10 +335,10 @@ This produces `build-osxcross/src/bloom-terminal` (Mach-O 64-bit x86_64). The os
 For interactive testing, use a macOS VM with QEMU/KVM via [OSX-KVM](https://github.com/kholia/OSX-KVM):
 
 ```bash
-./build.sh --mac-vm-setup    # Download recovery image, create disk images (one-time)
-./build.sh --mac-vm-install  # Boot from recovery to install macOS
-./build.sh --mac-vm-deploy   # Cross-compile and write binary to VM transfer disk
-./build.sh --mac-vm          # Boot the VM (transfer disk appears as USB drive)
+./scripts/vm-mac.sh setup    # Download recovery image, create disk images (one-time)
+./scripts/vm-mac.sh install  # Boot from recovery to install macOS
+./scripts/vm-mac.sh deploy   # Cross-compile and write binary to VM transfer disk
+./scripts/vm-mac.sh run      # Boot the VM (transfer disk appears as USB drive)
 ```
 
 The installer boots into OpenCore — select **"macOS Base System"**, then use **Disk Utility** to erase the SATA disk (APFS, GUID) before installing.
@@ -388,16 +382,16 @@ All tests support `-v` for verbose output. Visual testing of rendering and termi
 The project includes:
 
 - `.clang-format` for code formatting
-- `build.sh` for automated builds
+- `autogen.sh` + autotools (`configure.ac`, `Makefile.am`) for the build
 - Example scripts demonstrating terminal features, including `examples/unicode/emoji.sh` which exercises COLR/emoji paths
 
 ### Code Formatting
 
-Run `./build.sh --format` to format all source files. This requires:
+Run `make format` (from `build/`) to format all source files. This requires:
 
-- **clang-format** — C source and headers (`src/`)
-- **shfmt** — shell scripts (`examples/`)
-- **prettier** — markdown files
+- **clang-format** — C source and headers (`src/`, `tests/`)
+- **shfmt** — shell scripts (`examples/`, `scripts/`)
+- **prettier** — Markdown files
 
 ```bash
 # Fedora 41+

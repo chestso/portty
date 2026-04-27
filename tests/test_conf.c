@@ -1,5 +1,5 @@
-#include "test_helpers.h"
 #include "bloom_conf.h"
+#include "test_helpers.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>

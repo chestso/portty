@@ -4,6 +4,16 @@ AC_CONFIG_AUX_DIR([build-aux])
 AM_INIT_AUTOMAKE([foreign subdir-objects])
 AC_CANONICAL_HOST
 
+dnl Recompute the version at configure time so a rebuild after new commits
+dnl picks up the current version without needing to re-run autoreconf. Falls
+dnl back to PACKAGE_VERSION (set at autoreconf time via m4_esyscmd_s above)
+dnl for tarball builds where build-aux/git-version.sh has nothing to read.
+BLOOM_TERMINAL_VERSION=`"$srcdir/build-aux/git-version.sh" "$srcdir" 2>/dev/null`
+AS_IF([test -z "$BLOOM_TERMINAL_VERSION"],
+      [BLOOM_TERMINAL_VERSION="$PACKAGE_VERSION"])
+AC_SUBST([BLOOM_TERMINAL_VERSION])
+AC_MSG_NOTICE([bloom-terminal version: $BLOOM_TERMINAL_VERSION])
+
 # Check for programs
 AC_PROG_CC
 LT_INIT([dlopen])
@@ -114,7 +124,7 @@ fi
 
 # Generate config.h header
 AC_CONFIG_HEADERS([config.h])
-AC_DEFINE_UNQUOTED([BLOOM_TERMINAL_VERSION], ["$PACKAGE_VERSION"], [Version string])
+AC_DEFINE_UNQUOTED([BLOOM_TERMINAL_VERSION], ["$BLOOM_TERMINAL_VERSION"], [Version string])
 
 # Check for header files
 AC_CHECK_HEADERS([stdio.h stdlib.h string.h])
