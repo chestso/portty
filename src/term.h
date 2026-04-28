@@ -167,11 +167,15 @@ struct TerminalBackend
 
     // Line continuation (soft-wrap) query
     bool (*get_line_continuation)(TerminalBackend *term, int row);
+
+    // Configure scrollback ring capacity (0 disables scrollback).
+    void (*set_scrollback_size)(TerminalBackend *term, int lines);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
 void terminal_destroy(TerminalBackend *term);
 void terminal_resize(TerminalBackend *term, int width, int height);
+void terminal_set_scrollback_size(TerminalBackend *term, int lines);
 int terminal_process_input(TerminalBackend *term, const char *input, size_t len);
 int terminal_get_cell(TerminalBackend *term, int row, int col, TerminalCell *cell);
 int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols);

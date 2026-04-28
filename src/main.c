@@ -497,6 +497,7 @@ int main(int argc, char *argv[])
     const float font_size = 12.0f;
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
+    int init_scrollback = -1;
 
     int use_gtk4 = 0;
 
@@ -509,6 +510,7 @@ int main(int argc, char *argv[])
         { "demo", required_argument, NULL, 'd' },
         { "exec", required_argument, NULL, 'X' },
         { "wait", required_argument, NULL, 'W' },
+        { "scrollback", required_argument, NULL, 's' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -536,8 +538,10 @@ int main(int argc, char *argv[])
         padding = 1;
     if (conf.platform && strcmp(conf.platform, "gtk4") == 0)
         use_gtk4 = 1;
+    if (conf.scrollback >= 0)
+        init_scrollback = conf.scrollback;
 
-    while ((opt = getopt_long(argc, argv, "hvf:g:P:D:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvf:g:P:D:s:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -605,6 +609,19 @@ int main(int argc, char *argv[])
         case 'S':
             use_gtk4 = 0;
             break;
+        case 's':
+        {
+            char *end = NULL;
+            long n = strtol(optarg, &end, 10);
+            if (end == optarg || *end != '\0' || n < 0 || n > INT_MAX) {
+                fprintf(stderr,
+                        "ERROR: Invalid scrollback: %s (use a non-negative integer)\n",
+                        optarg);
+                return 1;
+            }
+            init_scrollback = (int)n;
+            break;
+        }
         case '?':
             print_usage(argv[0]);
             return 1;
@@ -746,6 +763,9 @@ int main(int argc, char *argv[])
 
     if (conf.word_chars)
         terminal_selection_set_word_chars(term, conf.word_chars);
+
+    if (init_scrollback >= 0)
+        terminal_set_scrollback_size(term, init_scrollback);
 
     // Only create window and renderer if we're going to run the event loop
     if (running) {
@@ -960,6 +980,7 @@ static void print_usage(const char *progname)
     printf("              Size is part of the pattern, e.g. -f monospace-16\n");
     printf("              Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
     printf("  -g COLSxROWS  Initial terminal size, e.g. 120x40 = 120 columns, 40 rows (default: 80x24)\n");
+    printf("  -s, --scrollback N  Scrollback history lines (default: 1000, 0 to disable)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
     printf("  --padding     Enable padding around terminal content\n");

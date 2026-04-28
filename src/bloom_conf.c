@@ -5,6 +5,7 @@
 #include "bloom_conf.h"
 #include "common.h"
 #include <ctype.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -89,6 +90,7 @@ void bloom_conf_init(BloomConf *conf)
     conf->verbose = -1;
     conf->word_chars = NULL;
     conf->platform = NULL;
+    conf->scrollback = -1;
 }
 
 bool bloom_conf_load_path(BloomConf *conf, const char *path)
@@ -188,6 +190,16 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
                         "WARNING: %s:%d: invalid platform '%s' (use sdl3, gtk4)\n",
                         path, lineno, val);
             }
+        } else if (strcmp(key, "scrollback") == 0) {
+            char *end = NULL;
+            long n = strtol(val, &end, 10);
+            if (end == val || *end != '\0' || n < 0 || n > INT_MAX) {
+                fprintf(stderr,
+                        "WARNING: %s:%d: invalid scrollback '%s' (use a non-negative integer)\n",
+                        path, lineno, val);
+            } else {
+                conf->scrollback = (int)n;
+            }
         } else {
             fprintf(stderr, "WARNING: %s:%d: unknown key '%s'\n", path, lineno, key);
         }
@@ -196,10 +208,10 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
     fclose(fp);
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d padding=%d verbose=%d"
-         " word_chars=%s platform=%s\n",
+         " word_chars=%s platform=%s scrollback=%d\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
          conf->padding, conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
-         conf->platform ? conf->platform : "(unset)");
+         conf->platform ? conf->platform : "(unset)", conf->scrollback);
 
     return true;
 }

@@ -22,6 +22,7 @@ typedef struct
     int verbose;           /* -1 = not set, 0 = false, 1 = true */
     char *word_chars;      /* NULL = not set */
     char *platform;        /* NULL = not set; "sdl3" or "gtk4" */
+    int scrollback;        /* -1 = not set; >= 0 = lines (0 disables) */
 } BloomConf;
 
 void bloom_conf_init(BloomConf *conf);

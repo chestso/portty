@@ -672,6 +672,14 @@ static bool bvt_back_get_line_continuation(TerminalBackend *term, int row)
     return bvt_get_scrollback_wrapline(d->vt, sb_row);
 }
 
+static void bvt_back_set_scrollback_size(TerminalBackend *term, int lines)
+{
+    BvtBackendData *d = term->backend_data;
+    if (!d)
+        return;
+    bvt_set_scrollback_size(d->vt, lines);
+}
+
 /* ------------------------------------------------------------------ */
 /* vtable                                                              */
 /* ------------------------------------------------------------------ */
@@ -706,4 +714,5 @@ TerminalBackend terminal_backend_bvt = {
     .start_paste = bvt_back_start_paste,
     .end_paste = bvt_back_end_paste,
     .get_line_continuation = bvt_back_get_line_continuation,
+    .set_scrollback_size = bvt_back_set_scrollback_size,
 };

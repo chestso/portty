@@ -101,6 +101,13 @@ void terminal_resize(TerminalBackend *term, int width, int height)
     term->resize(term, width, height);
 }
 
+void terminal_set_scrollback_size(TerminalBackend *term, int lines)
+{
+    if (!term || !term->set_scrollback_size)
+        return;
+    term->set_scrollback_size(term, lines);
+}
+
 int terminal_process_input(TerminalBackend *term, const char *input, size_t len)
 {
     if (!term || !term->process_input)

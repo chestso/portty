@@ -44,6 +44,7 @@ static void test_init_defaults(void)
     ASSERT_EQ(conf.verbose, -1);
     ASSERT_NULL(conf.word_chars);
     ASSERT_NULL(conf.platform);
+    ASSERT_EQ(conf.scrollback, -1);
 
     bloom_conf_free(&conf);
 }
@@ -129,6 +130,48 @@ static void test_parse_platform(void)
     bloom_conf_init(&conf);
     ASSERT_TRUE(bloom_conf_load_path(&conf, path));
     ASSERT_STR_EQ(conf.platform, "gtk4");
+
+    bloom_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+static void test_parse_scrollback(void)
+{
+    char *path = write_tmp_conf("[terminal]\nscrollback = 5000\n");
+    ASSERT_NOT_NULL(path);
+
+    BloomConf conf;
+    bloom_conf_init(&conf);
+    ASSERT_TRUE(bloom_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.scrollback, 5000);
+
+    bloom_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+static void test_parse_scrollback_zero(void)
+{
+    char *path = write_tmp_conf("[terminal]\nscrollback = 0\n");
+    ASSERT_NOT_NULL(path);
+
+    BloomConf conf;
+    bloom_conf_init(&conf);
+    ASSERT_TRUE(bloom_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.scrollback, 0);
+
+    bloom_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+static void test_parse_scrollback_invalid(void)
+{
+    char *path = write_tmp_conf("[terminal]\nscrollback = -5\n");
+    ASSERT_NOT_NULL(path);
+
+    BloomConf conf;
+    bloom_conf_init(&conf);
+    ASSERT_TRUE(bloom_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.scrollback, -1);
 
     bloom_conf_free(&conf);
     cleanup_tmp(path);
@@ -227,6 +270,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_booleans);
     RUN_TEST(test_parse_word_chars);
     RUN_TEST(test_parse_platform);
+    RUN_TEST(test_parse_scrollback);
+    RUN_TEST(test_parse_scrollback_zero);
+    RUN_TEST(test_parse_scrollback_invalid);
     RUN_TEST(test_comments_and_blank_lines);
     RUN_TEST(test_unknown_keys_ignored);
     RUN_TEST(test_wrong_section_ignored);

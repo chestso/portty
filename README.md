@@ -152,6 +152,7 @@ build/src/bloom-terminal -P "😀" output.png
 | `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                            |
 | `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)               |
 | `-d TEXT` / `--demo TEXT` | Display TEXT in terminal without spawning a shell (for testing) |
+| `-s N` / `--scrollback N` | Scrollback history lines (default: 1000, 0 to disable)          |
 
 ### Keyboard Shortcuts
 
@@ -187,6 +188,7 @@ platform = gtk4
 padding = false
 verbose = false
 word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
+scrollback = 1000
 ```
 
 ### Available Keys
@@ -202,6 +204,7 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `padding`    | `true`/`false`                    | `false`        | Padding around terminal content             |
 | `verbose`    | `true`/`false`                    | `false`        | Debug output                                |
 | `word_chars` | Character string                  | `A-Za-z0-9_-/` | Characters treated as word for double-click |
+| `scrollback` | Non-negative integer              | `1000`         | Scrollback history lines (0 disables)       |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
