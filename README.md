@@ -219,14 +219,15 @@ Multi-codepoint clusters (ZWJ family chains, flag sequences, long combining-mark
 
 ## Terminfo
 
-bloom-terminal ships two terminfo entries based on `xterm-256color`:
+bloom-terminal ships a single terminfo entry (based on `xterm-256color`) under three aliases — `bloom-terminal-vty-256color`, `bloom-terminal-256color`, and `bloom-terminal`. The default `TERM` is `bloom-terminal-vty-256color`; the alternate names exist for users who prefer to set them.
 
-- **`bloom-terminal-vty-256color`** (default `TERM`) — inherits `setaf`/`setab` from `xterm-256color` so its capability strings use only the restricted operator subset that Haskell `vty-unix`'s terminfo parser supports. 24-bit colour still works via `Tc`/`RGB` flags and `COLORTERM=truecolor` for any app using modern detection. This is the default so `brick`/`matterhorn` and other vty-based TUIs work without a workaround.
-- **`bloom-terminal-256color`** — full entry with 24-bit `setaf`/`setab`/`Setulc` strings (use `%/` division, which ncurses parses fine but vty-unix does not). Apps that want to query truecolor via `tparm(setaf, 0xRRGGBB)` should opt in by setting `TERM=bloom-terminal-256color`.
+`setaf`/`setab` are inherited unchanged from `xterm-256color`, so the entry's capability strings stay within the restricted operator subset that Haskell `vty-unix`'s terminfo parser accepts. Truecolor is signalled via the `Tc` flag (which emacs, tmux, vte, alacritty, kitty, ghostty, and most modern TUIs honor) and via `COLORTERM=truecolor` for apps that read the env var directly. Extension caps added on top of `xterm-256color`: `Smulx` (extended underline styles), `Setulc` (underline color), `Ss`/`Se` (cursor shape), `Ms` (OSC 52 set-clipboard), `BE`/`BD` (bracketed paste), `PS`/`PE` (paste delimiters), `hs`/`tsl`/`fsl`/`dsl` (status line / window title), `sitm`/`ritm` (italic), `smxx`/`rmxx` (strikethrough).
 
-On Linux, both are compiled and installed automatically by `make install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
+The `RGB` flag is deliberately **not** advertised: its ncurses contract is "feed packed 24-bit ints to `setaf` and it'll DTRT," which would require a custom `setaf` outside the vty-unix parser subset. Truecolor consumers are expected to use `Tc` or `COLORTERM`.
 
-If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy either compiled entry to the remote host:
+On Linux, the entry is compiled and installed automatically by `make install` via `tic`. On macOS (QEMU VM), run `sh /Volumes/NO\ NAME/install-terminfo.sh` to compile and install natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
+
+If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
 
 ```bash
 infocmp bloom-terminal-vty-256color | ssh remote-host 'tic -x -'

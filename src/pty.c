@@ -160,12 +160,15 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         }
 
         // Set TERM environment variable.
-        // Default to the vty-compatible entry: it inherits setaf/setab
-        // from xterm-256color, so Haskell TUIs using vty-unix (brick,
-        // matterhorn, etc.) can parse it. 24-bit colour still works via
-        // Tc/RGB flags and COLORTERM=truecolor for apps using modern
-        // detection. Apps that want the full ncurses-parseable entry
-        // with 24-bit setaf/setab/Setulc can set TERM=bloom-terminal-256color.
+        // The bloom-terminal entry is a single terminfo definition with
+        // three aliases (bloom-terminal-vty-256color, bloom-terminal-256color,
+        // bloom-terminal). It inherits xterm-256color and adds the Tc flag
+        // plus extension caps (Smulx, Setulc, Ss/Se, Ms, BE/BD, PS/PE).
+        // Tc carries the truecolor signal: apps that respect it emit
+        // \e[38;2;R;G;Bm directly. We default to the vty-named alias so
+        // Haskell vty-unix TUIs (brick, matterhorn) see clean
+        // xterm-256color inheritance. COLORTERM=truecolor below covers
+        // apps that ignore terminfo and check the env var.
         setenv("TERM", "bloom-terminal-vty-256color", 1);
 
         // Point to our installed terminfo database
