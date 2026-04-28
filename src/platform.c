@@ -178,3 +178,17 @@ bool platform_get_display_size(PlatformBackend *plat, int *width, int *height)
         return plat->get_display_size(plat, width, height);
     return false;
 }
+
+bool platform_open_url(PlatformBackend *plat, const char *url)
+{
+    if (!plat || !plat->open_url || !url)
+        return false;
+    return plat->open_url(plat, url);
+}
+
+void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
+{
+    if (!plat || !plat->set_cursor)
+        return;
+    plat->set_cursor(plat, cursor);
+}

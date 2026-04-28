@@ -218,6 +218,76 @@ static void test_selection_after_cursor_movement(void)
     terminal_destroy(&t);
 }
 
+/* OSC-8 hyperlink: cells written between an opening OSC-8 and its empty
+ * close share a non-zero hyperlink_id; cells outside the link have id 0;
+ * the URI bytes round-trip through terminal_cell_get_hyperlink. */
+static void test_hyperlink_basic(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
+    /* OSC 8 ; ; https://charm.land ST  Charm  OSC 8 ; ; ST */
+    feed(&t,
+         "\x1b]8;;https://charm.land\x1b\\"
+         "Charm"
+         "\x1b]8;;\x1b\\"
+         " plain");
+
+    TerminalCell c0, c4, c5;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &c0), 0); /* 'C' */
+    ASSERT_EQ(terminal_get_cell(&t, 0, 4, &c4), 0); /* 'm' */
+    ASSERT_EQ(terminal_get_cell(&t, 0, 5, &c5), 0); /* ' ' (outside link) */
+    ASSERT_EQ(c0.cp, (uint32_t)'C');
+    ASSERT_EQ(c4.cp, (uint32_t)'m');
+    ASSERT_TRUE(c0.hyperlink_id != 0);
+    ASSERT_EQ(c0.hyperlink_id, c4.hyperlink_id); /* dedup: same id */
+    ASSERT_EQ((unsigned)c5.hyperlink_id, 0u);
+
+    char uri[256];
+    size_t n = terminal_cell_get_hyperlink(&t, 0, 0, uri, sizeof(uri));
+    ASSERT_EQ(n, strlen("https://charm.land"));
+    ASSERT_STR_EQ(uri, "https://charm.land");
+
+    /* Outside the link returns 0 / empty. */
+    n = terminal_cell_get_hyperlink(&t, 0, 5, uri, sizeof(uri));
+    ASSERT_EQ(n, (size_t)0);
+
+    terminal_destroy(&t);
+}
+
+/* Scheme allow-list refuses dangerous URIs and accepts safe ones. */
+static void test_hyperlink_safety(void)
+{
+    ASSERT_TRUE(terminal_hyperlink_is_safe("https://example.com"));
+    ASSERT_TRUE(terminal_hyperlink_is_safe("HTTP://example.com")); /* case-insensitive scheme */
+    ASSERT_TRUE(terminal_hyperlink_is_safe("mailto:hi@example.com"));
+    ASSERT_FALSE(terminal_hyperlink_is_safe("javascript:alert(1)"));
+    ASSERT_FALSE(terminal_hyperlink_is_safe("data:text/html,<script>"));
+    ASSERT_FALSE(terminal_hyperlink_is_safe("file:///etc/passwd"));
+    ASSERT_FALSE(terminal_hyperlink_is_safe(""));
+    ASSERT_FALSE(terminal_hyperlink_is_safe(NULL));
+}
+
+/* Hover state setter/getter is a plain field on TerminalBackend. PTY input
+ * and resize must clear it (next mouse motion re-resolves). */
+static void test_hyperlink_hover_state(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+
+    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
+    terminal_set_hovered_hyperlink(&t, 7);
+    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 7u);
+
+    feed(&t, "x"); /* PTY output clears hover */
+    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
+
+    terminal_set_hovered_hyperlink(&t, 9);
+    terminal_resize(&t, 30, 4);
+    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
+
+    terminal_destroy(&t);
+}
+
 /* Wide CJK chars must not have their right-half continuation cell turn into
  * a space — the width-2 advance should skip past it. */
 static void test_selection_skips_wide_continuation(void)
@@ -253,6 +323,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_selection_with_tab);
     RUN_TEST(test_selection_after_cursor_movement);
     RUN_TEST(test_selection_skips_wide_continuation);
+    RUN_TEST(test_hyperlink_basic);
+    RUN_TEST(test_hyperlink_safety);
+    RUN_TEST(test_hyperlink_hover_state);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

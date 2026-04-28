@@ -97,6 +97,7 @@ void terminal_resize(TerminalBackend *term, int width, int height)
 {
     if (!term || !term->resize)
         return;
+    term->hovered_hyperlink_id = 0;
     term->resize(term, width, height);
 }
 
@@ -105,6 +106,9 @@ int terminal_process_input(TerminalBackend *term, const char *input, size_t len)
     if (!term || !term->process_input)
         return -1;
     terminal_selection_clear(term);
+    /* PTY output may rewrite the cell under the mouse. The next motion
+     * event will re-resolve. */
+    term->hovered_hyperlink_id = 0;
     return term->process_input(term, input, len);
 }
 
@@ -199,6 +203,58 @@ size_t terminal_cell_get_grapheme(TerminalBackend *term, int unified_row, int co
     if (!term || !term->get_grapheme || !out || cap == 0)
         return 0;
     return term->get_grapheme(term, unified_row, col, out, cap);
+}
+
+size_t terminal_cell_get_hyperlink(TerminalBackend *term, int unified_row, int col,
+                                   char *out, size_t cap)
+{
+    if (!term || !term->get_hyperlink || !out || cap == 0)
+        return 0;
+    return term->get_hyperlink(term, unified_row, col, out, cap);
+}
+
+bool terminal_hyperlink_is_safe(const char *uri)
+{
+    if (!uri)
+        return false;
+    /* Allow-list: only the schemes a desktop user expects to invoke from a
+     * terminal click. javascript:, data:, vbscript:, file:// (no), etc. are
+     * refused — pasted/escaped link smuggling is the realistic threat. */
+    static const char *const allowed[] = {
+        "http://", "https://", "ftp://", "ftps://", "mailto:", NULL
+    };
+    for (int i = 0; allowed[i]; i++) {
+        size_t n = strlen(allowed[i]);
+        /* Case-insensitive scheme compare. */
+        bool match = true;
+        for (size_t k = 0; k < n; k++) {
+            char a = uri[k];
+            char b = allowed[i][k];
+            if (a >= 'A' && a <= 'Z')
+                a = (char)(a + ('a' - 'A'));
+            if (a != b) {
+                match = false;
+                break;
+            }
+        }
+        if (match)
+            return true;
+    }
+    return false;
+}
+
+void terminal_set_hovered_hyperlink(TerminalBackend *term, uint16_t id)
+{
+    if (!term)
+        return;
+    if (term->hovered_hyperlink_id == id)
+        return;
+    term->hovered_hyperlink_id = id;
+}
+
+uint16_t terminal_hovered_hyperlink(const TerminalBackend *term)
+{
+    return term ? term->hovered_hyperlink_id : 0;
 }
 
 bool terminal_is_altscreen(TerminalBackend *term)

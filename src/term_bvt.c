@@ -294,6 +294,7 @@ static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst)
      * the renderer boundary. */
     dst->cp = src->cp;
     dst->grapheme_id = src->grapheme_id;
+    dst->hyperlink_id = src->hyperlink_id;
 
     /* Style. */
     const BvtStyle *st = bvt_cell_style(vt, src);
@@ -447,6 +448,26 @@ static size_t bvt_back_get_grapheme(TerminalBackend *term, int unified_row,
     if (!src)
         return 0;
     return bvt_cell_get_grapheme(d->vt, src, out, cap);
+}
+
+static size_t bvt_back_get_hyperlink(TerminalBackend *term, int unified_row,
+                                     int col, char *out, size_t cap)
+{
+    BvtBackendData *d = term->backend_data;
+    if (!d || !out || cap == 0)
+        return 0;
+    const BvtCell *src = (unified_row >= 0)
+                             ? bvt_get_cell(d->vt, unified_row, col)
+                             : bvt_get_scrollback_cell(d->vt, -(unified_row + 1), col);
+    if (!src || src->hyperlink_id == 0)
+        return 0;
+    /* Reserve one byte for the trailing NUL. bvt returns raw bytes, so
+     * we cap the write at cap-1 and add the terminator ourselves. */
+    size_t n = bvt_cell_get_hyperlink(d->vt, src, (uint8_t *)out, cap - 1);
+    if (n >= cap)
+        n = cap - 1;
+    out[n] = '\0';
+    return n;
 }
 
 /* ------------------------------------------------------------------ */
@@ -675,6 +696,7 @@ TerminalBackend terminal_backend_bvt = {
     .consume_pushed_rows = bvt_back_consume_pushed_rows,
     .get_scrollback_cell = bvt_back_get_scrollback_cell,
     .get_grapheme = bvt_back_get_grapheme,
+    .get_hyperlink = bvt_back_get_hyperlink,
     .is_altscreen = bvt_back_is_altscreen,
     .get_mouse_mode = bvt_back_get_mouse_mode,
     .send_mouse_event = bvt_back_send_mouse_event,

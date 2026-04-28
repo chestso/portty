@@ -121,6 +121,12 @@ typedef struct
     TimerId cursor_blink_timer;
     bool cursor_blink_visible;
     bool has_focus;
+
+    // Cached system cursors for OSC-8 hyperlink hover. Created lazily on
+    // first set_cursor call; freed in sdl3_plat_destroy.
+    SDL_Cursor *cursor_text;
+    SDL_Cursor *cursor_pointer;
+    PlatformCursor current_cursor;
 } SDL3PlatformData;
 
 // Convert SDL modifier flags to TERM_MOD_* flags
@@ -239,6 +245,8 @@ static void sdl3_pause_pty(PlatformBackend *plat);
 static void sdl3_resume_pty(PlatformBackend *plat);
 static float sdl3_get_display_scale(PlatformBackend *plat);
 static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height);
+static bool sdl3_open_url(PlatformBackend *plat, const char *url);
+static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
@@ -262,6 +270,8 @@ PlatformBackend platform_backend_sdl3 = {
     .resume_pty = sdl3_resume_pty,
     .get_display_scale = sdl3_get_display_scale,
     .get_display_size = sdl3_get_display_size,
+    .open_url = sdl3_open_url,
+    .set_cursor = sdl3_set_cursor,
 };
 
 // PTY reader thread function
@@ -648,6 +658,16 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
         ctx->wakeup_pipe[1] = -1;
     }
 #endif
+
+    // Destroy cached cursors
+    if (ctx->cursor_text) {
+        SDL_DestroyCursor(ctx->cursor_text);
+        ctx->cursor_text = NULL;
+    }
+    if (ctx->cursor_pointer) {
+        SDL_DestroyCursor(ctx->cursor_pointer);
+        ctx->cursor_pointer = NULL;
+    }
 
     // Destroy SDL resources
     if (ctx->sdl_renderer) {
@@ -1163,4 +1183,38 @@ static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height
     if (height)
         *height = bounds.h;
     return true;
+}
+
+static bool sdl3_open_url(PlatformBackend *plat, const char *url)
+{
+    (void)plat;
+    if (!url)
+        return false;
+    /* SDL_OpenURL fronts xdg-open / open / ShellExecute on the host OS. */
+    return SDL_OpenURL(url);
+}
+
+static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    if (ctx->current_cursor == cursor &&
+        ((cursor == PLATFORM_CURSOR_TEXT && ctx->cursor_text) ||
+         (cursor == PLATFORM_CURSOR_POINTER && ctx->cursor_pointer)))
+        return;
+
+    SDL_Cursor *c = NULL;
+    if (cursor == PLATFORM_CURSOR_POINTER) {
+        if (!ctx->cursor_pointer)
+            ctx->cursor_pointer = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_POINTER);
+        c = ctx->cursor_pointer;
+    } else {
+        if (!ctx->cursor_text)
+            ctx->cursor_text = SDL_CreateSystemCursor(SDL_SYSTEM_CURSOR_TEXT);
+        c = ctx->cursor_text;
+    }
+    if (c)
+        SDL_SetCursor(c);
+    ctx->current_cursor = cursor;
 }

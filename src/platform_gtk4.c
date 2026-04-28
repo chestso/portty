@@ -1355,6 +1355,8 @@ static void gtk4_resume_pty(PlatformBackend *plat);
 static char *gtk4_get_default_font(PlatformBackend *plat);
 static float gtk4_get_display_scale(PlatformBackend *plat);
 static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height);
+static bool gtk4_open_url(PlatformBackend *plat, const char *url);
+static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -1380,6 +1382,8 @@ PlatformBackend platform_backend_gtk4 = {
     .get_default_font = gtk4_get_default_font,
     .get_display_scale = gtk4_get_display_scale,
     .get_display_size = gtk4_get_display_size,
+    .open_url = gtk4_open_url,
+    .set_cursor = gtk4_set_cursor,
 };
 
 static bool gtk4_plat_init(PlatformBackend *plat)
@@ -2212,6 +2216,36 @@ static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height
     if (height)
         *height = geom.height * scale;
     return true;
+}
+
+static bool gtk4_open_url(PlatformBackend *plat, const char *url)
+{
+    (void)plat;
+    if (!url)
+        return false;
+    /* g_app_info_launch_default_for_uri picks the user's preferred handler
+     * via xdg-mime / portals. Async to avoid blocking the GTK main loop. */
+    GError *error = NULL;
+    gboolean ok = g_app_info_launch_default_for_uri(url, NULL, &error);
+    if (!ok) {
+        fprintf(stderr, "ERROR: open URL failed: %s\n",
+                error ? error->message : "unknown");
+        if (error)
+            g_error_free(error);
+        return false;
+    }
+    return true;
+}
+
+static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (!ctx->drawing_area)
+        return;
+    const char *name = (cursor == PLATFORM_CURSOR_POINTER) ? "pointer" : "text";
+    gtk_widget_set_cursor_from_name(ctx->drawing_area, name);
 }
 
 __attribute__((visibility("default")))

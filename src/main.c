@@ -241,6 +241,41 @@ static void term_output_to_pty(const char *data, size_t len, void *user)
     }
 }
 
+// Resolve the OSC-8 hyperlink id at a pixel position. Returns 0 if no link
+// or out-of-bounds. Also returns the resolved (unified_row, vt_col) for
+// callers that want to fetch the URI without redoing the math.
+static uint16_t hyperlink_id_at(MainContext *ctx, int pixel_x, int pixel_y,
+                                int *out_unified_row, int *out_vt_col)
+{
+    int display_row, display_col;
+    if (!pixel_to_cell(ctx, pixel_x, pixel_y, &display_row, &display_col))
+        return 0;
+    int term_rows, term_cols;
+    terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
+    if (display_row < 0 || display_row >= term_rows ||
+        display_col < 0 || display_col >= term_cols)
+        return 0;
+    int unified_row = display_row_to_unified(ctx->rend, display_row);
+    int vt_col = terminal_vis_col_to_vt_col(ctx->term, unified_row, display_col);
+    if (vt_col < 0)
+        vt_col = 0;
+    if (vt_col >= term_cols)
+        vt_col = term_cols - 1;
+
+    TerminalCell cell;
+    int rc = (unified_row >= 0)
+                 ? terminal_get_cell(ctx->term, unified_row, vt_col, &cell)
+                 : terminal_get_scrollback_cell(ctx->term, -(unified_row + 1),
+                                                vt_col, &cell);
+    if (rc < 0)
+        return 0;
+    if (out_unified_row)
+        *out_unified_row = unified_row;
+    if (out_vt_col)
+        *out_vt_col = vt_col;
+    return cell.hyperlink_id;
+}
+
 // Mouse callback — mod uses TERM_MOD_* flags (platform-independent)
 static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool pressed,
                      int clicks, int mod)
@@ -249,6 +284,40 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
     int mouse_mode = terminal_get_mouse_mode(ctx->term);
     bool shift_held = (mod & TERM_MOD_SHIFT) != 0;
+
+    // OSC-8 hyperlink hover: only meaningful when the terminal is not
+    // forwarding mouse events to the running app (or Shift overrides).
+    // We update the cursor + hover-id and trigger a redraw on changes.
+    bool hover_changed = false;
+    if (mouse_mode == 0 || shift_held) {
+        int link_row, link_col;
+        uint16_t hid = hyperlink_id_at(ctx, pixel_x, pixel_y, &link_row, &link_col);
+        uint16_t prev = terminal_hovered_hyperlink(ctx->term);
+        if (hid != prev) {
+            terminal_set_hovered_hyperlink(ctx->term, hid);
+            platform_set_cursor(ctx->plat,
+                                hid != 0 ? PLATFORM_CURSOR_POINTER
+                                         : PLATFORM_CURSOR_TEXT);
+            hover_changed = true;
+        }
+
+        // Ctrl + left-click on a link cell: open URL, swallow the event so
+        // it does not start a selection.
+        if (hid != 0 && button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
+            char url[4096];
+            size_t n = terminal_cell_get_hyperlink(ctx->term, link_row,
+                                                   link_col, url, sizeof(url));
+            if (n > 0 && terminal_hyperlink_is_safe(url)) {
+                vlog("Opening OSC-8 URL: %s\n", url);
+                if (!platform_open_url(ctx->plat, url))
+                    fprintf(stderr, "ERROR: failed to open URL\n");
+            } else if (n > 0) {
+                fprintf(stderr, "WARNING: refusing to open URL with disallowed scheme: %s\n",
+                        url);
+            }
+            return true;
+        }
+    }
 
     // Forward to terminal if mouse mode is active and Shift is not held
     if (mouse_mode > 0 && !shift_held) {
@@ -394,7 +463,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
         return true;
     }
 
-    return false;
+    return hover_changed;
 }
 
 int main(int argc, char *argv[])

@@ -14,6 +14,13 @@ typedef struct PlatformBackend PlatformBackend;
 struct PlatformCallbacks;
 typedef struct PlatformCallbacks PlatformCallbacks;
 
+// Cursor shape requested by the application (for hyperlink hover, etc.)
+typedef enum
+{
+    PLATFORM_CURSOR_TEXT = 0,
+    PLATFORM_CURSOR_POINTER,
+} PlatformCursor;
+
 // Result from keyboard callbacks — bytes to write to PTY
 typedef struct
 {
@@ -106,6 +113,13 @@ struct PlatformBackend
     // Get usable display size in physical pixels. Returns false if unknown.
     bool (*get_display_size)(PlatformBackend *plat, int *width, int *height);
 
+    // Open a URL with the system's default handler. Returns true on
+    // success. Implementations: SDL_OpenURL on SDL3, gtk_show_uri on GTK4.
+    bool (*open_url)(PlatformBackend *plat, const char *url);
+
+    // Set the mouse cursor shape. Used for OSC-8 hyperlink hover.
+    void (*set_cursor)(PlatformBackend *plat, PlatformCursor cursor);
+
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
 };
@@ -141,5 +155,8 @@ void platform_resume_pty(PlatformBackend *plat);
 char *platform_get_default_font(PlatformBackend *plat);
 float platform_get_display_scale(PlatformBackend *plat);
 bool platform_get_display_size(PlatformBackend *plat, int *width, int *height);
+
+bool platform_open_url(PlatformBackend *plat, const char *url);
+void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 
 #endif /* PLATFORM_H */

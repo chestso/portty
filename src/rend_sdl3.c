@@ -60,6 +60,15 @@ typedef struct
 #define UNDERLINE_COLOR_B CURSOR_COLOR_B
 #define UNDERLINE_COLOR_A 255
 
+// OSC-8 hyperlink underline: idle is a faint dotted Charm-purple line under
+// the cell so the user can see linked text exists without clutter; hover
+// brightens to full opacity across the whole run sharing the same id.
+#define HYPERLINK_COLOR_R     CURSOR_COLOR_R
+#define HYPERLINK_COLOR_G     CURSOR_COLOR_G
+#define HYPERLINK_COLOR_B     CURSOR_COLOR_B
+#define HYPERLINK_IDLE_ALPHA  110
+#define HYPERLINK_HOVER_ALPHA 255
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================
@@ -1808,6 +1817,75 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 }
             }
         }
+        // Pass 3b: draw OSC-8 hyperlink underlines. Coalesce by hyperlink_id
+        // so a single link with adjacent cells sharing the same id renders
+        // as one continuous run. Idle is a faint dotted Charm-purple line
+        // sitting one pixel below the SGR underline slot; hover (when the
+        // cell's id matches the terminal-tracked hovered_hyperlink_id)
+        // upgrades the same span to a solid full-alpha line.
+        if (!populate_only) {
+            uint16_t hovered = terminal_hovered_hyperlink(term);
+            terminal_row_iter_init(&it, term, unified_row, display_cols);
+            int vis_run_start = -1;
+            int vis_run_end = 0;
+            uint16_t run_id = 0;
+            while (terminal_row_iter_next(&it)) {
+                uint16_t hid = it.cell.hyperlink_id;
+                bool same_run = (run_id != 0 && hid == run_id);
+                if (run_id != 0 && !same_run) {
+                    // Flush current run
+                    float pd = data->content_scale;
+                    int thickness = (int)roundf(1.0f * pd);
+                    if (thickness < 1)
+                        thickness = 1;
+                    int cell_y = data->pad_top + row * data->cell_height;
+                    int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
+                    if (link_y + thickness > cell_y + data->cell_height)
+                        link_y = cell_y + data->cell_height - thickness;
+                    int run_x = data->pad_left + vis_run_start * data->cell_width;
+                    int run_w = (vis_run_end - vis_run_start) * data->cell_width;
+                    bool hover = (run_id == hovered);
+                    Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
+                    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+                    SDL_SetRenderDrawColor(data->renderer, HYPERLINK_COLOR_R,
+                                           HYPERLINK_COLOR_G, HYPERLINK_COLOR_B, a);
+                    if (hover)
+                        draw_underline_single(data->renderer, run_x, link_y, run_w, pd);
+                    else
+                        draw_underline_dotted(data->renderer, run_x, link_y, run_w, pd);
+                    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+                    run_id = 0;
+                }
+                if (hid != 0 && run_id == 0) {
+                    vis_run_start = it.vis_col;
+                    run_id = hid;
+                }
+                vis_run_end = it.vis_col + it.pres_w;
+            }
+            if (run_id != 0) {
+                float pd = data->content_scale;
+                int thickness = (int)roundf(1.0f * pd);
+                if (thickness < 1)
+                    thickness = 1;
+                int cell_y = data->pad_top + row * data->cell_height;
+                int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
+                if (link_y + thickness > cell_y + data->cell_height)
+                    link_y = cell_y + data->cell_height - thickness;
+                int run_x = data->pad_left + vis_run_start * data->cell_width;
+                int run_w = (vis_run_end - vis_run_start) * data->cell_width;
+                bool hover = (run_id == hovered);
+                Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
+                SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+                SDL_SetRenderDrawColor(data->renderer, HYPERLINK_COLOR_R,
+                                       HYPERLINK_COLOR_G, HYPERLINK_COLOR_B, a);
+                if (hover)
+                    draw_underline_single(data->renderer, run_x, link_y, run_w, pd);
+                else
+                    draw_underline_dotted(data->renderer, run_x, link_y, run_w, pd);
+                SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+            }
+        }
+
         // Pass 4: draw strikethroughs as continuous spans across consecutive cells
         if (!populate_only) {
             terminal_row_iter_init(&it, term, unified_row, display_cols);
