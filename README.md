@@ -21,6 +21,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
+- OSC-8 hyperlinks — dotted Charm-purple underline at rest, solid on hover with pointer cursor; Ctrl+click opens via the system handler. Scheme allow-list (http/https/ftp/ftps/mailto) refuses `javascript:`, `data:`, `file://`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
@@ -154,13 +155,14 @@ build/src/bloom-terminal -P "😀" output.png
 
 ### Keyboard Shortcuts
 
-| Shortcut            | Action                                               |
-| ------------------- | ---------------------------------------------------- |
-| `Ctrl+C`            | Copy selection to clipboard (sends SIGINT otherwise) |
-| `Ctrl+Shift+C`      | Copy selection to clipboard                          |
-| `Ctrl+Shift+V`      | Paste from clipboard                                 |
-| `Shift+PageUp/Down` | Scroll through scrollback buffer                     |
-| Right-click         | Copy selection if active, otherwise paste            |
+| Shortcut             | Action                                               |
+| -------------------- | ---------------------------------------------------- |
+| `Ctrl+C`             | Copy selection to clipboard (sends SIGINT otherwise) |
+| `Ctrl+Shift+C`       | Copy selection to clipboard                          |
+| `Ctrl+Shift+V`       | Paste from clipboard                                 |
+| `Shift+PageUp/Down`  | Scroll through scrollback buffer                     |
+| Right-click          | Copy selection if active, otherwise paste            |
+| `Ctrl+click` on link | Open OSC-8 URL via the system handler                |
 
 ## Configuration
 
@@ -359,23 +361,9 @@ Then run bloom-terminal from the USB drive or copy it locally.
 
 ## Testing
 
-Unit tests are run via the Autotools test harness:
-
 ```bash
 cd build && make check
 ```
-
-Current test suites:
-
-- **test_atlas** — Glyph texture atlas: insert/lookup, shelf packing, staging buffer contents, spatial and load-factor eviction, plus regression tests for hash table overflow, probe chain corruption, and post-eviction staging bugs
-- **test_pty_pause** — PTY pause/resume during selection: platform wrapper delegation, pause on select, resume on clear/copy/resize, full select-copy cycles
-- **test_unicode** — Unicode helpers: emoji range detection, ZWJ, skin tone modifiers, regional indicators, UTF-8 decoding (ASCII, multibyte, 4-byte emoji, invalid input, truncation)
-- **test_conf** — Config parser: init defaults, font/geometry/hinting/boolean/word_chars/platform parsing, comments, unknown keys, section handling
-- **test_term_bvt** — `term_bvt.c` adapter: wrap-aware selection across the visible/scrollback boundary, resize reflow, arbitrary-length cluster round-trip via `terminal_cell_get_grapheme`
-
-Engine-level tests for the VT parser, kitty keyboard protocol, and PTY soak live in the bloom-vt repository now that bloom-vt is consumed as an external library.
-
-All tests support `-v` for verbose output. Visual testing of rendering and terminal features is done manually using example scripts.
 
 ## Development
 
