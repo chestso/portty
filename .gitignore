@@ -26,6 +26,7 @@ ltmain.sh
 
 # Build directories
 build/
+build-release/
 build-mingw64/
 build-osxcross/
 osxcross/
