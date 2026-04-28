@@ -43,9 +43,9 @@ typedef struct
 } LoadedFallbackFont;
 
 // Cursor color: Charm signature purple with slight transparency (RGBA)
-#define CURSOR_COLOR_R 0x7D
-#define CURSOR_COLOR_G 0x56
-#define CURSOR_COLOR_B 0xF4
+#define CURSOR_COLOR_R 0x6B
+#define CURSOR_COLOR_G 0x50
+#define CURSOR_COLOR_B 0xFF
 #define CURSOR_COLOR_A 220
 
 // Selection highlight color: muted Dracula comment-style (RGBA)
