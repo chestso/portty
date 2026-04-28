@@ -62,16 +62,14 @@ typedef struct
     int drag_start_col; // display col
 } MainContext;
 
-// Convert pixel coordinates to display row/col (accounting for padding)
+// Convert pixel coordinates to display row/col
 static bool pixel_to_cell(MainContext *ctx, int pixel_x, int pixel_y, int *out_row, int *out_col)
 {
     int cell_w, cell_h;
-    int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
     if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0)
         return false;
-    renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
-    *out_col = (pixel_x - pad_l) / cell_w;
-    *out_row = (pixel_y - pad_t) / cell_h;
+    *out_col = pixel_x / cell_w;
+    *out_row = pixel_y / cell_h;
     return true;
 }
 
@@ -213,11 +211,9 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
     renderer_resize(ctx->rend, pixel_w, pixel_h);
 
     int cell_w, cell_h;
-    int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
     if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h)) {
-        renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
-        int cols = (pixel_w - pad_l - pad_r) / cell_w;
-        int rows = (pixel_h - pad_t - pad_b) / cell_h;
+        int cols = pixel_w / cell_w;
+        int rows = pixel_h / cell_h;
         if (cols > 0 && rows > 0) {
             terminal_resize(ctx->term, cols, rows);
             pty_resize(ctx->pty, rows, cols);
@@ -334,13 +330,11 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
         if (should_forward) {
             int cell_w, cell_h;
-            int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
             if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 ||
                 cell_h <= 0)
                 return false;
-            renderer_get_padding(ctx->rend, &pad_l, &pad_t, &pad_r, &pad_b);
-            int col = (pixel_x - pad_l) / cell_w;
-            int row = (pixel_y - pad_t) / cell_h;
+            int col = pixel_x / cell_w;
+            int row = pixel_y / cell_h;
 
             int term_rows, term_cols;
             terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
@@ -504,7 +498,6 @@ int main(int argc, char *argv[])
     static struct option long_options[] = {
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
-        { "padding", no_argument, NULL, 'N' },
         { "gtk4", no_argument, NULL, 'G' },
         { "sdl3", no_argument, NULL, 'S' },
         { "demo", required_argument, NULL, 'd' },
@@ -513,8 +506,6 @@ int main(int argc, char *argv[])
         { "scrollback", required_argument, NULL, 's' },
         { NULL, 0, NULL, 0 }
     };
-
-    int padding = 0;
 
     /* Load config file (CLI flags below will override) */
     BloomConf conf;
@@ -534,8 +525,6 @@ int main(int argc, char *argv[])
                                         FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
         ft_hint_target = hint_map[conf.hinting];
     }
-    if (conf.padding == 1)
-        padding = 1;
     if (conf.platform && strcmp(conf.platform, "gtk4") == 0)
         use_gtk4 = 1;
     if (conf.scrollback >= 0)
@@ -599,9 +588,6 @@ int main(int argc, char *argv[])
             break;
         case 'D':
             colr_debug_path = optarg;
-            break;
-        case 'N':
-            padding = 1;
             break;
         case 'G':
             use_gtk4 = 1;
@@ -811,21 +797,14 @@ int main(int argc, char *argv[])
         }
         free(desktop_font);
 
-        // Disable padding unless --padding is passed
-        if (!padding) {
-            renderer_set_padding(rend, 0, 0, 0, 0);
-        }
-
-        // Derive window size from font cell dimensions plus padding
+        // Derive window size from font cell dimensions
         int cell_w, cell_h;
-        int pad_l = 0, pad_t = 0, pad_r = 0, pad_b = 0;
         int win_w = 800, win_h = 600;
         if (renderer_get_cell_size(rend, &cell_w, &cell_h)) {
-            renderer_get_padding(rend, &pad_l, &pad_t, &pad_r, &pad_b);
-            win_w = init_cols * cell_w + pad_l + pad_r;
-            win_h = init_rows * cell_h + pad_t + pad_b;
-            vlog("Derived window size from font: %dx%d (%d cols * %d px + %d pad, %d rows * %d px + %d pad)\n",
-                 win_w, win_h, init_cols, cell_w, pad_l + pad_r, init_rows, cell_h, pad_t + pad_b);
+            win_w = init_cols * cell_w;
+            win_h = init_rows * cell_h;
+            vlog("Derived window size from font: %dx%d (%d cols * %d px, %d rows * %d px)\n",
+                 win_w, win_h, init_cols, cell_w, init_rows, cell_h);
 
             // Clamp to display bounds so the WM doesn't have to force-resize
             int disp_w, disp_h;
@@ -835,14 +814,14 @@ int main(int argc, char *argv[])
                         win_w = disp_w;
                     if (win_h > disp_h)
                         win_h = disp_h;
-                    init_cols = (win_w - pad_l - pad_r) / cell_w;
-                    init_rows = (win_h - pad_t - pad_b) / cell_h;
+                    init_cols = win_w / cell_w;
+                    init_rows = win_h / cell_h;
                     if (init_cols < 1)
                         init_cols = 1;
                     if (init_rows < 1)
                         init_rows = 1;
-                    win_w = init_cols * cell_w + pad_l + pad_r;
-                    win_h = init_rows * cell_h + pad_t + pad_b;
+                    win_w = init_cols * cell_w;
+                    win_h = init_rows * cell_h;
                     vlog("Clamped to display %dx%d: %dx%d (%d cols, %d rows)\n",
                          disp_w, disp_h, win_w, win_h, init_cols, init_rows);
                     terminal_resize(term, init_cols, init_rows);
@@ -983,7 +962,6 @@ static void print_usage(const char *progname)
     printf("  -s, --scrollback N  Scrollback history lines (default: 1000, 0 to disable)\n");
     printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts  List available monospace fonts and exit\n");
-    printf("  --padding     Enable padding around terminal content\n");
     printf("  --gtk4        Use GTK4/libadwaita platform backend (native CSD)\n");
     printf("  --sdl3        Use SDL3 platform backend (overrides config file)\n");
     printf("  --demo TEXT Display TEXT in terminal without spawning a shell (for testing)\n");

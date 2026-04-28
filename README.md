@@ -148,7 +148,6 @@ build/src/bloom-terminal -P "😀" output.png
 | `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
 | `-L` / `--list-fonts`     | List available monospace fonts and exit                         |
 | `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)       |
-| `-N` / `--padding`        | Enable padding around terminal content                          |
 | `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                            |
 | `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)               |
 | `-d TEXT` / `--demo TEXT` | Display TEXT in terminal without spawning a shell (for testing) |
@@ -185,7 +184,6 @@ font = Cascadia Code-14
 geometry = 120x40
 hinting = light
 platform = gtk4
-padding = false
 verbose = false
 word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
 scrollback = 1000
@@ -201,7 +199,6 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `geometry`   | `COLSxROWS`                       | `80x24`        | Initial terminal dimensions                 |
 | `hinting`    | `none`, `light`, `normal`, `mono` | `light`        | FreeType hinting mode                       |
 | `platform`   | `sdl3`, `gtk4`                    | `sdl3`         | Platform backend                            |
-| `padding`    | `true`/`false`                    | `false`        | Padding around terminal content             |
 | `verbose`    | `true`/`false`                    | `false`        | Debug output                                |
 | `word_chars` | Character string                  | `A-Za-z0-9_-/` | Characters treated as word for double-click |
 | `scrollback` | Non-negative integer              | `1000`         | Scrollback history lines (0 disables)       |

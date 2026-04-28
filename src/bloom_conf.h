@@ -18,7 +18,6 @@ typedef struct
     int cols;              /* 0 = not set */
     int rows;              /* 0 = not set */
     BloomHintMode hinting; /* BLOOM_HINT_UNSET = not set */
-    int padding;           /* -1 = not set, 0 = false, 1 = true */
     int verbose;           /* -1 = not set, 0 = false, 1 = true */
     char *word_chars;      /* NULL = not set */
     char *platform;        /* NULL = not set; "sdl3" or "gtk4" */

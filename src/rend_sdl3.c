@@ -862,11 +862,6 @@ typedef struct RendererSdl3Data
     int width;
     int height;
     int scroll_offset;
-    // Padding around the terminal content area
-    int pad_left;
-    int pad_right;
-    int pad_top;
-    int pad_bottom;
 
     RendSdl3Atlas atlas;
 
@@ -922,10 +917,6 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->width = 0;
     data->height = 0;
     data->scroll_offset = 0;
-    data->pad_left = 0;
-    data->pad_right = 0;
-    data->pad_top = 0;
-    data->pad_bottom = 0;
     data->resolve = NULL;
     data->fallback_cache_count = 0;
     data->font_size = 0;
@@ -1140,20 +1131,12 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     data->cell_width = metrics->cell_width;
     data->cell_height = metrics->cell_height;
 
-    // Initialize padding values (1px left/right, half cell height top/bottom)
-    data->pad_left = 1;
-    data->pad_right = 1;
-    data->pad_top = data->cell_height / 2;
-    data->pad_bottom = data->cell_height / 2;
-
     vlog("Font metrics - ascent: %d, descent: %d\n",
          data->font_ascent, data->font_descent);
     vlog("Character dimensions - width: %d, height: %d\n",
          data->char_width, data->char_height);
     vlog("Cell dimensions - width: %d, height: %d\n",
          data->cell_width, data->cell_height);
-    vlog("Padding - left: %d, right: %d, top: %d, bottom: %d\n",
-         data->pad_left, data->pad_right, data->pad_top, data->pad_bottom);
 
     // Set target cell width on all loaded fonts so oversized glyphs are
     // scaled down during rasterization (before bitmap generation).
@@ -1372,8 +1355,8 @@ static void render_cell_bg(RendererSdl3Data *data, int row, int vis_col,
     if (pres_w <= 0)
         pres_w = 1;
     SDL_FRect bg_rect = {
-        (float)(data->pad_left + vis_col * data->cell_width),
-        (float)(data->pad_top + row * data->cell_height),
+        (float)(vis_col * data->cell_width),
+        (float)(row * data->cell_height),
         (float)(pres_w * data->cell_width),
         (float)data->cell_height
     };
@@ -1438,8 +1421,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (cp_count == 1 && rend_sdl3_boxdraw_is_supported(cps[0])) {
         if (!populate_only) {
             rend_sdl3_boxdraw_draw(data->renderer, cps[0],
-                                   data->pad_left + vis_col * data->cell_width,
-                                   data->pad_top + row * data->cell_height,
+                                   vis_col * data->cell_width,
+                                   row * data->cell_height,
                                    data->cell_width, data->cell_height, r, g, b);
         }
         goto render_cursor;
@@ -1485,8 +1468,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         vlog("render_cell: U+%04X style=%d emoji=%d cols=%d cell.w=%d\n",
              cps[0], style, emoji_render, columns_to_consume, cell.width);
 
-    int cell_x = data->pad_left + vis_col * data->cell_width;
-    int cell_y = data->pad_top + row * data->cell_height;
+    int cell_x = vis_col * data->cell_width;
+    int cell_y = row * data->cell_height;
     int avail_w = columns_to_consume * data->cell_width;
     int avail_h = data->cell_height;
 
@@ -1665,8 +1648,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
 render_cursor:
     if (!populate_only && show_cursor && row == cursor_pos.row && vt_col == cursor_pos.col) {
-        float cx = (float)(data->pad_left + vis_col * data->cell_width);
-        float cy = (float)(data->pad_top + row * data->cell_height);
+        float cx = (float)(vis_col * data->cell_width);
+        float cy = (float)(row * data->cell_height);
         float cw = (float)data->cell_width;
         float ch = (float)data->cell_height;
 
@@ -1683,8 +1666,8 @@ render_cursor:
         int scrollback_row = scroll_offset - 1 - row;
         int unified_row = (scrollback_row >= 0) ? -(scrollback_row + 1) : (row - scroll_offset);
         if (terminal_cell_in_selection(term, unified_row, vt_col)) {
-            float sx = (float)(data->pad_left + vis_col * data->cell_width);
-            float sy = (float)(data->pad_top + row * data->cell_height);
+            float sx = (float)(vis_col * data->cell_width);
+            float sy = (float)(row * data->cell_height);
             float sw = (float)(columns_to_consume * data->cell_width);
             float sh = (float)data->cell_height;
 
@@ -1747,11 +1730,11 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     int thickness = (int)roundf(1.0f * pd);
                     if (thickness < 1)
                         thickness = 1;
-                    int cell_y = data->pad_top + row * data->cell_height;
+                    int cell_y = row * data->cell_height;
                     int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
                     if (underline_y + thickness > cell_y + data->cell_height)
                         underline_y = cell_y + data->cell_height - thickness;
-                    int run_x = data->pad_left + vis_run_start * data->cell_width;
+                    int run_x = vis_run_start * data->cell_width;
                     int run_w = (vis_run_end - vis_run_start) * data->cell_width;
                     SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b,
                                            UNDERLINE_COLOR_A);
@@ -1790,11 +1773,11 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 int thickness = (int)roundf(1.0f * pd);
                 if (thickness < 1)
                     thickness = 1;
-                int cell_y = data->pad_top + row * data->cell_height;
+                int cell_y = row * data->cell_height;
                 int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
                 if (underline_y + thickness > cell_y + data->cell_height)
                     underline_y = cell_y + data->cell_height - thickness;
-                int run_x = data->pad_left + vis_run_start * data->cell_width;
+                int run_x = vis_run_start * data->cell_width;
                 int run_w = (vis_run_end - vis_run_start) * data->cell_width;
                 SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, UNDERLINE_COLOR_A);
                 switch (run_style) {
@@ -1838,11 +1821,11 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     int thickness = (int)roundf(1.0f * pd);
                     if (thickness < 1)
                         thickness = 1;
-                    int cell_y = data->pad_top + row * data->cell_height;
+                    int cell_y = row * data->cell_height;
                     int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
                     if (link_y + thickness > cell_y + data->cell_height)
                         link_y = cell_y + data->cell_height - thickness;
-                    int run_x = data->pad_left + vis_run_start * data->cell_width;
+                    int run_x = vis_run_start * data->cell_width;
                     int run_w = (vis_run_end - vis_run_start) * data->cell_width;
                     bool hover = (run_id == hovered);
                     Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
@@ -1867,11 +1850,11 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 int thickness = (int)roundf(1.0f * pd);
                 if (thickness < 1)
                     thickness = 1;
-                int cell_y = data->pad_top + row * data->cell_height;
+                int cell_y = row * data->cell_height;
                 int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
                 if (link_y + thickness > cell_y + data->cell_height)
                     link_y = cell_y + data->cell_height - thickness;
-                int run_x = data->pad_left + vis_run_start * data->cell_width;
+                int run_x = vis_run_start * data->cell_width;
                 int run_w = (vis_run_end - vis_run_start) * data->cell_width;
                 bool hover = (run_id == hovered);
                 Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
@@ -1900,9 +1883,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 if (in_run && !same_run) {
                     // Flush current run
                     float pd = data->content_scale;
-                    int cell_y = data->pad_top + row * data->cell_height;
+                    int cell_y = row * data->cell_height;
                     int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
-                    int run_x = data->pad_left + vis_run_start * data->cell_width;
+                    int run_x = vis_run_start * data->cell_width;
                     int run_w = (vis_run_end - vis_run_start) * data->cell_width;
                     SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, 255);
                     draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
@@ -1919,9 +1902,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
             }
             if (in_run) {
                 float pd = data->content_scale;
-                int cell_y = data->pad_top + row * data->cell_height;
+                int cell_y = row * data->cell_height;
                 int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
-                int run_x = data->pad_left + vis_run_start * data->cell_width;
+                int run_x = vis_run_start * data->cell_width;
                 int run_w = (vis_run_end - vis_run_start) * data->cell_width;
                 SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, 255);
                 draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
@@ -1989,17 +1972,17 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
         int screen_row = img->cursor_row + data->scroll_offset;
 
         // Pixel position on screen
-        int px = data->pad_left + img->cursor_col * data->cell_width;
-        int py = data->pad_top + screen_row * data->cell_height;
+        int px = img->cursor_col * data->cell_width;
+        int py = screen_row * data->cell_height;
 
         // Skip if completely off-screen
-        if (py + img->height <= data->pad_top)
+        if (py + img->height <= 0)
             continue;
-        if (py >= data->height - data->pad_bottom)
+        if (py >= data->height)
             continue;
-        if (px + img->width <= data->pad_left)
+        if (px + img->width <= 0)
             continue;
-        if (px >= data->width - data->pad_right)
+        if (px >= data->width)
             continue;
 
         SDL_Texture *tex = sixel_get_texture(data, img);
@@ -2028,8 +2011,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
 
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
-    int display_rows = (data->height - data->pad_top - data->pad_bottom) / data->cell_height;
-    int display_cols = (data->width - data->pad_left - data->pad_right) / data->cell_width;
+    int display_rows = data->height / data->cell_height;
+    int display_cols = data->width / data->cell_width;
     if (display_rows > term_rows)
         display_rows = term_rows;
     if (display_cols > term_cols)
@@ -2103,31 +2086,6 @@ static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *c
     *cell_width = data->cell_width;
     *cell_height = data->cell_height;
     return true;
-}
-
-static bool sdl3_get_padding(RendererBackend *backend, int *left, int *top, int *right, int *bottom)
-{
-    if (!backend || !backend->backend_data)
-        return false;
-    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-    *left = data->pad_left;
-    *top = data->pad_top;
-    *right = data->pad_right;
-    *bottom = data->pad_bottom;
-    return true;
-}
-
-static void sdl3_set_padding(RendererBackend *backend, int left, int top, int right, int bottom)
-{
-    if (!backend || !backend->backend_data)
-        return;
-    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-    data->pad_left = left;
-    data->pad_top = top;
-    data->pad_right = right;
-    data->pad_bottom = bottom;
-    vlog("Padding set to - left: %d, right: %d, top: %d, bottom: %d\n",
-         left, right, top, bottom);
 }
 
 static void sdl3_scroll(RendererBackend *backend, TerminalBackend *term, int delta)
@@ -2312,8 +2270,6 @@ RendererBackend renderer_backend_sdl3 = {
     .resize = sdl3_resize,
     .log_stats = sdl3_log_stats,
     .get_cell_size = sdl3_get_cell_size,
-    .get_padding = sdl3_get_padding,
-    .set_padding = sdl3_set_padding,
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,

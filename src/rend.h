@@ -25,8 +25,6 @@ struct RendererBackend
     void (*resize)(RendererBackend *rend, int width, int height);
     void (*log_stats)(RendererBackend *rend);
     bool (*get_cell_size)(RendererBackend *rend, int *cell_width, int *cell_height);
-    bool (*get_padding)(RendererBackend *rend, int *left, int *top, int *right, int *bottom);
-    void (*set_padding)(RendererBackend *rend, int left, int top, int right, int bottom);
     void (*scroll)(RendererBackend *rend, TerminalBackend *term, int delta);
     void (*reset_scroll)(RendererBackend *rend);
     int (*get_scroll_offset)(RendererBackend *rend);
@@ -44,8 +42,6 @@ void renderer_present(RendererBackend *rend);
 void renderer_resize(RendererBackend *rend, int width, int height);
 void renderer_log_stats(RendererBackend *rend);
 bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_height);
-bool renderer_get_padding(RendererBackend *rend, int *left, int *top, int *right, int *bottom);
-void renderer_set_padding(RendererBackend *rend, int left, int top, int right, int bottom);
 void renderer_scroll(RendererBackend *rend, TerminalBackend *term, int delta);
 void renderer_reset_scroll(RendererBackend *rend);
 int renderer_get_scroll_offset(RendererBackend *rend);

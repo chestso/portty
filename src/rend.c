@@ -62,20 +62,6 @@ bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_he
     return rend->get_cell_size(rend, cell_width, cell_height);
 }
 
-bool renderer_get_padding(RendererBackend *rend, int *left, int *top, int *right, int *bottom)
-{
-    if (!rend || !rend->get_padding)
-        return false;
-    return rend->get_padding(rend, left, top, right, bottom);
-}
-
-void renderer_set_padding(RendererBackend *rend, int left, int top, int right, int bottom)
-{
-    if (!rend || !rend->set_padding)
-        return;
-    rend->set_padding(rend, left, top, right, bottom);
-}
-
 void renderer_scroll(RendererBackend *rend, TerminalBackend *term, int delta)
 {
     if (!rend || !rend->scroll)

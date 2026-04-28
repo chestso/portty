@@ -86,7 +86,6 @@ void bloom_conf_init(BloomConf *conf)
     conf->cols = 0;
     conf->rows = 0;
     conf->hinting = BLOOM_HINT_UNSET;
-    conf->padding = -1;
     conf->verbose = -1;
     conf->word_chars = NULL;
     conf->platform = NULL;
@@ -166,12 +165,6 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
                         "WARNING: %s:%d: invalid hinting '%s' (use none, light, normal, mono)\n",
                         path, lineno, val);
             }
-        } else if (strcmp(key, "padding") == 0) {
-            int b = parse_bool(val);
-            if (b < 0)
-                fprintf(stderr, "WARNING: %s:%d: invalid boolean '%s'\n", path, lineno, val);
-            else
-                conf->padding = b;
         } else if (strcmp(key, "verbose") == 0) {
             int b = parse_bool(val);
             if (b < 0)
@@ -207,10 +200,10 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
 
     fclose(fp);
 
-    vlog("Config: font=%s cols=%d rows=%d hinting=%d padding=%d verbose=%d"
+    vlog("Config: font=%s cols=%d rows=%d hinting=%d verbose=%d"
          " word_chars=%s platform=%s scrollback=%d\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
-         conf->padding, conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
+         conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
          conf->platform ? conf->platform : "(unset)", conf->scrollback);
 
     return true;
