@@ -50,13 +50,6 @@ typedef struct
     int target_cell_width;  // Base monospace cell width in pixels (0 = no constraint)
     int presentation_width; // Per-render target width in pixels (0 = use target_cell_width)
 
-    // Set by ft_render_glyph before delegating to rasterize_glyph_index, so
-    // the rasterizer can decide whether a primary-font overflow should be
-    // scaled (symbols/emoji) or left to the renderer to clip (text). 0 when
-    // the rasterizer is entered without a known codepoint (e.g. shaped runs,
-    // COLR sub-glyphs).
-    uint32_t current_codepoint;
-
     // Font rendering options
     int ft_hint_target; // FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT, _NORMAL, or _MONO
     int dpi_x;          // Horizontal DPI for HiDPI support

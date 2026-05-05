@@ -1500,6 +1500,12 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     uint32_t color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
                                      : 0xFFFFFF;
     bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
+    // Route symbol/emoji cells through the box-filter downscale path so
+    // oversized dingbats (Noto Sans Mono ✶ etc.) get smoothly fitted into
+    // the cell instead of being pre-scaled by FreeType and then upscaled
+    // again at blit time.
+    bool symbol_cell = (cp_count > 0 && (is_emoji_presentation(cps[0]) || is_regional));
+    bool downscale_glyph = (emoji_render && color_baked) || symbol_cell;
 
     // For regional indicators, cache at square size for consistent high-quality scaling
     int cache_w = avail_w;
@@ -1562,7 +1568,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                            render_r, render_g, render_b);
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
-                                            gb, emoji_render && color_baked,
+                                            gb, downscale_glyph,
                                             cache_w, cache_h);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
@@ -1639,7 +1645,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
                                                     : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
-                                    glyph_bitmap, emoji_render && color_baked,
+                                    glyph_bitmap, downscale_glyph,
                                     cache_w, cache_h);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (atlas_glyph_id != 0) {

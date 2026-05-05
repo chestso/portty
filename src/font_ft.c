@@ -10,7 +10,6 @@
 #include "common.h"
 #include "font.h"
 #include "font_ft_internal.h"
-#include "unicode.h"
 #include <hb-ft.h>
 #include <hb.h>
 #include <math.h>
@@ -859,10 +858,7 @@ static GlyphBitmap *ft_render_glyph(FontBackend *font, void *font_data,
         return NULL;
     }
 
-    ft_data->current_codepoint = codepoint;
-    GlyphBitmap *out = rasterize_glyph_index(ft_data, glyph_index, fg_r, fg_g, fg_b);
-    ft_data->current_codepoint = 0;
-    return out;
+    return rasterize_glyph_index(ft_data, glyph_index, fg_r, fg_g, fg_b);
 }
 
 // Helper: rasterize a glyph by glyph index
@@ -967,19 +963,18 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     int bearing_x = (int)(slot_pre->metrics.horiBearingX >> 6);
     int glyph_extent = bearing_x + ink_width; // rightmost pixel
     double glyph_scale = 0.0;                 // non-zero when glyph was scaled down
-    // presentation_width is the per-render pixel budget (e.g. 2*cell_width
-    // for CJK); target_cell_width is the base monospace cell width.
-    // Scale when:
-    //   - style is fallback (CJK etc. via fontconfig fallback), or
-    //   - the codepoint is a symbol/emoji whose font glyph (Noto Sans Mono
-    //     dingbats, etc.) overflows the cell. Plain text glyphs (ASCII bold)
-    //     are intentionally left to the renderer to clip so stroke weight is
-    //     preserved.
+    // CJK fallback: pre-scale via FreeType so the rasterized glyph fits the
+    // cell at high quality and stays baseline-aware.
+    // Symbols/emoji are intentionally not pre-scaled here — the renderer
+    // routes them through its CPU box-filter downscale (same path color
+    // emoji use), which gives a softer result than re-rasterizing at a
+    // non-design-grid size.
+    // Plain text glyphs (ASCII bold) that overflow are left to the renderer
+    // to clip so stroke weight is preserved.
     bool is_fallback = (ft_data->style == FONT_STYLE_FALLBACK);
-    bool is_symbol = ft_data->current_codepoint != 0 && is_emoji_presentation(ft_data->current_codepoint);
     int target = ft_data->presentation_width > 0 ? ft_data->presentation_width
                                                  : ft_data->target_cell_width;
-    if ((is_fallback || is_symbol) && target > 0 && glyph_extent > target) {
+    if (is_fallback && target > 0 && glyph_extent > target) {
         glyph_scale = (double)target / glyph_extent;
         FT_Fixed scale_16_16 = (FT_Fixed)(glyph_scale * 0x10000);
         FT_Matrix matrix = { scale_16_16, 0, 0, scale_16_16 };
