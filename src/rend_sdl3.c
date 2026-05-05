@@ -1190,7 +1190,7 @@ static bool is_color_font(FontBackend *font, FontStyle style)
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                        RendSdl3AtlasEntry *entry,
                        int cell_x, int cell_y, int glyph_x_offset, int glyph_y_offset,
-                       int avail_w, int avail_h, int font_ascent, bool is_regional,
+                       int avail_w, int avail_h, int font_ascent,
                        bool color_baked, uint8_t mod_r, uint8_t mod_g, uint8_t mod_b)
 {
     if (!entry || entry->region.w <= 0)
@@ -1200,30 +1200,14 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                       (float)entry->region.w, (float)entry->region.h };
     SDL_FRect dst;
     if (entry->centered) {
-        // Cell-center placement, used for color emoji (rasterized at native
-        // size) and for symbol/emoji glyphs that the rasterizer pre-scaled
-        // to fit the cell width. fminf collapses to ~1.0 for pre-fit
-        // bitmaps, so no double-scaling occurs.
-        float glyph_w = (float)entry->region.w;
-        float glyph_h = (float)entry->region.h;
-        float scaled_w, scaled_h;
-
-        if (is_regional) {
-            // Regional indicators: scale uniformly to fit within a square,
-            // preserving aspect ratio.
-            float side = fminf((float)avail_w, (float)avail_h);
-            float scale = fminf(side / glyph_w, side / glyph_h);
-            scaled_w = fminf(glyph_w * scale, side);
-            scaled_h = fminf(glyph_h * scale, side);
-        } else {
-            float scale = fminf((float)avail_w / glyph_w, (float)avail_h / glyph_h);
-            scaled_w = glyph_w * scale;
-            scaled_h = glyph_h * scale;
-        }
+        // Cell-center placement. The atlas bitmap is already at its final
+        // display size: cache_glyph runs the box-filter when the rasterized
+        // glyph overflows the cell, and small glyphs stay on their native
+        // pixel grid. Blit is always 1:1 — no GPU scaling.
         dst = (SDL_FRect){
-            floorf((float)cell_x + ((float)avail_w - scaled_w) * 0.5f),
-            floorf((float)cell_y + ((float)avail_h - scaled_h) * 0.5f),
-            scaled_w, scaled_h
+            floorf((float)cell_x + ((float)avail_w - (float)entry->region.w) * 0.5f),
+            floorf((float)cell_y + ((float)avail_h - (float)entry->region.h) * 0.5f),
+            (float)entry->region.w, (float)entry->region.h
         };
     } else {
         // Trust FreeType's bitmap bounds: anchor at cell_x + bitmap_left and
@@ -1581,7 +1565,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     blit_glyph(data->renderer, &data->atlas, entry,
                                cell_x, cell_y, x_off,
                                y_off, avail_w, avail_h, data->font_ascent,
-                               is_regional, color_baked, r, g, b);
+                               color_baked, r, g, b);
                 }
             }
             free(shaped->glyph_ids);
@@ -1656,7 +1640,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             blit_glyph(data->renderer, &data->atlas, entry,
                        cell_x, cell_y,
                        entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
-                       avail_w, avail_h, data->font_ascent, is_regional,
+                       avail_w, avail_h, data->font_ascent,
                        color_baked, r, g, b);
     }
 
