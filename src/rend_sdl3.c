@@ -1485,10 +1485,18 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                      : 0xFFFFFF;
     bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
     // Route symbol/emoji cells through the box-filter downscale path so
-    // oversized dingbats (Noto Sans Mono ✶ etc.) get smoothly fitted into
-    // the cell instead of being pre-scaled by FreeType and then upscaled
-    // again at blit time.
-    bool symbol_cell = (cp_count > 0 && (is_emoji_presentation(cps[0]) || is_regional));
+    // oversized dingbats (Noto Sans Mono ✶, ▽ etc.) get smoothly fitted
+    // into the cell. Box Drawing (0x2500-0x257F) and Block Elements
+    // (0x2580-0x259F) are handled procedurally elsewhere; the ranges
+    // below are the symbol blocks that go through font rasterization.
+    bool symbol_cell = false;
+    if (cp_count > 0) {
+        uint32_t cp = cps[0];
+        symbol_cell = is_emoji_presentation(cp) || is_regional || (cp >= 0x2300 && cp <= 0x23FF) // Misc Technical
+                      || (cp >= 0x25A0 && cp <= 0x25FF)                                          // Geometric Shapes
+                      || (cp >= 0x2900 && cp <= 0x297F)                                          // Supplemental Arrows-B
+                      || (cp >= 0x2B00 && cp <= 0x2BFF);                                         // Misc Symbols and Arrows
+    }
     bool downscale_glyph = (emoji_render && color_baked) || symbol_cell;
 
     // For regional indicators, cache at square size for consistent high-quality scaling
