@@ -1168,6 +1168,10 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
         vlog("Cache emoji glyph %u: bitmap=%dx%d max=%dx%d\n",
              glyph_id, bitmap->width, bitmap->height, max_w, max_h);
         scaled = downscale_bitmap(bitmap, max_w, max_h);
+        // Color emoji are placed by cell-center, not baseline.
+        bitmap->centered = true;
+        if (scaled)
+            scaled->centered = true;
     }
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
                                    scaled ? scaled : bitmap);
@@ -1184,7 +1188,7 @@ static bool is_color_font(FontBackend *font, FontStyle style)
 }
 
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
-                       RendSdl3AtlasEntry *entry, bool emoji_centered,
+                       RendSdl3AtlasEntry *entry,
                        int cell_x, int cell_y, int glyph_x_offset, int glyph_y_offset,
                        int avail_w, int avail_h, int font_ascent, bool is_regional,
                        bool color_baked, uint8_t mod_r, uint8_t mod_g, uint8_t mod_b)
@@ -1195,14 +1199,18 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
     SDL_FRect src = { (float)entry->region.x, (float)entry->region.y,
                       (float)entry->region.w, (float)entry->region.h };
     SDL_FRect dst;
-    if (emoji_centered) {
+    if (entry->centered) {
+        // Cell-center placement, used for color emoji (rasterized at native
+        // size) and for symbol/emoji glyphs that the rasterizer pre-scaled
+        // to fit the cell width. fminf collapses to ~1.0 for pre-fit
+        // bitmaps, so no double-scaling occurs.
         float glyph_w = (float)entry->region.w;
         float glyph_h = (float)entry->region.h;
         float scaled_w, scaled_h;
 
         if (is_regional) {
             // Regional indicators: scale uniformly to fit within a square,
-            // preserving aspect ratio and centering within the cell
+            // preserving aspect ratio.
             float side = fminf((float)avail_w, (float)avail_h);
             float scale = fminf(side / glyph_w, side / glyph_h);
             scaled_w = fminf(glyph_w * scale, side);
@@ -1565,7 +1573,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
                     int y_off = entry ? entry->y_offset : 0;
                     blit_glyph(data->renderer, &data->atlas, entry,
-                               emoji_render && color_baked, cell_x, cell_y, x_off,
+                               cell_x, cell_y, x_off,
                                y_off, avail_w, avail_h, data->font_ascent,
                                is_regional, color_baked, r, g, b);
                 }
@@ -1640,7 +1648,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         }
         if (!populate_only)
             blit_glyph(data->renderer, &data->atlas, entry,
-                       emoji_render && color_baked, cell_x, cell_y,
+                       cell_x, cell_y,
                        entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
                        avail_w, avail_h, data->font_ascent, is_regional,
                        color_baked, r, g, b);

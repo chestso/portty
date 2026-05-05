@@ -247,6 +247,7 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
     slot->region = region;
     slot->x_offset = bmp->x_offset;
     slot->y_offset = bmp->y_offset;
+    slot->centered = bmp->centered;
     slot->last_used_frame = atlas->current_frame;
     slot->occupied = true;
     atlas->entry_count++;

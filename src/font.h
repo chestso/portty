@@ -35,10 +35,13 @@ typedef struct GlyphBitmap
     uint8_t *pixels; // RGBA format, 4 bytes per pixel
     int width;
     int height;
-    int x_offset; // Horizontal offset from cell origin
-    int y_offset; // Vertical offset from baseline
-    int advance;  // Horizontal advance to next glyph
-    int glyph_id; // Underlying font glyph id (if available)
+    int x_offset;  // Horizontal offset from cell origin
+    int y_offset;  // Vertical offset from baseline
+    int advance;   // Horizontal advance to next glyph
+    int glyph_id;  // Underlying font glyph id (if available)
+    bool centered; // Place by cell-center (ignore baseline). Set when the
+                   // rasterizer scaled the glyph to fit, so the renderer
+                   // shouldn't re-anchor against an already-scaled bitmap_top.
 } GlyphBitmap;
 
 // Font options structure

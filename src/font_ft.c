@@ -1023,12 +1023,16 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     glyph_bitmap->y_offset = slot->bitmap_top;
     glyph_bitmap->advance = (int)(slot->advance.x >> 6);
     glyph_bitmap->glyph_id = glyph_index;
+    glyph_bitmap->centered = false;
 
-    // When the glyph was scaled down via FT_Set_Transform, FreeType's
-    // bitmap_top is already correctly scaled to preserve baseline alignment.
-    // Only center horizontally within the available pixel budget.
+    // When the glyph was scaled down via FT_Set_Transform, baseline-relative
+    // placement no longer makes sense (the scaled bitmap_top would anchor a
+    // shrunken glyph against the original baseline, parking it low in the
+    // cell). Mark it for cell-centered placement and let the renderer drop
+    // the baseline arithmetic for this entry.
     if (glyph_scale > 0.0) {
         glyph_bitmap->x_offset = (target - (int)bitmap->width) / 2;
+        glyph_bitmap->centered = true;
     }
 
     glyph_bitmap->pixels = malloc(glyph_bitmap->width * glyph_bitmap->height * 4);

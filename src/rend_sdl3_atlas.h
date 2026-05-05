@@ -31,6 +31,7 @@ typedef struct
     int x_offset, y_offset;
     uint64_t last_used_frame;
     bool occupied;
+    bool centered; // Forwarded from GlyphBitmap.centered.
 } RendSdl3AtlasEntry;
 
 typedef struct
