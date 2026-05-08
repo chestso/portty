@@ -559,9 +559,13 @@ char *terminal_selection_get_text(TerminalBackend *term)
         int col_start = (row == sel->start.row) ? sel->start.col : 0;
         int col_end = (row == sel->end.row) ? sel->end.col : cols - 1;
 
-        // Track last non-whitespace position for trailing whitespace stripping
+        // Track last non-whitespace position for trailing whitespace stripping.
+        // "Whitespace" here means both NULL cells (cp=0, emitted as ' ') and
+        // real space cells (cp=0x20). TUIs frequently paint full-width
+        // backgrounds with cp=0x20 styled cells; those would otherwise leak
+        // into the clipboard as a long run of trailing spaces.
         size_t row_start_pos = pos;
-        size_t last_nonspace_pos = row_start_pos;
+        size_t last_nonblank_pos = row_start_pos;
 
         // Walk by cell width: width=2 cells advance by 2 (skipping their
         // continuation half), so we never land on a wide-char right half.
@@ -601,7 +605,8 @@ char *terminal_selection_get_text(TerminalBackend *term)
                         pos += n;
                     }
                 }
-                last_nonspace_pos = pos;
+                if (cell.cp != 0x20)
+                    last_nonblank_pos = pos;
                 col += (cell.width == 2) ? 2 : 1;
             }
         }
@@ -611,7 +616,7 @@ char *terminal_selection_get_text(TerminalBackend *term)
         bool next_is_continuation =
             row < sel->end.row && terminal_get_line_continuation(term, row + 1);
         if (!next_is_continuation)
-            pos = last_nonspace_pos;
+            pos = last_nonblank_pos;
 
         // Add newline between rows only if next row is NOT a soft-wrap continuation
         if (row < sel->end.row && pos < buf_size - 1) {

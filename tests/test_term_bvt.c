@@ -288,6 +288,62 @@ static void test_hyperlink_hover_state(void)
     terminal_destroy(&t);
 }
 
+/* Selecting a full row that ends in NULL cells (no soft-wrap) must drop the
+ * trailing run rather than padding the clipboard with spaces. */
+static void test_selection_strips_trailing_null_cells(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    feed(&t, "hi");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 19);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "hi");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
+/* TUIs paint full-width regions by writing real space cells (cp=0x20) with a
+ * styled background — those land as ordinary content but should still be
+ * stripped on copy at hard line boundaries, the same way trailing NULLs are. */
+static void test_selection_strips_trailing_real_spaces(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    feed(&t, "hi                  ");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 19);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "hi");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
+/* Trailing-strip must not eat interior NULL gaps left by TAB/CUF. Selecting a
+ * full row of "foo\tbar" + trailing NULLs keeps the inter-word spaces and
+ * drops only the run past "bar". */
+static void test_selection_keeps_interior_spaces_on_full_row(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
+    feed(&t, "foo\tbar");
+
+    terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
+    terminal_selection_update(&t, 0, 39);
+    char *text = terminal_selection_get_text(&t);
+    ASSERT_NOT_NULL(text);
+    ASSERT_STR_EQ(text, "foo     bar");
+    free(text);
+
+    terminal_destroy(&t);
+}
+
 /* Wide CJK chars must not have their right-half continuation cell turn into
  * a space — the width-2 advance should skip past it. */
 static void test_selection_skips_wide_continuation(void)
@@ -322,6 +378,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_selection_across_rows);
     RUN_TEST(test_selection_with_tab);
     RUN_TEST(test_selection_after_cursor_movement);
+    RUN_TEST(test_selection_strips_trailing_null_cells);
+    RUN_TEST(test_selection_strips_trailing_real_spaces);
+    RUN_TEST(test_selection_keeps_interior_spaces_on_full_row);
     RUN_TEST(test_selection_skips_wide_continuation);
     RUN_TEST(test_hyperlink_basic);
     RUN_TEST(test_hyperlink_safety);
