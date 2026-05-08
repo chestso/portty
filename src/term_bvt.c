@@ -9,6 +9,7 @@
  */
 
 #include "term_bvt.h"
+#include "base64.h"
 #include <bloom-vt/bloom_vt.h>
 
 #include <stdbool.h>
@@ -19,6 +20,10 @@
 typedef struct
 {
     BvtTerm *vt;
+
+    /* Back-pointer for callbacks that need to reach application-level
+     * state stored on TerminalBackend (e.g. the OSC 52 clipboard hook). */
+    TerminalBackend *term;
 
     /* Damage tracking — accumulated rectangle since last clear_redraw.
      * bloom-vt provides its own damage callback; we union into this. */
@@ -207,6 +212,48 @@ static void cb_sb_pop(BvtCell *o, int n, void *u)
     (void)u;
 }
 
+/* OSC 52 (set clipboard). Body format: <selection-chars> ';' <base64 | '?'>.
+ * We accept any selection (c/p/s/...) and route to one OS clipboard. The
+ * '?' query form is silently refused — see the rationale in term.h next to
+ * TerminalClipboardSetFn. bloom-vt only forwards non-special OSC codes here
+ * (0/1/2 go through set_title; 8 is handled inside the engine), so the
+ * code==52 guard is strictly a defense against future engine changes. */
+static void cb_osc(int code, const char *data, size_t len, void *user)
+{
+    BvtBackendData *d = user;
+    if (code != 52 || !d || !d->term || !d->term->clipboard_set_cb)
+        return;
+    if (!data || len == 0)
+        return;
+
+    const char *semi = memchr(data, ';', len);
+    if (!semi)
+        return;
+    const char *payload = semi + 1;
+    size_t payload_len = len - (size_t)(payload - data);
+
+    if (payload_len == 1 && payload[0] == '?')
+        return; /* query refused */
+
+    if (payload_len == 0) {
+        d->term->clipboard_set_cb("", 0, d->term->clipboard_set_data);
+        return;
+    }
+
+    size_t decoded_len = 0;
+    uint8_t *decoded = base64_decode(payload, payload_len, &decoded_len);
+    if (!decoded)
+        return;
+    /* 1 MiB cap mirrors xterm-style guard against runaway sequences. */
+    if (decoded_len > 1024u * 1024u) {
+        free(decoded);
+        return;
+    }
+    d->term->clipboard_set_cb((const char *)decoded, decoded_len,
+                              d->term->clipboard_set_data);
+    free(decoded);
+}
+
 /* ------------------------------------------------------------------ */
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
@@ -235,9 +282,11 @@ static bool bvt_back_init(TerminalBackend *term, int width, int height)
         .output = cb_output,
         .sb_pushline = cb_sb_push,
         .sb_popline = cb_sb_pop,
+        .osc = cb_osc,
     };
     bvt_set_callbacks(d->vt, &cb, d);
 
+    d->term = term;
     term->backend_data = d;
     return true;
 }

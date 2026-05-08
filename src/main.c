@@ -95,6 +95,22 @@ static void on_selection_change(bool active, void *user_data)
         platform_resume_pty(ctx->plat);
 }
 
+// OSC 52 set-clipboard callback. SDL/GDK clipboard APIs take a NUL-
+// terminated UTF-8 string; an interior NUL inside the decoded payload
+// would silently truncate, so we rely on that here too.
+static void on_clipboard_set(const char *text, size_t len, void *user_data)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    char *buf = malloc(len + 1);
+    if (!buf)
+        return;
+    if (len)
+        memcpy(buf, text, len);
+    buf[len] = '\0';
+    platform_clipboard_set(ctx->plat, buf);
+    free(buf);
+}
+
 // Key callback — receives TERM_KEY_* and TERM_MOD_* (platform-independent)
 static KeyboardResult on_key(void *user_data, int key, int mod,
                              uint32_t codepoint)
@@ -889,6 +905,9 @@ int main(int argc, char *argv[])
 
         // Pause/resume PTY on selection changes in alt screen
         terminal_set_selection_callback(term, on_selection_change, &main_ctx);
+
+        // OSC 52: route application clipboard-set requests to the OS clipboard
+        terminal_set_clipboard_set_callback(term, on_clipboard_set, &main_ctx);
 
         // Run the event loop (blocks)
         platform_run(plat, term, rend, &callbacks);

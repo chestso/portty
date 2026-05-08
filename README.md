@@ -19,6 +19,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
+- OSC 52 clipboard set — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy text to the system clipboard via escape sequence. Read queries (`OSC 52 ; c ; ?`) are silently refused so any program running in the terminal — including processes on the remote end of an SSH session — can't ask the terminal to hand it the contents of your clipboard (passwords, tokens, etc.).
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
 - OSC-8 hyperlinks — dotted Charm-purple underline at rest, solid on hover with pointer cursor; Ctrl+click opens via the system handler. Scheme allow-list (http/https/ftp/ftps/mailto) refuses `javascript:`, `data:`, `file://`, etc.

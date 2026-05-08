@@ -19,6 +19,12 @@ typedef void (*TerminalOutputCallback)(const char *data, size_t len, void *user)
 // Callback fired when selection becomes active or inactive
 typedef void (*TerminalSelectionChangeFn)(bool active, void *user_data);
 
+// Callback fired when the application asks the terminal to set the system
+// clipboard via OSC 52. `text` is the decoded payload (raw bytes; not
+// necessarily NUL-terminated, may contain interior NULs). `len` is the
+// byte count.
+typedef void (*TerminalClipboardSetFn)(const char *text, size_t len, void *user_data);
+
 typedef struct
 {
     int row;
@@ -101,6 +107,11 @@ struct TerminalBackend
     TerminalSelection selection;
     TerminalSelectionChangeFn selection_change_cb;
     void *selection_change_data;
+
+    // OSC 52 clipboard-set hook. Application installs this so that
+    // sequences emitted by tmux/neovim/etc. can reach the OS clipboard.
+    TerminalClipboardSetFn clipboard_set_cb;
+    void *clipboard_set_data;
 
     // Application-level sixel image storage
     SixelImage *sixel_images[TERM_MAX_SIXEL_IMAGES];
@@ -299,6 +310,8 @@ char *terminal_selection_get_text(TerminalBackend *term);
 void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars);
 void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionChangeFn cb,
                                      void *user_data);
+void terminal_set_clipboard_set_callback(TerminalBackend *term, TerminalClipboardSetFn cb,
+                                         void *user_data);
 
 // Row iterator over a terminal row. bloom-vt stores UAX #11 + #29
 // cluster widths on the cell, so the iterator is now a plain
