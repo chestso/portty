@@ -49,6 +49,7 @@ int verbose = 0;
 
 // Function prototypes
 static void print_usage(const char *progname);
+static void print_version(void);
 
 // Context passed to platform callbacks
 typedef struct
@@ -512,6 +513,8 @@ int main(int argc, char *argv[])
     int use_gtk4 = 0;
 
     static struct option long_options[] = {
+        { "help", no_argument, NULL, 'h' },
+        { "version", no_argument, NULL, 'V' },
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
         { "gtk4", no_argument, NULL, 'G' },
@@ -546,10 +549,13 @@ int main(int argc, char *argv[])
     if (conf.scrollback >= 0)
         init_scrollback = conf.scrollback;
 
-    while ((opt = getopt_long(argc, argv, "hvf:g:P:D:s:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
+            return 0;
+        case 'V':
+            print_version();
             return 0;
         case 'v':
             verbose = 1;
@@ -972,20 +978,21 @@ static void print_usage(const char *progname)
     printf("Usage: %s [OPTIONS] [-- COMMAND [ARGS...]]\n", progname);
     printf("Terminal emulator using bloom-vt and SDL3\n\n");
     printf("Options:\n");
-    printf("  -h          Show this help message\n");
-    printf("  -v          Verbose output (debug information)\n");
-    printf("  -f PATTERN  Font (fontconfig pattern, default: monospace)\n");
-    printf("              Size is part of the pattern, e.g. -f monospace-16\n");
-    printf("              Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
-    printf("  -g COLSxROWS  Initial terminal size, e.g. 120x40 = 120 columns, 40 rows (default: 80x24)\n");
+    printf("  -h, --help          Show this help message and exit\n");
+    printf("  -V, --version       Show version and build info and exit\n");
+    printf("  -v                  Verbose output (debug information)\n");
+    printf("  -f PATTERN          Font (fontconfig pattern, default: monospace)\n");
+    printf("                      Size is part of the pattern, e.g. -f monospace-16\n");
+    printf("                      Examples: -f \"Cascadia Code-14\", -f monospace-24\n");
+    printf("  -g COLSxROWS        Initial terminal size, e.g. 120x40 (default: 80x24)\n");
     printf("  -s, --scrollback N  Scrollback history lines (default: 1000, 0 to disable)\n");
-    printf("  --ft-hinting S  Set FreeType hinting: none, light, normal, mono (default: light)\n");
-    printf("  --list-fonts  List available monospace fonts and exit\n");
-    printf("  --gtk4        Use GTK4/libadwaita platform backend (native CSD)\n");
-    printf("  --sdl3        Use SDL3 platform backend (overrides config file)\n");
-    printf("  --demo TEXT Display TEXT in terminal without spawning a shell (for testing)\n");
-    printf("  -P TEXT     Render TEXT to a PNG file (output path as positional arg)\n");
-    printf("  -D PREFIX   Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
+    printf("  --ft-hinting S      FreeType hinting: none, light, normal, mono (default: light)\n");
+    printf("  --list-fonts        List available monospace fonts and exit\n");
+    printf("  --gtk4              Use GTK4/libadwaita platform backend (native CSD)\n");
+    printf("  --sdl3              Use SDL3 platform backend (overrides config file)\n");
+    printf("  --demo TEXT         Display TEXT in terminal without spawning a shell (for testing)\n");
+    printf("  -P TEXT             Render TEXT to a PNG file (output path as positional arg)\n");
+    printf("  -D PREFIX           Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
     printf("\n");
     printf("Command execution:\n");
     printf("  Use -- to separate options from command. Without --, runs default shell.\n");
@@ -999,26 +1006,35 @@ static void print_usage(const char *progname)
     printf("  Ctrl+Shift+V    Paste from clipboard\n");
     printf("  Shift+PgUp/Dn   Scroll through scrollback\n");
     printf("\n");
-    printf("Build info:\n");
-    printf("  %s\n", PACKAGE_STRING);
-    printf("  CC: %s\n", BUILD_CC);
-    printf("  bloom-vt %s, SDL3 %s, FreeType %s\n",
+    printf("Run '%s --version' for build and version info.\n", progname);
+}
+
+static void print_version(void)
+{
+    printf("bloom-terminal %s\n", BLOOM_TERMINAL_VERSION);
+    printf("Copyright (C) 2026 Thomas Christensen\n");
+    printf("License MIT: <https://opensource.org/licenses/MIT>\n");
+    printf("This is free software: you are free to change and redistribute it.\n");
+    printf("There is NO WARRANTY, to the extent permitted by law.\n");
+    printf("\n");
+    printf("Built with: %s\n", BUILD_CC);
+    printf("bloom-vt %s, SDL3 %s, FreeType %s\n",
            DEP_BLOOM_VT_VERSION, DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
-    printf("  HarfBuzz %s, libpng %s\n",
+    printf("HarfBuzz %s, libpng %s\n",
            DEP_HARFBUZZ_VERSION, DEP_LIBPNG_VERSION);
 #ifdef DEP_FONTCONFIG_VERSION
-    printf("  Fontconfig %s\n", DEP_FONTCONFIG_VERSION);
+    printf("Fontconfig %s\n", DEP_FONTCONFIG_VERSION);
 #endif
 #ifdef __APPLE__
-    printf("  Font resolver: Core Text (system)\n");
+    printf("Font resolver: Core Text (system)\n");
 #elif defined(_WIN32)
-    printf("  Font resolver: W32 native\n");
+    printf("Font resolver: W32 native\n");
 #endif
 #ifdef HAVE_GTK4
-    printf("  GTK4 %s, libadwaita %s\n", DEP_GTK4_VERSION,
+    printf("GTK4 %s, libadwaita %s\n", DEP_GTK4_VERSION,
            DEP_LIBADWAITA_VERSION);
 #ifdef HAVE_EGL_DMABUF
-    printf("  DMA-BUF: EGL + GBM zero-copy\n");
+    printf("DMA-BUF: EGL + GBM zero-copy\n");
 #endif
 #endif
 }
