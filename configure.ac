@@ -124,7 +124,9 @@ fi
 
 # Generate config.h header
 AC_CONFIG_HEADERS([config.h])
-AC_DEFINE_UNQUOTED([BLOOM_TERMINAL_VERSION], ["$BLOOM_TERMINAL_VERSION"], [Version string])
+dnl BLOOM_TERMINAL_VERSION is intentionally NOT defined in config.h.
+dnl src/Makefile.am regenerates src/bloom_version.h on every `make` so the
+dnl version reflects the current git HEAD without needing reconfigure.
 
 # Check for header files
 AC_CHECK_HEADERS([stdio.h stdlib.h string.h])

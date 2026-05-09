@@ -2,6 +2,8 @@
 #include "config.h"
 #endif
 
+#include "bloom_version.h"
+
 #include "bloom_conf.h"
 #include "bloom_pty.h"
 #include "common.h"

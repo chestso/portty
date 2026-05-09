@@ -14,6 +14,7 @@ config.status
 config.sub
 configure
 version
+src/bloom_version.h
 depcomp
 install-sh
 Makefile.in

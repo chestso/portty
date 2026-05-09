@@ -2,9 +2,7 @@
 #include "config.h"
 #endif
 
-#ifndef BLOOM_TERMINAL_VERSION
-#define BLOOM_TERMINAL_VERSION "unknown"
-#endif
+#include "bloom_version.h"
 
 #include "common.h"
 #include "platform_gtk4.h"
