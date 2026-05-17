@@ -183,6 +183,7 @@ typedef struct
 
     // Timer
     guint cursor_blink_timer_id;
+    guint autoscroll_timer_id;
     bool cursor_blink_visible;
 
     // Cached exe path (resolved once at startup, avoids " (deleted)" issue)
@@ -1284,6 +1285,19 @@ static gboolean on_cursor_blink(gpointer user_data)
     return G_SOURCE_CONTINUE;
 }
 
+// Drag-autoscroll tick (active while selection drag goes past viewport edge)
+static gboolean on_autoscroll_tick_gtk(gpointer user_data)
+{
+    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+    if (ctx->callbacks && ctx->callbacks->on_autoscroll_tick) {
+        ctx->callbacks->on_autoscroll_tick(ctx->callbacks->user_data);
+        ctx->force_redraw = true;
+        if (ctx->drawing_area)
+            gtk_widget_queue_draw(ctx->drawing_area);
+    }
+    return G_SOURCE_CONTINUE;
+}
+
 // Unix signal handler (SIGINT, SIGTERM)
 static gboolean on_unix_signal(gpointer user_data)
 {
@@ -1355,6 +1369,7 @@ static float gtk4_get_display_scale(PlatformBackend *plat);
 static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height);
 static bool gtk4_open_url(PlatformBackend *plat, const char *url);
 static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
+static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -1382,6 +1397,7 @@ PlatformBackend platform_backend_gtk4 = {
     .get_display_size = gtk4_get_display_size,
     .open_url = gtk4_open_url,
     .set_cursor = gtk4_set_cursor,
+    .set_autoscroll = gtk4_set_autoscroll,
 };
 
 static bool gtk4_plat_init(PlatformBackend *plat)
@@ -1621,6 +1637,10 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     if (ctx->cursor_blink_timer_id) {
         g_source_remove(ctx->cursor_blink_timer_id);
         ctx->cursor_blink_timer_id = 0;
+    }
+    if (ctx->autoscroll_timer_id) {
+        g_source_remove(ctx->autoscroll_timer_id);
+        ctx->autoscroll_timer_id = 0;
     }
 
     // Destroy GIO channels
@@ -2105,6 +2125,9 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
     if (ctx->cursor_blink_timer_id)
         g_source_remove(ctx->cursor_blink_timer_id);
     ctx->cursor_blink_timer_id = 0;
+    if (ctx->autoscroll_timer_id)
+        g_source_remove(ctx->autoscroll_timer_id);
+    ctx->autoscroll_timer_id = 0;
     ctx->pty_watch_id = 0;
     ctx->signal_watch_id = 0;
 }
@@ -2244,6 +2267,21 @@ static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
         return;
     const char *name = (cursor == PLATFORM_CURSOR_POINTER) ? "pointer" : "text";
     gtk_widget_set_cursor_from_name(ctx->drawing_area, name);
+}
+
+static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (enabled) {
+        if (!ctx->autoscroll_timer_id)
+            ctx->autoscroll_timer_id =
+                g_timeout_add(AUTOSCROLL_INTERVAL_MS, on_autoscroll_tick_gtk, ctx);
+    } else if (ctx->autoscroll_timer_id) {
+        g_source_remove(ctx->autoscroll_timer_id);
+        ctx->autoscroll_timer_id = 0;
+    }
 }
 
 __attribute__((visibility("default")))

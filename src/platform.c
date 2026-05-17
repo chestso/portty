@@ -192,3 +192,10 @@ void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
         return;
     plat->set_cursor(plat, cursor);
 }
+
+void platform_set_autoscroll(PlatformBackend *plat, bool enabled)
+{
+    if (!plat || !plat->set_autoscroll)
+        return;
+    plat->set_autoscroll(plat, enabled);
+}

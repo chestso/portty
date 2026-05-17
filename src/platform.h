@@ -58,6 +58,11 @@ struct PlatformCallbacks
     bool (*on_mouse)(void *user_data, int pixel_x, int pixel_y,
                      int button, bool pressed, int clicks, int mod);
 
+    // Periodic tick fired while platform_set_autoscroll(true) is in effect.
+    // Used by main to scroll the viewport and extend the selection while the
+    // user drags past the top/bottom edges of the window.
+    void (*on_autoscroll_tick)(void *user_data);
+
     // User data passed to callbacks
     void *user_data;
 };
@@ -120,6 +125,10 @@ struct PlatformBackend
     // Set the mouse cursor shape. Used for OSC-8 hyperlink hover.
     void (*set_cursor)(PlatformBackend *plat, PlatformCursor cursor);
 
+    // Enable or disable the drag-autoscroll tick. While enabled, the
+    // backend fires `on_autoscroll_tick` on its own timer (~30Hz).
+    void (*set_autoscroll)(PlatformBackend *plat, bool enabled);
+
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
 };
@@ -158,5 +167,6 @@ bool platform_get_display_size(PlatformBackend *plat, int *width, int *height);
 
 bool platform_open_url(PlatformBackend *plat, const char *url);
 void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
+void platform_set_autoscroll(PlatformBackend *plat, bool enabled);
 
 #endif /* PLATFORM_H */

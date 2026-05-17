@@ -63,6 +63,12 @@ typedef struct
     bool drag_pending;
     int drag_start_row; // unified row
     int drag_start_col; // display col
+    // Drag-autoscroll: last raw mouse pixel pos while a selection drag is
+    // active; the autoscroll tick reads this to know which direction to
+    // scroll and where to re-extend the selection.
+    int drag_last_pixel_x;
+    int drag_last_pixel_y;
+    bool autoscroll_active;
 } MainContext;
 
 // Convert pixel coordinates to display row/col
@@ -96,6 +102,93 @@ static void on_selection_change(bool active, void *user_data)
         platform_pause_pty(ctx->plat);
     else
         platform_resume_pty(ctx->plat);
+}
+
+// Enable / disable the platform drag-autoscroll tick, mirroring local state.
+static void set_autoscroll(MainContext *ctx, bool enabled)
+{
+    if (ctx->autoscroll_active == enabled)
+        return;
+    ctx->autoscroll_active = enabled;
+    platform_set_autoscroll(ctx->plat, enabled);
+}
+
+// Re-extend the active selection to a raw pixel position (clamped into the
+// viewport). Shared by the motion handler and the autoscroll tick.
+static void extend_selection_from_pixel(MainContext *ctx, int pixel_x, int pixel_y)
+{
+    int term_rows, term_cols;
+    terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
+    int cell_w, cell_h;
+    if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0)
+        return;
+    int viewport_w = term_cols * cell_w;
+    int viewport_h = term_rows * cell_h;
+    if (pixel_x < 0)
+        pixel_x = 0;
+    if (pixel_x >= viewport_w)
+        pixel_x = viewport_w - 1;
+    if (pixel_y < 0)
+        pixel_y = 0;
+    if (pixel_y >= viewport_h)
+        pixel_y = viewport_h - 1;
+
+    int display_row, display_col;
+    if (!pixel_to_cell(ctx, pixel_x, pixel_y, &display_row, &display_col))
+        return;
+    if (display_row >= term_rows)
+        display_row = term_rows - 1;
+    if (display_row < 0)
+        display_row = 0;
+    if (display_col < 0)
+        display_col = 0;
+    int unified_row = display_row_to_unified(ctx->rend, display_row);
+    display_col = terminal_vis_col_to_vt_col(ctx->term, unified_row, display_col);
+    if (display_col >= term_cols)
+        display_col = term_cols - 1;
+    if (display_col < 0)
+        display_col = 0;
+    terminal_selection_update(ctx->term, unified_row, display_col);
+}
+
+// Drag-autoscroll tick — invoked by the platform timer while the user is
+// holding a selection drag past the top/bottom edge of the viewport.
+static void on_autoscroll_tick(void *user_data)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    if (!terminal_selection_active(ctx->term)) {
+        set_autoscroll(ctx, false);
+        return;
+    }
+
+    int term_rows, term_cols;
+    terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
+    int cell_w, cell_h;
+    if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_w <= 0 || cell_h <= 0)
+        return;
+    (void)term_cols;
+    int viewport_h = term_rows * cell_h;
+    int py = ctx->drag_last_pixel_y;
+
+    int delta;
+    if (py < 0) {
+        int overshoot = -py;
+        delta = 1 + overshoot / cell_h;
+        if (delta > 5)
+            delta = 5;
+    } else if (py >= viewport_h) {
+        int overshoot = py - (viewport_h - 1);
+        delta = -(1 + overshoot / cell_h);
+        if (delta < -5)
+            delta = -5;
+    } else {
+        // Pointer back inside viewport — autoscroll no longer needed.
+        set_autoscroll(ctx, false);
+        return;
+    }
+
+    renderer_scroll(ctx->rend, ctx->term, delta);
+    extend_selection_from_pixel(ctx, ctx->drag_last_pixel_x, ctx->drag_last_pixel_y);
 }
 
 // OSC 52 set-clipboard callback. SDL/GDK clipboard APIs take a NUL-
@@ -433,6 +526,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     // Left button release — cancel pending drag if no motion occurred
     if (button == 1 && !pressed) {
         ctx->drag_pending = false;
+        set_autoscroll(ctx, false);
         return false;
     }
 
@@ -444,13 +538,28 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
             terminal_selection_start(ctx->term, ctx->drag_start_row, ctx->drag_start_col,
                                      TERM_SELECT_CHAR);
             terminal_selection_update(ctx->term, unified_row, display_col);
-            return true;
-        }
-        if (terminal_selection_active(ctx->term)) {
+        } else if (terminal_selection_active(ctx->term)) {
             terminal_selection_update(ctx->term, unified_row, display_col);
-            return true;
+        } else {
+            // Button-down outside a selection (e.g. middle/right) — nothing to do
+            return hover_changed;
         }
+
+        // Update autoscroll state from the raw (unclamped) pointer pos.
+        ctx->drag_last_pixel_x = pixel_x;
+        ctx->drag_last_pixel_y = pixel_y;
+        int cell_w, cell_h;
+        if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) && cell_h > 0) {
+            int viewport_h = term_rows * cell_h;
+            bool past_edge = (pixel_y < 0 || pixel_y >= viewport_h);
+            set_autoscroll(ctx, past_edge);
+        }
+        return true;
     }
+
+    // Any non-drag mouse activity — stop autoscroll
+    if (button != 0 && pressed)
+        set_autoscroll(ctx, false);
 
     // Right button press — copy selection if active, otherwise paste
     if (button == 3 && pressed) {
@@ -905,6 +1014,7 @@ int main(int argc, char *argv[])
             .on_resize = on_resize,
             .on_scroll = on_scroll,
             .on_mouse = on_mouse,
+            .on_autoscroll_tick = on_autoscroll_tick,
             .user_data = &main_ctx,
         };
 

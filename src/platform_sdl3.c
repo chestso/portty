@@ -34,6 +34,7 @@ enum BloomEventCode
     EVENT_PTY_CLOSED,
     EVENT_PTY_CHILD_EXIT,
     EVENT_CURSOR_BLINK,
+    EVENT_AUTOSCROLL_TICK,
 };
 
 // PTY data event payload
@@ -117,6 +118,7 @@ typedef struct
     // Timer system
     TimerManager *timers;
     TimerId cursor_blink_timer;
+    TimerId autoscroll_timer;
     bool cursor_blink_visible;
     bool has_focus;
 
@@ -245,6 +247,7 @@ static float sdl3_get_display_scale(PlatformBackend *plat);
 static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height);
 static bool sdl3_open_url(PlatformBackend *plat, const char *url);
 static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
+static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled);
 
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
@@ -270,6 +273,7 @@ PlatformBackend platform_backend_sdl3 = {
     .get_display_size = sdl3_get_display_size,
     .open_url = sdl3_open_url,
     .set_cursor = sdl3_set_cursor,
+    .set_autoscroll = sdl3_set_autoscroll,
 };
 
 // PTY reader thread function
@@ -603,6 +607,7 @@ static bool sdl3_plat_init(PlatformBackend *plat)
         return false;
     }
     ctx->cursor_blink_timer = TIMER_INVALID;
+    ctx->autoscroll_timer = TIMER_INVALID;
     ctx->cursor_blink_visible = true;
 
     plat->backend_data = ctx;
@@ -907,6 +912,13 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         ctx->force_redraw = true;
                     }
                     break;
+
+                case EVENT_AUTOSCROLL_TICK:
+                    if (callbacks && callbacks->on_autoscroll_tick) {
+                        callbacks->on_autoscroll_tick(callbacks->user_data);
+                        ctx->force_redraw = true;
+                    }
+                    break;
                 }
             } else if (event.type == SDL_EVENT_QUIT) {
                 vlog("SDL quit event received\n");
@@ -1035,6 +1047,11 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     int button = event.button.button;
                     int clicks = pressed ? event.button.clicks : 0;
                     int tmod = sdl_mod_to_term(SDL_GetModState());
+                    // Capture the mouse on left-button press so drag motion
+                    // events keep arriving when the pointer leaves the
+                    // window (needed for drag-to-autoscroll selection).
+                    if (button == 1)
+                        SDL_CaptureMouse(pressed);
                     if (callbacks->on_mouse(callbacks->user_data, (int)event.button.x,
                                             (int)event.button.y, button, pressed,
                                             clicks, tmod)) {
@@ -1073,6 +1090,12 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
     if (ctx->cursor_blink_timer != TIMER_INVALID) {
         timer_remove(ctx->timers, ctx->cursor_blink_timer);
         ctx->cursor_blink_timer = TIMER_INVALID;
+    }
+
+    // Stop autoscroll timer
+    if (ctx->autoscroll_timer != TIMER_INVALID) {
+        timer_remove(ctx->timers, ctx->autoscroll_timer);
+        ctx->autoscroll_timer = TIMER_INVALID;
     }
 
     // Stop reader thread
@@ -1190,6 +1213,24 @@ static bool sdl3_open_url(PlatformBackend *plat, const char *url)
         return false;
     /* SDL_OpenURL fronts xdg-open / open / ShellExecute on the host OS. */
     return SDL_OpenURL(url);
+}
+
+static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    if (enabled) {
+        if (ctx->autoscroll_timer == TIMER_INVALID && ctx->timers) {
+            ctx->autoscroll_timer = timer_add(ctx->timers, AUTOSCROLL_INTERVAL_MS,
+                                              true, EVENT_AUTOSCROLL_TICK, NULL);
+        }
+    } else {
+        if (ctx->autoscroll_timer != TIMER_INVALID) {
+            timer_remove(ctx->timers, ctx->autoscroll_timer);
+            ctx->autoscroll_timer = TIMER_INVALID;
+        }
+    }
 }
 
 static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
