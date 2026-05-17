@@ -246,10 +246,20 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
         len == 0)
         return -1;
 
-    DWORD written;
-    if (!WriteFile(ctx->input_write, data, (DWORD)len, &written, NULL))
-        return -1;
-    return (ssize_t)written;
+    // Loop in case WriteFile returns a short count (matches the POSIX
+    // path's behavior — pastes larger than the pipe buffer need to be
+    // delivered completely).
+    size_t total = 0;
+    while (total < len) {
+        DWORD written = 0;
+        DWORD chunk = (DWORD)((len - total) > 0x7FFFFFFFu ? 0x7FFFFFFFu : (len - total));
+        if (!WriteFile(ctx->input_write, data + total, chunk, &written, NULL))
+            return total > 0 ? (ssize_t)total : -1;
+        if (written == 0)
+            break;
+        total += (size_t)written;
+    }
+    return (ssize_t)total;
 }
 
 ssize_t pty_read(PtyContext *ctx, char *buf, size_t bufsize)

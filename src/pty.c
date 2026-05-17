@@ -317,7 +317,24 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
     if (!ctx || ctx->master_fd < 0 || !data || len == 0)
         return -1;
 
-    return write(ctx->master_fd, data, len);
+    // PTY master writes can be short — the line-discipline input buffer
+    // is bounded (typically N_TTY_BUF_SIZE = 4096 bytes), and a paste
+    // larger than that returns a partial count instead of blocking for
+    // the whole buffer. Loop until everything is written so callers
+    // never have to handle short writes themselves.
+    size_t total = 0;
+    while (total < len) {
+        ssize_t n = write(ctx->master_fd, data + total, len - total);
+        if (n < 0) {
+            if (errno == EINTR)
+                continue;
+            return total > 0 ? (ssize_t)total : -1;
+        }
+        if (n == 0)
+            break;
+        total += (size_t)n;
+    }
+    return (ssize_t)total;
 }
 
 ssize_t pty_read(PtyContext *ctx, char *buf, size_t bufsize)
