@@ -1,0 +1,11 @@
+Emoji test:
+Faces: 😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇
+Animals: 🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯
+Food: 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🍈 🍒
+Transport: 🚗 🚕 🚙 🚌 🚎 🏎️ 🚓 🚑 🚒 🚐
+Flags: 🇺🇸 🇬🇧 🇯🇵 🇰🇷 🇩🇪 🇫🇷 🇮🇹 🇪🇸 🇷🇺 🇨🇳
+Objects: ⌚️ 📱 💻 ⌨️ 🖥 🖨 🎙 🎥 📹 📼
+
+Emoji with modifiers:
+Skin tones: 👋 👋🏻 👋🏼 👋🏽 👋🏾 👋🏿
+Family: 👨‍👩‍👧‍👦 👨‍👨‍👧‍👦 👩‍👩‍👧‍👦

@@ -99,7 +99,7 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 - `make` — build everything
 - `make check` — run the test suite
 - `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`, installs the GTK4 plugin to `$prefix/lib/bloom-terminal/`
-- `make format` — clang-format on `src/` and `tests/`, shfmt on `examples/` and `scripts/`, prettier on Markdown
+- `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 
 ### Helper Scripts
@@ -374,14 +374,14 @@ The project includes:
 
 - `.clang-format` for code formatting
 - `autogen.sh` + autotools (`configure.ac`, `Makefile.am`) for the build
-- Example scripts demonstrating terminal features, including `examples/unicode/emoji.sh` which exercises COLR/emoji paths
+- Example files demonstrating terminal features under `examples/` — plain `cat`-able demos (e.g. `cat examples/unicode/emoji.txt` exercises COLR/emoji paths)
 
 ### Code Formatting
 
 Run `make format` (from `build/`) to format all source files. This requires:
 
 - **clang-format** — C source and headers (`src/`, `tests/`)
-- **shfmt** — shell scripts (`examples/`, `scripts/`)
+- **shfmt** — shell scripts (`scripts/`)
 - **prettier** — Markdown files
 
 ```bash

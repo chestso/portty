@@ -26,7 +26,7 @@ format:
 	fi
 	@if command -v shfmt >/dev/null 2>&1; then \
 	    echo "Formatting shell scripts with shfmt..."; \
-	    find $(top_srcdir)/examples $(top_srcdir)/scripts \
+	    find $(top_srcdir)/scripts \
 	        -name '*.sh' -print0 2>/dev/null \
 	        | xargs -0 -r shfmt -w; \
 	else \

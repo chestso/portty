@@ -1,0 +1,13 @@
+Mathematical symbols:
+∑ ∫ ∏ √ ∞ ≈ ≠ ≤ ≥ ± × ÷
+
+Currency symbols:
+$ € £ ¥ ₩ ₽ ₹ ₺
+
+Arrow symbols:
+← ↑ → ↓ ↔ ↕ ↖ ↗ ↘ ↙
+⇐ ⇑ ⇒ ⇓ ⇔ ⇕ ⇖ ⇗ ⇘ ⇙
+
+Miscellaneous symbols:
+© ® ™ ♠ ♣ ♥ ♦ ♪ ♫ ☀ ☁ ☂ ☃
+✓ ✗ ✘ ✿ ❀ ❁ ❂ ❃ ❄ ❅ ❆ ❇

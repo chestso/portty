@@ -1,0 +1,7 @@
+[1;32mHello [1;34mWorld[0m!
+Normal text
+[31mRed text[0m
+[42;30mGreen background with black text[0m
+[3mItalic text[0m
+[4mUnderlined text[0m
+[9mStrikethrough text[0m

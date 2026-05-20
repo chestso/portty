@@ -1,0 +1,11 @@
+Line 1: Cursor at beginning
+[2;10HCursor moved to row 2, column 10
+[3;1HCursor moved to row 3, column 1
+[4;20HX
+[5;1HCursor up test: [1A(moved up 1 row)
+[6;1HCursor down test: [1B(moved down 1 row)
+[7;10HCursor forward test: [5C(moved forward 5 columns)
+[8;20HCursor backward test: [5D(moved backward 5 columns)
+[10;1HSave cursor position[s
+Text after saving
+[uRestored cursor position

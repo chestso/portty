@@ -1,0 +1,68 @@
+Emoji presentation: text-default vs emoji-default codepoints.
+
+Two distinct Unicode groups, often confused:
+
+  Group A — Emoji_Presentation=No (text-default, ambiguous width)
+    Bare base: 1 cell, monochrome.
+    With VS16 (U+FE0F): 2 cells, emoji presentation.
+    This is the "ambiguous" case bloom's emoji width paradigm covers.
+
+  Group B — Emoji_Presentation=Yes (emoji-default, already wide)
+    Bare base: 2 cells, emoji presentation.
+    With VS16: still 2 cells. VS16 is a no-op here.
+    Listed in bloom-vt's UAX #11 WIDE table; not ambiguous.
+
+See README.md "Emoji Width Paradigm".
+
+Group A — text-default (bare=1 cell, VS16=2 cells):
+
+  Bare    FE0F    Name
+  ⚠  vs  ⚠️   Warning sign
+  ☀  vs  ☀️   Sun
+  ☁  vs  ☁️   Cloud
+  ☂  vs  ☂️   Umbrella
+  ☃  vs  ☃️   Snowman
+  ☄  vs  ☄️   Comet
+  ☎  vs  ☎️   Telephone
+  ☘  vs  ☘️   Shamrock
+  ☠  vs  ☠️   Skull and crossbones
+  ☢  vs  ☢️   Radioactive
+  ☣  vs  ☣️   Biohazard
+  ☮  vs  ☮️   Peace
+  ☯  vs  ☯️   Yin yang
+  ♻  vs  ♻️   Recycling
+  ⛏  vs  ⛏️   Pick
+  ⛩  vs  ⛩️   Shinto shrine
+  ⛰  vs  ⛰️   Mountain
+  ⛱  vs  ⛱️   Umbrella on ground
+  ⛷  vs  ⛷️   Skier
+  ⛸  vs  ⛸️   Ice skate
+  ⛹  vs  ⛹️   Person bouncing ball
+
+Group A alignment check (bare = 1 cell, VS16 = 2 cells):
+  |⚠|☀|☁|☘|⛏|  bare (1 cell each)
+  |A|B|C|D|E|  ASCII reference (1 cell each)
+  |⚠️|☀️|☁️|☘️|⛏️|  with VS16 (2 cells each)
+  |AB|CD|EF|GH|IJ|  ASCII reference (2 chars each)
+
+Group B — emoji-default (bare=2 cells, VS16 no-op):
+
+  Bare    FE0F    Name
+  ♈  vs  ♈️   Aries
+  ⚡  vs  ⚡️   High voltage
+  ⚽  vs  ⚽️   Soccer ball
+  ⚾  vs  ⚾️   Baseball
+  ⛄  vs  ⛄️   Snowman without snow
+  ⛅  vs  ⛅️   Sun behind cloud
+  ⛎  vs  ⛎️   Ophiuchus
+  ⛔  vs  ⛔️   No entry
+  ⛲  vs  ⛲️   Fountain
+  ⛳  vs  ⛳️   Flag in hole
+  ⛵  vs  ⛵️   Sailboat
+  ⛺  vs  ⛺️   Tent
+  ⛽  vs  ⛽️   Fuel pump
+
+Group B alignment check (both rows = 2 cells each):
+  |⚡|⚽|⛄|⛔|⛽|  bare (2 cells each)
+  |⚡️|⚽️|⛄️|⛔️|⛽️|  with VS16 (2 cells each, identical)
+  |AB|CD|EF|GH|IJ|  ASCII reference (2 chars each)

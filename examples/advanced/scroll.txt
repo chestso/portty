@@ -1,0 +1,54 @@
+[2J
+Scrolling test - 50 lines:
+Line 1: This is a test line to demonstrate terminal scrolling capabilities.
+Line 2: This is a test line to demonstrate terminal scrolling capabilities.
+Line 3: This is a test line to demonstrate terminal scrolling capabilities.
+Line 4: This is a test line to demonstrate terminal scrolling capabilities.
+Line 5: This is a test line to demonstrate terminal scrolling capabilities.
+Line 6: This is a test line to demonstrate terminal scrolling capabilities.
+Line 7: This is a test line to demonstrate terminal scrolling capabilities.
+Line 8: This is a test line to demonstrate terminal scrolling capabilities.
+Line 9: This is a test line to demonstrate terminal scrolling capabilities.
+Line 10: This is a test line to demonstrate terminal scrolling capabilities.
+Line 11: This is a test line to demonstrate terminal scrolling capabilities.
+Line 12: This is a test line to demonstrate terminal scrolling capabilities.
+Line 13: This is a test line to demonstrate terminal scrolling capabilities.
+Line 14: This is a test line to demonstrate terminal scrolling capabilities.
+Line 15: This is a test line to demonstrate terminal scrolling capabilities.
+Line 16: This is a test line to demonstrate terminal scrolling capabilities.
+Line 17: This is a test line to demonstrate terminal scrolling capabilities.
+Line 18: This is a test line to demonstrate terminal scrolling capabilities.
+Line 19: This is a test line to demonstrate terminal scrolling capabilities.
+Line 20: This is a test line to demonstrate terminal scrolling capabilities.
+Line 21: This is a test line to demonstrate terminal scrolling capabilities.
+Line 22: This is a test line to demonstrate terminal scrolling capabilities.
+Line 23: This is a test line to demonstrate terminal scrolling capabilities.
+Line 24: This is a test line to demonstrate terminal scrolling capabilities.
+Line 25: This is a test line to demonstrate terminal scrolling capabilities.
+Line 26: This is a test line to demonstrate terminal scrolling capabilities.
+Line 27: This is a test line to demonstrate terminal scrolling capabilities.
+Line 28: This is a test line to demonstrate terminal scrolling capabilities.
+Line 29: This is a test line to demonstrate terminal scrolling capabilities.
+Line 30: This is a test line to demonstrate terminal scrolling capabilities.
+Line 31: This is a test line to demonstrate terminal scrolling capabilities.
+Line 32: This is a test line to demonstrate terminal scrolling capabilities.
+Line 33: This is a test line to demonstrate terminal scrolling capabilities.
+Line 34: This is a test line to demonstrate terminal scrolling capabilities.
+Line 35: This is a test line to demonstrate terminal scrolling capabilities.
+Line 36: This is a test line to demonstrate terminal scrolling capabilities.
+Line 37: This is a test line to demonstrate terminal scrolling capabilities.
+Line 38: This is a test line to demonstrate terminal scrolling capabilities.
+Line 39: This is a test line to demonstrate terminal scrolling capabilities.
+Line 40: This is a test line to demonstrate terminal scrolling capabilities.
+Line 41: This is a test line to demonstrate terminal scrolling capabilities.
+Line 42: This is a test line to demonstrate terminal scrolling capabilities.
+Line 43: This is a test line to demonstrate terminal scrolling capabilities.
+Line 44: This is a test line to demonstrate terminal scrolling capabilities.
+Line 45: This is a test line to demonstrate terminal scrolling capabilities.
+Line 46: This is a test line to demonstrate terminal scrolling capabilities.
+Line 47: This is a test line to demonstrate terminal scrolling capabilities.
+Line 48: This is a test line to demonstrate terminal scrolling capabilities.
+Line 49: This is a test line to demonstrate terminal scrolling capabilities.
+Line 50: This is a test line to demonstrate terminal scrolling capabilities.
+
+End of scrolling test
