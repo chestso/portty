@@ -1179,14 +1179,26 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
              height_only_fit ? " (height-only)" : "");
         scaled = downscale_bitmap(bitmap, max_w, max_h, height_only_fit);
         // Color emoji are placed by cell-center, not baseline. Symbol-class
-        // glyphs from a text font (height_only_fit) keep their FreeType
-        // bitmap_left / bitmap_top so they sit on the typographic baseline;
-        // downscale_bitmap already scales those offsets by the same factor
-        // applied to the bitmap, so blit_glyph's baseline branch is exact.
+        // glyphs from a text font (height_only_fit) use the baseline branch
+        // of blit_glyph but with x_offset overridden: FreeType's bitmap_left
+        // is calibrated against the font's natural advance, which for many
+        // mono fonts is wider than our 1-cell allocation (Noto Sans Mono ✶
+        // U+2736: advance 1200/1000 em). Honoring it directly drops the ink
+        // into the right half of the cell with the rest overhanging into
+        // the next cell. Centering the bitmap horizontally restores a
+        // symmetric placement while bitmap_top still anchors the glyph to
+        // the typographic baseline.
         bool centered = !height_only_fit;
         bitmap->centered = centered;
         if (scaled)
             scaled->centered = centered;
+        if (height_only_fit) {
+            int eff_w = scaled ? scaled->width : bitmap->width;
+            int x_off = (max_w - eff_w) / 2;
+            bitmap->x_offset = x_off;
+            if (scaled)
+                scaled->x_offset = x_off;
+        }
     }
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
                                    scaled ? scaled : bitmap);
