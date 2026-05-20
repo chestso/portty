@@ -585,16 +585,25 @@ static uint32_t nf_translate_codepoint(uint32_t cp)
 
 // Box-filter downscale a glyph bitmap to fit within max_w x max_h.
 // Returns a newly allocated GlyphBitmap, or NULL if no downscale is needed.
-static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
+// When height_only_fit is true, only the height is constrained: a glyph that
+// fits vertically passes through unchanged regardless of width (overhang is
+// handled by the renderer's two-pass row draw). When the glyph overflows
+// vertically, scale uniformly by the height ratio so aspect is preserved.
+static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
+                                     bool height_only_fit)
 {
     if (!src || !src->pixels || src->width <= 0 || src->height <= 0)
         return NULL;
-    if (src->width <= max_w && src->height <= max_h)
+    if (height_only_fit) {
+        if (src->height <= max_h)
+            return NULL;
+    } else if (src->width <= max_w && src->height <= max_h) {
         return NULL;
+    }
 
     float scale_x = (float)max_w / (float)src->width;
     float scale_y = (float)max_h / (float)src->height;
-    float scale = fminf(scale_x, scale_y);
+    float scale = height_only_fit ? scale_y : fminf(scale_x, scale_y);
 
     int dst_w = (int)(src->width * scale + 0.5f);
     int dst_h = (int)(src->height * scale + 0.5f);
@@ -1157,7 +1166,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
 static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
                                        uint32_t glyph_id, uint32_t color_key,
                                        GlyphBitmap *bitmap, bool downscale,
-                                       int max_w, int max_h)
+                                       int max_w, int max_h, bool height_only_fit)
 {
     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(atlas, font_data, glyph_id, color_key);
     if (entry)
@@ -1165,13 +1174,19 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
 
     GlyphBitmap *scaled = NULL;
     if (downscale) {
-        vlog("Cache emoji glyph %u: bitmap=%dx%d max=%dx%d\n",
-             glyph_id, bitmap->width, bitmap->height, max_w, max_h);
-        scaled = downscale_bitmap(bitmap, max_w, max_h);
-        // Color emoji are placed by cell-center, not baseline.
-        bitmap->centered = true;
+        vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d%s\n",
+             glyph_id, bitmap->width, bitmap->height, max_w, max_h,
+             height_only_fit ? " (height-only)" : "");
+        scaled = downscale_bitmap(bitmap, max_w, max_h, height_only_fit);
+        // Color emoji are placed by cell-center, not baseline. Symbol-class
+        // glyphs from a text font (height_only_fit) keep their FreeType
+        // bitmap_left / bitmap_top so they sit on the typographic baseline;
+        // downscale_bitmap already scales those offsets by the same factor
+        // applied to the bitmap, so blit_glyph's baseline branch is exact.
+        bool centered = !height_only_fit;
+        bitmap->centered = centered;
         if (scaled)
-            scaled->centered = true;
+            scaled->centered = centered;
     }
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
                                    scaled ? scaled : bitmap);
@@ -1185,6 +1200,18 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
 static bool is_color_font(FontBackend *font, FontStyle style)
 {
     return style == FONT_STYLE_EMOJI || font_style_has_colr(font, style);
+}
+
+// Symbol/dingbat codepoints whose glyphs frequently exceed the text cell.
+// Box Drawing (0x2500-0x257F) and Block Elements (0x2580-0x259F) are drawn
+// procedurally elsewhere and intentionally excluded.
+static bool is_symbol_cell_cp(uint32_t cp)
+{
+    return is_emoji_presentation(cp) || is_regional_indicator(cp) ||
+           (cp >= 0x2300 && cp <= 0x23FF) || // Misc Technical
+           (cp >= 0x25A0 && cp <= 0x25FF) || // Geometric Shapes
+           (cp >= 0x2900 && cp <= 0x297F) || // Supplemental Arrows-B
+           (cp >= 0x2B00 && cp <= 0x2BFF);   // Misc Symbols and Arrows
 }
 
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
@@ -1437,16 +1464,32 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             style = FONT_STYLE_ITALIC;
     }
     if (cp_count > 0) {
-        bool use_emoji = is_emoji_presentation(cps[0]) || is_regional_indicator(cps[0]);
-        if (!use_emoji) {
-            for (int i = 1; i < cp_count; i++) {
-                if (cps[i] == 0xFE0F) {
-                    use_emoji = true;
-                    break;
-                }
+        // A codepoint is rendered via the emoji font only when (a) VS16
+        // forces emoji presentation, (b) it is a regional indicator
+        // (definitionally emoji), or (c) the emoji font actually carries
+        // the glyph. Plain is_ambiguous_emoji codepoints (Dingbats etc.)
+        // without VS16 stay on the text font when the emoji font lacks
+        // the glyph — avoids the old "route to EMOJI, shape, fall back to
+        // NORMAL while symbol_cell flags still say emoji" round-trip.
+        // VS15 (U+FE0E) forces text presentation regardless.
+        bool has_vs15 = false;
+        bool has_vs16 = false;
+        for (int i = 1; i < cp_count; i++) {
+            if (cps[i] == 0xFE0E)
+                has_vs15 = true;
+            else if (cps[i] == 0xFE0F)
+                has_vs16 = true;
+        }
+        bool use_emoji = false;
+        if (!has_vs15 && font_has_style(data->font, FONT_STYLE_EMOJI)) {
+            uint32_t cp0 = cps[0];
+            if (has_vs16 || is_regional_indicator(cp0)) {
+                use_emoji = true;
+            } else if (is_emoji_presentation(cp0)) {
+                use_emoji = font_get_glyph_index(data->font, FONT_STYLE_EMOJI, cp0) != 0;
             }
         }
-        if (use_emoji && font_has_style(data->font, FONT_STYLE_EMOJI))
+        if (use_emoji)
             style = FONT_STYLE_EMOJI;
     }
 
@@ -1484,20 +1527,14 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     uint32_t color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
                                      : 0xFFFFFF;
     bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
-    // Route symbol/emoji cells through the box-filter downscale path so
-    // oversized dingbats (Noto Sans Mono ✶, ▽ etc.) get smoothly fitted
-    // into the cell. Box Drawing (0x2500-0x257F) and Block Elements
-    // (0x2580-0x259F) are handled procedurally elsewhere; the ranges
-    // below are the symbol blocks that go through font rasterization.
-    bool symbol_cell = false;
-    if (cp_count > 0) {
-        uint32_t cp = cps[0];
-        symbol_cell = is_emoji_presentation(cp) || is_regional || (cp >= 0x2300 && cp <= 0x23FF) // Misc Technical
-                      || (cp >= 0x25A0 && cp <= 0x25FF)                                          // Geometric Shapes
-                      || (cp >= 0x2900 && cp <= 0x297F)                                          // Supplemental Arrows-B
-                      || (cp >= 0x2B00 && cp <= 0x2BFF);                                         // Misc Symbols and Arrows
-    }
+    bool symbol_cell = (cp_count > 0) && is_symbol_cell_cp(cps[0]);
     bool downscale_glyph = (emoji_render && color_baked) || symbol_cell;
+    // Symbol-class glyphs rendered through a text/fallback font keep their
+    // natural design width — only height drives the (rare) downscale, and
+    // they are placed on the typographic baseline instead of cell-center.
+    // Color-baked emoji-font output keeps the existing centered min-fit
+    // policy because emoji fonts are designed for a square cell.
+    bool height_only_fit = symbol_cell && !color_baked;
 
     // For regional indicators, cache at square size for consistent high-quality scaling
     int cache_w = avail_w;
@@ -1561,7 +1598,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
                                             gb, downscale_glyph,
-                                            cache_w, cache_h);
+                                            cache_w, cache_h, height_only_fit);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
                         rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
@@ -1638,7 +1675,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                     : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
                                     glyph_bitmap, downscale_glyph,
-                                    cache_w, cache_h);
+                                    cache_w, cache_h, height_only_fit);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (atlas_glyph_id != 0) {
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
@@ -2153,22 +2190,31 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     terminal_get_dimensions(term, &term_rows, &term_cols);
 
     // Find the rightmost non-empty column across all rows so multi-row
-    // outputs (e.g. -P --exec) aren't trimmed to row 0's width.
+    // outputs (e.g. -P --exec) aren't trimmed to row 0's width. Symbol-class
+    // codepoints rendered through a text font are anchored on the baseline
+    // at natural width and may overhang the cell — bump the canvas by one
+    // column whenever the rightmost glyph is symbol-class so the overhang
+    // is preserved in the snapshot.
     int last_col = 0;
+    bool last_is_symbol_overhang = false;
     for (int row = 0; row < term_rows; row++) {
         for (int col = 0; col < term_cols; col++) {
             TerminalCell cell;
             if (terminal_get_cell(term, row, col, &cell) == 0 && cell.cp != 0) {
                 int end = col + (cell.width > 0 ? cell.width : 1);
-                if (end > last_col)
+                if (end > last_col) {
                     last_col = end;
+                    last_is_symbol_overhang = is_symbol_cell_cp(cell.cp);
+                } else if (end == last_col && is_symbol_cell_cp(cell.cp)) {
+                    last_is_symbol_overhang = true;
+                }
             }
         }
     }
     if (last_col <= 0)
         last_col = 1;
 
-    int render_cols = last_col;
+    int render_cols = last_col + (last_is_symbol_overhang ? 1 : 0);
     int render_rows = term_rows;
 
     int img_w = render_cols * data->cell_width;

@@ -15,7 +15,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Variable-font support (MM_Var) and axis control
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Support for Unicode characters and emoji (COLR v1 color fonts)
-- Emoji width paradigm: color glyphs preferred regardless of VS16; ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells. Widths are computed at insertion time (UAX #11 + #29) and stored on the cell, so the renderer walks rows in plain column order.
+- Emoji width paradigm: coverage-aware routing (color emoji font used when VS16 forces emoji presentation, the codepoint is a regional indicator, or the emoji font actually carries the glyph; VS15 forces text); ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells; symbol-class glyphs from a text font keep their natural design width and sit on the typographic baseline. Widths are computed at insertion time (UAX #11 + #29) and stored on the cell, so the renderer walks rows in plain column order.
 - Sixel graphics protocol support
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
@@ -208,11 +208,12 @@ Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting wit
 
 ## Emoji Width Paradigm
 
-bloom-terminal enforces three rules for how emoji and symbols are rendered:
+bloom-terminal enforces four rules for how emoji and symbols are rendered:
 
-1. **Color preferred.** When a color glyph is available in the primary or fallback font, it is used. This decision is independent of VS16 (the emoji presentation selector) — the emoji font is chosen based on whether the base codepoint is in an emoji range or whether a fallback font supplies a color raster.
-2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell regardless of whether they render with the color emoji font. They stay 1 cell wide unless followed by VS16.
+1. **Coverage-aware emoji selection.** A codepoint routes to the color emoji font when (a) VS16 (U+FE0F) forces emoji presentation, (b) it is a regional indicator (always emoji), or (c) the emoji font actually carries the glyph. VS15 (U+FE0E) forces text presentation in all cases. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
+2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell. They stay 1 cell wide unless followed by VS16.
 3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the cell width is 2 — e.g. `⚠` is 1 cell but `⚠️` is 2 cells.
+4. **Symbol-class glyphs preserve font design.** Dingbats, Misc Symbols, Misc Technical, Geometric Shapes, Supplemental Arrows-B, and Misc Symbols & Arrows rendered through a text font keep their natural design width and sit on the typographic baseline (not the cell midpoint). Only vertical overflow triggers a downscale; horizontal overhang into neighbor cells is allowed and handled cleanly by the two-pass row draw (backgrounds first, then glyphs).
 
 bloom-vt computes UAX #11 + UAX #29 cluster widths at insertion time and stores them on the cell, so VS16 emoji come through with `cell.width == 2` and the cell immediately to its right is a continuation cell with `cell.width == 0`. The renderer walks rows in plain column order via `TerminalRowIter` and increments by `cell.width` — no peek-ahead, no shift-vs-absorb decision, no separate "visual" column space. Mouse, cursor, and selection coordinates all share the same single column space.
 
