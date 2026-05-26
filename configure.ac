@@ -1,7 +1,9 @@
 AC_INIT([bloom-terminal],
         m4_esyscmd_s([cat version 2>/dev/null || echo "0.0.0-unknown"]))
 AC_CONFIG_AUX_DIR([build-aux])
-AM_INIT_AUTOMAKE([foreign subdir-objects])
+AC_CONFIG_MACRO_DIRS([m4])
+AM_INIT_AUTOMAKE([1.14 foreign subdir-objects -Wall -Werror])
+AM_SILENT_RULES([yes])
 AC_CANONICAL_HOST
 
 dnl Recompute the version at configure time so a rebuild after new commits
@@ -16,6 +18,7 @@ AC_MSG_NOTICE([bloom-terminal version: $BLOOM_TERMINAL_VERSION])
 
 # Check for programs
 AC_PROG_CC
+AM_PROG_AR
 LT_INIT([dlopen])
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
