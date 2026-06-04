@@ -12,6 +12,10 @@
 #include "base64.h"
 #include <bloom-vt/bloom_vt.h>
 
+#ifdef BLOOM_HARDEN_HEAP
+#include "heap_harden.h"
+#endif
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -263,7 +267,15 @@ static bool bvt_back_init(TerminalBackend *term, int width, int height)
     BvtBackendData *d = calloc(1, sizeof(*d));
     if (!d)
         return false;
+#ifdef BLOOM_HARDEN_HEAP
+    /* One-time hookup of the heap_stats post-mortem dump into the
+     * bloom_bug chain. Safe to call multiple times — heap_harden_init
+     * just registers itself if not already done. */
+    heap_harden_init();
+    d->vt = bvt_new_with_allocator(height, width, &bvt_hardened_allocator);
+#else
     d->vt = bvt_new(height, width); /* rows, cols */
+#endif
     if (!d->vt) {
         free(d);
         return false;

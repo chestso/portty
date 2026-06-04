@@ -55,6 +55,24 @@ else
   fi
 fi
 
+# BLOOM_HARDEN_HEAP — install the hardened BvtAllocator wrapper that
+# catches heap corruption at the corrupting allocation rather than at
+# the next unrelated calloc. Auto-on under --enable-debug or when the
+# user has passed -fsanitize=address (the wrapper layers usefully with
+# ASan and is cheap), off in plain release builds.
+have_hardened_heap=no
+if test "x$enable_debug" = "xyes"; then
+  have_hardened_heap=yes
+fi
+case "$CFLAGS" in
+  *-fsanitize=address*) have_hardened_heap=yes ;;
+esac
+if test "x$have_hardened_heap" = "xyes"; then
+  AC_DEFINE([BLOOM_HARDEN_HEAP], [1],
+            [Wrap the bvt allocator with magic + canary + poison-on-free])
+  AC_MSG_NOTICE([Hardened heap allocator enabled (catches UAF / overflow at the source)])
+fi
+
 # Check for libraries
 PKG_CHECK_MODULES([SDL3], [sdl3])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then

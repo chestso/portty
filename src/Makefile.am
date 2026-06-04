@@ -40,7 +40,8 @@ bloom_terminal_SOURCES = main.c bloom_conf.c base64.c term.c term_bvt.c \
     rend.c rend_sdl3.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
-    platform.c platform_sdl3.c png_mode.c timer.c sixel.c
+    platform.c platform_sdl3.c png_mode.c timer.c sixel.c \
+    bloom_bug.c heap_harden.c
 
 # Compiler flags
 AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \

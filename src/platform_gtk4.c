@@ -4,6 +4,7 @@
 
 #include "bloom_version.h"
 
+#include "bloom_bug.h"
 #include "common.h"
 #include "platform_gtk4.h"
 #include <SDL3/SDL.h>
@@ -13,8 +14,10 @@
 #endif
 #include <errno.h>
 #include <glib-unix.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -258,8 +261,93 @@ typedef struct
     PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData; // optional
     PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC
     glGetFramebufferAttachmentParameteriv;
+
+    /* True once the first DMA-BUF frame has been presented successfully.
+     * Until then a setup_export_resources failure is treated as
+     * "system doesn't support zero-copy" (lifecycle, fall back). After
+     * the flag is set, a failure means a previously-working path broke
+     * — those are bug indicators and abort. */
+    bool zero_copy_was_working;
 #endif
+
+    /* Detection counters. Split into "lifecycle" (just count) and
+     * "bug indicators" (the corresponding code path also calls
+     * BLOOM_BUG_ABORT). Dumped via bloom_bug on any abort and on
+     * clean shutdown. */
+    struct
+    {
+        /* Lifecycle */
+        uint64_t frame_count;
+        uint32_t gbm_recreations;
+        uint32_t readback_path_taken;
+        uint32_t zero_copy_disabled_by_env;
+
+        /* Bug indicators — incremented just before BLOOM_BUG_ABORT
+         * so the post-mortem dump shows which slot was hit. */
+        uint32_t egl_restore_failures;
+        uint32_t setup_resources_mid_session;
+        uint32_t dmabuf_verify_failures;
+        uint32_t dup_dmabuf_failures;
+        uint32_t gdk_builder_failures;
+        uint32_t render_target_create_failures;
+    } gl_stats;
 } GTK4PlatformData;
+
+/* Singleton pointer so the bloom_bug dump hook (no user argument) can
+ * reach the live ctx. There is only ever one GTK4 backend per
+ * process. */
+static GTK4PlatformData *gtk4_singleton = NULL;
+
+/* bloom_bug post-mortem hook — dumps the gl_stats counters so an abort
+ * anywhere in the binary leaves a trail of what the GTK4 GL/DMA-BUF
+ * lifecycle did in the run-up. Registered from gtk4_plat_init. */
+static void gtk4_dump_gl_stats(void)
+{
+    GTK4PlatformData *ctx = gtk4_singleton;
+    if (!ctx)
+        return;
+    fprintf(stderr,
+            "GL_STATS frame=%" PRIu64 " gbm_recreations=%u readback=%u"
+            " zc_disabled_by_env=%u\n",
+            ctx->gl_stats.frame_count,
+            ctx->gl_stats.gbm_recreations,
+            ctx->gl_stats.readback_path_taken,
+            ctx->gl_stats.zero_copy_disabled_by_env);
+    fprintf(stderr,
+            "GL_BUGS egl_restore_failures=%u setup_mid_session=%u"
+            " dmabuf_verify_failures=%u dup_failures=%u"
+            " gdk_builder_failures=%u render_target_failures=%u\n",
+            ctx->gl_stats.egl_restore_failures,
+            ctx->gl_stats.setup_resources_mid_session,
+            ctx->gl_stats.dmabuf_verify_failures,
+            ctx->gl_stats.dup_dmabuf_failures,
+            ctx->gl_stats.gdk_builder_failures,
+            ctx->gl_stats.render_target_create_failures);
+}
+
+#ifdef HAVE_EGL_DMABUF
+/* A1.1 — restore SDL's EGL context after GTK has switched to its own
+ * for inter-frame rendering. eglMakeCurrent silently succeeded with a
+ * dropped return before; now any mid-session failure aborts with the
+ * gl_stats dump so we catch the cause instead of letting subsequent
+ * GL ops run against undefined state and scribble GTK's heap. */
+static void restore_sdl_egl_context(GTK4PlatformData *ctx)
+{
+    if (!ctx->egl_ctx)
+        return;
+    if (!eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
+                        ctx->egl_ctx)) {
+        EGLint err = eglGetError();
+        ctx->gl_stats.egl_restore_failures++;
+        BLOOM_BUG_ABORT(
+            "eglMakeCurrent restore failed (egl_error=0x%x); GL state "
+            "is undefined, refusing to draw",
+            (unsigned)err);
+    }
+    while (ctx->glGetError && ctx->glGetError() != 0)
+        ;
+}
+#endif
 
 // Convert GDK modifier flags to TERM_MOD_* flags
 static int gdk_mod_to_term(GdkModifierType state)
@@ -667,16 +755,23 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     // Ensure renderer internal state matches drawing area (physical pixels)
     renderer_resize(ctx->rend, phys_w, phys_h);
 
+    ctx->gl_stats.frame_count++;
+
 #ifdef HAVE_EGL_DMABUF
-    // GTK4 makes its own EGL context current for GL rendering between frames.
-    // Restore SDL's EGL context before any SDL/GL operations — including
-    // render target creation, export resource setup, and drawing.
-    if (ctx->egl_ctx) {
-        eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
-                       ctx->egl_ctx);
-        while (ctx->glGetError && ctx->glGetError() != 0)
-            ;
+    // A1.2 — env-var kill switch. Honoured once at the start of each
+    // frame; flips ctx->zero_copy off and stays off for the rest of the
+    // session so the user can bisect "is DMA-BUF implicated?" without
+    // rebuilding.
+    if (ctx->zero_copy && getenv("BLOOM_DISABLE_ZERO_COPY")) {
+        ctx->gl_stats.zero_copy_disabled_by_env++;
+        vlog("BLOOM_DISABLE_ZERO_COPY set; disabling zero-copy for the "
+             "rest of this session\n");
+        ctx->zero_copy = false;
     }
+
+    // A1.1 — restore SDL's EGL context. eglMakeCurrent failures abort
+    // via BLOOM_BUG_ABORT (handled inside the helper).
+    restore_sdl_egl_context(ctx);
 #endif
 
     // Create/resize render target texture if needed
@@ -687,14 +782,36 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
         ctx->render_target = SDL_CreateTexture(
             ctx->sdl_renderer, SDL_PIXELFORMAT_RGBA8888,
             SDL_TEXTUREACCESS_TARGET, phys_w, phys_h);
+        // A1.4 — NULL check before any use of render_target.
+        if (!ctx->render_target) {
+            ctx->gl_stats.render_target_create_failures++;
+            vlog("Failed to create render target %dx%d: %s\n", phys_w,
+                 phys_h, SDL_GetError());
+            return;
+        }
         ctx->target_w = phys_w;
         ctx->target_h = phys_h;
 #ifdef HAVE_EGL_DMABUF
         // Recreate export resources for new size
         if (ctx->zero_copy) {
+            ctx->gl_stats.gbm_recreations++;
             g_clear_object(&ctx->prev_texture);
             if (!setup_export_resources(ctx, phys_w, phys_h)) {
-                vlog("Export resource setup failed, disabling zero-copy\n");
+                // A1.3 — phase-aware: a setup failure *before* the
+                // first successful frame means the system doesn't
+                // support zero-copy. Lifecycle event, fall back.
+                // *After* the first successful frame, the path was
+                // working — a failure here is a bug indicator.
+                if (ctx->zero_copy_was_working) {
+                    ctx->gl_stats.setup_resources_mid_session++;
+                    BLOOM_BUG_ABORT(
+                        "setup_export_resources failed mid-session at "
+                        "%dx%d (zero-copy was working — GL/GBM/EGL state "
+                        "broke between frames)",
+                        phys_w, phys_h);
+                }
+                vlog("Export resource setup failed at init, disabling "
+                     "zero-copy\n");
                 ctx->zero_copy = false;
             }
         }
@@ -721,11 +838,6 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
                  ctx->sdl_target_gl_tex);
         }
 #endif
-        if (!ctx->render_target) {
-            vlog("Failed to create render target %dx%d: %s\n", phys_w, phys_h,
-                 SDL_GetError());
-            return;
-        }
     }
 
     // Render terminal into SDL's render target texture.
@@ -816,12 +928,16 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
                 }
 
                 if (nonzero == 0) {
-                    vlog("DMA-BUF export verification FAILED: export texture "
-                         "is blank after GL copy — falling back to "
-                         "readback\n");
-                    ctx->zero_copy = false;
-                    // Fall through to readback path below
-                    goto readback_fallback;
+                    // A1.6 — silent blank export means the GL copy
+                    // path is broken. Aborting so the cause gets
+                    // diagnosed instead of falling back forever and
+                    // hoping nobody notices the screen flicker.
+                    ctx->gl_stats.dmabuf_verify_failures++;
+                    BLOOM_BUG_ABORT(
+                        "DMA-BUF export verify: blank after GL copy "
+                        "at %dx%d (sample_w=%d) — GL blit silently "
+                        "produced empty pixels",
+                        phys_w, phys_h, sample_w);
                 }
                 vlog("DMA-BUF export verification OK (%d non-zero bytes "
                      "in %d-pixel sample)\n",
@@ -833,8 +949,13 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
         // GTK closes the fd via close_dmabuf_fd when done.
         int fd = dup(ctx->dmabuf_fd);
         if (fd < 0) {
-            vlog("dup(dmabuf_fd) failed: %s\n", strerror(errno));
-            goto readback_fallback;
+            // The fd was just successfully opened during setup; a dup
+            // failure here means the process ran out of fds or
+            // dmabuf_fd was clobbered. Either way, a bug indicator.
+            ctx->gl_stats.dup_dmabuf_failures++;
+            BLOOM_BUG_ABORT(
+                "dup(dmabuf_fd=%d) failed: %s (errno=%d)",
+                ctx->dmabuf_fd, strerror(errno), errno);
         }
 
         GdkDmabufTextureBuilder *builder =
@@ -867,19 +988,33 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
             g_clear_object(&ctx->prev_texture);
             ctx->prev_texture = texture;
 
+            ctx->zero_copy_was_working = true;
             terminal_clear_redraw(ctx->term);
             ctx->force_redraw = false;
             return;
         }
 
-        // DMA-BUF texture build failed
-        vlog("GdkDmabufTextureBuilder failed: %s\n",
-             error ? error->message : "unknown");
+        // The builder is fed validated dimensions, a valid fourcc/
+        // modifier, and a freshly-dup'd fd. If it still fails, GTK has
+        // rejected something we constructed — that's our bug.
+        ctx->gl_stats.gdk_builder_failures++;
         g_clear_error(&error);
         close(fd);
+        BLOOM_BUG_ABORT(
+            "gdk_dmabuf_texture_builder_build failed at %dx%d "
+            "(fourcc=0x%x modifier=0x%" PRIx64 " stride=%d offset=%d)"
+            ": %s",
+            phys_w, phys_h, ctx->dmabuf_fourcc,
+            (uint64_t)ctx->dmabuf_modifier, ctx->dmabuf_stride,
+            ctx->dmabuf_offset,
+            error ? error->message : "unknown");
     }
 
-readback_fallback:
+    /* Reached only when ctx->zero_copy was false from the start of
+     * the frame (init failure, env-var kill switch, or system has no
+     * DMA-BUF support). All mid-frame failures in the zero-copy path
+     * BLOOM_BUG_ABORT instead. */
+    ctx->gl_stats.readback_path_taken++;
 #endif // HAVE_EGL_DMABUF
 
     // Readback fallback — read pixels and create GdkMemoryTexture
@@ -1433,6 +1568,8 @@ static bool gtk4_plat_init(PlatformBackend *plat)
         SDL_Quit();
         return false;
     }
+    gtk4_singleton = ctx;
+    bloom_bug_register_dump(gtk4_dump_gl_stats);
 
     ctx->cursor_blink_visible = true;
     ctx->has_focus = true;
@@ -1624,6 +1761,21 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
         return;
 
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+
+    /* Dump gl_stats on clean shutdown so successful sessions still
+     * surface the gbm_recreations / readback distribution that tell
+     * us how the GL/DMA-BUF path was exercised. Bug counters should
+     * all be zero — if any are non-zero we'd have aborted earlier. */
+    vlog("GL_STATS frame=%" PRIu64 " gbm_recreations=%u readback=%u"
+         " zc_disabled_by_env=%u\n",
+         ctx->gl_stats.frame_count, ctx->gl_stats.gbm_recreations,
+         ctx->gl_stats.readback_path_taken,
+         ctx->gl_stats.zero_copy_disabled_by_env);
+
+    /* Clear singleton so the bloom_bug dump hook doesn't dereference
+     * an about-to-be-freed ctx if anything aborts during teardown. */
+    if (gtk4_singleton == ctx)
+        gtk4_singleton = NULL;
 
     // Remove watches
     if (ctx->pty_watch_id) {
