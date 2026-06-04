@@ -8,6 +8,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 
 - Full terminal emulation using bloom-vt — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
 - Rendering with SDL3
+- Gamma-correct text rendering — antialiased glyph coverage is composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), so text gets its physically-correct, heavier/softer weight like kitty rather than the thin look of sRGB-space blending. Tunable with the kitty-style `text_composition_strategy` config key.
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
@@ -39,13 +40,14 @@ bloom-terminal uses a modular backend abstraction design:
 
 - **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
   - Default: SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
-  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Uses zero-copy DMA-BUF rendering (GBM → EGL → `glBlitFramebuffer` → `GdkDmabufTexture`) when EGL/GBM are available, with `SDL_RenderReadPixels` fallback.
+  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Renders with SDL's Vulkan renderer and exports each frame as a zero-copy DMA-BUF via Vulkan external memory (exportable DRM-modifier `VkImage` wrapped as the SDL render target → `vkGetMemoryFdKHR` → `GdkDmabufTexture` with `GtkGraphicsOffload`). bloom owns Vulkan instance/device creation because SDL's own device does not enable the external-memory extensions. Falls back to `SDL_RenderReadPixels` if Vulkan is unavailable.
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: bloom-vt (`terminal_backend_bvt`) — external VT engine consumed via `pkg-config bloom-vt`, bridged through `term_bvt.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
 
 - **Renderer Backend**: Handles graphics output
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
+  - Draws the frame into an `RGBA64_FLOAT` / `SRGB_LINEAR` target via SDL's GPU renderer (Vulkan/D3D12/Metal), so glyph coverage is blended in linear light and re-encoded to sRGB on present — the OpenGL renderer ignores the colorspace and is not used
   - Uses a texture atlas with shelf packing and FNV-1a hash-based lookup
   - LRU eviction occurs when the atlas fills
 
@@ -188,21 +190,23 @@ platform = gtk4
 verbose = false
 word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
 scrollback = 1000
+text_composition_strategy = kitty
 ```
 
 ### Available Keys
 
 All keys are optional. Only the `[terminal]` section is recognized.
 
-| Key          | Values                            | Default        | Description                                 |
-| ------------ | --------------------------------- | -------------- | ------------------------------------------- |
-| `font`       | Fontconfig pattern                | `monospace`    | Font family and size (e.g. `monospace-16`)  |
-| `geometry`   | `COLSxROWS`                       | `80x24`        | Initial terminal dimensions                 |
-| `hinting`    | `none`, `light`, `normal`, `mono` | `light`        | FreeType hinting mode                       |
-| `platform`   | `sdl3`, `gtk4`                    | `sdl3`         | Platform backend                            |
-| `verbose`    | `true`/`false`                    | `false`        | Debug output                                |
-| `word_chars` | Character string                  | `A-Za-z0-9_-/` | Characters treated as word for double-click |
-| `scrollback` | Non-negative integer              | `1000`         | Scrollback history lines (0 disables)       |
+| Key                         | Values                                                | Default        | Description                                                                            |
+| --------------------------- | ----------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
+| `font`                      | Fontconfig pattern                                    | `monospace`    | Font family and size (e.g. `monospace-16`)                                             |
+| `geometry`                  | `COLSxROWS`                                           | `80x24`        | Initial terminal dimensions                                                            |
+| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`        | FreeType hinting mode                                                                  |
+| `platform`                  | `sdl3`, `gtk4`                                        | `sdl3`         | Platform backend                                                                       |
+| `verbose`                   | `true`/`false`                                        | `false`        | Debug output                                                                           |
+| `word_chars`                | Character string                                      | `A-Za-z0-9_-/` | Characters treated as word for double-click                                            |
+| `scrollback`                | Non-negative integer                                  | `1000`         | Scrollback history lines (0 disables)                                                  |
+| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`      | Glyph-weight curve on top of linear-light blending (`kitty` = gamma 1.7 / contrast 30) |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
@@ -245,9 +249,12 @@ All platforms:
 - harfbuzz (>= 2.0)
 - libpng
 
+Rendering uses SDL's GPU renderer for gamma-correct linear-light blending, so a working GPU backend is required **at runtime**: Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS.
+
 Linux only:
 
 - fontconfig (font discovery)
+- a Vulkan runtime (loader + ICD, e.g. `mesa-vulkan-drivers`) for the GPU renderer
 
 macOS only:
 
@@ -256,7 +263,7 @@ macOS only:
 Optional (Linux):
 
 - gtk4 + libadwaita-1 (for `--gtk4` platform backend)
-- EGL + GBM + libdrm (for zero-copy DMA-BUF rendering in GTK4 backend)
+- libdrm (DRM format constants for the GTK4 backend's Vulkan DMA-BUF export; the Vulkan runtime above is also required)
 
 ### Fedora 41+
 
@@ -267,8 +274,11 @@ sudo dnf install gcc autoconf automake libtool pkgconf-pkg-config
 # Required libraries
 sudo dnf install SDL3-devel fontconfig-devel freetype-devel harfbuzz-devel libpng-devel
 
-# Optional: GTK4 backend
-sudo dnf install gtk4-devel libadwaita-devel mesa-libEGL-devel mesa-libgbm-devel libdrm-devel
+# Runtime: a Vulkan driver for the GPU renderer (most systems have it)
+sudo dnf install mesa-vulkan-drivers vulkan-loader
+
+# Optional: GTK4 backend (vulkan-loader-devel + libdrm-devel for DMA-BUF export)
+sudo dnf install gtk4-devel libadwaita-devel vulkan-loader-devel libdrm-devel
 
 # Optional: compile_commands.json for editors
 sudo dnf install bear
