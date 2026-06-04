@@ -746,23 +746,30 @@ static bool sdl3_create_window(PlatformBackend *plat, const char *title,
     }
 #endif
 
-    // Create renderer
-    vlog("Creating renderer\n");
+    // Create renderer. bloom requires SDL's GPU renderer (Vulkan / D3D12 /
+    // Metal): only it performs gamma-correct (linear-light) glyph blending,
+    // via SRGB_LINEAR float render targets. The OpenGL renderer blends in sRGB
+    // space (thin, gamma-incorrect text) and is intentionally not used.
+    vlog("Creating GPU renderer\n");
     SDL_ClearError();
 
-    ctx->sdl_renderer = SDL_CreateRenderer(ctx->window, NULL);
+    SDL_PropertiesID rprops = SDL_CreateProperties();
+    if (rprops) {
+        SDL_SetPointerProperty(rprops, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, ctx->window);
+        SDL_SetStringProperty(rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING, "gpu");
+        ctx->sdl_renderer = SDL_CreateRendererWithProperties(rprops);
+        SDL_DestroyProperties(rprops);
+    }
     if (!ctx->sdl_renderer) {
         const char *error = SDL_GetError();
-        if (error && error[0] != '\0') {
-            fprintf(stderr, "ERROR: Failed to create renderer: %s\n", error);
-        } else {
-            fprintf(stderr, "ERROR: Failed to create renderer (no specific error message)\n");
-        }
+        fprintf(stderr,
+                "ERROR: Failed to create GPU renderer (requires Vulkan/D3D12/Metal): %s\n",
+                (error && error[0]) ? error : "no specific error message");
         SDL_DestroyWindow(ctx->window);
         ctx->window = NULL;
         return false;
     }
-    vlog("Renderer created successfully\n");
+    vlog("Renderer created: %s\n", SDL_GetRendererName(ctx->sdl_renderer));
 
     // Disable VSync for lowest input latency
     SDL_SetRenderVSync(ctx->sdl_renderer, 0);

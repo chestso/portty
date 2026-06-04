@@ -131,15 +131,20 @@ if test "x$have_gtk4" = "xyes"; then
   AC_DEFINE_UNQUOTED([DEP_LIBADWAITA_VERSION], ["$DEP_LIBADWAITA_VER"], [libadwaita version])
   AC_MSG_NOTICE([GTK4/libadwaita platform backend enabled])
 
-  # Check for EGL + libdrm + GBM for zero-copy DMA-BUF rendering
-  PKG_CHECK_MODULES([EGL], [egl], [have_egl=yes], [have_egl=no])
+  # libdrm provides <drm_fourcc.h> (DRM format constants used when describing
+  # the exported DMA-BUF to GTK). Header-only here; no extra link required.
   PKG_CHECK_MODULES([LIBDRM], [libdrm], [have_libdrm=yes], [have_libdrm=no])
-  PKG_CHECK_MODULES([GBM], [gbm], [have_gbm=yes], [have_gbm=no])
-  if test "x$have_egl" = "xyes" && test "x$have_libdrm" = "xyes" && test "x$have_gbm" = "xyes"; then
-    AC_DEFINE([HAVE_EGL_DMABUF], [1], [Have EGL + GBM + DRM for zero-copy DMA-BUF rendering])
-    AC_MSG_NOTICE([GBM/EGL DMA-BUF zero-copy rendering enabled])
+
+  # Vulkan: the GTK4 backend renders with SDL's Vulkan renderer (gamma-correct
+  # linear-light blending) and exports the render target as a DMA-BUF via
+  # Vulkan external memory for zero-copy display. bloom owns Vulkan device
+  # creation (SDL's own device does not enable the external-memory extensions).
+  PKG_CHECK_MODULES([VULKAN], [vulkan], [have_vulkan=yes], [have_vulkan=no])
+  if test "x$have_vulkan" = "xyes" && test "x$have_libdrm" = "xyes"; then
+    AC_DEFINE([HAVE_VULKAN_DMABUF], [1], [Have Vulkan for zero-copy DMA-BUF export])
+    AC_MSG_NOTICE([Vulkan DMA-BUF zero-copy rendering enabled])
   else
-    AC_MSG_NOTICE([GBM/EGL DMA-BUF not available, using readback rendering])
+    AC_MSG_NOTICE([Vulkan not available, GTK4 falls back to readback rendering])
   fi
 fi
 

@@ -6,6 +6,7 @@
 
 #include "bloom_bug.h"
 #include "common.h"
+#include "gtk4_vulkan.h"
 #include "platform_gtk4.h"
 #include <SDL3/SDL.h>
 #include <adwaita.h>
@@ -22,87 +23,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-
-#ifdef HAVE_EGL_DMABUF
-#include <EGL/egl.h>
-#include <EGL/eglext.h>
-#include <fcntl.h>
-#include <gbm.h>
-#include <libdrm/drm_fourcc.h>
-// GL function pointer types (loaded via eglGetProcAddress, avoids -lGL)
-typedef void(EGLAPIENTRYP PFNGLFINISHPROC)(void);
-typedef void(EGLAPIENTRYP PFNGLGENTEXTURESPROC)(int n, unsigned int *textures);
-typedef void(EGLAPIENTRYP PFNGLBINDTEXTUREPROC)(unsigned int target,
-                                                unsigned int texture);
-typedef void(EGLAPIENTRYP PFNGLDELETETEXTURESPROC)(int n,
-                                                   const unsigned int *textures);
-typedef void(EGLAPIENTRYP PFNGLTEXPARAMETERIPROC)(unsigned int target,
-                                                  unsigned int pname,
-                                                  int param);
-typedef void(EGLAPIENTRYP PFNGLGENFRAMEBUFFERSPROC)(int n,
-                                                    unsigned int *framebuffers);
-typedef void(EGLAPIENTRYP PFNGLBINDFRAMEBUFFERPROC)(unsigned int target,
-                                                    unsigned int framebuffer);
-typedef void(EGLAPIENTRYP PFNGLFRAMEBUFFERTEXTURE2DPROC)(
-    unsigned int target, unsigned int attachment, unsigned int textarget,
-    unsigned int texture, int level);
-typedef void(EGLAPIENTRYP PFNGLDELETEFRAMEBUFFERSPROC)(
-    int n, const unsigned int *framebuffers);
-typedef void(EGLAPIENTRYP PFNGLBLITFRAMEBUFFERPROC)(
-    int srcX0, int srcY0, int srcX1, int srcY1, int dstX0, int dstY0,
-    int dstX1, int dstY1, unsigned int mask, unsigned int filter);
-typedef unsigned int(EGLAPIENTRYP PFNGLCHECKFRAMEBUFFERSTATUSPROC)(
-    unsigned int target);
-typedef unsigned int(EGLAPIENTRYP PFNGLGETERRORPROC)(void);
-typedef void(EGLAPIENTRYP PFNGLGETINTEGERVPROC)(unsigned int pname,
-                                                int *params);
-// glEGLImageTargetTexture2DOES — bind EGLImage to GL texture
-typedef void(EGLAPIENTRYP PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)(
-    unsigned int target, void *image);
-// glCopyImageSubData — copy between textures without FBO binding (GL 4.3)
-typedef void(EGLAPIENTRYP PFNGLCOPYIMAGESUBDATAPROC)(
-    unsigned int srcName, unsigned int srcTarget, int srcLevel, int srcX,
-    int srcY, int srcZ, unsigned int dstName, unsigned int dstTarget,
-    int dstLevel, int dstX, int dstY, int dstZ, int srcWidth, int srcHeight,
-    int srcDepth);
-// glGetFramebufferAttachmentParameteriv — query FBO attachments
-typedef void(EGLAPIENTRYP PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC)(
-    unsigned int target, unsigned int attachment, unsigned int pname,
-    int *params);
-#define GL_TEXTURE_2D                         0x0DE1
-#define GL_TEXTURE_MIN_FILTER                 0x2801
-#define GL_TEXTURE_MAG_FILTER                 0x2800
-#define GL_LINEAR                             0x2601
-#define GL_NEAREST                            0x2600
-#define GL_RGBA                               0x1908
-#define GL_RGBA8                              0x8058
-#define GL_UNSIGNED_BYTE                      0x1401
-#define GL_FRAMEBUFFER                        0x8D40
-#define GL_READ_FRAMEBUFFER                   0x8CA8
-#define GL_DRAW_FRAMEBUFFER                   0x8CA9
-#define GL_FRAMEBUFFER_BINDING                0x8CA6
-#define GL_COLOR_ATTACHMENT0                  0x8CE0
-#define GL_COLOR_BUFFER_BIT                   0x00004000
-#define GL_FRAMEBUFFER_COMPLETE               0x8CD5
-#define GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME 0x8CD1
-// EGL device query constants (for matching DRM render node to EGL display)
-#ifndef EGL_DEVICE_EXT
-#define EGL_DEVICE_EXT 0x322C
-#endif
-#ifndef EGL_DRM_RENDER_NODE_FILE_EXT
-#define EGL_DRM_RENDER_NODE_FILE_EXT 0x3377
-#endif
-// GL functions for GPU diagnostics
-typedef const unsigned char *(EGLAPIENTRYP PFNGLGETSTRINGPROC)(unsigned int name);
-typedef void(EGLAPIENTRYP PFNGLREADPIXELSPROC)(
-    int x, int y, int width, int height, unsigned int format, unsigned int type,
-    void *pixels);
-#define GL_RENDERER                0x1F01
-#define GL_VENDOR                  0x1F00
-#define GL_TEXTURE_INTERNAL_FORMAT 0x1003
-typedef void(EGLAPIENTRYP PFNGLGETTEXLEVELPARAMETERIVPROC)(
-    unsigned int target, int level, unsigned int pname, int *params);
-#endif
 
 // GDK keyval -> terminal key mapping
 static const struct
@@ -176,6 +96,20 @@ typedef struct
     SDL_Texture *render_target;
     int target_w, target_h;
 
+#ifdef HAVE_VULKAN_DMABUF
+    // Zero-copy via Vulkan: bloom owns the VkInstance/VkDevice and exports the
+    // render target as a DMA-BUF. When true, render_target aliases
+    // vk_target.texture (an exportable VkImage wrapped as an SDL render target).
+    bool vulkan_dmabuf;
+    bool vk_export_verified;
+    BloomVk vk;
+    BloomVkTarget vk_target;
+#endif
+
+    // Last displayed frame: reused on a no-redraw snapshot and passed to GTK
+    // as the update-texture hint for the next zero-copy frame.
+    GdkTexture *prev_texture;
+
     // PTY
     PtyContext *pty;
     GIOChannel *pty_channel;
@@ -212,64 +146,6 @@ typedef struct
     guint sigint_id;
     guint sigterm_id;
 
-#ifdef HAVE_EGL_DMABUF
-    // Zero-copy DMA-BUF rendering state (GBM import approach)
-    bool zero_copy;
-    bool dmabuf_verified; // set after first-frame content verification
-    EGLDisplay egl_display;
-    GdkTexture *prev_texture;
-
-    // GBM state
-    int drm_fd; // DRM render node fd
-    struct gbm_device *gbm_dev;
-    struct gbm_bo *gbm_bo; // current buffer object
-    int dmabuf_fd;         // DMA-BUF fd from GBM (persistent, dup'd for GTK)
-    int dmabuf_stride;
-    int dmabuf_offset;
-    uint32_t dmabuf_fourcc;
-    uint64_t dmabuf_modifier;
-
-    // GL resources (texture + FBO backed by GBM buffer via EGLImage import)
-    EGLImage egl_image;      // imported from DMA-BUF (persistent per resize)
-    unsigned int export_tex; // GL texture bound to EGLImage
-    unsigned int export_fbo; // FBO with export_tex as color attachment
-
-    // EGL context state (saved for direct eglMakeCurrent restoration,
-    // since SDL_GL_MakeCurrent doesn't work after GTK changes the context)
-    EGLContext egl_ctx;
-    EGLSurface egl_draw;
-    EGLSurface egl_read;
-
-    // SDL render target's GL texture ID (queried from FBO attachment)
-    unsigned int sdl_target_gl_tex;
-
-    // GL function pointers
-    PFNGLFINISHPROC glFinish;
-    PFNGLGENTEXTURESPROC glGenTextures;
-    PFNGLBINDTEXTUREPROC glBindTexture;
-    PFNGLDELETETEXTURESPROC glDeleteTextures;
-    PFNGLTEXPARAMETERIPROC glTexParameteri;
-    PFNGLGENFRAMEBUFFERSPROC glGenFramebuffers;
-    PFNGLBINDFRAMEBUFFERPROC glBindFramebuffer;
-    PFNGLFRAMEBUFFERTEXTURE2DPROC glFramebufferTexture2D;
-    PFNGLDELETEFRAMEBUFFERSPROC glDeleteFramebuffers;
-    PFNGLBLITFRAMEBUFFERPROC glBlitFramebuffer;
-    PFNGLCHECKFRAMEBUFFERSTATUSPROC glCheckFramebufferStatus;
-    PFNGLGETERRORPROC glGetError;
-    PFNGLGETINTEGERVPROC glGetIntegerv;
-    PFNGLEGLIMAGETARGETTEXTURE2DOESPROC glEGLImageTargetTexture2DOES;
-    PFNGLCOPYIMAGESUBDATAPROC glCopyImageSubData; // optional
-    PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC
-    glGetFramebufferAttachmentParameteriv;
-
-    /* True once the first DMA-BUF frame has been presented successfully.
-     * Until then a setup_export_resources failure is treated as
-     * "system doesn't support zero-copy" (lifecycle, fall back). After
-     * the flag is set, a failure means a previously-working path broke
-     * — those are bug indicators and abort. */
-    bool zero_copy_was_working;
-#endif
-
     /* Detection counters. Split into "lifecycle" (just count) and
      * "bug indicators" (the corresponding code path also calls
      * BLOOM_BUG_ABORT). Dumped via bloom_bug on any abort and on
@@ -278,15 +154,10 @@ typedef struct
     {
         /* Lifecycle */
         uint64_t frame_count;
-        uint32_t gbm_recreations;
         uint32_t readback_path_taken;
-        uint32_t zero_copy_disabled_by_env;
 
         /* Bug indicators — incremented just before BLOOM_BUG_ABORT
          * so the post-mortem dump shows which slot was hit. */
-        uint32_t egl_restore_failures;
-        uint32_t setup_resources_mid_session;
-        uint32_t dmabuf_verify_failures;
         uint32_t dup_dmabuf_failures;
         uint32_t gdk_builder_failures;
         uint32_t render_target_create_failures;
@@ -307,47 +178,15 @@ static void gtk4_dump_gl_stats(void)
     if (!ctx)
         return;
     fprintf(stderr,
-            "GL_STATS frame=%" PRIu64 " gbm_recreations=%u readback=%u"
-            " zc_disabled_by_env=%u\n",
-            ctx->gl_stats.frame_count,
-            ctx->gl_stats.gbm_recreations,
-            ctx->gl_stats.readback_path_taken,
-            ctx->gl_stats.zero_copy_disabled_by_env);
+            "DMABUF_STATS frame=%" PRIu64 " readback=%u\n",
+            ctx->gl_stats.frame_count, ctx->gl_stats.readback_path_taken);
     fprintf(stderr,
-            "GL_BUGS egl_restore_failures=%u setup_mid_session=%u"
-            " dmabuf_verify_failures=%u dup_failures=%u"
-            " gdk_builder_failures=%u render_target_failures=%u\n",
-            ctx->gl_stats.egl_restore_failures,
-            ctx->gl_stats.setup_resources_mid_session,
-            ctx->gl_stats.dmabuf_verify_failures,
+            "DMABUF_BUGS dup_failures=%u gdk_builder_failures=%u"
+            " render_target_failures=%u\n",
             ctx->gl_stats.dup_dmabuf_failures,
             ctx->gl_stats.gdk_builder_failures,
             ctx->gl_stats.render_target_create_failures);
 }
-
-#ifdef HAVE_EGL_DMABUF
-/* A1.1 — restore SDL's EGL context after GTK has switched to its own
- * for inter-frame rendering. eglMakeCurrent silently succeeded with a
- * dropped return before; now any mid-session failure aborts with the
- * gl_stats dump so we catch the cause instead of letting subsequent
- * GL ops run against undefined state and scribble GTK's heap. */
-static void restore_sdl_egl_context(GTK4PlatformData *ctx)
-{
-    if (!ctx->egl_ctx)
-        return;
-    if (!eglMakeCurrent(ctx->egl_display, ctx->egl_draw, ctx->egl_read,
-                        ctx->egl_ctx)) {
-        EGLint err = eglGetError();
-        ctx->gl_stats.egl_restore_failures++;
-        BLOOM_BUG_ABORT(
-            "eglMakeCurrent restore failed (egl_error=0x%x); GL state "
-            "is undefined, refusing to draw",
-            (unsigned)err);
-    }
-    while (ctx->glGetError && ctx->glGetError() != 0)
-        ;
-}
-#endif
 
 // Convert GDK modifier flags to TERM_MOD_* flags
 static int gdk_mod_to_term(GdkModifierType state)
@@ -399,297 +238,6 @@ static void handle_keyboard_result(GTK4PlatformData *ctx, KeyboardResult *result
     }
 }
 
-#ifdef HAVE_EGL_DMABUF
-// Load a GL/EGL function via eglGetProcAddress
-#define LOAD_GL(ctx, name, type) \
-    ctx->name = (type)eglGetProcAddress(#name)
-
-// Find and open the DRM render node matching the current EGL display's device.
-// This is critical on multi-GPU systems (e.g. NVIDIA + AMD) where DMA-BUF
-// sharing only works when GBM allocates on the same GPU as the EGL context.
-static int open_drm_render_node(EGLDisplay egl_display)
-{
-    // Try EGL device query to find the render node for this display's GPU
-    PFNEGLQUERYDISPLAYATTRIBEXTPROC eglQueryDisplayAttribEXT =
-        (PFNEGLQUERYDISPLAYATTRIBEXTPROC)eglGetProcAddress(
-            "eglQueryDisplayAttribEXT");
-    PFNEGLQUERYDEVICESTRINGEXTPROC eglQueryDeviceStringEXT =
-        (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress(
-            "eglQueryDeviceStringEXT");
-
-    if (eglQueryDisplayAttribEXT && eglQueryDeviceStringEXT) {
-        EGLAttrib device = 0;
-        if (eglQueryDisplayAttribEXT(egl_display, EGL_DEVICE_EXT, &device) &&
-            device) {
-            const char *node = eglQueryDeviceStringEXT(
-                (EGLDeviceEXT)device, EGL_DRM_RENDER_NODE_FILE_EXT);
-            if (node) {
-                int fd = open(node, O_RDWR | O_CLOEXEC);
-                if (fd >= 0) {
-                    vlog("Opened DRM render node from EGL device: %s\n", node);
-                    return fd;
-                }
-                vlog("Failed to open EGL device render node %s: %s\n",
-                     node, strerror(errno));
-            }
-        }
-    }
-
-    // Fallback: try render nodes sequentially
-    for (int i = 128; i < 136; i++) {
-        char path[32];
-        snprintf(path, sizeof(path), "/dev/dri/renderD%d", i);
-        int fd = open(path, O_RDWR | O_CLOEXEC);
-        if (fd >= 0) {
-            vlog("Opened DRM render node (fallback): %s\n", path);
-            return fd;
-        }
-    }
-    return -1;
-}
-
-// Query the DRM render node path for an EGL display. Returns a static string
-// or NULL. Caller must not free.
-static const char *get_egl_render_node(EGLDisplay egl_display)
-{
-    PFNEGLQUERYDISPLAYATTRIBEXTPROC qda =
-        (PFNEGLQUERYDISPLAYATTRIBEXTPROC)eglGetProcAddress(
-            "eglQueryDisplayAttribEXT");
-    PFNEGLQUERYDEVICESTRINGEXTPROC qds =
-        (PFNEGLQUERYDEVICESTRINGEXTPROC)eglGetProcAddress(
-            "eglQueryDeviceStringEXT");
-    if (!qda || !qds)
-        return NULL;
-    EGLAttrib device = 0;
-    if (!qda(egl_display, EGL_DEVICE_EXT, &device) || !device)
-        return NULL;
-    return qds((EGLDeviceEXT)device, EGL_DRM_RENDER_NODE_FILE_EXT);
-}
-
-// Initialize GBM + EGL for DMA-BUF import — call after GL renderer creation
-static bool init_dmabuf_export(GTK4PlatformData *ctx)
-{
-    ctx->egl_display = eglGetCurrentDisplay();
-    if (ctx->egl_display == EGL_NO_DISPLAY) {
-        vlog("No EGL display available\n");
-        return false;
-    }
-
-    // Log GPU info from the GL context for diagnostics
-    PFNGLGETSTRINGPROC glGetString =
-        (PFNGLGETSTRINGPROC)eglGetProcAddress("glGetString");
-    if (glGetString) {
-        const char *renderer = (const char *)glGetString(GL_RENDERER);
-        const char *vendor = (const char *)glGetString(GL_VENDOR);
-        vlog("SDL GL context: vendor='%s' renderer='%s'\n",
-             vendor ? vendor : "?", renderer ? renderer : "?");
-    }
-
-    // Log SDL's EGL render node
-    const char *sdl_node = get_egl_render_node(ctx->egl_display);
-    vlog("SDL EGL render node: %s\n", sdl_node ? sdl_node : "(unknown)");
-
-    // Check for EGL_EXT_image_dma_buf_import (needed to import DMA-BUF)
-    const char *extensions = eglQueryString(ctx->egl_display, EGL_EXTENSIONS);
-    if (!extensions ||
-        !strstr(extensions, "EGL_EXT_image_dma_buf_import")) {
-        vlog("EGL_EXT_image_dma_buf_import not available\n");
-        return false;
-    }
-
-    // Open DRM render node for GBM
-    ctx->drm_fd = open_drm_render_node(ctx->egl_display);
-    if (ctx->drm_fd < 0) {
-        vlog("No DRM render node available\n");
-        return false;
-    }
-
-    // Create GBM device
-    ctx->gbm_dev = gbm_create_device(ctx->drm_fd);
-    if (!ctx->gbm_dev) {
-        vlog("gbm_create_device failed\n");
-        close(ctx->drm_fd);
-        ctx->drm_fd = -1;
-        return false;
-    }
-
-    // Save EGL context and surfaces for direct restoration.
-    // SDL_GL_MakeCurrent doesn't work after GTK makes its own context current,
-    // so we call eglMakeCurrent directly in the snapshot callback.
-    ctx->egl_ctx = eglGetCurrentContext();
-    ctx->egl_draw = eglGetCurrentSurface(EGL_DRAW);
-    ctx->egl_read = eglGetCurrentSurface(EGL_READ);
-
-    // Load GL functions (required)
-    LOAD_GL(ctx, glFinish, PFNGLFINISHPROC);
-    LOAD_GL(ctx, glGenTextures, PFNGLGENTEXTURESPROC);
-    LOAD_GL(ctx, glBindTexture, PFNGLBINDTEXTUREPROC);
-    LOAD_GL(ctx, glDeleteTextures, PFNGLDELETETEXTURESPROC);
-    LOAD_GL(ctx, glTexParameteri, PFNGLTEXPARAMETERIPROC);
-    LOAD_GL(ctx, glGenFramebuffers, PFNGLGENFRAMEBUFFERSPROC);
-    LOAD_GL(ctx, glBindFramebuffer, PFNGLBINDFRAMEBUFFERPROC);
-    LOAD_GL(ctx, glFramebufferTexture2D, PFNGLFRAMEBUFFERTEXTURE2DPROC);
-    LOAD_GL(ctx, glDeleteFramebuffers, PFNGLDELETEFRAMEBUFFERSPROC);
-    LOAD_GL(ctx, glBlitFramebuffer, PFNGLBLITFRAMEBUFFERPROC);
-    LOAD_GL(ctx, glCheckFramebufferStatus, PFNGLCHECKFRAMEBUFFERSTATUSPROC);
-    LOAD_GL(ctx, glGetError, PFNGLGETERRORPROC);
-    LOAD_GL(ctx, glGetIntegerv, PFNGLGETINTEGERVPROC);
-    LOAD_GL(ctx, glEGLImageTargetTexture2DOES,
-            PFNGLEGLIMAGETARGETTEXTURE2DOESPROC);
-    LOAD_GL(ctx, glGetFramebufferAttachmentParameteriv,
-            PFNGLGETFRAMEBUFFERATTACHMENTPARAMETERIVPROC);
-    // Optional: glCopyImageSubData (GL 4.3) — preferred over FBO blit
-    LOAD_GL(ctx, glCopyImageSubData, PFNGLCOPYIMAGESUBDATAPROC);
-
-    if (!ctx->glFinish || !ctx->glGenTextures || !ctx->glBindTexture ||
-        !ctx->glDeleteTextures || !ctx->glTexParameteri ||
-        !ctx->glGenFramebuffers || !ctx->glBindFramebuffer ||
-        !ctx->glFramebufferTexture2D || !ctx->glDeleteFramebuffers ||
-        !ctx->glBlitFramebuffer || !ctx->glCheckFramebufferStatus ||
-        !ctx->glGetError || !ctx->glGetIntegerv ||
-        !ctx->glEGLImageTargetTexture2DOES ||
-        !ctx->glGetFramebufferAttachmentParameteriv) {
-        vlog("Failed to load GL function pointers\n");
-        gbm_device_destroy(ctx->gbm_dev);
-        ctx->gbm_dev = NULL;
-        close(ctx->drm_fd);
-        ctx->drm_fd = -1;
-        return false;
-    }
-
-    ctx->gbm_bo = NULL;
-    ctx->dmabuf_fd = -1;
-    ctx->egl_image = EGL_NO_IMAGE;
-    ctx->export_tex = 0;
-    ctx->export_fbo = 0;
-    ctx->sdl_target_gl_tex = 0;
-    vlog("GBM DMA-BUF import initialized (glCopyImageSubData: %s)\n",
-         ctx->glCopyImageSubData ? "yes" : "no");
-    return true;
-}
-
-// Create or resize the GBM-backed GL texture + FBO.
-// Allocates a GBM buffer, exports its DMA-BUF fd, imports into EGL/GL.
-static bool setup_export_resources(GTK4PlatformData *ctx, int w, int h)
-{
-    // Clean up previous resources (reverse order of creation)
-    if (ctx->export_fbo) {
-        ctx->glDeleteFramebuffers(1, &ctx->export_fbo);
-        ctx->export_fbo = 0;
-    }
-    if (ctx->export_tex) {
-        ctx->glDeleteTextures(1, &ctx->export_tex);
-        ctx->export_tex = 0;
-    }
-    if (ctx->egl_image != EGL_NO_IMAGE) {
-        eglDestroyImage(ctx->egl_display, ctx->egl_image);
-        ctx->egl_image = EGL_NO_IMAGE;
-    }
-    if (ctx->dmabuf_fd >= 0) {
-        close(ctx->dmabuf_fd);
-        ctx->dmabuf_fd = -1;
-    }
-    if (ctx->gbm_bo) {
-        gbm_bo_destroy(ctx->gbm_bo);
-        ctx->gbm_bo = NULL;
-    }
-
-    // 1. Allocate GBM buffer with explicit linear modifier
-    uint64_t linear_mod = DRM_FORMAT_MOD_LINEAR;
-    ctx->gbm_bo = gbm_bo_create_with_modifiers2(
-        ctx->gbm_dev, (uint32_t)w, (uint32_t)h, GBM_FORMAT_ABGR8888,
-        &linear_mod, 1, GBM_BO_USE_RENDERING);
-    if (!ctx->gbm_bo) {
-        // Fallback: try gbm_bo_create with LINEAR flag
-        ctx->gbm_bo = gbm_bo_create(ctx->gbm_dev, (uint32_t)w, (uint32_t)h,
-                                    GBM_FORMAT_ABGR8888,
-                                    GBM_BO_USE_RENDERING | GBM_BO_USE_LINEAR);
-    }
-    if (!ctx->gbm_bo) {
-        vlog("gbm_bo_create(%dx%d) failed\n", w, h);
-        return false;
-    }
-
-    // 2. Get DMA-BUF fd and metadata from GBM
-    ctx->dmabuf_fd = gbm_bo_get_fd(ctx->gbm_bo);
-    if (ctx->dmabuf_fd < 0) {
-        vlog("gbm_bo_get_fd failed\n");
-        gbm_bo_destroy(ctx->gbm_bo);
-        ctx->gbm_bo = NULL;
-        return false;
-    }
-    ctx->dmabuf_stride = (int)gbm_bo_get_stride(ctx->gbm_bo);
-    ctx->dmabuf_offset = 0;
-    ctx->dmabuf_fourcc = gbm_bo_get_format(ctx->gbm_bo);
-    ctx->dmabuf_modifier = gbm_bo_get_modifier(ctx->gbm_bo);
-    // If GBM reports INVALID modifier but we requested linear, use linear
-    if (ctx->dmabuf_modifier == DRM_FORMAT_MOD_INVALID)
-        ctx->dmabuf_modifier = DRM_FORMAT_MOD_LINEAR;
-
-    // 3. Import DMA-BUF into EGL as an EGLImage (with explicit modifier)
-    EGLAttrib img_attrs[] = {
-        EGL_WIDTH, w,
-        EGL_HEIGHT, h,
-        EGL_LINUX_DRM_FOURCC_EXT, (EGLAttrib)ctx->dmabuf_fourcc,
-        EGL_DMA_BUF_PLANE0_FD_EXT, ctx->dmabuf_fd,
-        EGL_DMA_BUF_PLANE0_OFFSET_EXT, 0,
-        EGL_DMA_BUF_PLANE0_PITCH_EXT, ctx->dmabuf_stride,
-        EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
-        (EGLAttrib)(ctx->dmabuf_modifier & 0xFFFFFFFF),
-        EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
-        (EGLAttrib)(ctx->dmabuf_modifier >> 32),
-        EGL_NONE
-    };
-    ctx->egl_image = eglCreateImage(ctx->egl_display, EGL_NO_CONTEXT,
-                                    EGL_LINUX_DMA_BUF_EXT, NULL, img_attrs);
-    if (ctx->egl_image == EGL_NO_IMAGE) {
-        vlog("eglCreateImage(DMA-BUF import) failed: 0x%x\n", eglGetError());
-        close(ctx->dmabuf_fd);
-        ctx->dmabuf_fd = -1;
-        gbm_bo_destroy(ctx->gbm_bo);
-        ctx->gbm_bo = NULL;
-        return false;
-    }
-
-    // 4. Create GL texture backed by the EGLImage
-    ctx->glGenTextures(1, &ctx->export_tex);
-    ctx->glBindTexture(GL_TEXTURE_2D, ctx->export_tex);
-    ctx->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    ctx->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    ctx->glEGLImageTargetTexture2DOES(GL_TEXTURE_2D,
-                                      (void *)ctx->egl_image);
-    ctx->glBindTexture(GL_TEXTURE_2D, 0);
-
-    // 5. Create FBO with the EGLImage-backed texture
-    ctx->glGenFramebuffers(1, &ctx->export_fbo);
-    ctx->glBindFramebuffer(GL_FRAMEBUFFER, ctx->export_fbo);
-    ctx->glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                                GL_TEXTURE_2D, ctx->export_tex, 0);
-    unsigned int status = ctx->glCheckFramebufferStatus(GL_FRAMEBUFFER);
-    ctx->glBindFramebuffer(GL_FRAMEBUFFER, 0);
-    if (status != GL_FRAMEBUFFER_COMPLETE) {
-        vlog("Export FBO incomplete: 0x%x\n", status);
-        ctx->glDeleteFramebuffers(1, &ctx->export_fbo);
-        ctx->export_fbo = 0;
-        ctx->glDeleteTextures(1, &ctx->export_tex);
-        ctx->export_tex = 0;
-        eglDestroyImage(ctx->egl_display, ctx->egl_image);
-        ctx->egl_image = EGL_NO_IMAGE;
-        close(ctx->dmabuf_fd);
-        ctx->dmabuf_fd = -1;
-        gbm_bo_destroy(ctx->gbm_bo);
-        ctx->gbm_bo = NULL;
-        return false;
-    }
-
-    vlog("GBM export resources: bo=%p tex=%u fbo=%u fd=%d "
-         "fourcc=0x%x modifier=0x%lx stride=%d (%dx%d)\n",
-         (void *)ctx->gbm_bo, ctx->export_tex, ctx->export_fbo,
-         ctx->dmabuf_fd, ctx->dmabuf_fourcc,
-         (unsigned long)ctx->dmabuf_modifier, ctx->dmabuf_stride, w, h);
-    return true;
-}
-
 // GDestroyNotify callback to close dup'd fd when GTK is done with texture
 static void close_dmabuf_fd(gpointer data)
 {
@@ -697,7 +245,6 @@ static void close_dmabuf_fd(gpointer data)
     if (fd >= 0)
         close(fd);
 }
-#endif // HAVE_EGL_DMABUF
 
 // BloomTerminalArea — GtkDrawingArea subclass with snapshot override
 
@@ -736,7 +283,6 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     bool needs_render =
         terminal_needs_redraw(ctx->term) || ctx->force_redraw;
 
-#ifdef HAVE_EGL_DMABUF
     // If nothing changed and we have a cached texture, reuse it
     if (!needs_render && ctx->prev_texture) {
         gtk_snapshot_append_texture(
@@ -744,7 +290,6 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
             &GRAPHENE_RECT_INIT(0, 0, width, height));
         return;
     }
-#endif
 
     if (!needs_render)
         return;
@@ -757,26 +302,29 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
 
     ctx->gl_stats.frame_count++;
 
-#ifdef HAVE_EGL_DMABUF
-    // A1.2 — env-var kill switch. Honoured once at the start of each
-    // frame; flips ctx->zero_copy off and stays off for the rest of the
-    // session so the user can bisect "is DMA-BUF implicated?" without
-    // rebuilding.
-    if (ctx->zero_copy && getenv("BLOOM_DISABLE_ZERO_COPY")) {
-        ctx->gl_stats.zero_copy_disabled_by_env++;
-        vlog("BLOOM_DISABLE_ZERO_COPY set; disabling zero-copy for the "
-             "rest of this session\n");
-        ctx->zero_copy = false;
-    }
-
-    // A1.1 — restore SDL's EGL context. eglMakeCurrent failures abort
-    // via BLOOM_BUG_ABORT (handled inside the helper).
-    restore_sdl_egl_context(ctx);
-#endif
-
     // Create/resize render target texture if needed
     if (!ctx->render_target || ctx->target_w != phys_w ||
         ctx->target_h != phys_h) {
+#ifdef HAVE_VULKAN_DMABUF
+        if (ctx->vulkan_dmabuf) {
+            // The render target is an exportable VkImage wrapped as an SDL
+            // texture; bloom_vk_target_create destroys the previous one, so we
+            // must not SDL_DestroyTexture(render_target) here (it aliases it).
+            g_clear_object(&ctx->prev_texture);
+            if (!bloom_vk_target_create(&ctx->vk, ctx->sdl_renderer, phys_w,
+                                        phys_h, &ctx->vk_target)) {
+                ctx->gl_stats.render_target_create_failures++;
+                vlog("Vulkan dmabuf target create failed at %dx%d\n", phys_w,
+                     phys_h);
+                ctx->render_target = NULL;
+                return;
+            }
+            ctx->render_target = ctx->vk_target.texture;
+            ctx->target_w = phys_w;
+            ctx->target_h = phys_h;
+            goto render_target_ready;
+        }
+#endif
         if (ctx->render_target)
             SDL_DestroyTexture(ctx->render_target);
         ctx->render_target = SDL_CreateTexture(
@@ -791,55 +339,11 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
         }
         ctx->target_w = phys_w;
         ctx->target_h = phys_h;
-#ifdef HAVE_EGL_DMABUF
-        // Recreate export resources for new size
-        if (ctx->zero_copy) {
-            ctx->gl_stats.gbm_recreations++;
-            g_clear_object(&ctx->prev_texture);
-            if (!setup_export_resources(ctx, phys_w, phys_h)) {
-                // A1.3 — phase-aware: a setup failure *before* the
-                // first successful frame means the system doesn't
-                // support zero-copy. Lifecycle event, fall back.
-                // *After* the first successful frame, the path was
-                // working — a failure here is a bug indicator.
-                if (ctx->zero_copy_was_working) {
-                    ctx->gl_stats.setup_resources_mid_session++;
-                    BLOOM_BUG_ABORT(
-                        "setup_export_resources failed mid-session at "
-                        "%dx%d (zero-copy was working — GL/GBM/EGL state "
-                        "broke between frames)",
-                        phys_w, phys_h);
-                }
-                vlog("Export resource setup failed at init, disabling "
-                     "zero-copy\n");
-                ctx->zero_copy = false;
-            }
-        }
-        // Query the SDL render target's GL texture ID from the FBO
-        // attachment. SDL's offscreen renderer doesn't expose it via
-        // properties, but we can read it from the FBO color attachment.
-        if (ctx->zero_copy) {
-            ctx->sdl_target_gl_tex = 0;
-            SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target);
-            int fbo_id = 0;
-            ctx->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &fbo_id);
-            if (fbo_id > 0) {
-                int tex_name = 0;
-                ctx->glGetFramebufferAttachmentParameteriv(
-                    GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0,
-                    GL_FRAMEBUFFER_ATTACHMENT_OBJECT_NAME, &tex_name);
-                if (tex_name > 0)
-                    ctx->sdl_target_gl_tex = (unsigned int)tex_name;
-            }
-            SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
-            while (ctx->glGetError() != 0)
-                ;
-            vlog("SDL render target GL texture: %u\n",
-                 ctx->sdl_target_gl_tex);
-        }
-#endif
     }
 
+#ifdef HAVE_VULKAN_DMABUF
+render_target_ready:;
+#endif
     // Render terminal into SDL's render target texture.
     SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
     if (!SDL_SetRenderTarget(ctx->sdl_renderer, ctx->render_target)) {
@@ -851,127 +355,54 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
         !ctx->has_focus || !terminal_get_cursor_blink(ctx->term) || ctx->cursor_blink_visible;
     renderer_draw_terminal(ctx->rend, ctx->term, cursor_vis);
 
-#ifdef HAVE_EGL_DMABUF
-    if (ctx->zero_copy) {
-        // Flush SDL draw commands to GL
+#ifdef HAVE_VULKAN_DMABUF
+    if (ctx->vulkan_dmabuf) {
+        // Ensure SDL's render into the exportable VkImage completes before the
+        // compositor scans out the DMA-BUF.
         SDL_FlushRenderer(ctx->sdl_renderer);
+        bloom_vk_finish(&ctx->vk);
 
-        // Copy SDL render target → GBM-backed export texture.
-        // Use glBlitFramebuffer instead of glCopyImageSubData —
-        // glCopyImageSubData silently produces blank output with
-        // EGLImage-backed textures on Mesa radeonsi, even when
-        // internal formats match (both GL_RGBA8).
-        // Set BLOOM_COPY_IMAGE=1 to force the old path for testing.
-        if (getenv("BLOOM_COPY_IMAGE") && ctx->glCopyImageSubData &&
-            ctx->sdl_target_gl_tex) {
-            ctx->glCopyImageSubData(
-                ctx->sdl_target_gl_tex, GL_TEXTURE_2D, 0, 0, 0, 0,
-                ctx->export_tex, GL_TEXTURE_2D, 0, 0, 0, 0,
-                phys_w, phys_h, 1);
-        } else {
-            int sdl_fbo = 0;
-            ctx->glGetIntegerv(GL_FRAMEBUFFER_BINDING, &sdl_fbo);
-            ctx->glBindFramebuffer(GL_READ_FRAMEBUFFER,
-                                   (unsigned int)sdl_fbo);
-            ctx->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, ctx->export_fbo);
-            ctx->glBlitFramebuffer(0, 0, phys_w, phys_h, 0, 0, phys_w,
-                                   phys_h, GL_COLOR_BUFFER_BIT, GL_NEAREST);
-            ctx->glBindFramebuffer(GL_FRAMEBUFFER, (unsigned int)sdl_fbo);
-        }
-        ctx->glFinish();
-
-        // First-frame verification: read back a sample from the export
-        // texture to detect GPU mismatch or driver issues that cause
-        // the DMA-BUF export to silently produce blank frames.
-        if (!ctx->dmabuf_verified) {
-            ctx->dmabuf_verified = true;
-            // Log GL internal formats for diagnostics (GLES 3.1+)
-            PFNGLGETTEXLEVELPARAMETERIVPROC glGetTexLevelParameteriv =
-                (PFNGLGETTEXLEVELPARAMETERIVPROC)eglGetProcAddress(
-                    "glGetTexLevelParameteriv");
-            if (glGetTexLevelParameteriv) {
-                int sdl_ifmt = 0, exp_ifmt = 0;
-                if (ctx->sdl_target_gl_tex) {
-                    ctx->glBindTexture(GL_TEXTURE_2D,
-                                       ctx->sdl_target_gl_tex);
-                    glGetTexLevelParameteriv(GL_TEXTURE_2D, 0,
-                                             GL_TEXTURE_INTERNAL_FORMAT,
-                                             &sdl_ifmt);
-                    ctx->glBindTexture(GL_TEXTURE_2D, 0);
-                }
-                ctx->glBindTexture(GL_TEXTURE_2D, ctx->export_tex);
-                glGetTexLevelParameteriv(GL_TEXTURE_2D, 0,
-                                         GL_TEXTURE_INTERNAL_FORMAT,
-                                         &exp_ifmt);
-                ctx->glBindTexture(GL_TEXTURE_2D, 0);
-                vlog("GL internal formats: SDL=0x%04x export=0x%04x "
-                     "(%s)\n",
-                     sdl_ifmt, exp_ifmt,
-                     sdl_ifmt == exp_ifmt ? "match" : "MISMATCH");
-            }
-
-            PFNGLREADPIXELSPROC glReadPixels =
-                (PFNGLREADPIXELSPROC)eglGetProcAddress("glReadPixels");
-            if (glReadPixels) {
-                // Read a few rows from the export FBO
-                ctx->glBindFramebuffer(GL_FRAMEBUFFER, ctx->export_fbo);
-                uint8_t sample[64 * 4]; // 64 pixels
-                int sample_w = phys_w < 64 ? phys_w : 64;
-                glReadPixels(0, 0, sample_w, 1, GL_RGBA, GL_UNSIGNED_BYTE,
-                             sample);
-                ctx->glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
+        // One-time sanity check: confirm the exportable image actually received
+        // content (guards against a silently-blank export, like the GL path).
+        if (!ctx->vk_export_verified) {
+            ctx->vk_export_verified = true;
+            SDL_Surface *s = SDL_RenderReadPixels(ctx->sdl_renderer, NULL);
+            if (s) {
                 int nonzero = 0;
-                for (int i = 0; i < sample_w * 4; i++) {
-                    if (sample[i])
+                const uint8_t *px = s->pixels;
+                int n = (s->w < 64 ? s->w : 64) * 4;
+                for (int i = 0; i < n; i++)
+                    if (px[i])
                         nonzero++;
-                }
-
-                if (nonzero == 0) {
-                    // A1.6 — silent blank export means the GL copy
-                    // path is broken. Aborting so the cause gets
-                    // diagnosed instead of falling back forever and
-                    // hoping nobody notices the screen flicker.
-                    ctx->gl_stats.dmabuf_verify_failures++;
+                if (nonzero == 0)
                     BLOOM_BUG_ABORT(
-                        "DMA-BUF export verify: blank after GL copy "
-                        "at %dx%d (sample_w=%d) — GL blit silently "
-                        "produced empty pixels",
-                        phys_w, phys_h, sample_w);
-                }
-                vlog("DMA-BUF export verification OK (%d non-zero bytes "
-                     "in %d-pixel sample)\n",
-                     nonzero, sample_w);
+                        "Vulkan DMA-BUF export verify: blank render at %dx%d",
+                        phys_w, phys_h);
+                vlog("Vulkan DMA-BUF export verified (%d non-zero bytes)\n",
+                     nonzero);
+                SDL_DestroySurface(s);
             }
         }
 
-        // dup() the persistent DMA-BUF fd for this frame's GTK texture.
-        // GTK closes the fd via close_dmabuf_fd when done.
-        int fd = dup(ctx->dmabuf_fd);
+        int fd = dup(ctx->vk_target.dmabuf_fd);
         if (fd < 0) {
-            // The fd was just successfully opened during setup; a dup
-            // failure here means the process ran out of fds or
-            // dmabuf_fd was clobbered. Either way, a bug indicator.
             ctx->gl_stats.dup_dmabuf_failures++;
-            BLOOM_BUG_ABORT(
-                "dup(dmabuf_fd=%d) failed: %s (errno=%d)",
-                ctx->dmabuf_fd, strerror(errno), errno);
+            BLOOM_BUG_ABORT("dup(vk dmabuf_fd=%d) failed: %s",
+                            ctx->vk_target.dmabuf_fd, strerror(errno));
         }
 
-        GdkDmabufTextureBuilder *builder =
-            gdk_dmabuf_texture_builder_new();
-        gdk_dmabuf_texture_builder_set_display(
-            builder, gtk_widget_get_display(widget));
+        GdkDmabufTextureBuilder *builder = gdk_dmabuf_texture_builder_new();
+        gdk_dmabuf_texture_builder_set_display(builder,
+                                               gtk_widget_get_display(widget));
         gdk_dmabuf_texture_builder_set_width(builder, phys_w);
         gdk_dmabuf_texture_builder_set_height(builder, phys_h);
-        gdk_dmabuf_texture_builder_set_fourcc(builder, ctx->dmabuf_fourcc);
-        gdk_dmabuf_texture_builder_set_modifier(builder, ctx->dmabuf_modifier);
+        gdk_dmabuf_texture_builder_set_fourcc(builder, ctx->vk_target.fourcc);
+        gdk_dmabuf_texture_builder_set_modifier(builder, ctx->vk_target.modifier);
         gdk_dmabuf_texture_builder_set_n_planes(builder, 1);
         gdk_dmabuf_texture_builder_set_fd(builder, 0, fd);
-        gdk_dmabuf_texture_builder_set_stride(builder, 0, ctx->dmabuf_stride);
-        gdk_dmabuf_texture_builder_set_offset(builder, 0, ctx->dmabuf_offset);
+        gdk_dmabuf_texture_builder_set_stride(builder, 0, ctx->vk_target.stride);
+        gdk_dmabuf_texture_builder_set_offset(builder, 0, ctx->vk_target.offset);
         gdk_dmabuf_texture_builder_set_premultiplied(builder, TRUE);
-
         if (ctx->prev_texture)
             gdk_dmabuf_texture_builder_set_update_texture(builder,
                                                           ctx->prev_texture);
@@ -981,41 +412,27 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
             builder, close_dmabuf_fd, (gpointer)(intptr_t)fd, &error);
         g_object_unref(builder);
 
-        if (texture) {
-            gtk_snapshot_append_texture(
-                snapshot, texture,
-                &GRAPHENE_RECT_INIT(0, 0, width, height));
-            g_clear_object(&ctx->prev_texture);
-            ctx->prev_texture = texture;
-
-            ctx->zero_copy_was_working = true;
-            terminal_clear_redraw(ctx->term);
-            ctx->force_redraw = false;
-            return;
+        if (!texture) {
+            ctx->gl_stats.gdk_builder_failures++;
+            close(fd);
+            BLOOM_BUG_ABORT(
+                "gdk_dmabuf_texture_builder_build (vulkan) failed at %dx%d "
+                "(fourcc=0x%x modifier=0x%llx stride=%u offset=%u): %s",
+                phys_w, phys_h, ctx->vk_target.fourcc,
+                (unsigned long long)ctx->vk_target.modifier,
+                ctx->vk_target.stride, ctx->vk_target.offset,
+                error ? error->message : "unknown");
         }
 
-        // The builder is fed validated dimensions, a valid fourcc/
-        // modifier, and a freshly-dup'd fd. If it still fails, GTK has
-        // rejected something we constructed — that's our bug.
-        ctx->gl_stats.gdk_builder_failures++;
-        g_clear_error(&error);
-        close(fd);
-        BLOOM_BUG_ABORT(
-            "gdk_dmabuf_texture_builder_build failed at %dx%d "
-            "(fourcc=0x%x modifier=0x%" PRIx64 " stride=%d offset=%d)"
-            ": %s",
-            phys_w, phys_h, ctx->dmabuf_fourcc,
-            (uint64_t)ctx->dmabuf_modifier, ctx->dmabuf_stride,
-            ctx->dmabuf_offset,
-            error ? error->message : "unknown");
+        gtk_snapshot_append_texture(snapshot, texture,
+                                    &GRAPHENE_RECT_INIT(0, 0, width, height));
+        g_clear_object(&ctx->prev_texture);
+        ctx->prev_texture = texture;
+        terminal_clear_redraw(ctx->term);
+        ctx->force_redraw = false;
+        return;
     }
-
-    /* Reached only when ctx->zero_copy was false from the start of
-     * the frame (init failure, env-var kill switch, or system has no
-     * DMA-BUF support). All mid-frame failures in the zero-copy path
-     * BLOOM_BUG_ABORT instead. */
-    ctx->gl_stats.readback_path_taken++;
-#endif // HAVE_EGL_DMABUF
+#endif
 
     // Readback fallback — read pixels and create GdkMemoryTexture
     {
@@ -1582,97 +999,52 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     if (base)
         snprintf(ctx->exe_path, sizeof(ctx->exe_path), "%s" PACKAGE, base);
 
-#ifdef HAVE_EGL_DMABUF
-    // Try to create an OpenGL-backed offscreen renderer for zero-copy DMA-BUF.
-    // Strategy: offscreen driver + OpenGL window/renderer, with fallbacks.
-    bool got_gl = false;
-    // Attempt 1: offscreen driver with OpenGL renderer
+    // bloom requires gamma-correct (linear-light) glyph blending, which only
+    // SDL's Vulkan renderer provides (it linearizes -> blends -> re-encodes via
+    // SRGB_LINEAR float targets; the OpenGL renderer blends in sRGB). The
+    // Vulkan renderer also exposes the render target's VkImage + VkDevice, used
+    // for zero-copy DMA-BUF export. Create a hidden Vulkan window + 'vulkan'
+    // renderer under the offscreen video driver (no conflict with GTK's
+    // display).
     ctx->sdl_window = SDL_CreateWindow("bloom-terminal-offscreen", 800, 600,
-                                       SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
+                                       SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN);
     if (ctx->sdl_window) {
-        SDL_PropertiesID rprops = SDL_CreateProperties();
-        SDL_SetStringProperty(rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING,
-                              "opengl");
-        SDL_SetPointerProperty(rprops, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
-                               ctx->sdl_window);
-        ctx->sdl_renderer = SDL_CreateRendererWithProperties(rprops);
-        SDL_DestroyProperties(rprops);
-
-        if (ctx->sdl_renderer) {
-            const char *rname = SDL_GetRendererName(ctx->sdl_renderer);
-            if (rname &&
-                (strcmp(rname, "opengl") == 0 ||
-                 strcmp(rname, "opengles2") == 0)) {
-                got_gl = true;
-
-                vlog("SDL GL renderer (%s) on offscreen driver\n", rname);
-            } else {
-                vlog("Got non-GL renderer '%s', retrying\n",
-                     rname ? rname : "(null)");
-                SDL_DestroyRenderer(ctx->sdl_renderer);
-                ctx->sdl_renderer = NULL;
+        SDL_PropertiesID vrp = SDL_CreateProperties();
+        if (vrp) {
+            SDL_SetStringProperty(vrp, SDL_PROP_RENDERER_CREATE_NAME_STRING, "vulkan");
+            SDL_SetPointerProperty(vrp, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
+                                   ctx->sdl_window);
+#ifdef HAVE_VULKAN_DMABUF
+            // bloom owns Vulkan instance/device creation so the external-memory
+            // extensions (needed for zero-copy DMA-BUF export) are enabled —
+            // SDL's own vulkan device does not enable them.
+            if (bloom_vk_init(&ctx->vk, ctx->sdl_window, vrp)) {
+                ctx->sdl_renderer = SDL_CreateRendererWithProperties(vrp);
+                if (ctx->sdl_renderer)
+                    ctx->vulkan_dmabuf = true;
+                else
+                    bloom_vk_shutdown(&ctx->vk);
             }
+#else
+            ctx->sdl_renderer = SDL_CreateRendererWithProperties(vrp);
+#endif
+            SDL_DestroyProperties(vrp);
         }
-        if (!got_gl) {
+        if (ctx->sdl_renderer) {
+#ifdef HAVE_VULKAN_DMABUF
+            vlog("GTK4 using Vulkan renderer (linear-light blending, "
+                 "own-device DMA-BUF zero-copy)\n");
+#else
+            vlog("GTK4 using Vulkan renderer (linear-light blending, readback)\n");
+#endif
+        } else {
+            vlog("Vulkan renderer creation failed: %s\n", SDL_GetError());
             SDL_DestroyWindow(ctx->sdl_window);
             ctx->sdl_window = NULL;
         }
+    } else {
+        vlog("Vulkan window creation failed: %s\n", SDL_GetError());
     }
-
-    // Attempt 2: default video driver with hidden GL window
-    if (!got_gl) {
-        SDL_Quit();
-        SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "");
-        if (SDL_Init(SDL_INIT_VIDEO)) {
-            ctx->sdl_window =
-                SDL_CreateWindow("bloom-terminal-offscreen", 800, 600,
-                                 SDL_WINDOW_HIDDEN | SDL_WINDOW_OPENGL);
-            if (ctx->sdl_window) {
-                SDL_PropertiesID rprops = SDL_CreateProperties();
-                SDL_SetStringProperty(
-                    rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING, "opengl");
-                SDL_SetPointerProperty(
-                    rprops, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER,
-                    ctx->sdl_window);
-                ctx->sdl_renderer =
-                    SDL_CreateRendererWithProperties(rprops);
-                SDL_DestroyProperties(rprops);
-
-                if (ctx->sdl_renderer) {
-                    const char *rname =
-                        SDL_GetRendererName(ctx->sdl_renderer);
-                    if (rname &&
-                        (strcmp(rname, "opengl") == 0 ||
-                         strcmp(rname, "opengles2") == 0)) {
-                        got_gl = true;
-
-                        vlog("SDL GL renderer (%s) on default driver\n",
-                             rname);
-                    } else {
-                        SDL_DestroyRenderer(ctx->sdl_renderer);
-                        ctx->sdl_renderer = NULL;
-                    }
-                }
-                if (!got_gl) {
-                    SDL_DestroyWindow(ctx->sdl_window);
-                    ctx->sdl_window = NULL;
-                }
-            }
-        }
-        // Reinitialize with offscreen driver for fallback
-        if (!got_gl) {
-            SDL_Quit();
-            SDL_SetHint(SDL_HINT_VIDEO_DRIVER, "offscreen");
-            if (!SDL_Init(SDL_INIT_VIDEO)) {
-                fprintf(stderr,
-                        "ERROR: Failed to reinitialize SDL video: %s\n",
-                        SDL_GetError());
-                free(ctx);
-                return false;
-            }
-        }
-    }
-#endif // HAVE_EGL_DMABUF
 
     // Fallback: offscreen + any renderer (software)
     if (!ctx->sdl_window) {
@@ -1702,54 +1074,12 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     // Disable VSync for offscreen rendering
     SDL_SetRenderVSync(ctx->sdl_renderer, 0);
 
-#ifdef HAVE_EGL_DMABUF
-    // Initialize DMA-BUF export if we got a GL renderer
-    if (got_gl && !getenv("BLOOM_NO_DMABUF")) {
-        // Force a render to ensure GL context is current
-        SDL_SetRenderDrawColor(ctx->sdl_renderer, 0, 0, 0, 255);
-        SDL_RenderClear(ctx->sdl_renderer);
-        SDL_RenderPresent(ctx->sdl_renderer);
-
-        if (init_dmabuf_export(ctx)) {
-            ctx->zero_copy = true;
-            ctx->dmabuf_verified = false;
-            vlog("Zero-copy DMA-BUF rendering enabled (EGL ctx=%p)\n",
-                 (void *)ctx->egl_ctx);
-
-            // Check if GTK4's display is on the same GPU as SDL
-            GdkDisplay *gdk_dpy = gdk_display_get_default();
-            if (gdk_dpy && GDK_IS_WAYLAND_DISPLAY(gdk_dpy)) {
-                EGLDisplay gtk_egl =
-                    gdk_wayland_display_get_egl_display(gdk_dpy);
-                if (gtk_egl && gtk_egl != EGL_NO_DISPLAY) {
-                    const char *gtk_node = get_egl_render_node(gtk_egl);
-                    const char *sdl_node =
-                        get_egl_render_node(ctx->egl_display);
-                    vlog("GTK4 EGL render node: %s\n",
-                         gtk_node ? gtk_node : "(unknown)");
-                    if (gtk_node && sdl_node &&
-                        strcmp(gtk_node, sdl_node) != 0) {
-                        vlog("WARNING: GPU mismatch! SDL uses %s but "
-                             "GTK4 uses %s — DMA-BUF may not work\n",
-                             sdl_node, gtk_node);
-                    }
-                }
-            }
-        } else {
-            vlog("DMA-BUF export init failed, using readback\n");
-        }
-    } else {
-        vlog("No GL renderer, using readback rendering\n");
-    }
+    bool zc_enabled = false;
+#ifdef HAVE_VULKAN_DMABUF
+    zc_enabled = ctx->vulkan_dmabuf;
 #endif
-
     vlog("GTK4 platform initialized (zero_copy=%s, renderer=%s)\n",
-#ifdef HAVE_EGL_DMABUF
-         ctx->zero_copy ? "yes" : "no",
-#else
-         "no",
-#endif
-         SDL_GetRendererName(ctx->sdl_renderer));
+         zc_enabled ? "yes" : "no", SDL_GetRendererName(ctx->sdl_renderer));
 
     plat->backend_data = ctx;
     return true;
@@ -1762,15 +1092,11 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
 
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
 
-    /* Dump gl_stats on clean shutdown so successful sessions still
-     * surface the gbm_recreations / readback distribution that tell
-     * us how the GL/DMA-BUF path was exercised. Bug counters should
-     * all be zero — if any are non-zero we'd have aborted earlier. */
-    vlog("GL_STATS frame=%" PRIu64 " gbm_recreations=%u readback=%u"
-         " zc_disabled_by_env=%u\n",
-         ctx->gl_stats.frame_count, ctx->gl_stats.gbm_recreations,
-         ctx->gl_stats.readback_path_taken,
-         ctx->gl_stats.zero_copy_disabled_by_env);
+    /* Dump stats on clean shutdown so successful sessions still surface
+     * the readback distribution. Bug counters should all be zero — if any
+     * are non-zero we'd have aborted earlier. */
+    vlog("DMABUF_STATS frame=%" PRIu64 " readback=%u\n",
+         ctx->gl_stats.frame_count, ctx->gl_stats.readback_path_taken);
 
     /* Clear singleton so the bloom_bug dump hook doesn't dereference
      * an about-to-be-freed ctx if anything aborts during teardown. */
@@ -1823,36 +1149,14 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
         ctx->window = NULL;
     }
 
-#ifdef HAVE_EGL_DMABUF
-    // Destroy GBM/EGL/GL export resources (reverse order of creation)
-    g_clear_object(&ctx->prev_texture);
-    if (ctx->export_fbo && ctx->glDeleteFramebuffers) {
-        ctx->glDeleteFramebuffers(1, &ctx->export_fbo);
-        ctx->export_fbo = 0;
-    }
-    if (ctx->export_tex && ctx->glDeleteTextures) {
-        ctx->glDeleteTextures(1, &ctx->export_tex);
-        ctx->export_tex = 0;
-    }
-    if (ctx->egl_image != EGL_NO_IMAGE && ctx->egl_display != EGL_NO_DISPLAY) {
-        eglDestroyImage(ctx->egl_display, ctx->egl_image);
-        ctx->egl_image = EGL_NO_IMAGE;
-    }
-    if (ctx->dmabuf_fd >= 0) {
-        close(ctx->dmabuf_fd);
-        ctx->dmabuf_fd = -1;
-    }
-    if (ctx->gbm_bo) {
-        gbm_bo_destroy(ctx->gbm_bo);
-        ctx->gbm_bo = NULL;
-    }
-    if (ctx->gbm_dev) {
-        gbm_device_destroy(ctx->gbm_dev);
-        ctx->gbm_dev = NULL;
-    }
-    if (ctx->drm_fd >= 0) {
-        close(ctx->drm_fd);
-        ctx->drm_fd = -1;
+#ifdef HAVE_VULKAN_DMABUF
+    // Tear down the Vulkan export target before the SDL renderer (the renderer
+    // runs on our VkDevice, so the device must outlive it — shut it down last).
+    if (ctx->vulkan_dmabuf) {
+        bloom_vk_finish(&ctx->vk);
+        g_clear_object(&ctx->prev_texture);
+        bloom_vk_target_destroy(&ctx->vk, &ctx->vk_target);
+        ctx->render_target = NULL; // aliased the now-destroyed wrapped texture
     }
 #endif
 
@@ -1865,6 +1169,10 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
         SDL_DestroyRenderer(ctx->sdl_renderer);
         ctx->sdl_renderer = NULL;
     }
+#ifdef HAVE_VULKAN_DMABUF
+    if (ctx->vulkan_dmabuf)
+        bloom_vk_shutdown(&ctx->vk);
+#endif
     if (ctx->sdl_window) {
         SDL_DestroyWindow(ctx->sdl_window);
         ctx->sdl_window = NULL;
@@ -1995,9 +1303,12 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     adw_toolbar_view_add_top_bar(ADW_TOOLBAR_VIEW(toolbar_view),
                                  ctx->header_bar);
 
-#ifdef HAVE_EGL_DMABUF
-    // Wrap in GtkGraphicsOffload for potential compositor direct scanout
-    if (ctx->zero_copy) {
+    bool use_offload = false;
+#ifdef HAVE_VULKAN_DMABUF
+    use_offload = ctx->vulkan_dmabuf;
+#endif
+    // Wrap in GtkGraphicsOffload for compositor direct scanout of the DMA-BUF.
+    if (use_offload) {
         GtkWidget *offload = gtk_graphics_offload_new(ctx->drawing_area);
         gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(offload),
                                          GTK_GRAPHICS_OFFLOAD_ENABLED);
@@ -2008,10 +1319,6 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
         adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view),
                                      ctx->drawing_area);
     }
-#else
-    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view),
-                                 ctx->drawing_area);
-#endif
     adw_window_set_content(ADW_WINDOW(ctx->window), toolbar_view);
 
     // Connect resize signal

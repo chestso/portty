@@ -73,11 +73,11 @@ AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'
 # Optional GTK4/libadwaita platform backend (built as dlopen plugin)
 if HAVE_GTK4
 pkglib_LTLIBRARIES = bloom-terminal-gtk4.la
-bloom_terminal_gtk4_la_SOURCES = platform_gtk4.c
+bloom_terminal_gtk4_la_SOURCES = platform_gtk4.c gtk4_vulkan.c gtk4_vulkan.h
 bloom_terminal_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) \
     $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
-    $(EGL_CFLAGS) $(LIBDRM_CFLAGS) $(GBM_CFLAGS) \
+    $(LIBDRM_CFLAGS) $(VULKAN_CFLAGS) \
     -DBLOOM_DATADIR='"$(datadir)"' -Wall -Wextra
 bloom_terminal_gtk4_la_LDFLAGS = -module -avoid-version
-bloom_terminal_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS) $(EGL_LIBS) $(GBM_LIBS)
+bloom_terminal_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS) $(VULKAN_LIBS)
 endif

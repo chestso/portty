@@ -1164,8 +1164,8 @@ static void print_version(void)
 #ifdef HAVE_GTK4
     printf("GTK4 %s, libadwaita %s\n", DEP_GTK4_VERSION,
            DEP_LIBADWAITA_VERSION);
-#ifdef HAVE_EGL_DMABUF
-    printf("DMA-BUF: EGL + GBM zero-copy\n");
+#ifdef HAVE_VULKAN_DMABUF
+    printf("DMA-BUF: Vulkan zero-copy\n");
 #endif
 #endif
 }

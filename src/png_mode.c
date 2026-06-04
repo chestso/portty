@@ -43,9 +43,17 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
         fprintf(stderr, "ERROR: Failed to create hidden window: %s\n", SDL_GetError());
         return -1;
     }
-    ctx->sdl_rend = SDL_CreateRenderer(ctx->window, NULL);
+    // Use SDL's GPU renderer so PNG output matches on-screen rendering
+    // (gamma-correct linear-light blending; see platform_sdl3.c).
+    SDL_PropertiesID rprops = SDL_CreateProperties();
+    if (rprops) {
+        SDL_SetPointerProperty(rprops, SDL_PROP_RENDERER_CREATE_WINDOW_POINTER, ctx->window);
+        SDL_SetStringProperty(rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING, "gpu");
+        ctx->sdl_rend = SDL_CreateRendererWithProperties(rprops);
+        SDL_DestroyProperties(rprops);
+    }
     if (!ctx->sdl_rend) {
-        fprintf(stderr, "ERROR: Failed to create renderer: %s\n", SDL_GetError());
+        fprintf(stderr, "ERROR: Failed to create GPU renderer: %s\n", SDL_GetError());
         return -1;
     }
     ctx->term = terminal_init(select_backend(), cols, rows);

@@ -892,6 +892,16 @@ typedef struct RendererSdl3Data
     // Used for both font DPI and decoration scaling
     float content_scale;
 
+    // Linear-light compositing. The whole frame is drawn into this float
+    // render target (tagged SRGB_LINEAR) so SDL blends glyph coverage in
+    // linear light, then the result is encoded back onto the active sRGB
+    // target. linear_ok goes false (permanently) if the GPU can't allocate a
+    // float target, in which case we fall back to legacy sRGB blending.
+    SDL_Texture *linear_target;
+    int linear_w, linear_h;
+    bool linear_ok;
+    bool linear_selfcheck_done;
+
     // Sixel texture cache
     struct
     {
@@ -934,6 +944,19 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->loaded_fallback_count = 0;
     memset(data->loaded_fallbacks, 0, sizeof(data->loaded_fallbacks));
     data->content_scale = 1.0f;
+    data->linear_target = NULL;
+    data->linear_w = 0;
+    data->linear_h = 0;
+    // Linear-light compositing requires SDL's Vulkan-based renderers ("gpu" or
+    // "vulkan"), which honor the SRGB_LINEAR colorspace on float render targets
+    // (linearize -> blend -> re-encode). The OpenGL/software renderers blend in
+    // sRGB regardless, so there we skip the linear pass and draw straight
+    // (legacy behavior).
+    const char *rname = SDL_GetRendererName(data->renderer);
+    data->linear_ok = (rname && (strcmp(rname, "gpu") == 0 || strcmp(rname, "vulkan") == 0));
+    data->linear_selfcheck_done = false;
+    vlog("Renderer '%s': linear-light compositing %s\n", rname ? rname : "(null)",
+         data->linear_ok ? "enabled" : "disabled (sRGB blending)");
 
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
@@ -966,6 +989,12 @@ static void sdl3_destroy(RendererBackend *backend)
 
     // Destroy sixel texture cache
     sixel_cache_clear(data);
+
+    // Destroy linear-light render target
+    if (data->linear_target) {
+        SDL_DestroyTexture(data->linear_target);
+        data->linear_target = NULL;
+    }
 
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
@@ -2049,6 +2078,189 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
     }
 }
 
+// ---------------------------------------------------------------------------
+// Linear-light compositing
+// ---------------------------------------------------------------------------
+//
+// bloom blends antialiased glyph coverage in *linear* light (like kitty),
+// rather than gamma-incorrectly in sRGB space. We do this by drawing the whole
+// frame into an RGBA64_FLOAT render target tagged SDL_COLORSPACE_SRGB_LINEAR:
+// SDL linearizes every sRGB input (draw colors, the sRGB glyph atlas, colormod
+// fg) on read, blends in linear, and re-encodes linear->sRGB when we blit the
+// float target back onto the active sRGB target. Every existing draw call
+// becomes gamma-correct with no change to its color values.
+
+// (Re)create the linear float render target to match the currently bound
+// target's pixel size. Returns false (and disables the linear path
+// permanently) if the GPU can't allocate the float target.
+static bool ensure_linear_target(RendererSdl3Data *data)
+{
+    if (!data->linear_ok)
+        return false;
+
+    int w = 0, h = 0;
+    if (!SDL_GetCurrentRenderOutputSize(data->renderer, &w, &h) || w <= 0 || h <= 0)
+        return false;
+
+    if (data->linear_target && data->linear_w == w && data->linear_h == h)
+        return true;
+
+    if (data->linear_target) {
+        SDL_DestroyTexture(data->linear_target);
+        data->linear_target = NULL;
+    }
+
+    SDL_PropertiesID props = SDL_CreateProperties();
+    if (!props)
+        return false;
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER,
+                          SDL_PIXELFORMAT_RGBA64_FLOAT);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER,
+                          SDL_COLORSPACE_SRGB_LINEAR);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER,
+                          SDL_TEXTUREACCESS_TARGET);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, w);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, h);
+    SDL_Texture *tex = SDL_CreateTextureWithProperties(data->renderer, props);
+    SDL_DestroyProperties(props);
+
+    if (!tex) {
+        vlog("Linear render target %dx%d unavailable (%s); falling back to "
+             "legacy sRGB blending\n",
+             w, h, SDL_GetError());
+        data->linear_ok = false;
+        return false;
+    }
+
+    SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_NONE);
+    data->linear_target = tex;
+    data->linear_w = w;
+    data->linear_h = h;
+    vlog("Linear render target created: %dx%d RGBA64F / SRGB_LINEAR\n", w, h);
+    return true;
+}
+
+// One-shot canary: composite 50%-coverage white over black through the linear
+// path and read back the midtone. A linear-correct blend yields ~188; a
+// gamma-incorrect sRGB blend yields ~128. This confirms SDL's renderer really
+// linearizes on this backend (and is a permanent regression tripwire under -v).
+static void linear_blend_selfcheck(RendererSdl3Data *data)
+{
+    SDL_PropertiesID props = SDL_CreateProperties();
+    if (!props)
+        return;
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER,
+                          SDL_PIXELFORMAT_RGBA64_FLOAT);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER,
+                          SDL_COLORSPACE_SRGB_LINEAR);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER,
+                          SDL_TEXTUREACCESS_TARGET);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, 4);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, 4);
+    SDL_Texture *lin = SDL_CreateTextureWithProperties(data->renderer, props);
+    SDL_DestroyProperties(props);
+    SDL_Texture *srgb = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                          SDL_TEXTUREACCESS_TARGET, 4, 4);
+    if (!lin || !srgb) {
+        if (lin)
+            SDL_DestroyTexture(lin);
+        if (srgb)
+            SDL_DestroyTexture(srgb);
+        return;
+    }
+
+    // A white texture whose coverage we drive via alpha-mod, mirroring how real
+    // glyphs are drawn (textured blit, not a solid fill).
+    SDL_Texture *white = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                           SDL_TEXTUREACCESS_STATIC, 1, 1);
+    if (white) {
+        Uint8 wpx[4] = { 255, 255, 255, 255 };
+        SDL_UpdateTexture(white, NULL, wpx, 4);
+        SDL_SetTextureBlendMode(white, SDL_BLENDMODE_BLEND);
+    }
+
+    SDL_Texture *prev = SDL_GetRenderTarget(data->renderer);
+
+    int fill_mid = -1, tex_mid = -1;
+
+    // Variant 1: 50% white via solid FillRect (draw color) over black.
+    SDL_SetRenderTarget(data->renderer, lin);
+    SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
+    SDL_RenderClear(data->renderer);
+    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(data->renderer, 255, 255, 255, 128);
+    SDL_RenderFillRect(data->renderer, NULL);
+    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+    SDL_SetRenderTarget(data->renderer, srgb);
+    SDL_SetTextureBlendMode(lin, SDL_BLENDMODE_NONE);
+    SDL_RenderTexture(data->renderer, lin, NULL, NULL);
+    SDL_Surface *s1 = SDL_RenderReadPixels(data->renderer, NULL);
+    if (s1) {
+        Uint8 r, g, b, a;
+        if (SDL_ReadSurfacePixel(s1, 0, 0, &r, &g, &b, &a))
+            fill_mid = r;
+        SDL_DestroySurface(s1);
+    }
+
+    // Variant 2: 50% white via textured blit with alpha-mod (the glyph path).
+    if (white) {
+        SDL_SetRenderTarget(data->renderer, lin);
+        SDL_SetRenderDrawColor(data->renderer, 0, 0, 0, 255);
+        SDL_RenderClear(data->renderer);
+        SDL_SetTextureAlphaMod(white, 128);
+        SDL_SetTextureColorMod(white, 255, 255, 255);
+        SDL_RenderTexture(data->renderer, white, NULL, NULL);
+        SDL_SetRenderTarget(data->renderer, srgb);
+        SDL_RenderTexture(data->renderer, lin, NULL, NULL);
+        SDL_Surface *s2 = SDL_RenderReadPixels(data->renderer, NULL);
+        if (s2) {
+            Uint8 r, g, b, a;
+            if (SDL_ReadSurfacePixel(s2, 0, 0, &r, &g, &b, &a))
+                tex_mid = r;
+            SDL_DestroySurface(s2);
+        }
+    }
+
+    SDL_SetRenderTarget(data->renderer, prev);
+
+    vlog("Linear-blend self-check (50%% white over black): fill=%d texture=%d "
+         "(expect ~188 linear-correct, ~128 if gamma-incorrect)\n",
+         fill_mid, tex_mid);
+
+    if (white)
+        SDL_DestroyTexture(white);
+    SDL_DestroyTexture(lin);
+    SDL_DestroyTexture(srgb);
+}
+
+// Draw the already-populated scene into the linear-light target and encode it
+// onto whatever render target is currently bound (SDL window, GTK4 render
+// target, or PNG export target). Falls back to drawing straight into the bound
+// target (legacy sRGB) when the float target is unavailable.
+static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
+                              int display_rows, int display_cols,
+                              bool cursor_visible, bool with_sixel)
+{
+    SDL_Texture *dst = SDL_GetRenderTarget(data->renderer);
+    bool linear = ensure_linear_target(data);
+
+    if (linear)
+        SDL_SetRenderTarget(data->renderer, data->linear_target);
+
+    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
+    SDL_RenderClear(data->renderer);
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
+    if (with_sixel)
+        render_sixel_images(data, term);
+
+    if (linear) {
+        SDL_SetRenderTarget(data->renderer, dst);
+        SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
+        SDL_RenderTexture(data->renderer, data->linear_target, NULL, NULL);
+    }
+}
+
 static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
                                bool cursor_visible)
 {
@@ -2060,6 +2272,12 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     if (!font_has_style(data->font, FONT_STYLE_NORMAL)) {
         vlog("Renderer draw terminal failed: invalid parameters\n");
         return;
+    }
+
+    if (verbose && !data->linear_selfcheck_done) {
+        data->linear_selfcheck_done = true;
+        if (data->linear_ok)
+            linear_blend_selfcheck(data);
     }
 
     rend_sdl3_atlas_begin_frame(&data->atlas);
@@ -2094,13 +2312,8 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     // Phase 2: Flush staging buffers to GPU (render queue is empty)
     rend_sdl3_atlas_flush(&data->atlas);
 
-    // Phase 3: Draw (all glyphs cached, texture data is current)
-    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
-    SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
-
-    // Phase 4: Overlay sixel images
-    render_sixel_images(data, term);
+    // Phase 3+4: Draw the scene gamma-correct (linear-light) and overlay sixels.
+    draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
 }
 
 static void sdl3_present(RendererBackend *backend)
@@ -2197,6 +2410,12 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
         return -1;
     }
 
+    if (verbose && !data->linear_selfcheck_done) {
+        data->linear_selfcheck_done = true;
+        if (data->linear_ok)
+            linear_blend_selfcheck(data);
+    }
+
     // Get terminal dimensions
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
@@ -2268,10 +2487,9 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     // Phase 2: Flush staging buffers to GPU
     rend_sdl3_atlas_flush(&data->atlas);
 
-    // Phase 3: Clear and draw
-    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
-    SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, render_rows, render_cols, false, false);
+    // Phase 3: Draw the scene gamma-correct (linear-light) into `target` so the
+    // PNG matches on-screen output. No sixel overlay in the PNG path.
+    draw_scene_linear(data, term, render_rows, render_cols, false, false);
 
     // Read pixels back from the render target
     SDL_Surface *surface = SDL_RenderReadPixels(data->renderer, NULL);
