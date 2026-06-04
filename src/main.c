@@ -49,6 +49,25 @@
 /* Global verbose flag - controls debug output */
 int verbose = 0;
 
+/* ASan/UBSan runtime defaults. Only compiled in when the binary is
+ * built with -fsanitize=address. detect_leaks=0 silences GTK/Mesa exit
+ * leaks; abort_on_error=1 produces a core file via systemd-coredump so
+ * the trace survives the GUI shutdown; log_path writes reports to
+ * /tmp/bloom-asan.<pid> in case stderr is lost.
+ */
+#if defined(__SANITIZE_ADDRESS__) || \
+    (defined(__has_feature) && __has_feature(address_sanitizer))
+const char *__asan_default_options(void)
+{
+    return "abort_on_error=1:disable_coredump=0:detect_leaks=0:"
+           "log_path=/tmp/bloom-asan:print_module_map=1";
+}
+const char *__ubsan_default_options(void)
+{
+    return "abort_on_error=1:print_stacktrace=1:log_path=/tmp/bloom-ubsan";
+}
+#endif
+
 // Function prototypes
 static void print_usage(const char *progname);
 static void print_version(void);
