@@ -6,6 +6,13 @@
 /* Global verbose flag - defined in main.c */
 extern int verbose;
 
+/* kitty-style text_composition_strategy knob (defined in main.c, set from
+ * config). Applied as a uniform coverage curve to grayscale glyph alpha in
+ * font_ft.c, on top of the renderer's linear-light blending. Neutral defaults
+ * (gamma 1.0, contrast 0) leave coverage unchanged. */
+extern float bloom_text_gamma;
+extern float bloom_text_contrast;
+
 /* Verbose logging implementation - use vlog() macro instead */
 void vlog_impl(const char *file, const char *func, int line, const char *format, ...);
 

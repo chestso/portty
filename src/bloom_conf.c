@@ -90,6 +90,8 @@ void bloom_conf_init(BloomConf *conf)
     conf->word_chars = NULL;
     conf->platform = NULL;
     conf->scrollback = -1;
+    conf->text_gamma = -1.0f;
+    conf->text_contrast = -1.0f;
 }
 
 bool bloom_conf_load_path(BloomConf *conf, const char *path)
@@ -193,6 +195,39 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
             } else {
                 conf->scrollback = (int)n;
             }
+        } else if (strcmp(key, "text_composition_strategy") == 0) {
+            /* kitty-compatible: "kitty" (gamma 1.7, contrast 30),
+             * "neutral"/"correct" (pure linear), or "<gamma> [contrast]". */
+            if (strcmp(val, "kitty") == 0) {
+                conf->text_gamma = 1.7f;
+                conf->text_contrast = 30.0f;
+            } else if (strcmp(val, "neutral") == 0 || strcmp(val, "correct") == 0) {
+                conf->text_gamma = 1.0f;
+                conf->text_contrast = 0.0f;
+            } else {
+                char *end = NULL;
+                float g = strtof(val, &end);
+                float c = 0.0f;
+                bool ok = (end != val && g > 0.0f && g <= 4.0f);
+                if (ok && *end != '\0') {
+                    char *end2 = NULL;
+                    c = strtof(end, &end2);
+                    while (*end2 == ' ' || *end2 == '\t')
+                        end2++;
+                    if (end2 == end || *end2 != '\0' || c < 0.0f || c > 100.0f)
+                        ok = false;
+                }
+                if (!ok) {
+                    fprintf(stderr,
+                            "WARNING: %s:%d: invalid text_composition_strategy "
+                            "'%s' (use 'kitty', 'neutral', or '<gamma> "
+                            "<contrast>')\n",
+                            path, lineno, val);
+                } else {
+                    conf->text_gamma = g;
+                    conf->text_contrast = c;
+                }
+            }
         } else {
             fprintf(stderr, "WARNING: %s:%d: unknown key '%s'\n", path, lineno, key);
         }
@@ -201,10 +236,12 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
     fclose(fp);
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d verbose=%d"
-         " word_chars=%s platform=%s scrollback=%d\n",
+         " word_chars=%s platform=%s scrollback=%d text_gamma=%.2f"
+         " text_contrast=%.1f\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
          conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
-         conf->platform ? conf->platform : "(unset)", conf->scrollback);
+         conf->platform ? conf->platform : "(unset)", conf->scrollback,
+         conf->text_gamma, conf->text_contrast);
 
     return true;
 }

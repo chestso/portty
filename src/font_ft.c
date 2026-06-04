@@ -562,6 +562,40 @@ void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uin
     *out_a = (uint8_t)round(pa * a_scale);
 }
 
+// kitty-style text_composition_strategy coverage curve, applied uniformly to
+// grayscale glyph alpha on top of the renderer's linear-light blending.
+// gamma > 1 thickens strokes; contrast (0..100) adds contrast around the
+// midpoint. Neutral (gamma 1.0, contrast 0) is identity. Built once from the
+// global bloom_text_gamma / bloom_text_contrast. Unlike kitty (which scales the
+// curve by fg/bg luminance in its shader), this is uniform — we apply it at
+// rasterization, where the background is unknown.
+static unsigned char g_coverage_lut[256];
+static bool g_coverage_lut_ready = false;
+
+static void build_coverage_lut(void)
+{
+    float gamma = bloom_text_gamma > 0.0f ? bloom_text_gamma : 1.0f;
+    float contrast = bloom_text_contrast / 100.0f; // 0..1
+    for (int i = 0; i < 256; i++) {
+        double a = i / 255.0;
+        a = pow(a, 1.0 / gamma);
+        if (contrast > 0.0f) {
+            a = 0.5 + (a - 0.5) * (1.0 + contrast);
+            a = a < 0.0 ? 0.0 : (a > 1.0 ? 1.0 : a);
+        }
+        int v = (int)(a * 255.0 + 0.5);
+        g_coverage_lut[i] = (unsigned char)(v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
+    g_coverage_lut_ready = true;
+}
+
+static inline unsigned char coverage_curve(unsigned char a)
+{
+    if (!g_coverage_lut_ready)
+        build_coverage_lut();
+    return g_coverage_lut[a];
+}
+
 // Initialize FreeType font
 static void *ft_init_font(FontBackend *font, const char *font_path,
                           float font_size, FontStyle style, const FontOptions *options)
@@ -1041,7 +1075,7 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
             unsigned char *src_row = bitmap->buffer + y * bitmap->pitch;
             unsigned char *dst_row = glyph_bitmap->pixels + y * glyph_bitmap->width * 4;
             for (int x = 0; x < (int)bitmap->width; x++) {
-                unsigned char alpha = src_row[x];
+                unsigned char alpha = coverage_curve(src_row[x]);
                 dst_row[x * 4 + 0] = fg_r;
                 dst_row[x * 4 + 1] = fg_g;
                 dst_row[x * 4 + 2] = fg_b;

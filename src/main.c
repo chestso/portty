@@ -48,6 +48,8 @@
 
 /* Global verbose flag - controls debug output */
 int verbose = 0;
+float bloom_text_gamma = 1.0f;    /* neutral (pure linear-correct) */
+float bloom_text_contrast = 0.0f; /* neutral */
 
 /* ASan/UBSan runtime defaults. Only compiled in when the binary is
  * built with -fsanitize=address. detect_leaks=0 silences GTK/Mesa exit
@@ -678,6 +680,11 @@ int main(int argc, char *argv[])
         use_gtk4 = 1;
     if (conf.scrollback >= 0)
         init_scrollback = conf.scrollback;
+    /* kitty-style text_composition_strategy curve (unset = neutral). */
+    if (conf.text_gamma > 0.0f)
+        bloom_text_gamma = conf.text_gamma;
+    if (conf.text_contrast >= 0.0f)
+        bloom_text_contrast = conf.text_contrast;
 
     while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:", long_options, NULL)) != -1) {
         switch (opt) {
