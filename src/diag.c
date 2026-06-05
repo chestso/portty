@@ -290,7 +290,9 @@ char *diag_build_report(const DiagSources *s)
     kv(&sb, "PAGER", or_unset(s->pager_env));
     kv(&sb, "LANG", or_unset(s->lang_env));
     kv(&sb, "title", or_unset(s->title));
-    kv_bool(&sb, "alt screen", s->altscreen, "yes", "no");
+    // Neutral state, not a good/bad condition — use the plain value colour
+    // rather than kv_bool's green/red (red "no" wrongly reads as an error).
+    kv(&sb, "alt screen", s->altscreen ? "yes" : "no");
     if (s->mouse_mode == 0)
         kv(&sb, "mouse mode", "off");
     else

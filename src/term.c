@@ -202,6 +202,13 @@ int terminal_get_scrollback_lines(TerminalBackend *term)
     return term->get_scrollback_lines(term);
 }
 
+int terminal_get_scrollback_capacity(TerminalBackend *term)
+{
+    if (!term || !term->get_scrollback_capacity)
+        return 0;
+    return term->get_scrollback_capacity(term);
+}
+
 int terminal_consume_pushed_rows(TerminalBackend *term)
 {
     if (!term || !term->consume_pushed_rows)

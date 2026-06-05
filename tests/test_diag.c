@@ -112,6 +112,38 @@ static void test_glyph_curve_states(void)
     free(r);
 }
 
+static void test_scrollback(void)
+{
+    // Enabled: shows the configured capacity, not "(disabled)".
+    DiagSources s = sample(); // scrollback = 1000
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "1000 lines") != NULL);
+    ASSERT_TRUE(strstr(r, "(disabled)") == NULL);
+    free(r);
+
+    // Only a capacity of 0 reads as disabled.
+    s = sample();
+    s.scrollback = 0;
+    r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "(disabled)") != NULL);
+    free(r);
+}
+
+static void test_altscreen_neutral(void)
+{
+    // "alt screen: no" is a neutral state, not an error — it must not be
+    // emitted in the red (C_OFF) colour. With linear_light on, the sample has
+    // no other red element, so the red SGR escape should be wholly absent.
+    DiagSources s = sample(); // altscreen = false, linear_light = true
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "no") != NULL);
+    ASSERT_TRUE(strstr(r, "\x1b[38;2;255;85;85m") == NULL);
+    free(r);
+}
+
 static void test_unset_values(void)
 {
     // NULL string fields must not crash and should render as "(unset)".
@@ -135,6 +167,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_contains_values);
     RUN_TEST(test_neutral_composition);
     RUN_TEST(test_glyph_curve_states);
+    RUN_TEST(test_scrollback);
+    RUN_TEST(test_altscreen_neutral);
     RUN_TEST(test_unset_values);
 
     TEST_SUMMARY();

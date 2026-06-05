@@ -231,22 +231,6 @@ static void on_clipboard_set(const char *text, size_t len, void *user_data)
     free(buf);
 }
 
-static const char *hint_name(BloomHintMode h)
-{
-    switch (h) {
-    case BLOOM_HINT_NONE:
-        return "none";
-    case BLOOM_HINT_LIGHT:
-        return "light";
-    case BLOOM_HINT_NORMAL:
-        return "normal";
-    case BLOOM_HINT_MONO:
-        return "mono";
-    default:
-        return "(default)";
-    }
-}
-
 // Build the diagnostics document and show it through the system pager. The
 // report is written to a private (0600) temp file and a pager command is
 // injected into the shell via the PTY; the pager opens it in the alt-screen and
@@ -278,8 +262,11 @@ static void show_diagnostics_report(MainContext *ctx)
         .config_path = c ? c->source_path : NULL,
         .font_pattern = c ? c->font : NULL,
         .font_path = rd.font_path,
-        .hinting = hint_name(c ? c->hinting : BLOOM_HINT_UNSET),
-        .scrollback = terminal_get_scrollback_lines(ctx->term),
+        // Effective hinting from the renderer (what fonts were actually loaded
+        // with), not the raw config value — so the default resolves to "light"
+        // rather than "(default)".
+        .hinting = rd.hinting,
+        .scrollback = terminal_get_scrollback_capacity(ctx->term),
         .text_gamma = bloom_text_gamma,
         .text_contrast = bloom_text_contrast,
         .word_chars = c ? c->word_chars : NULL,

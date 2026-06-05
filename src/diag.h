@@ -23,7 +23,7 @@ typedef struct
     const char *config_path;  // NULL => built-in defaults
     const char *font_pattern; // requested font pattern (config/CLI), or NULL
     const char *font_path;    // resolved normal font file, or NULL
-    const char *hinting;      // "none"/"light"/"normal"/"mono"/"(default)"
+    const char *hinting;      // effective FT hint target: "none"/"light"/"normal"/"mono"
     int scrollback;
     float text_gamma;
     float text_contrast;

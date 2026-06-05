@@ -137,6 +137,9 @@ struct TerminalBackend
     void (*mark_dirty)(TerminalBackend *term);
     bool (*get_damage_rect)(TerminalBackend *term, TerminalDamageRect *rect);
     int (*get_scrollback_lines)(TerminalBackend *term);
+    /* Configured scrollback capacity in lines (0 = disabled), independent of
+     * how many lines are currently held. */
+    int (*get_scrollback_capacity)(TerminalBackend *term);
     /* Read-and-reset count of rows pushed to scrollback since the last
      * call. Used by the renderer to keep a held scroll-lock view stable
      * across new PTY output and reflow — sb_lines saturates at the
@@ -211,6 +214,7 @@ void terminal_flush_damage(TerminalBackend *term);
 void terminal_mark_dirty(TerminalBackend *term);
 bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
+int terminal_get_scrollback_capacity(TerminalBackend *term);
 int terminal_consume_pushed_rows(TerminalBackend *term);
 int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
                                  TerminalCell *cell);

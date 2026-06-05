@@ -898,6 +898,11 @@ typedef struct RendererSdl3Data
     // (renderer_get_diag). NULL until fonts are loaded.
     char *font_path;
 
+    // Effective FreeType hint-target name ("none"/"light"/"normal"/"mono")
+    // actually used to load fonts, retained for the diagnostics report. Points
+    // at a static string literal. NULL until fonts are loaded.
+    const char *hint_name;
+
     // Linear-light compositing. The whole frame is drawn into this float
     // render target (tagged SRGB_LINEAR) so SDL blends glyph coverage in
     // linear light, then the result is encoded back onto the active sRGB
@@ -1112,6 +1117,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         hint_name = "normal";
     else if (ft_hint_target == FT_LOAD_TARGET_MONO)
         hint_name = "mono";
+    data->hint_name = hint_name;
 
     // Initialize font resolver
     data->resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
@@ -2497,6 +2503,7 @@ static bool sdl3_get_diag(RendererBackend *backend, RendererDiag *out)
     out->cell_width = data->cell_width;
     out->cell_height = data->cell_height;
     out->font_path = data->font_path;
+    out->hinting = data->hint_name;
     return true;
 }
 

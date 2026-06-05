@@ -506,6 +506,11 @@ static int bvt_back_get_scrollback_lines(TerminalBackend *term)
     BvtBackendData *d = term->backend_data;
     return d ? bvt_get_scrollback_lines(d->vt) : 0;
 }
+static int bvt_back_get_scrollback_capacity(TerminalBackend *term)
+{
+    BvtBackendData *d = term->backend_data;
+    return d ? bvt_get_scrollback_capacity(d->vt) : 0;
+}
 static int bvt_back_consume_pushed_rows(TerminalBackend *term)
 {
     BvtBackendData *d = term->backend_data;
@@ -793,6 +798,7 @@ TerminalBackend terminal_backend_bvt = {
     .mark_dirty = bvt_back_mark_dirty,
     .get_damage_rect = bvt_back_get_damage_rect,
     .get_scrollback_lines = bvt_back_get_scrollback_lines,
+    .get_scrollback_capacity = bvt_back_get_scrollback_capacity,
     .consume_pushed_rows = bvt_back_consume_pushed_rows,
     .get_scrollback_cell = bvt_back_get_scrollback_cell,
     .get_grapheme = bvt_back_get_grapheme,

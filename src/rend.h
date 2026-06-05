@@ -22,6 +22,7 @@ typedef struct
     int cell_width; // glyph cell size, pixels
     int cell_height;
     const char *font_path; // resolved normal font file path, or NULL
+    const char *hinting;   // effective FT hint target ("none"/"light"/"normal"/"mono"), or NULL
 } RendererDiag;
 
 // Backend interface definition
