@@ -2,31 +2,42 @@
 
 ---
 
-## Known Issues
-
-### Cursor Position Offset After Resize (Line-Based Shells)
-
-When using line-based shells (bash, zsh, fish) in bloom-terminal:
-
-1. Resize the window narrower so the shell prompt wraps to multiple lines
-2. Resize the window wider so the prompt would fit on one line
-3. The cursor appears in the wrong position (often in the middle of the prompt)
-
-**Cause:** libvterm with reflow disabled keeps wrapped text at the same row/column positions. bash/readline assumes the terminal reflowed content during resize and recalculates cursor position based on how the prompt _would_ wrap at the new width.
-
-Reflow is disabled by default due to a [libvterm bug](https://github.com/neovim/neovim/issues/25234) that can cause crashes during extreme window resizes.
-
-| Use Case                            | Status                                         |
-| ----------------------------------- | ---------------------------------------------- |
-| Full-screen apps (vim, htop, less)  | Works correctly - they manage their own screen |
-| Line-based shells (bash, zsh, fish) | Cursor glitches after resize                   |
-| Running commands with output        | Works correctly                                |
-
-**Workarounds:** Type `reset`, press Ctrl+L, enable reflow with `--reflow` (at risk of crashes), or avoid resizing at a shell prompt.
-
----
-
 ## 1. SDL3 GPU API Migration
+
+### Current state (not this migration)
+
+We render through SDL's **high-level** `SDL_Renderer`, created with the
+`"gpu"` driver name (`platform_sdl3.c:757`). On Linux that backend resolves
+to Vulkan — this is the "we went all Vulkan" change. It bought us
+**linear-light glyph blending** (the gpu/vulkan renderer honors SRGB_LINEAR
+float render targets; `rend_sdl3.c:950-956`) and, on the GTK4 path, a
+hand-written Vulkan device for zero-copy DMA-BUF export (`gtk4_vulkan.c`).
+
+But the glyph draw loop is still one `SDL_RenderTexture` per cell plus
+`SDL_RenderFillRect` per background/underline/cursor/selection
+(`rend_sdl3.c` `render_cell`). SDL batches these into vertex buffers
+internally, but we issue per-cell API calls and don't own the pipeline or
+shaders. The DMA-BUF Vulkan code only handles buffer export/handoff — it
+does not draw glyphs.
+
+So "Vulkan" here is the **render backend**, not this item. This migration is
+about programming the **low-level `SDL_GPU` API directly** (`SDL_CreateGPUDevice`,
+our own pipeline + SPIR-V shaders, `SDL_DrawGPUPrimitivesInstanced`).
+
+### What this would add
+
+- **Instanced rendering**: one `GlyphInstance` array for the whole grid,
+  drawn in a single instanced call instead of N per-cell `SDL_RenderTexture`
+  calls — collapses CPU draw-submission from O(cells) to ~O(1) per frame.
+- Our own fragment shader (could fold the gamma/coverage curve and color in
+  directly rather than leaning on SDL's render pipeline).
+- More direct control over CPU↔GPU sync.
+
+The payoff is **CPU draw-call overhead**, not GPU work or correctness — and
+it's already blunted by the damage-driven, VSync-off, event-driven design
+(we only redraw on change, and SDL already batches). Worth doing only if
+profiling shows draw submission is a bottleneck (very large grids, sustained
+full-screen scroll). Keep as a profile-gated optimization, not a default.
 
 ### Goals
 
@@ -355,110 +366,3 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 3. Modify renderer to handle multiple runs per line
 4. Add cursor movement logic
 5. Test with Arabic/Hebrew test files
-
----
-
-## 4. Custom Terminal Emulation Library
-
-### Problem
-
-libvterm doesn't properly handle multi-cell Unicode combining:
-
-- **ZWJ sequences** (👨‍👩‍👧): Split into separate cells (👨, ZWJ, 👩, ZWJ, 👧)
-- **Flag emoji** (🇺🇸): Regional indicators in separate cells (🇺, 🇸)
-- **Skin tone modifiers** (👋🏽): Base emoji and modifier in separate cells
-
-This is a fundamental limitation of libvterm's cell-based model.
-
-### Goals
-
-- Maintain grapheme clusters as atomic units during terminal emulation
-- Proper cursor movement over grapheme clusters
-- Correct width calculation for complex emoji sequences
-- Consistent behavior between live terminal and scrollback
-
-### Alternatives to Evaluate
-
-1. **Fork libvterm**: Modify cell storage to support grapheme clusters
-   - Pros: Minimal architectural changes to bloom-terminal
-   - Cons: Ongoing maintenance burden, may diverge from upstream
-
-2. **Custom cell layer**: Keep libvterm for escape sequence parsing, replace its cell storage with a custom layer that preserves grapheme clusters
-   - Pros: Minimal scope, reuses libvterm's mature escape sequence handling
-   - Cons: Tight coupling to libvterm internals
-
-3. **Custom implementation**: Build terminal emulation from scratch
-   - Pros: Full control over cell model and grapheme handling
-   - Cons: Massive undertaking, many edge cases
-
-### How Other Terminals Solve This
-
-All three major GPU-accelerated terminals (foot, kitty, alacritty) wrote their own VT
-parsers from scratch rather than using libvterm. None of their implementations are
-available as reusable C libraries.
-
-#### kitty: Indexed Grapheme Storage
-
-The core problem: a terminal grid stores one cell per column, but a single visible
-character like 👨‍👩‍👧 (family emoji) is actually 5 codepoints joined by zero-width joiners.
-A naive cell model either truncates this to one codepoint or scatters it across cells.
-
-kitty solves this by splitting each cell into two structs. The first (`CPUCell`) holds
-the text content — but instead of storing codepoints directly, it stores either a single
-codepoint (the common case for ASCII/Latin) or an index into a separate shared table
-called `TextCache`. The second struct (`GPUCell`) holds only rendering attributes (colors,
-style flags, sprite index into the texture atlas).
-
-`TextCache` is a reference-counted, deduplicated store for multi-codepoint sequences.
-When kitty encounters a ZWJ emoji or combining character sequence, it inserts the full
-codepoint sequence into the `TextCache` and stores just the index in the cell. Multiple
-cells can reference the same entry (e.g., if the same emoji appears twice on screen),
-and entries are freed when their reference count drops to zero.
-
-This means:
-
-- Simple ASCII characters cost no extra memory (codepoint stored inline in the cell).
-- Complex grapheme clusters are stored once and referenced by index.
-- The GPU-facing struct stays small and fixed-size (no variable-length data).
-
-kitty also performs full UAX#29 grapheme cluster segmentation (the Unicode algorithm that
-defines where one "user-perceived character" ends and the next begins). When processing
-PTY input, it checks whether each incoming codepoint forms a grapheme boundary with the
-previous cell. If not, the codepoint is appended to the previous cell's content rather
-than advancing to a new cell.
-
-#### foot: libutf8proc for Grapheme Segmentation
-
-foot takes a different approach. Instead of building its own Unicode segmentation, it
-uses **libutf8proc** — a small C library (originally from the Julia language project)
-that implements Unicode algorithms including grapheme cluster boundary detection
-(UAX#29), normalization, and character properties.
-
-When foot receives terminal output, it uses libutf8proc's `utf8proc_grapheme_break()`
-to decide whether consecutive codepoints belong to the same grapheme cluster. If they
-do, they are kept together as a single unit for rendering.
-
-For the actual rasterization, foot uses **fcft** (a standalone C font library by foot's
-author) which has a `fcft_grapheme_rasterize()` function that takes an entire grapheme
-cluster and renders it as one glyph via HarfBuzz shaping.
-
-foot's grapheme clustering is an optional build-time feature. The biggest unsolved
-problem is width: `wcswidth()` (the standard C function for string display width) gives
-wrong answers for many grapheme clusters, so foot offers a config toggle between
-`wcswidth` (stays in sync with the shell but adds extra spacing) and `double-width`
-(looks better but risks cursor desync with the application).
-
-#### alacritty: Minimal Approach
-
-alacritty (Rust) stores each cell as a base `char` plus an optional `Vec<char>` for
-zero-width combining characters. It does not do full UAX#29 grapheme segmentation —
-combining marks are appended to the base character, but complex sequences like ZWJ
-emoji may not be treated as atomic clusters. Its VT parser (`vte` crate) is a widely
-used standalone Rust library but has no C API.
-
-### Before Starting
-
-1. Benchmark current emoji rendering to establish baseline
-2. Create proof-of-concept with simplest alternative first
-3. Consider hybrid approach: keep libvterm for escape sequences, custom layer for cell management
-4. Evaluate libutf8proc for grapheme segmentation (small, C, permissive license)
