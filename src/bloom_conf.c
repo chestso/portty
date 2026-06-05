@@ -92,6 +92,7 @@ void bloom_conf_init(BloomConf *conf)
     conf->scrollback = -1;
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
+    conf->source_path = NULL;
 }
 
 bool bloom_conf_load_path(BloomConf *conf, const char *path)
@@ -101,6 +102,9 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
         return false;
 
     vlog("Loading config from %s\n", path);
+
+    free(conf->source_path);
+    conf->source_path = strdup(path);
 
     char line[MAX_LINE];
     int in_terminal_section = 0;
@@ -265,4 +269,6 @@ void bloom_conf_free(BloomConf *conf)
     conf->word_chars = NULL;
     free(conf->platform);
     conf->platform = NULL;
+    free(conf->source_path);
+    conf->source_path = NULL;
 }

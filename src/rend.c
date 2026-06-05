@@ -98,6 +98,13 @@ void renderer_set_content_scale(RendererBackend *rend, float scale)
     rend->set_content_scale(rend, scale);
 }
 
+bool renderer_get_diag(RendererBackend *rend, RendererDiag *out)
+{
+    if (!rend || !rend->get_diag || !out)
+        return false;
+    return rend->get_diag(rend, out);
+}
+
 void renderer_process_pty_data(RendererBackend *rend, TerminalBackend *term,
                                const char *data, size_t len)
 {

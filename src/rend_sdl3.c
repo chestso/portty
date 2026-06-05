@@ -894,6 +894,10 @@ typedef struct RendererSdl3Data
     // Used for both font DPI and decoration scaling
     float content_scale;
 
+    // Resolved normal-font file path, retained for the diagnostics report
+    // (renderer_get_diag). NULL until fonts are loaded.
+    char *font_path;
+
     // Linear-light compositing. The whole frame is drawn into this float
     // render target (tagged SRGB_LINEAR) so SDL blends glyph coverage in
     // linear light, then the result is encoded back onto the active sRGB
@@ -956,6 +960,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->loaded_fallback_count = 0;
     memset(data->loaded_fallbacks, 0, sizeof(data->loaded_fallbacks));
     data->content_scale = 1.0f;
+    data->font_path = NULL;
     data->linear_target = NULL;
     data->linear_w = 0;
     data->linear_h = 0;
@@ -1026,6 +1031,9 @@ static void sdl3_destroy(RendererBackend *backend)
     // Destroy GPU glyph-coverage shader (no-op if it was never created)
     rend_shader_destroy(data->glyph_shader);
     data->glyph_shader = NULL;
+
+    free(data->font_path);
+    data->font_path = NULL;
 
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
@@ -1151,6 +1159,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
         return -1;
     }
     vlog("Normal font loaded: %s size=%.1f hinting=%s\n", result.font_path, font_size, hint_name);
+    free(data->font_path);
+    data->font_path = result.font_path ? strdup(result.font_path) : NULL;
     font_resolve_free_result(&result);
 
     // Save font size and options for dynamic fallback loading later
@@ -2461,6 +2471,23 @@ static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *c
     return true;
 }
 
+static bool sdl3_get_diag(RendererBackend *backend, RendererDiag *out)
+{
+    if (!backend || !backend->backend_data || !out)
+        return false;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    out->renderer_name = SDL_GetRendererName(data->renderer);
+    out->linear_light = data->linear_ok;
+    out->glyph_shader = (data->glyph_shader != NULL);
+    out->content_scale = data->content_scale;
+    out->pixel_width = data->width;
+    out->pixel_height = data->height;
+    out->cell_width = data->cell_width;
+    out->cell_height = data->cell_height;
+    out->font_path = data->font_path;
+    return true;
+}
+
 static void sdl3_scroll(RendererBackend *backend, TerminalBackend *term, int delta)
 {
     if (!backend || !backend->backend_data)
@@ -2687,6 +2714,7 @@ RendererBackend renderer_backend_sdl3 = {
     .resize = sdl3_resize,
     .log_stats = sdl3_log_stats,
     .get_cell_size = sdl3_get_cell_size,
+    .get_diag = sdl3_get_diag,
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,

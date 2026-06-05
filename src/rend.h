@@ -8,6 +8,22 @@
 struct RendererBackend;
 typedef struct RendererBackend RendererBackend;
 
+// Read-only snapshot of renderer state for the diagnostics report.
+// String members point at renderer-owned storage valid for the renderer's
+// lifetime; do not free them.
+typedef struct
+{
+    const char *renderer_name; // SDL renderer ("gpu"/"vulkan"/"opengl"/...), or NULL
+    bool linear_light;         // linear-light compositing active
+    bool glyph_shader;         // luminance-aware GPU glyph-coverage shader active
+    float content_scale;       // HiDPI content scale
+    int pixel_width;           // window drawable size, pixels
+    int pixel_height;
+    int cell_width; // glyph cell size, pixels
+    int cell_height;
+    const char *font_path; // resolved normal font file path, or NULL
+} RendererDiag;
+
 // Backend interface definition
 struct RendererBackend
 {
@@ -31,6 +47,7 @@ struct RendererBackend
     int (*render_to_png)(RendererBackend *rend, TerminalBackend *term,
                          const char *output_path);
     void (*set_content_scale)(RendererBackend *rend, float scale);
+    bool (*get_diag)(RendererBackend *rend, RendererDiag *out);
 };
 
 // Renderer API
@@ -48,6 +65,7 @@ int renderer_get_scroll_offset(RendererBackend *rend);
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path);
 void renderer_set_content_scale(RendererBackend *rend, float scale);
+bool renderer_get_diag(RendererBackend *rend, RendererDiag *out);
 
 void renderer_process_pty_data(RendererBackend *rend, TerminalBackend *term,
                                const char *data, size_t len);

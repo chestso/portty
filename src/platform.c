@@ -40,6 +40,11 @@ void platform_destroy(PlatformBackend *plat)
     vlog("Platform backend '%s' destroyed\n", plat->name ? plat->name : "unknown");
 }
 
+const char *platform_get_name(PlatformBackend *plat)
+{
+    return plat ? plat->name : NULL;
+}
+
 bool platform_create_window(PlatformBackend *plat, const char *title,
                             int width, int height)
 {

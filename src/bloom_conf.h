@@ -24,6 +24,7 @@ typedef struct
     int scrollback;        /* -1 = not set; >= 0 = lines (0 disables) */
     float text_gamma;      /* < 0 = unset (neutral); kitty text_composition_strategy gamma */
     float text_contrast;   /* < 0 = unset (neutral); kitty contrast, 0..100 */
+    char *source_path;     /* path the config was loaded from, or NULL (defaults) */
 } BloomConf;
 
 void bloom_conf_init(BloomConf *conf);

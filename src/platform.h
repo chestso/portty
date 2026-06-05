@@ -136,6 +136,7 @@ struct PlatformBackend
 // Platform API
 PlatformBackend *platform_init(PlatformBackend *plat);
 void platform_destroy(PlatformBackend *plat);
+const char *platform_get_name(PlatformBackend *plat);
 
 bool platform_create_window(PlatformBackend *plat, const char *title,
                             int width, int height);

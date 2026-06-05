@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the bloom-vt include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(BLOOM_VT_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel test_diag
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -15,6 +15,10 @@ test_unicode_CFLAGS = $(TEST_CFLAGS)
 
 test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/bloom_conf.c
 test_conf_CFLAGS = $(TEST_CFLAGS)
+
+# diag.c includes the generated bloom_version.h (builddir/src), so add that path.
+test_diag_SOURCES = test_diag.c $(TEST_COMMON) ../src/diag.c
+test_diag_CFLAGS = $(TEST_CFLAGS) -I$(top_builddir)/src
 
 test_term_bvt_SOURCES = test_term_bvt.c $(TEST_COMMON) $(TERM_STUBS) \
     ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c

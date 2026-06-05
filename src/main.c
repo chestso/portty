@@ -7,6 +7,7 @@
 #include "bloom_conf.h"
 #include "bloom_pty.h"
 #include "common.h"
+#include "diag.h"
 #include "font_ft_internal.h"
 #include "font_resolve.h"
 #ifdef _WIN32
@@ -28,6 +29,7 @@
 #include "term.h"
 #include "term_bvt.h"
 #include <SDL3/SDL.h>
+#include <errno.h>
 #include <getopt.h>
 #include <limits.h>
 #include <stdio.h>
@@ -81,6 +83,7 @@ typedef struct
     RendererBackend *rend;
     PtyContext *pty;
     PlatformBackend *plat;
+    const BloomConf *conf; // loaded config, for the diagnostics report
     bool drag_pending;
     int drag_start_row; // unified row
     int drag_start_col; // display col
@@ -228,6 +231,120 @@ static void on_clipboard_set(const char *text, size_t len, void *user_data)
     free(buf);
 }
 
+static const char *hint_name(BloomHintMode h)
+{
+    switch (h) {
+    case BLOOM_HINT_NONE:
+        return "none";
+    case BLOOM_HINT_LIGHT:
+        return "light";
+    case BLOOM_HINT_NORMAL:
+        return "normal";
+    case BLOOM_HINT_MONO:
+        return "mono";
+    default:
+        return "(default)";
+    }
+}
+
+// Build the diagnostics document and show it through the system pager. The
+// report is written to a private (0600) temp file and a pager command is
+// injected into the shell via the PTY; the pager opens it in the alt-screen and
+// restores the normal screen on exit. Caller guarantees we are on the normal
+// screen. (POSIX only; a no-op on Windows for now.)
+static void show_diagnostics_report(MainContext *ctx)
+{
+#ifdef _WIN32
+    (void)ctx;
+#else
+    const BloomConf *c = ctx->conf;
+    RendererDiag rd = { 0 };
+    renderer_get_diag(ctx->rend, &rd);
+
+    int rows = 0, cols = 0;
+    terminal_get_dimensions(ctx->term, &rows, &cols);
+
+    DiagSources src = {
+        .renderer_name = rd.renderer_name,
+        .linear_light = rd.linear_light,
+        .glyph_shader = rd.glyph_shader,
+        .content_scale = rd.content_scale,
+        .pixel_width = rd.pixel_width,
+        .pixel_height = rd.pixel_height,
+        .cell_width = rd.cell_width,
+        .cell_height = rd.cell_height,
+        .cols = cols,
+        .rows = rows,
+        .config_path = c ? c->source_path : NULL,
+        .font_pattern = c ? c->font : NULL,
+        .font_path = rd.font_path,
+        .hinting = hint_name(c ? c->hinting : BLOOM_HINT_UNSET),
+        .scrollback = terminal_get_scrollback_lines(ctx->term),
+        .text_gamma = bloom_text_gamma,
+        .text_contrast = bloom_text_contrast,
+        .word_chars = c ? c->word_chars : NULL,
+        .platform_name = platform_get_name(ctx->plat),
+        // TERM/COLORTERM are what pty.c advertises to the shell (set post-fork,
+        // so not visible via the host's getenv) — keep in sync with pty.c.
+        .term_env = "bloom-terminal-vty-256color",
+        .colorterm_env = "truecolor",
+        .pager_env = getenv("PAGER"),
+        .lang_env = getenv("LANG"),
+        .title = terminal_get_title(ctx->term),
+        .altscreen = terminal_is_altscreen(ctx->term),
+        .mouse_mode = terminal_get_mouse_mode(ctx->term),
+    };
+
+    char *report = diag_build_report(&src);
+    if (!report)
+        return;
+
+    // Write to a private temp file (mkstemp => 0600) under XDG_RUNTIME_DIR.
+    const char *dir = getenv("XDG_RUNTIME_DIR");
+    if (!dir || !*dir)
+        dir = "/tmp";
+    char path[PATH_MAX];
+    snprintf(path, sizeof(path), "%s/bloom-report-XXXXXX", dir);
+    int fd = mkstemp(path);
+    if (fd < 0) {
+        free(report);
+        return;
+    }
+    size_t total = 0, n = strlen(report);
+    while (total < n) {
+        ssize_t w = write(fd, report + total, n - total);
+        if (w < 0) {
+            if (errno == EINTR)
+                continue;
+            break;
+        }
+        total += (size_t)w;
+    }
+    close(fd);
+    free(report);
+    if (total < n) {
+        unlink(path);
+        return;
+    }
+
+    // Inject the pager command. Leading Ctrl-U clears any half-typed line;
+    // `env LESS=-R` makes less honour the raw ANSI colours even if $PAGER is a
+    // bare `less`; `; rm -f` self-cleans the temp file when the pager exits.
+    const char *pager = getenv("PAGER");
+    if (!pager || !*pager)
+        pager = "less";
+    char cmd[PATH_MAX + 128];
+    // "\x15" (Ctrl-U) clears any half-typed line; the leading space keeps the
+    // command out of history under HISTCONTROL=ignorespace. The literal is split
+    // so the hex escape doesn't greedily swallow the following space/letter.
+    int len = snprintf(cmd, sizeof(cmd), "\x15"
+                                         " env LESS=-R %s '%s'; rm -f '%s'\n",
+                       pager, path, path);
+    if (len > 0 && (size_t)len < sizeof(cmd))
+        pty_write(ctx->pty, cmd, (size_t)len);
+#endif
+}
+
 // Key callback — receives TERM_KEY_* and TERM_MOD_* (platform-independent)
 static KeyboardResult on_key(void *user_data, int key, int mod,
                              uint32_t codepoint)
@@ -295,6 +412,16 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
             result.handled = true;
             return result;
         }
+    }
+
+    // Ctrl+Shift+F6 → diagnostics report through the system pager (mirrors
+    // kitty's debug_config). Normal screen only: on the alt screen we fall
+    // through so the F6 sequence still reaches the running full-screen app.
+    if (key == TERM_KEY_F6 && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT) &&
+        !terminal_is_altscreen(ctx->term)) {
+        show_diagnostics_report(ctx);
+        result.handled = true;
+        return result;
     }
 
     // Special keys
@@ -1036,6 +1163,7 @@ int main(int argc, char *argv[])
             .rend = rend,
             .pty = pty,
             .plat = plat,
+            .conf = &conf,
         };
 
         PlatformCallbacks callbacks = {
