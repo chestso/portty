@@ -12,6 +12,9 @@ typedef struct
 {
     // Rendering / runtime
     const char *renderer_name; // "gpu" / "vulkan" / "opengl" / "software"
+    const char *gpu_device;    // GPU model (e.g. "NVIDIA GeForce RTX 4060 (NVK AD107)"), or NULL
+    const char *gpu_driver;    // driver description (e.g. "NVK (open source) — Mesa 25.x"), or NULL
+    bool gpu_driver_libre;     // driver is permissively-licensed open source (shown green)
     bool linear_light;
     bool glyph_shader; // luminance-aware GPU glyph-coverage shader active
     float content_scale;
@@ -33,7 +36,6 @@ typedef struct
     // Session / environment
     const char *term_env;      // TERM advertised to the shell
     const char *colorterm_env; // COLORTERM advertised to the shell
-    const char *pager_env;     // host $PAGER (what the report is shown through)
     const char *lang_env;      // host $LANG
     const char *title;
     bool altscreen;

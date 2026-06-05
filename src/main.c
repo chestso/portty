@@ -20,6 +20,7 @@
 #include "font_resolve_fc.h"
 #define FONT_RESOLVE_BACKEND font_resolve_backend_fc
 #endif
+#include "pager.h"
 #include "platform.h"
 #include "platform_gtk4.h"
 #include "platform_sdl3.h"
@@ -84,6 +85,7 @@ typedef struct
     PtyContext *pty;
     PlatformBackend *plat;
     const BloomConf *conf; // loaded config, for the diagnostics report
+    Pager *pager;          // internal pager overlay (diagnostics report, etc.)
     bool drag_pending;
     int drag_start_row; // unified row
     int drag_start_col; // display col
@@ -231,16 +233,11 @@ static void on_clipboard_set(const char *text, size_t len, void *user_data)
     free(buf);
 }
 
-// Build the diagnostics document and show it through the system pager. The
-// report is written to a private (0600) temp file and a pager command is
-// injected into the shell via the PTY; the pager opens it in the alt-screen and
-// restores the normal screen on exit. Caller guarantees we are on the normal
-// screen. (POSIX only; a no-op on Windows for now.)
+// Build the diagnostics document and show it in the internal pager. Rendered by
+// bloom-terminal itself (not an external pager), so OSC 8 links stay clickable
+// and nothing is injected into the shell.
 static void show_diagnostics_report(MainContext *ctx)
 {
-#ifdef _WIN32
-    (void)ctx;
-#else
     const BloomConf *c = ctx->conf;
     RendererDiag rd = { 0 };
     renderer_get_diag(ctx->rend, &rd);
@@ -248,8 +245,16 @@ static void show_diagnostics_report(MainContext *ctx)
     int rows = 0, cols = 0;
     terminal_get_dimensions(ctx->term, &rows, &cols);
 
+    // GPU + driver, when the platform can report them (GTK4/Vulkan path).
+    const char *gpu_device = NULL, *gpu_driver = NULL;
+    bool gpu_libre = false;
+    platform_get_gpu_info(ctx->plat, &gpu_device, &gpu_driver, &gpu_libre);
+
     DiagSources src = {
         .renderer_name = rd.renderer_name,
+        .gpu_device = gpu_device,
+        .gpu_driver = gpu_driver,
+        .gpu_driver_libre = gpu_libre,
         .linear_light = rd.linear_light,
         .glyph_shader = rd.glyph_shader,
         .content_scale = rd.content_scale,
@@ -275,7 +280,6 @@ static void show_diagnostics_report(MainContext *ctx)
         // so not visible via the host's getenv) — keep in sync with pty.c.
         .term_env = "bloom-terminal-vty-256color",
         .colorterm_env = "truecolor",
-        .pager_env = getenv("PAGER"),
         .lang_env = getenv("LANG"),
         .title = terminal_get_title(ctx->term),
         .altscreen = terminal_is_altscreen(ctx->term),
@@ -286,50 +290,12 @@ static void show_diagnostics_report(MainContext *ctx)
     if (!report)
         return;
 
-    // Write to a private temp file (mkstemp => 0600) under XDG_RUNTIME_DIR.
-    const char *dir = getenv("XDG_RUNTIME_DIR");
-    if (!dir || !*dir)
-        dir = "/tmp";
-    char path[PATH_MAX];
-    snprintf(path, sizeof(path), "%s/bloom-report-XXXXXX", dir);
-    int fd = mkstemp(path);
-    if (fd < 0) {
-        free(report);
-        return;
-    }
-    size_t total = 0, n = strlen(report);
-    while (total < n) {
-        ssize_t w = write(fd, report + total, n - total);
-        if (w < 0) {
-            if (errno == EINTR)
-                continue;
-            break;
-        }
-        total += (size_t)w;
-    }
-    close(fd);
+    // Show the report in the internal pager (it copies the text). The pager
+    // pauses the PTY for the duration and renders the document itself, so the
+    // clickable OSC 8 issues link survives regardless of the user's $PAGER.
+    if (cols > 0 && rows > 0)
+        pager_open(ctx->pager, report, cols, rows);
     free(report);
-    if (total < n) {
-        unlink(path);
-        return;
-    }
-
-    // Inject the pager command. Leading Ctrl-U clears any half-typed line;
-    // `env LESS=-R` makes less honour the raw ANSI colours even if $PAGER is a
-    // bare `less`; `; rm -f` self-cleans the temp file when the pager exits.
-    const char *pager = getenv("PAGER");
-    if (!pager || !*pager)
-        pager = "less";
-    char cmd[PATH_MAX + 128];
-    // "\x15" (Ctrl-U) clears any half-typed line; the leading space keeps the
-    // command out of history under HISTCONTROL=ignorespace. The literal is split
-    // so the hex escape doesn't greedily swallow the following space/letter.
-    int len = snprintf(cmd, sizeof(cmd), "\x15"
-                                         " env LESS=-R %s '%s'; rm -f '%s'\n",
-                       pager, path, path);
-    if (len > 0 && (size_t)len < sizeof(cmd))
-        pty_write(ctx->pty, cmd, (size_t)len);
-#endif
 }
 
 // Key callback — receives TERM_KEY_* and TERM_MOD_* (platform-independent)
@@ -338,6 +304,14 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
 {
     MainContext *ctx = (MainContext *)user_data;
     KeyboardResult result = { 0 };
+
+    // The internal pager is modal: while open it consumes every keystroke
+    // (scroll/close) so nothing reaches the shell. Closing keys (q/Esc) make it
+    // inactive here, so the next keystroke flows normally.
+    if (pager_active(ctx->pager)) {
+        result.handled = pager_key(ctx->pager, key, mod, codepoint);
+        return result;
+    }
 
     // Ctrl+C with active selection → copy and cancel (not SIGINT)
     if (codepoint == 'c' && (mod & TERM_MOD_CTRL) && !(mod & TERM_MOD_SHIFT) &&
@@ -401,11 +375,10 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
         }
     }
 
-    // Ctrl+Shift+F6 → diagnostics report through the system pager (mirrors
-    // kitty's debug_config). Normal screen only: on the alt screen we fall
-    // through so the F6 sequence still reaches the running full-screen app.
-    if (key == TERM_KEY_F6 && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT) &&
-        !terminal_is_altscreen(ctx->term)) {
+    // Ctrl+Shift+F6 → diagnostics report in the internal pager (mirrors kitty's
+    // debug_config). The pager is a self-contained modal overlay that pauses the
+    // PTY, so it works over the alt screen too.
+    if (key == TERM_KEY_F6 && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
         show_diagnostics_report(ctx);
         result.handled = true;
         return result;
@@ -434,6 +407,17 @@ static KeyboardResult on_text(void *user_data, const char *text)
 {
     MainContext *ctx = (MainContext *)user_data;
     KeyboardResult result = { 0 };
+
+    // While the pager is open, plain printables arrive here (the platforms
+    // route non-modified letters through IME/text, not on_key). Feed each as a
+    // character shortcut (q close, j/k/g/G/b/space scroll); everything else is
+    // swallowed so nothing reaches the shell.
+    if (pager_active(ctx->pager)) {
+        for (const char *t = text; *t; t++)
+            pager_key(ctx->pager, TERM_KEY_NONE, TERM_MOD_NONE, (unsigned char)*t);
+        result.handled = true;
+        return result;
+    }
 
     if (terminal_selection_active(ctx->term)) {
         terminal_selection_clear(ctx->term);
@@ -465,6 +449,9 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
         if (cols > 0 && rows > 0) {
             terminal_resize(ctx->term, cols, rows);
             pty_resize(ctx->pty, rows, cols);
+            // Rebuild the pager overlay at the new size if it is open.
+            if (pager_active(ctx->pager))
+                pager_resize(ctx->pager, cols, rows);
         }
     }
 }
@@ -473,6 +460,10 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
 static void on_scroll(void *user_data, int delta)
 {
     MainContext *ctx = (MainContext *)user_data;
+    if (pager_active(ctx->pager)) {
+        pager_scroll(ctx->pager, delta);
+        return;
+    }
     renderer_scroll(ctx->rend, ctx->term, delta);
 }
 
@@ -525,6 +516,11 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
                      int clicks, int mod)
 {
     MainContext *ctx = (MainContext *)user_data;
+
+    // The pager is modal: it handles hover, Ctrl+click-to-open, and text
+    // selection, and consumes all mouse events while open.
+    if (pager_active(ctx->pager))
+        return pager_mouse(ctx->pager, pixel_x, pixel_y, button, pressed, clicks, mod);
 
     int mouse_mode = terminal_get_mouse_mode(ctx->term);
     bool shift_held = (mod & TERM_MOD_SHIFT) != 0;
@@ -1152,6 +1148,7 @@ int main(int argc, char *argv[])
             .plat = plat,
             .conf = &conf,
         };
+        main_ctx.pager = pager_create(rend, plat);
 
         PlatformCallbacks callbacks = {
             .on_key = on_key,
@@ -1174,6 +1171,8 @@ int main(int argc, char *argv[])
 
         // Run the event loop (blocks)
         platform_run(plat, term, rend, &callbacks);
+
+        pager_destroy(main_ctx.pager);
     }
 
     // Cleanup

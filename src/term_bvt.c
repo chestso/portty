@@ -816,3 +816,26 @@ TerminalBackend terminal_backend_bvt = {
     .get_sixels = bvt_back_get_sixels,
     .set_cell_px = bvt_back_set_cell_px,
 };
+
+TerminalBackend *term_bvt_new(int cols, int rows)
+{
+    TerminalBackend *t = malloc(sizeof(*t));
+    if (!t)
+        return NULL;
+    /* Copy the vtable/template, then clear all per-instance state so this is a
+     * clean terminal independent of the shared global (whose backend_data,
+     * selection, callbacks, etc. belong to the host terminal once it is up). */
+    *t = terminal_backend_bvt;
+    t->backend_data = NULL;
+    memset(&t->selection, 0, sizeof(t->selection));
+    t->selection_change_cb = NULL;
+    t->selection_change_data = NULL;
+    t->clipboard_set_cb = NULL;
+    t->clipboard_set_data = NULL;
+    t->hovered_hyperlink_id = 0;
+    if (!terminal_init(t, cols, rows)) {
+        free(t);
+        return NULL;
+    }
+    return t;
+}

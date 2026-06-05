@@ -45,6 +45,12 @@ struct RendererBackend
     void (*scroll)(RendererBackend *rend, TerminalBackend *term, int delta);
     void (*reset_scroll)(RendererBackend *rend);
     int (*get_scroll_offset)(RendererBackend *rend);
+    /* Internal pager overlay: when set, the renderer draws `overlay`
+     * full-screen in place of the host terminal and reuses its scroll view
+     * for paging (host scroll position is stashed and restored on clear). */
+    void (*set_overlay)(RendererBackend *rend, TerminalBackend *overlay);
+    void (*clear_overlay)(RendererBackend *rend);
+    bool (*has_overlay)(RendererBackend *rend);
     int (*render_to_png)(RendererBackend *rend, TerminalBackend *term,
                          const char *output_path);
     void (*set_content_scale)(RendererBackend *rend, float scale);
@@ -63,6 +69,9 @@ bool renderer_get_cell_size(RendererBackend *rend, int *cell_width, int *cell_he
 void renderer_scroll(RendererBackend *rend, TerminalBackend *term, int delta);
 void renderer_reset_scroll(RendererBackend *rend);
 int renderer_get_scroll_offset(RendererBackend *rend);
+void renderer_set_overlay(RendererBackend *rend, TerminalBackend *overlay);
+void renderer_clear_overlay(RendererBackend *rend);
+bool renderer_has_overlay(RendererBackend *rend);
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path);
 void renderer_set_content_scale(RendererBackend *rend, float scale);

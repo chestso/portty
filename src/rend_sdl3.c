@@ -874,6 +874,13 @@ typedef struct RendererSdl3Data
     int height;
     int scroll_offset;
 
+    // Internal pager overlay. When non-NULL, draw_terminal renders this
+    // terminal full-screen instead of the host terminal, and scroll_offset
+    // tracks the overlay's scrollback view. saved_scroll_offset stashes the
+    // host terminal's scroll position so it survives an overlay session.
+    TerminalBackend *overlay;
+    int saved_scroll_offset;
+
     RendSdl3Atlas atlas;
 
     // Font resolver backend (kept alive for runtime fallback queries)
@@ -957,6 +964,9 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->width = 0;
     data->height = 0;
     data->scroll_offset = 0;
+    data->overlay = NULL;
+    data->saved_scroll_offset = 0;
+    data->hint_name = NULL;
     data->resolve = NULL;
     data->fallback_cache_count = 0;
     data->font_size = 0;
@@ -2402,6 +2412,15 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
 
+    // Internal pager overlay: when set, draw it full-screen in place of the
+    // host terminal. scroll_offset already holds the overlay's view position
+    // (stashed/restored by renderer_set_overlay / renderer_clear_overlay), and
+    // the overlay has no cursor of its own.
+    if (data->overlay) {
+        term = data->overlay;
+        cursor_visible = false;
+    }
+
     if (!font_has_style(data->font, FONT_STYLE_NORMAL)) {
         vlog("Renderer draw terminal failed: invalid parameters\n");
         return;
@@ -2533,6 +2552,11 @@ static void sdl3_reset_scroll(RendererBackend *backend)
         return;
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    // While the pager overlay owns the scroll view, ignore the host's
+    // snap-to-bottom-on-keystroke reset — scroll_offset is the overlay's
+    // position and must survive keypresses.
+    if (data->overlay)
+        return;
     if (data->scroll_offset != 0) {
         data->scroll_offset = 0;
         vlog("Scroll offset reset to 0\n");
@@ -2546,6 +2570,40 @@ static int sdl3_get_scroll_offset(RendererBackend *backend)
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     return data->scroll_offset;
+}
+
+static void sdl3_set_overlay(RendererBackend *backend, TerminalBackend *overlay)
+{
+    if (!backend || !backend->backend_data || !overlay)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    // Stash the host terminal's scroll position, then point the shared scroll
+    // view at the TOP of the overlay (its oldest line == fully scrolled back).
+    data->saved_scroll_offset = data->scroll_offset;
+    data->overlay = overlay;
+    data->scroll_offset = terminal_get_scrollback_lines(overlay);
+}
+
+static void sdl3_clear_overlay(RendererBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (!data->overlay)
+        return;
+    data->overlay = NULL;
+    data->scroll_offset = data->saved_scroll_offset;
+}
+
+static bool sdl3_has_overlay(RendererBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return false;
+
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    return data->overlay != NULL;
 }
 
 static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
@@ -2737,6 +2795,9 @@ RendererBackend renderer_backend_sdl3 = {
     .scroll = sdl3_scroll,
     .reset_scroll = sdl3_reset_scroll,
     .get_scroll_offset = sdl3_get_scroll_offset,
+    .set_overlay = sdl3_set_overlay,
+    .clear_overlay = sdl3_clear_overlay,
+    .has_overlay = sdl3_has_overlay,
     .render_to_png = sdl3_render_to_png,
     .set_content_scale = sdl3_set_content_scale,
 };

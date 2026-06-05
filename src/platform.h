@@ -129,6 +129,14 @@ struct PlatformBackend
     // backend fires `on_autoscroll_tick` on its own timer (~30Hz).
     void (*set_autoscroll)(PlatformBackend *plat, bool enabled);
 
+    // GPU device + driver description for the diagnostics report (only the
+    // GTK4/Vulkan backend, which owns device creation, knows this). Returns
+    // false and leaves the out-params untouched when unavailable. *libre is set
+    // true for permissively-licensed open-source drivers (Mesa). Strings are
+    // platform-owned, valid for the platform's lifetime.
+    bool (*get_gpu_info)(PlatformBackend *plat, const char **device,
+                         const char **driver, bool *libre);
+
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
 };
@@ -169,5 +177,7 @@ bool platform_get_display_size(PlatformBackend *plat, int *width, int *height);
 bool platform_open_url(PlatformBackend *plat, const char *url);
 void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 void platform_set_autoscroll(PlatformBackend *plat, bool enabled);
+bool platform_get_gpu_info(PlatformBackend *plat, const char **device,
+                           const char **driver, bool *libre);
 
 #endif /* PLATFORM_H */

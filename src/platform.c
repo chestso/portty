@@ -204,3 +204,11 @@ void platform_set_autoscroll(PlatformBackend *plat, bool enabled)
         return;
     plat->set_autoscroll(plat, enabled);
 }
+
+bool platform_get_gpu_info(PlatformBackend *plat, const char **device,
+                           const char **driver, bool *libre)
+{
+    if (!plat || !plat->get_gpu_info)
+        return false;
+    return plat->get_gpu_info(plat, device, driver, libre);
+}

@@ -288,6 +288,35 @@ static void test_hyperlink_hover_state(void)
     terminal_destroy(&t);
 }
 
+/* term_bvt_new yields a heap-allocated, independent (PTY-less) terminal that
+ * parses content — including OSC 8 hyperlinks — exactly like the shared global.
+ * This is what the internal pager builds its overlay from. */
+static void test_bvt_new_independent(void)
+{
+    TerminalBackend *t = term_bvt_new(40, 4);
+    ASSERT_NOT_NULL(t);
+
+    int rows = 0, cols = 0;
+    terminal_get_dimensions(t, &rows, &cols);
+    ASSERT_EQ(cols, 40);
+    ASSERT_EQ(rows, 4);
+
+    feed(t, "\x1b]8;;https://x.example\x1b\\Z\x1b]8;;\x1b\\");
+
+    TerminalCell c;
+    ASSERT_TRUE(terminal_get_cell(t, 0, 0, &c) >= 0);
+    ASSERT_EQ((unsigned)c.cp, (unsigned)'Z');
+    ASSERT_TRUE(c.hyperlink_id != 0);
+
+    char uri[64];
+    size_t n = terminal_cell_get_hyperlink(t, 0, 0, uri, sizeof(uri));
+    ASSERT_TRUE(n > 0);
+    ASSERT_STR_EQ(uri, "https://x.example");
+
+    terminal_destroy(t);
+    free(t);
+}
+
 /* Selecting a full row that ends in NULL cells (no soft-wrap) must drop the
  * trailing run rather than padding the clipboard with spaces. */
 static void test_selection_strips_trailing_null_cells(void)
@@ -385,6 +414,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_hyperlink_basic);
     RUN_TEST(test_hyperlink_safety);
     RUN_TEST(test_hyperlink_hover_state);
+    RUN_TEST(test_bvt_new_independent);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

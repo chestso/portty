@@ -10,6 +10,9 @@ static DiagSources sample(void)
 {
     DiagSources s = {
         .renderer_name = "test-gpu",
+        .gpu_device = "Test GPU 9000 (NVK)",
+        .gpu_driver = "NVK (open source) — Mesa 25.x",
+        .gpu_driver_libre = true,
         .linear_light = true,
         .glyph_shader = true,
         .content_scale = 1.5f,
@@ -30,7 +33,6 @@ static DiagSources sample(void)
         .platform_name = "sdl3",
         .term_env = "bloom-terminal-vty-256color",
         .colorterm_env = "truecolor",
-        .pager_env = "less",
         .lang_env = "en_US.UTF-8",
         .title = "bash",
         .altscreen = false,
@@ -144,6 +146,44 @@ static void test_altscreen_neutral(void)
     free(r);
 }
 
+static void test_issues_hyperlink(void)
+{
+    // The footer URL is wrapped in an OSC 8 hyperlink so the internal pager can
+    // make it clickable. Check both the opening (with URI) and closing markers.
+    DiagSources s = sample();
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "\x1b]8;;https://codeberg.org/thomasc/bloom-terminal/issues\x1b\\") !=
+                NULL);
+    ASSERT_TRUE(strstr(r, "\x1b]8;;\x1b\\") != NULL);
+    free(r);
+}
+
+static void test_gpu_driver_color(void)
+{
+    // Permissively-licensed open-source driver → green (C_ON, 80;250;123)
+    // immediately preceding the driver text.
+    DiagSources s = sample();
+    s.gpu_driver = "NVK — Mesa";
+    s.gpu_driver_libre = true;
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "\x1b[38;2;80;250;123m"
+                          "NVK — Mesa") != NULL);
+    free(r);
+
+    // Proprietary driver → plain text, not the green colour.
+    s = sample();
+    s.gpu_driver = "NVIDIA";
+    s.gpu_driver_libre = false;
+    r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "NVIDIA") != NULL);
+    ASSERT_TRUE(strstr(r, "\x1b[38;2;80;250;123m"
+                          "NVIDIA") == NULL);
+    free(r);
+}
+
 static void test_unset_values(void)
 {
     // NULL string fields must not crash and should render as "(unset)".
@@ -169,6 +209,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_glyph_curve_states);
     RUN_TEST(test_scrollback);
     RUN_TEST(test_altscreen_neutral);
+    RUN_TEST(test_issues_hyperlink);
+    RUN_TEST(test_gpu_driver_color);
     RUN_TEST(test_unset_values);
 
     TEST_SUMMARY();

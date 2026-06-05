@@ -969,6 +969,8 @@ static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height
 static bool gtk4_open_url(PlatformBackend *plat, const char *url);
 static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled);
+static bool gtk4_get_gpu_info(PlatformBackend *plat, const char **device,
+                              const char **driver, bool *libre);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -997,6 +999,7 @@ PlatformBackend platform_backend_gtk4 = {
     .open_url = gtk4_open_url,
     .set_cursor = gtk4_set_cursor,
     .set_autoscroll = gtk4_set_autoscroll,
+    .get_gpu_info = gtk4_get_gpu_info,
 };
 
 #ifdef HAVE_VULKAN_DMABUF
@@ -1932,6 +1935,33 @@ static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled)
         g_source_remove(ctx->autoscroll_timer_id);
         ctx->autoscroll_timer_id = 0;
     }
+}
+
+static bool gtk4_get_gpu_info(PlatformBackend *plat, const char **device,
+                              const char **driver, bool *libre)
+{
+#ifdef HAVE_VULKAN_DMABUF
+    if (!plat || !plat->backend_data)
+        return false;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    // Only the zero-copy Vulkan path owns a device we queried; the readback
+    // fallback has none.
+    if (!ctx->dmabuf_export || ctx->vk.device_name[0] == '\0')
+        return false;
+    if (device)
+        *device = ctx->vk.device_name;
+    if (driver)
+        *driver = ctx->vk.driver_desc[0] ? ctx->vk.driver_desc : NULL;
+    if (libre)
+        *libre = ctx->vk.driver_libre;
+    return true;
+#else
+    (void)plat;
+    (void)device;
+    (void)driver;
+    (void)libre;
+    return false;
+#endif
 }
 
 __attribute__((visibility("default")))

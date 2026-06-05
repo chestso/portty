@@ -40,6 +40,15 @@
 #define C_OFF     255, 85, 85   // red
 #define C_ACCENT  241, 250, 140 // yellow
 
+// OSC 8 hyperlink wrappers. The visible text between OPEN and CLOSE is made
+// clickable by OSC-8-aware terminals (bloom-terminal's internal pager does
+// this); others ignore the wrapper and just show the text. ST is ESC '\'.
+// The "\x1b]8" hex escape stops at ']' (not a hex digit), so concatenating a
+// URL literal right after is safe.
+#define OSC8_OPEN(url) "\x1b]8;;" url "\x1b\\"
+#define OSC8_CLOSE     "\x1b]8;;\x1b\\"
+#define ISSUES_URL     "https://codeberg.org/thomasc/bloom-terminal/issues"
+
 // ---- growable string buffer ------------------------------------------------
 typedef struct
 {
@@ -254,6 +263,16 @@ char *diag_build_report(const DiagSources *s)
     section(&sb, "RENDERING");
     kv(&sb, "platform", or_unset(s->platform_name));
     kv(&sb, "renderer", or_unset(s->renderer_name));
+    // GPU + driver (when the backend can report them). Permissively-licensed
+    // open-source drivers (Mesa) are shown green; others plain.
+    if (s->gpu_device)
+        kv(&sb, "GPU", s->gpu_device);
+    if (s->gpu_driver) {
+        if (s->gpu_driver_libre)
+            kv_colored(&sb, "driver", C_ON, s->gpu_driver);
+        else
+            kv(&sb, "driver", s->gpu_driver);
+    }
     kv_bool(&sb, "linear-light", s->linear_light, "enabled", "disabled (sRGB)");
     // Glyph curve has three distinct states, not two: a neutral curve applies
     // nothing (no shader needed); a non-neutral curve runs either in the GPU
@@ -287,7 +306,6 @@ char *diag_build_report(const DiagSources *s)
     section(&sb, "SESSION");
     kv(&sb, "TERM", or_unset(s->term_env));
     kv(&sb, "COLORTERM", or_unset(s->colorterm_env));
-    kv(&sb, "PAGER", or_unset(s->pager_env));
     kv(&sb, "LANG", or_unset(s->lang_env));
     kv(&sb, "title", or_unset(s->title));
     // Neutral state, not a good/bad condition — use the plain value colour
@@ -320,7 +338,9 @@ char *diag_build_report(const DiagSources *s)
     sb_fg(&sb, C_KEY);
     sb_puts(&sb, DIM "  Report issues at " RST);
     sb_fg(&sb, C_TITLE_B);
-    sb_puts(&sb, ULN "https://codeberg.org/thomasc/bloom-terminal/issues" RST);
+    // Clickable OSC 8 hyperlink (cyan URL as the visible text). No explicit
+    // underline — bloom-terminal draws the hyperlink underline itself.
+    sb_puts(&sb, OSC8_OPEN(ISSUES_URL) ISSUES_URL RST OSC8_CLOSE);
     sb_puts(&sb, "\n\n");
 
     if (sb.oom) {

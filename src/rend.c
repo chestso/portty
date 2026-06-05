@@ -83,6 +83,27 @@ int renderer_get_scroll_offset(RendererBackend *rend)
     return rend->get_scroll_offset(rend);
 }
 
+void renderer_set_overlay(RendererBackend *rend, TerminalBackend *overlay)
+{
+    if (!rend || !rend->set_overlay)
+        return;
+    rend->set_overlay(rend, overlay);
+}
+
+void renderer_clear_overlay(RendererBackend *rend)
+{
+    if (!rend || !rend->clear_overlay)
+        return;
+    rend->clear_overlay(rend);
+}
+
+bool renderer_has_overlay(RendererBackend *rend)
+{
+    if (!rend || !rend->has_overlay)
+        return false;
+    return rend->has_overlay(rend);
+}
+
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path)
 {

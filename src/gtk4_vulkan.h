@@ -36,6 +36,11 @@ typedef struct
     VkCommandPool cmd_pool;
     VkCommandBuffer release_cmd;
     VkFence release_fence;
+    // Human-readable GPU + driver, captured at init for the diagnostics report.
+    char device_name[VK_MAX_PHYSICAL_DEVICE_NAME_SIZE]; // VkPhysicalDeviceProperties.deviceName
+    // Sized to hold driverName + driverInfo + the " (open source) — " join.
+    char driver_desc[VK_MAX_DRIVER_NAME_SIZE + VK_MAX_DRIVER_INFO_SIZE + 32];
+    bool driver_libre; // permissively-licensed open-source driver (Mesa = MIT)
     bool ok;
 } BloomVk;
 

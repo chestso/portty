@@ -9,6 +9,7 @@
 #include "common.h"
 #include <SDL3/SDL_vulkan.h>
 #include <drm_fourcc.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -159,8 +160,37 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
     }
     VkPhysicalDeviceProperties pprops;
     vkGetPhysicalDeviceProperties(vk->phys, &pprops);
-    vlog("Vulkan: GPU '%s' gfxQF=%u presQF=%u\n", pprops.deviceName, vk->gfx_qf,
-         vk->present_qf);
+    snprintf(vk->device_name, sizeof(vk->device_name), "%s", pprops.deviceName);
+
+    // Driver identity (Vulkan 1.1+ core) so the diagnostics report can tell e.g.
+    // the open-source NVK/nouveau stack from the proprietary NVIDIA driver.
+    // Classify by string (header-independent: avoids referencing driver-ID enum
+    // constants that may be absent in older Vulkan headers).
+    VkPhysicalDeviceDriverProperties dprops = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES
+    };
+    VkPhysicalDeviceProperties2 props2 = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &dprops
+    };
+    vkGetPhysicalDeviceProperties2(vk->phys, &props2);
+    // Mesa GPU drivers (NVK, RADV, ANV, …) are MIT-licensed — permissive open
+    // source. The diagnostics report colours those green.
+    vk->driver_libre = strstr(dprops.driverInfo, "Mesa") != NULL ||
+                       strstr(dprops.driverName, "Mesa") != NULL;
+    const char *origin = NULL;
+    if (vk->driver_libre)
+        origin = "open source";
+    else if (strstr(dprops.driverName, "NVIDIA") || strstr(dprops.driverName, "proprietary"))
+        origin = "proprietary";
+    if (origin)
+        snprintf(vk->driver_desc, sizeof(vk->driver_desc), "%s (%s) — %s",
+                 dprops.driverName, origin, dprops.driverInfo);
+    else
+        snprintf(vk->driver_desc, sizeof(vk->driver_desc), "%s — %s",
+                 dprops.driverName, dprops.driverInfo);
+
+    vlog("Vulkan: GPU '%s' driver '%s' gfxQF=%u presQF=%u\n", vk->device_name,
+         vk->driver_desc, vk->gfx_qf, vk->present_qf);
 
     float pri = 1.0f;
     VkDeviceQueueCreateInfo qci[2];
