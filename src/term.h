@@ -5,9 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include "sixel.h"
-
-#define TERM_MAX_SIXEL_IMAGES 64
+#include <bloom-vt/bloom_vt.h> // BvtSixel — sixel images are owned by the VT engine
 
 // Forward declarations
 struct TerminalBackend;
@@ -113,10 +111,6 @@ struct TerminalBackend
     TerminalClipboardSetFn clipboard_set_cb;
     void *clipboard_set_data;
 
-    // Application-level sixel image storage
-    SixelImage *sixel_images[TERM_MAX_SIXEL_IMAGES];
-    int sixel_image_count;
-
     // Active OSC-8 hyperlink under the mouse (0 = none). Set by main.c on
     // mouse motion; consumed by the renderer to draw the run sharing this
     // id with a hover treatment. Cleared on PTY output / resize.
@@ -187,6 +181,12 @@ struct TerminalBackend
 
     // Configure scrollback ring capacity (0 disables scrollback).
     void (*set_scrollback_size)(TerminalBackend *term, int lines);
+
+    // Sixel graphics (owned by the VT engine). get_sixels returns the live
+    // images for this frame (NULL/0 if none); set_cell_px tells the engine
+    // the pixel size of a character cell so it can place images in rows.
+    const BvtSixel *(*get_sixels)(TerminalBackend *term, int *count);
+    void (*set_cell_px)(TerminalBackend *term, int cell_w, int cell_h);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
@@ -357,9 +357,10 @@ bool terminal_row_iter_next(TerminalRowIter *it);
 int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_col);
 int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col);
 
-// Sixel image API
-void terminal_add_sixel_image(TerminalBackend *term, SixelImage *image);
-void terminal_clear_sixel_images(TerminalBackend *term);
-void terminal_scroll_sixel_images(TerminalBackend *term, int delta);
+// Sixel image API. Images are decoded, stored, scrolled, and cleared by
+// the VT engine (bloom-vt); the host just queries them each frame and
+// tells the engine the cell pixel size for row placement.
+const BvtSixel *terminal_get_sixels(TerminalBackend *term, int *count);
+void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h);
 
 #endif /* TERM_H */

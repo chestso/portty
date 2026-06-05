@@ -1,9 +1,11 @@
 TEST_COMMON = test_common.c
 SDL_STUBS   = sdl_stubs.c
 TERM_STUBS  = term_stubs.c
-TEST_CFLAGS = -I$(top_srcdir)/src -Wall -Wextra
+# term.h now includes <bloom-vt/bloom_vt.h>, so every test that pulls it
+# in (directly or via term.c) needs the bloom-vt include path.
+TEST_CFLAGS = -I$(top_srcdir)/src $(BLOOM_VT_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -23,6 +25,13 @@ test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) $(TERM_STUBS) \
     ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
 test_osc52_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
 test_osc52_LDADD = $(BLOOM_VT_LIBS)
+
+# Sixel end-to-end through the host bridge: feed a DCS sequence via
+# terminal_process_input and read images back via terminal_get_sixels.
+test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
+    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
+test_sixel_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
+test_sixel_LDADD = $(BLOOM_VT_LIBS)
 
 # test_pty_pause depends on POSIX PTY APIs
 if !HOST_WINDOWS

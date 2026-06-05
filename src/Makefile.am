@@ -40,7 +40,7 @@ bloom_terminal_SOURCES = main.c bloom_conf.c base64.c term.c term_bvt.c \
     rend.c rend_sdl3.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
-    platform.c platform_sdl3.c png_mode.c timer.c sixel.c \
+    platform.c platform_sdl3.c png_mode.c timer.c \
     bloom_bug.c heap_harden.c
 
 # Compiler flags
@@ -76,7 +76,7 @@ pkglib_LTLIBRARIES = bloom-terminal-gtk4.la
 bloom_terminal_gtk4_la_SOURCES = platform_gtk4.c gtk4_vulkan.c gtk4_vulkan.h
 bloom_terminal_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) \
     $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
-    $(LIBDRM_CFLAGS) $(VULKAN_CFLAGS) \
+    $(LIBDRM_CFLAGS) $(VULKAN_CFLAGS) $(BLOOM_VT_CFLAGS) \
     -DBLOOM_DATADIR='"$(datadir)"' -Wall -Wextra
 bloom_terminal_gtk4_la_LDFLAGS = -module -avoid-version
 bloom_terminal_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS) $(VULKAN_LIBS)

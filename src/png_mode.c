@@ -70,6 +70,10 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
         fprintf(stderr, "ERROR: Failed to load fonts for PNG\n");
         return -1;
     }
+    // Let the VT engine place sixel images by giving it the cell pixel size.
+    int cell_w, cell_h;
+    if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h))
+        terminal_set_cell_px(ctx->term, cell_w, cell_h);
     return 0;
 }
 

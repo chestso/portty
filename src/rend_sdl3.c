@@ -29,6 +29,7 @@
 #define EMOJI_FONT_SCALE     4.0f
 #define FALLBACK_CACHE_SIZE  64
 #define MAX_LOADED_FALLBACKS 8
+#define SIXEL_CACHE_MAX      256 // matches the engine's live-image cap
 
 typedef struct
 {
@@ -902,12 +903,17 @@ typedef struct RendererSdl3Data
     bool linear_ok;
     bool linear_selfcheck_done;
 
-    // Sixel texture cache
+    // Sixel texture cache. Keyed by the engine's stable image id; the
+    // version detects pixel changes (animation) so we re-upload in place
+    // via SDL_UpdateTexture instead of churning textures. Entries whose id
+    // is no longer live are reconciled away each frame.
     struct
     {
         SDL_Texture *texture;
-        SixelImage *source; // pointer identity check
-    } sixel_cache[TERM_MAX_SIXEL_IMAGES];
+        uint64_t id;
+        uint32_t version;
+        int w, h;
+    } sixel_cache[SIXEL_CACHE_MAX];
     int sixel_cache_count;
 } RendererSdl3Data;
 
@@ -2004,76 +2010,125 @@ static void sixel_cache_clear(RendererSdl3Data *data)
         if (data->sixel_cache[i].texture)
             SDL_DestroyTexture(data->sixel_cache[i].texture);
         data->sixel_cache[i].texture = NULL;
-        data->sixel_cache[i].source = NULL;
     }
     data->sixel_cache_count = 0;
 }
 
-// Find or create an SDL_Texture for a sixel image (by pointer identity)
-static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, SixelImage *img)
+// Drop cached textures whose image id is no longer live, so the cache
+// tracks the engine's current image set (and frees textures for evicted /
+// scrolled-off / cleared images). O(cache * live) but both are small.
+static void sixel_cache_reconcile(RendererSdl3Data *data, const BvtSixel *imgs, int count)
 {
-    // Check cache
+    for (int i = 0; i < data->sixel_cache_count;) {
+        bool live = false;
+        for (int j = 0; j < count; j++) {
+            if (imgs[j].id == data->sixel_cache[i].id) {
+                live = true;
+                break;
+            }
+        }
+        if (live) {
+            i++;
+        } else {
+            if (data->sixel_cache[i].texture)
+                SDL_DestroyTexture(data->sixel_cache[i].texture);
+            data->sixel_cache[i] = data->sixel_cache[--data->sixel_cache_count];
+        }
+    }
+}
+
+// Find or create an SDL_Texture for a sixel image, keyed by its stable id.
+// On a version change (animation) the texture is re-uploaded in place; a
+// dimension change forces a recreate.
+static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const BvtSixel *img)
+{
     for (int i = 0; i < data->sixel_cache_count; i++) {
-        if (data->sixel_cache[i].source == img)
+        if (data->sixel_cache[i].id != img->id)
+            continue;
+        if (data->sixel_cache[i].w != img->width_px ||
+            data->sixel_cache[i].h != img->height_px) {
+            // Dimensions changed — recreate the texture object.
+            if (data->sixel_cache[i].texture)
+                SDL_DestroyTexture(data->sixel_cache[i].texture);
+            data->sixel_cache[i].texture = NULL;
+        } else if (data->sixel_cache[i].version != img->version) {
+            // Same size, new pixels — re-upload in place (no churn).
+            SDL_UpdateTexture(data->sixel_cache[i].texture, NULL, img->rgba,
+                              img->width_px * 4);
+            data->sixel_cache[i].version = img->version;
             return data->sixel_cache[i].texture;
+        } else {
+            return data->sixel_cache[i].texture;
+        }
+        // Fall through to recreate into this slot.
+        SDL_Texture *t = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                           SDL_TEXTUREACCESS_STATIC, img->width_px,
+                                           img->height_px);
+        if (!t)
+            return NULL;
+        SDL_UpdateTexture(t, NULL, img->rgba, img->width_px * 4);
+        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+        data->sixel_cache[i].texture = t;
+        data->sixel_cache[i].version = img->version;
+        data->sixel_cache[i].w = img->width_px;
+        data->sixel_cache[i].h = img->height_px;
+        return t;
     }
 
-    // Create new texture
-    SDL_Texture *tex =
-        SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_STATIC,
-                          img->width, img->height);
+    // Not cached — create and insert.
+    SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                         SDL_TEXTUREACCESS_STATIC, img->width_px,
+                                         img->height_px);
     if (!tex)
         return NULL;
-
-    SDL_UpdateTexture(tex, NULL, img->pixels, img->width * 4);
+    SDL_UpdateTexture(tex, NULL, img->rgba, img->width_px * 4);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
 
-    if (data->sixel_cache_count < TERM_MAX_SIXEL_IMAGES) {
-        data->sixel_cache[data->sixel_cache_count].texture = tex;
-        data->sixel_cache[data->sixel_cache_count].source = img;
-        data->sixel_cache_count++;
+    if (data->sixel_cache_count >= SIXEL_CACHE_MAX) {
+        // Cache full (>256 simultaneous images — effectively never). Skip
+        // rather than leak an uncached texture.
+        SDL_DestroyTexture(tex);
+        return NULL;
     }
-
+    int n = data->sixel_cache_count++;
+    data->sixel_cache[n].texture = tex;
+    data->sixel_cache[n].id = img->id;
+    data->sixel_cache[n].version = img->version;
+    data->sixel_cache[n].w = img->width_px;
+    data->sixel_cache[n].h = img->height_px;
     return tex;
 }
 
-// Render sixel images overlaid on the terminal
+// Render sixel images overlaid on the terminal. The engine returns each
+// image's anchor as a unified row (>= 0 visible, < 0 scrollback); the
+// display row is unified_row + scroll_offset, identical to how cells map.
 static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
 {
-    if (term->sixel_image_count == 0)
+    int count = 0;
+    const BvtSixel *imgs = terminal_get_sixels(term, &count);
+    sixel_cache_reconcile(data, imgs, count);
+    if (count == 0)
         return;
 
-    int term_rows, term_cols;
-    terminal_get_dimensions(term, &term_rows, &term_cols);
-    (void)term_cols;
+    for (int i = 0; i < count; i++) {
+        const BvtSixel *img = &imgs[i];
 
-    for (int i = 0; i < term->sixel_image_count; i++) {
-        SixelImage *img = term->sixel_images[i];
-        if (!img || !img->valid)
-            continue;
-
-        // Compute screen position accounting for scroll offset
-        int screen_row = img->cursor_row + data->scroll_offset;
-
-        // Pixel position on screen
-        int px = img->cursor_col * data->cell_width;
+        int screen_row = img->row + data->scroll_offset;
+        int px = img->col * data->cell_width;
         int py = screen_row * data->cell_height;
 
-        // Skip if completely off-screen
-        if (py + img->height <= 0)
+        // Cull fully off-screen images.
+        if (py + img->height_px <= 0 || py >= data->height)
             continue;
-        if (py >= data->height)
-            continue;
-        if (px + img->width <= 0)
-            continue;
-        if (px >= data->width)
+        if (px + img->width_px <= 0 || px >= data->width)
             continue;
 
         SDL_Texture *tex = sixel_get_texture(data, img);
         if (!tex)
             continue;
 
-        SDL_FRect dst = { (float)px, (float)py, (float)img->width, (float)img->height };
+        SDL_FRect dst = { (float)px, (float)py, (float)img->width_px,
+                          (float)img->height_px };
         SDL_RenderTexture(data->renderer, tex, NULL, &dst);
     }
 }
@@ -2451,8 +2506,34 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     int img_w = render_cols * data->cell_width;
     int img_h = render_rows * data->cell_height;
 
+    // Expand the canvas to cover any sixel images so they aren't cropped
+    // away by the text-content bounding box (a sixel-only output has no
+    // text to size from).
+    {
+        int sc = 0;
+        const BvtSixel *si = terminal_get_sixels(term, &sc);
+        for (int i = 0; i < sc; i++) {
+            if (si[i].row < 0)
+                continue; // anchored in scrollback, above the snapshot
+            int right = si[i].col * data->cell_width + si[i].width_px;
+            int bottom = si[i].row * data->cell_height + si[i].height_px;
+            if (right > img_w)
+                img_w = right;
+            if (bottom > img_h)
+                img_h = bottom;
+        }
+    }
+
     vlog("PNG render: %d cols x %d rows = %dx%d pixels\n",
          render_cols, render_rows, img_w, img_h);
+
+    // render_sixel_images() culls against data->width/height (the 1x1 hidden
+    // window in PNG mode). Point them at the render canvas for the snapshot.
+    int saved_w = data->width, saved_h = data->height;
+    int saved_scroll = data->scroll_offset;
+    data->width = img_w;
+    data->height = img_h;
+    data->scroll_offset = 0;
 
     // Create offscreen render target texture
     SDL_Texture *target = SDL_CreateTexture(data->renderer,
@@ -2487,9 +2568,13 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     // Phase 2: Flush staging buffers to GPU
     rend_sdl3_atlas_flush(&data->atlas);
 
-    // Phase 3: Draw the scene gamma-correct (linear-light) into `target` so the
-    // PNG matches on-screen output. No sixel overlay in the PNG path.
-    draw_scene_linear(data, term, render_rows, render_cols, false, false);
+    // Phase 3+4: Draw the scene gamma-correct (linear-light) into `target`
+    // so the PNG matches on-screen output, including the sixel overlay.
+    draw_scene_linear(data, term, render_rows, render_cols, false, true);
+
+    data->width = saved_w;
+    data->height = saved_h;
+    data->scroll_offset = saved_scroll;
 
     // Read pixels back from the render target
     SDL_Surface *surface = SDL_RenderReadPixels(data->renderer, NULL);

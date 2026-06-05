@@ -431,6 +431,16 @@ static bool bvt_back_get_cursor_visible(TerminalBackend *term)
     BvtBackendData *d = term->backend_data;
     return bvt_get_cursor(d->vt).visible;
 }
+static const BvtSixel *bvt_back_get_sixels(TerminalBackend *term, int *count)
+{
+    BvtBackendData *d = term->backend_data;
+    return bvt_get_sixels(d->vt, count);
+}
+static void bvt_back_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
+{
+    BvtBackendData *d = term->backend_data;
+    bvt_set_cell_pixels(d->vt, cell_w, cell_h);
+}
 static bool bvt_back_get_cursor_blink(TerminalBackend *term)
 {
     BvtBackendData *d = term->backend_data;
@@ -797,4 +807,6 @@ TerminalBackend terminal_backend_bvt = {
     .end_paste = bvt_back_end_paste,
     .get_line_continuation = bvt_back_get_line_continuation,
     .set_scrollback_size = bvt_back_set_scrollback_size,
+    .get_sixels = bvt_back_get_sixels,
+    .set_cell_px = bvt_back_set_cell_px,
 };

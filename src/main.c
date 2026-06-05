@@ -345,6 +345,7 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
 
     int cell_w, cell_h;
     if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h)) {
+        terminal_set_cell_px(ctx->term, cell_w, cell_h);
         int cols = pixel_w / cell_w;
         int rows = pixel_h / cell_h;
         if (cols > 0 && rows > 0) {
@@ -960,6 +961,9 @@ int main(int argc, char *argv[])
         int cell_w, cell_h;
         int win_w = 800, win_h = 600;
         if (renderer_get_cell_size(rend, &cell_w, &cell_h)) {
+            // Tell the VT engine the cell pixel size so it can place sixel
+            // images in text rows.
+            terminal_set_cell_px(term, cell_w, cell_h);
             win_w = init_cols * cell_w;
             win_h = init_rows * cell_h;
             vlog("Derived window size from font: %dx%d (%d cols * %d px, %d rows * %d px)\n",

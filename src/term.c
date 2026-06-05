@@ -1,5 +1,4 @@
 #include "term.h"
-#include "sixel.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -644,43 +643,23 @@ char *terminal_selection_get_text(TerminalBackend *term)
 }
 
 // --- Sixel Image API ---
+//
+// Decode, storage, scrolling, and clearing all live in the VT engine
+// (bloom-vt); these are thin pass-throughs to the backend.
 
-void terminal_add_sixel_image(TerminalBackend *term, SixelImage *image)
+const BvtSixel *terminal_get_sixels(TerminalBackend *term, int *count)
 {
-    if (!term || !image)
-        return;
-
-    // Drop oldest if at capacity
-    if (term->sixel_image_count >= TERM_MAX_SIXEL_IMAGES) {
-        sixel_image_free(term->sixel_images[0]);
-        memmove(&term->sixel_images[0], &term->sixel_images[1],
-                (TERM_MAX_SIXEL_IMAGES - 1) * sizeof(SixelImage *));
-        term->sixel_image_count = TERM_MAX_SIXEL_IMAGES - 1;
-    }
-
-    term->sixel_images[term->sixel_image_count++] = image;
+    if (count)
+        *count = 0;
+    if (!term || !term->get_sixels)
+        return NULL;
+    return term->get_sixels(term, count);
 }
 
-void terminal_clear_sixel_images(TerminalBackend *term)
+void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
 {
-    if (!term)
-        return;
-
-    for (int i = 0; i < term->sixel_image_count; i++) {
-        sixel_image_free(term->sixel_images[i]);
-        term->sixel_images[i] = NULL;
-    }
-    term->sixel_image_count = 0;
-}
-
-void terminal_scroll_sixel_images(TerminalBackend *term, int delta)
-{
-    if (!term)
-        return;
-
-    for (int i = 0; i < term->sixel_image_count; i++) {
-        term->sixel_images[i]->cursor_row -= delta;
-    }
+    if (term && term->set_cell_px)
+        term->set_cell_px(term, cell_w, cell_h);
 }
 
 // Emoji width paradigm.
