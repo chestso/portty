@@ -23,6 +23,12 @@ typedef struct
     int cell_height;
     const char *font_path; // resolved normal font file path, or NULL
     const char *hinting;   // effective FT hint target ("none"/"light"/"normal"/"mono"), or NULL
+    // GPU + driver via SDL's GPU renderer (SDL_GetGPUDeviceProperties). NULL on
+    // the GTK4/Vulkan path (SDL owns no GPU device there — the platform reports
+    // it instead). gpu_driver_libre flags a permissively-licensed (Mesa) driver.
+    const char *gpu_device;
+    const char *gpu_driver;
+    bool gpu_driver_libre;
 } RendererDiag;
 
 // Backend interface definition

@@ -910,6 +910,13 @@ typedef struct RendererSdl3Data
     // at a static string literal. NULL until fonts are loaded.
     const char *hint_name;
 
+    // GPU + driver captured from SDL's GPU device at init, for the diagnostics
+    // report. Empty (gpu_name[0]=='\0') when SDL owns no GPU device (e.g. the
+    // GTK4/Vulkan renderer, where the platform reports this instead).
+    char gpu_name[128];
+    char gpu_driver[160];
+    bool gpu_driver_libre;
+
     // Linear-light compositing. The whole frame is drawn into this float
     // render target (tagged SRGB_LINEAR) so SDL blends glyph coverage in
     // linear light, then the result is encoded back onto the active sRGB
@@ -942,6 +949,70 @@ typedef struct RendererSdl3Data
 // Forward declaration for sixel cache cleanup (used in sdl3_destroy)
 static void sixel_cache_clear(RendererSdl3Data *data);
 
+// Capture the GPU model + driver from SDL's GPU renderer device for the
+// diagnostics report. Pure SDL (portable across Vulkan/D3D12/Metal). Present
+// only for the "gpu" render driver, where SDL owns the device; the GTK4
+// "vulkan" renderer uses bloom's own VkDevice (no SDL_GPUDevice), so the
+// platform reports GPU info there instead.
+static void capture_sdl_gpu_info(RendererSdl3Data *data)
+{
+    data->gpu_name[0] = '\0';
+    data->gpu_driver[0] = '\0';
+    data->gpu_driver_libre = false;
+    if (!data->renderer)
+        return;
+    SDL_PropertiesID rp = SDL_GetRendererProperties(data->renderer);
+    if (!rp)
+        return;
+    SDL_GPUDevice *gpu = SDL_GetPointerProperty(rp, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
+    if (!gpu)
+        return; // not the "gpu" render driver (e.g. GTK4's "vulkan" renderer)
+    SDL_PropertiesID dp = SDL_GetGPUDeviceProperties(gpu);
+    if (!dp)
+        return;
+
+    const char *name = SDL_GetStringProperty(dp, SDL_PROP_GPU_DEVICE_NAME_STRING, NULL);
+    const char *dname = SDL_GetStringProperty(dp, SDL_PROP_GPU_DEVICE_DRIVER_NAME_STRING, NULL);
+    const char *dinfo = SDL_GetStringProperty(dp, SDL_PROP_GPU_DEVICE_DRIVER_INFO_STRING, NULL);
+    const char *dver = SDL_GetStringProperty(dp, SDL_PROP_GPU_DEVICE_DRIVER_VERSION_STRING, NULL);
+
+    if (name && *name)
+        snprintf(data->gpu_name, sizeof(data->gpu_name), "%s", name);
+
+    // Mesa drivers (NVK, RADV, ANV, …) are MIT-licensed — permissive open source.
+    data->gpu_driver_libre = (dinfo && strstr(dinfo, "Mesa")) || (dname && strstr(dname, "Mesa")) ||
+                             (dname && strstr(dname, "open-source")) ||
+                             (dname && strstr(dname, "open source"));
+    const char *origin = data->gpu_driver_libre               ? "open source"
+                         : (dname && strstr(dname, "NVIDIA")) ? "proprietary"
+                                                              : NULL;
+
+    // Prefer the richer driver_info; it may be multiline, so keep the first line.
+    const char *ver = (dinfo && *dinfo) ? dinfo : dver;
+    char verbuf[96];
+    verbuf[0] = '\0';
+    if (ver) {
+        size_t n = 0;
+        while (ver[n] && ver[n] != '\n' && n + 1 < sizeof(verbuf)) {
+            verbuf[n] = ver[n];
+            n++;
+        }
+        verbuf[n] = '\0';
+    }
+
+    if (dname && *dname) {
+        if (origin && verbuf[0])
+            snprintf(data->gpu_driver, sizeof(data->gpu_driver), "%s (%s) — %s", dname, origin,
+                     verbuf);
+        else if (origin)
+            snprintf(data->gpu_driver, sizeof(data->gpu_driver), "%s (%s)", dname, origin);
+        else if (verbuf[0])
+            snprintf(data->gpu_driver, sizeof(data->gpu_driver), "%s — %s", dname, verbuf);
+        else
+            snprintf(data->gpu_driver, sizeof(data->gpu_driver), "%s", dname);
+    }
+}
+
 static bool sdl3_init(RendererBackend *backend, void *window_handle, void *renderer_handle)
 {
     // Allocate SDL3-specific data
@@ -967,6 +1038,9 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->overlay = NULL;
     data->saved_scroll_offset = 0;
     data->hint_name = NULL;
+    data->gpu_name[0] = '\0';
+    data->gpu_driver[0] = '\0';
+    data->gpu_driver_libre = false;
     data->resolve = NULL;
     data->fallback_cache_count = 0;
     data->font_size = 0;
@@ -989,6 +1063,12 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->linear_selfcheck_done = false;
     vlog("Renderer '%s': linear-light compositing %s\n", rname ? rname : "(null)",
          data->linear_ok ? "enabled" : "disabled (sRGB blending)");
+
+    // GPU model + driver for the diagnostics report (portable; "gpu" driver only).
+    capture_sdl_gpu_info(data);
+    if (data->gpu_name[0])
+        vlog("GPU '%s' driver '%s'%s\n", data->gpu_name, data->gpu_driver,
+             data->gpu_driver_libre ? " (open source)" : "");
 
     // GPU glyph-coverage shader. Only attempt on the linear-light backends
     // (gpu/vulkan) — the shader rides on the same float target. rend_shader_create
@@ -2523,6 +2603,9 @@ static bool sdl3_get_diag(RendererBackend *backend, RendererDiag *out)
     out->cell_height = data->cell_height;
     out->font_path = data->font_path;
     out->hinting = data->hint_name;
+    out->gpu_device = data->gpu_name[0] ? data->gpu_name : NULL;
+    out->gpu_driver = data->gpu_driver[0] ? data->gpu_driver : NULL;
+    out->gpu_driver_libre = data->gpu_driver_libre;
     return true;
 }
 

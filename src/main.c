@@ -245,10 +245,17 @@ static void show_diagnostics_report(MainContext *ctx)
     int rows = 0, cols = 0;
     terminal_get_dimensions(ctx->term, &rows, &cols);
 
-    // GPU + driver, when the platform can report them (GTK4/Vulkan path).
+    // GPU + driver. The GTK4/Vulkan backend owns its device and reports via the
+    // platform; the portable --sdl backend lets SDL own it and reports via the
+    // renderer (SDL_GetGPUDeviceProperties). Prefer the platform, fall back to
+    // the renderer.
     const char *gpu_device = NULL, *gpu_driver = NULL;
     bool gpu_libre = false;
-    platform_get_gpu_info(ctx->plat, &gpu_device, &gpu_driver, &gpu_libre);
+    if (!platform_get_gpu_info(ctx->plat, &gpu_device, &gpu_driver, &gpu_libre)) {
+        gpu_device = rd.gpu_device;
+        gpu_driver = rd.gpu_driver;
+        gpu_libre = rd.gpu_driver_libre;
+    }
 
     DiagSources src = {
         .renderer_name = rd.renderer_name,
