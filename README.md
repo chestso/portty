@@ -9,7 +9,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Full terminal emulation using bloom-vt — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
 - Rendering with SDL3
 - Damage-driven rendering — bloom-vt's accumulated damage is flushed once per frame into a single dirty signal, so the frame is repainted only when terminal content, the cursor, selection, or the scrollback view actually changes; an idle terminal does no rendering work
-- Gamma-correct text rendering — antialiased glyph coverage is composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), so text gets its physically-correct, heavier/softer weight like kitty rather than the thin look of sRGB-space blending. Tunable with the kitty-style `text_composition_strategy` config key.
+- Gamma-correct text rendering — antialiased glyph coverage is composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), so text gets its physically-correct, heavier/softer weight like kitty rather than the thin look of sRGB-space blending. Tunable with the kitty-style `text_composition_strategy` config key, which on the GPU renderer runs as a luminance-aware fragment shader — thickening dark-on-light text (reverse video) without bolding normal light-on-dark text.
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
@@ -198,16 +198,16 @@ text_composition_strategy = kitty
 
 All keys are optional. Only the `[terminal]` section is recognized.
 
-| Key                         | Values                                                | Default        | Description                                                                            |
-| --------------------------- | ----------------------------------------------------- | -------------- | -------------------------------------------------------------------------------------- |
-| `font`                      | Fontconfig pattern                                    | `monospace`    | Font family and size (e.g. `monospace-16`)                                             |
-| `geometry`                  | `COLSxROWS`                                           | `80x24`        | Initial terminal dimensions                                                            |
-| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`        | FreeType hinting mode                                                                  |
-| `platform`                  | `sdl3`, `gtk4`                                        | `sdl3`         | Platform backend                                                                       |
-| `verbose`                   | `true`/`false`                                        | `false`        | Debug output                                                                           |
-| `word_chars`                | Character string                                      | `A-Za-z0-9_-/` | Characters treated as word for double-click                                            |
-| `scrollback`                | Non-negative integer                                  | `1000`         | Scrollback history lines (0 disables)                                                  |
-| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`      | Glyph-weight curve on top of linear-light blending (`kitty` = gamma 1.7 / contrast 30) |
+| Key                         | Values                                                | Default        | Description                                                                                                                 |
+| --------------------------- | ----------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `font`                      | Fontconfig pattern                                    | `monospace`    | Font family and size (e.g. `monospace-16`)                                                                                  |
+| `geometry`                  | `COLSxROWS`                                           | `80x24`        | Initial terminal dimensions                                                                                                 |
+| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`        | FreeType hinting mode                                                                                                       |
+| `platform`                  | `sdl3`, `gtk4`                                        | `sdl3`         | Platform backend                                                                                                            |
+| `verbose`                   | `true`/`false`                                        | `false`        | Debug output                                                                                                                |
+| `word_chars`                | Character string                                      | `A-Za-z0-9_-/` | Characters treated as word for double-click                                                                                 |
+| `scrollback`                | Non-negative integer                                  | `1000`         | Scrollback history lines (0 disables)                                                                                       |
+| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`      | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30) |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
