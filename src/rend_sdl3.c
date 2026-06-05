@@ -1578,11 +1578,11 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (cp_count > 0) {
         // A codepoint is rendered via the emoji font only when (a) VS16
         // forces emoji presentation, (b) it is a regional indicator
-        // (definitionally emoji), or (c) the emoji font actually carries
-        // the glyph. Plain is_ambiguous_emoji codepoints (Dingbats etc.)
-        // without VS16 stay on the text font when the emoji font lacks
-        // the glyph — avoids the old "route to EMOJI, shape, fall back to
-        // NORMAL while symbol_cell flags still say emoji" round-trip.
+        // (definitionally emoji), or (c) is_emoji_presentation(cp) and the
+        // emoji font actually carries the glyph. Text-default symbols
+        // (dingbats etc.) without VS16 stay on the text font when the emoji
+        // font lacks the glyph — avoids the old "route to EMOJI, shape, fall
+        // back to NORMAL while symbol_cell flags still say emoji" round-trip.
         // VS15 (U+FE0E) forces text presentation regardless.
         bool has_vs15 = false;
         bool has_vs16 = false;

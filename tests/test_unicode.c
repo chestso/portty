@@ -4,44 +4,37 @@
 
 /* --- Emoji range detection --- */
 
-static void test_emoji_base_range(void)
-{
-    /* Inside ranges */
-    ASSERT_TRUE(is_emoji_base_range(0x1F600)); /* grinning face */
-    ASSERT_TRUE(is_emoji_base_range(0x1F680)); /* rocket */
-    ASSERT_TRUE(is_emoji_base_range(0x1F300)); /* cyclone */
-    ASSERT_TRUE(is_emoji_base_range(0x1F9D1)); /* person */
-    ASSERT_TRUE(is_emoji_base_range(0x1FA70)); /* ballet shoes */
-
-    /* Outside ranges */
-    ASSERT_FALSE(is_emoji_base_range(0x0041));  /* 'A' */
-    ASSERT_FALSE(is_emoji_base_range(0x2600));  /* sun — ambiguous, not base */
-    ASSERT_FALSE(is_emoji_base_range(0x1F1E6)); /* regional indicator */
-}
-
-static void test_ambiguous_emoji(void)
-{
-    ASSERT_TRUE(is_ambiguous_emoji(0x2600)); /* sun */
-    ASSERT_TRUE(is_ambiguous_emoji(0x231A)); /* watch */
-    ASSERT_TRUE(is_ambiguous_emoji(0x2328)); /* keyboard */
-    ASSERT_TRUE(is_ambiguous_emoji(0x23E9)); /* fast forward */
-
-    ASSERT_FALSE(is_ambiguous_emoji(0x0041));  /* 'A' */
-    ASSERT_FALSE(is_ambiguous_emoji(0x1F1E6)); /* regional indicator */
-
-    /* Emoji_Presentation=Yes ranges belong in is_emoji_base_range, not here */
-    ASSERT_FALSE(is_ambiguous_emoji(0x1F600)); /* grinning face */
-    ASSERT_FALSE(is_ambiguous_emoji(0x1F300)); /* cyclone */
-    ASSERT_FALSE(is_ambiguous_emoji(0x1F680)); /* rocket */
-}
-
 static void test_emoji_presentation(void)
 {
-    /* Should include both base range and ambiguous */
-    ASSERT_TRUE(is_emoji_presentation(0x1F600)); /* base range */
-    ASSERT_TRUE(is_emoji_presentation(0x2600));  /* ambiguous */
+    /* SMP emoji blocks */
+    ASSERT_TRUE(is_emoji_presentation(0x1F600)); /* grinning face */
+    ASSERT_TRUE(is_emoji_presentation(0x1F680)); /* rocket */
+    ASSERT_TRUE(is_emoji_presentation(0x1F300)); /* cyclone */
+    ASSERT_TRUE(is_emoji_presentation(0x1F9D1)); /* person */
+    ASSERT_TRUE(is_emoji_presentation(0x1FA70)); /* ballet shoes */
 
-    ASSERT_FALSE(is_emoji_presentation(0x0041)); /* 'A' */
+    /* BMP symbol/dingbat band (text-default, color-preferred) */
+    ASSERT_TRUE(is_emoji_presentation(0x2600)); /* sun */
+    ASSERT_TRUE(is_emoji_presentation(0x231A)); /* watch */
+    ASSERT_TRUE(is_emoji_presentation(0x2328)); /* keyboard */
+    ASSERT_TRUE(is_emoji_presentation(0x23E9)); /* fast forward */
+    ASSERT_TRUE(is_emoji_presentation(0x2764)); /* heavy black heart */
+
+    /* Emoji_Presentation=Yes codepoints outside the SMP blocks (Emoji 17.0) */
+    ASSERT_TRUE(is_emoji_presentation(0x2B50));  /* ⭐ star */
+    ASSERT_TRUE(is_emoji_presentation(0x2B1B));  /* ⬛ large square */
+    ASSERT_TRUE(is_emoji_presentation(0x25FD));  /* ◽ medium-small square */
+    ASSERT_TRUE(is_emoji_presentation(0x1F004)); /* 🀄 mahjong */
+    ASSERT_TRUE(is_emoji_presentation(0x1F0CF)); /* 🃏 joker */
+    ASSERT_TRUE(is_emoji_presentation(0x1F18E)); /* 🆎 */
+    ASSERT_TRUE(is_emoji_presentation(0x1F7E6)); /* 🟦 blue square */
+    ASSERT_TRUE(is_emoji_presentation(0x1F7F0)); /* 🟰 heavy equals */
+    ASSERT_TRUE(is_emoji_presentation(0x1F250)); /* 🉐 */
+
+    /* Non-emoji: must stay on the text font */
+    ASSERT_FALSE(is_emoji_presentation(0x0041));  /* 'A' */
+    ASSERT_FALSE(is_emoji_presentation(0x0030));  /* '0' (keycap base needs VS16) */
+    ASSERT_FALSE(is_emoji_presentation(0x1F1E6)); /* regional indicator (handled separately) */
 }
 
 /* --- Codepoint classification --- */
@@ -182,8 +175,6 @@ int main(int argc, char *argv[])
     test_parse_args(argc, argv);
     printf("test_unicode\n");
 
-    RUN_TEST(test_emoji_base_range);
-    RUN_TEST(test_ambiguous_emoji);
     RUN_TEST(test_emoji_presentation);
     RUN_TEST(test_zwj);
     RUN_TEST(test_skin_tone_modifier);

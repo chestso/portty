@@ -2,33 +2,39 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-bool is_emoji_base_range(uint32_t cp)
-{
-    // Proper emoji base ranges from Unicode standard
-    return (cp >= 0x1F300 && cp <= 0x1F5FF) || // Miscellaneous Symbols and Pictographs
-           (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
-           (cp >= 0x1F680 && cp <= 0x1F6FF) || // Transport and Map Symbols
-           (cp >= 0x1F7E0 && cp <= 0x1F7EB) || // Colored circles/squares (🟠..🟫)
-           (cp >= 0x1F900 && cp <= 0x1F9FF) || // Supplemental Symbols and Pictographs
-           (cp >= 0x1FA70 && cp <= 0x1FAFF);   // Symbols and Pictographs Extended-A
-}
-
-bool is_ambiguous_emoji(uint32_t cp)
-{
-    // Text-default emoji: Emoji=Yes, Emoji_Presentation=No per Unicode.
-    // These render as text by default and only as emoji with U+FE0F.
-    // Ranges that have Emoji_Presentation=Yes (0x1F300+) belong in
-    // is_emoji_base_range() instead.
-    return (cp >= 0x2600 && cp <= 0x27BF) || // Miscellaneous Symbols, Dingbats
-           (cp >= 0x231A && cp <= 0x231B) || // Watch, Clock
-           (cp == 0x2328) ||                 // Keyboard
-           (cp >= 0x23E9 && cp <= 0x23FA);   // Media controls
-}
-
 bool is_emoji_presentation(uint32_t cp)
 {
-    // Check if character is in emoji base ranges or ambiguous emoji that needs variation selector
-    return is_emoji_base_range(cp) || is_ambiguous_emoji(cp);
+    // Codepoints that should prefer the color-emoji font. This is the union of
+    // Unicode's Emoji_Presentation=Yes set (default emoji — color without VS16)
+    // and the text-default symbol band bloom also colors by default ("color
+    // preferred, independent of VS16"). The color decision is still guarded by
+    // whether the emoji font actually carries the glyph (see render_cell), so
+    // the broad SMP blocks below are intentional supersets — they have no
+    // Emoji_Presentation gaps and any over-inclusion is harmless. Regional
+    // indicators are handled separately (is_regional_indicator). Tracks Unicode
+    // Emoji 17.0 (unicode.org/Public/UCD/latest/ucd/emoji/emoji-data.txt).
+    return
+        // BMP symbols & dingbats (U+231A..U+2BFF)
+        (cp >= 0x231A && cp <= 0x231B) || // ⌚⌛
+        cp == 0x2328 ||                   // ⌨
+        (cp >= 0x23E9 && cp <= 0x23FA) || // ⏩..⏺ media controls
+        (cp >= 0x25FD && cp <= 0x25FE) || // ◽◾
+        (cp >= 0x2600 && cp <= 0x27BF) || // ☀..➿ misc symbols & dingbats
+        (cp >= 0x2B1B && cp <= 0x2B1C) || // ⬛⬜
+        cp == 0x2B50 || cp == 0x2B55 ||   // ⭐ ⭕
+        // Enclosed Alphanumeric / Ideographic Supplement (U+1F000..U+1F2FF)
+        cp == 0x1F004 || cp == 0x1F0CF ||                    // 🀄 🃏
+        cp == 0x1F18E || (cp >= 0x1F191 && cp <= 0x1F19A) || // 🆎 🆑..🆚
+        cp == 0x1F201 || cp == 0x1F21A || cp == 0x1F22F ||   // 🈁 🈚 🈯
+        (cp >= 0x1F232 && cp <= 0x1F23A) ||                  // 🈲..🈺
+        (cp >= 0x1F250 && cp <= 0x1F251) ||                  // 🉐🉑
+        // Supplementary Multilingual Plane emoji blocks (supersets)
+        (cp >= 0x1F300 && cp <= 0x1F5FF) || // Misc Symbols & Pictographs
+        (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
+        (cp >= 0x1F680 && cp <= 0x1F6FF) || // Transport & Map
+        (cp >= 0x1F7E0 && cp <= 0x1F7F0) || // 🟠..🟫 colored shapes, 🟰
+        (cp >= 0x1F900 && cp <= 0x1F9FF) || // Supplemental Symbols & Pictographs
+        (cp >= 0x1FA70 && cp <= 0x1FAFF);   // Symbols & Pictographs Extended-A
 }
 
 bool is_regional_indicator(uint32_t cp)

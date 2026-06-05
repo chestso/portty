@@ -13,8 +13,6 @@
 #define UNICODE_REGIONAL_INDICATOR_MAX 0x1F1FF
 
 // Emoji detection functions
-bool is_emoji_base_range(uint32_t cp);
-bool is_ambiguous_emoji(uint32_t cp);
 bool is_emoji_presentation(uint32_t cp);
 bool is_regional_indicator(uint32_t cp);
 bool is_zwj(uint32_t cp);
