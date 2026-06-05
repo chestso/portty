@@ -1,6 +1,6 @@
 // Diagnostics report builder. Produces a styled, self-contained UTF-8 document
-// (truecolor SGR, box-drawing, bold/underline) for bug reporting — shown through
-// the system pager by the Ctrl+Shift+F6 binding in main.c. See diag.h.
+// (ANSI-palette SGR, box-drawing, bold/underline) for bug reporting — shown
+// through the system pager by the Ctrl+Shift+F6 binding in main.c. See diag.h.
 //
 // Kept free of SDL / terminal / renderer dependencies: all runtime values arrive
 // via DiagSources. Only the static build/version block reads config.h macros.
@@ -24,21 +24,20 @@
 #define DW 64 // content width for rules
 
 // ---- styling ---------------------------------------------------------------
-#define RST  "\x1b[0m"
-#define BOLD "\x1b[1m"
-#define DIM  "\x1b[2m"
-#define ITAL "\x1b[3m"
-#define ULN  "\x1b[4m"
-// 24-bit colours (Dracula-ish, matches the default Glamour-dark palette feel)
-#define C_TITLE_A 255, 121, 198 // pink
-#define C_TITLE_B 139, 233, 253 // cyan
-#define C_HEADER  189, 147, 249 // purple
-#define C_RULE    68, 71, 90    // muted
-#define C_KEY     98, 114, 164  // comment grey-blue
-#define C_VAL     248, 248, 242 // foreground
-#define C_ON      80, 250, 123  // green
-#define C_OFF     255, 85, 85   // red
-#define C_ACCENT  241, 250, 140 // yellow
+// Attributes plus 3/4-bit ANSI colour SGR. Colours resolve against the host
+// terminal's own palette (CharmTone inside bloom-terminal) — no hardcoded RGB,
+// so the report inherits whatever theme the viewing terminal uses.
+#define RST       "\x1b[0m"
+#define BOLD      "\x1b[1m"
+#define DIM       "\x1b[2m"
+#define ITAL      "\x1b[3m"
+#define ULN       "\x1b[4m"
+#define FG_HEADER "\x1b[35m" // magenta — section titles
+#define FG_RULE   "\x1b[90m" // bright black — rules
+#define FG_ON     "\x1b[32m" // green — enabled / libre driver
+#define FG_OFF    "\x1b[31m" // red — disabled
+#define FG_ACCENT "\x1b[33m" // yellow — version / accents
+#define FG_LINK   "\x1b[36m" // cyan — hyperlinks
 
 // OSC 8 hyperlink wrappers. The visible text between OPEN and CLOSE is made
 // clickable by OSC-8-aware terminals (bloom-terminal's internal pager does
@@ -111,64 +110,36 @@ static void sb_printf(SB *sb, const char *fmt, ...)
     sb->len += (size_t)n;
 }
 
-// 24-bit foreground colour escape.
-static void sb_fg(SB *sb, int r, int g, int b)
-{
-    sb_printf(sb, "\x1b[38;2;%d;%d;%dm", r, g, b);
-}
-
 // ---- formatting primitives -------------------------------------------------
 
 // Horizontal rule of `w` box-drawing chars in the muted rule colour.
 static void rule(SB *sb, const char *glyph, int w)
 {
-    sb_fg(sb, C_RULE);
+    sb_puts(sb, FG_RULE);
     for (int i = 0; i < w; i++)
         sb_puts(sb, glyph);
     sb_puts(sb, RST "\n");
 }
 
-// Per-character horizontal colour gradient — showcases truecolor.
-static void gradient(SB *sb, const char *text, int r0, int g0, int b0, int r1, int g1, int b1)
-{
-    size_t n = strlen(text);
-    if (n == 0)
-        return;
-    for (size_t i = 0; i < n; i++) {
-        float t = n > 1 ? (float)i / (float)(n - 1) : 0.0f;
-        int r = (int)(r0 + (r1 - r0) * t);
-        int g = (int)(g0 + (g1 - g0) * t);
-        int b = (int)(b0 + (b1 - b0) * t);
-        sb_fg(sb, r, g, b);
-        char c[2] = { text[i], 0 };
-        sb_puts(sb, c);
-    }
-    sb_puts(sb, RST);
-}
-
-// Section header: blank line, "▍ TITLE" in bold purple, then a thin rule.
+// Section header: blank line, "▍ TITLE" in bold magenta, then a thin rule.
 static void section(SB *sb, const char *title)
 {
     sb_puts(sb, "\n");
-    sb_fg(sb, C_HEADER);
-    sb_printf(sb, BOLD "  ▍ %s" RST "\n", title);
+    sb_printf(sb, BOLD FG_HEADER "  ▍ %s" RST "\n", title);
     sb_puts(sb, "  ");
     rule(sb, "─", DW);
 }
 
 // Key/value row: dim key padded into an 18-col gutter, then the value (or dim
-// "(unset)"). 18 keeps a 2-space gap even for the longest key.
+// "(unset)") in the default foreground. 18 keeps a 2-space gap even for the
+// longest key.
 static void kv(SB *sb, const char *key, const char *val)
 {
-    sb_fg(sb, C_KEY);
-    sb_printf(sb, "  %-18s" RST, key);
-    if (val && *val) {
-        sb_fg(sb, C_VAL);
+    sb_printf(sb, DIM "  %-18s" RST, key);
+    if (val && *val)
         sb_puts(sb, val);
-        sb_puts(sb, RST);
-    } else {
+    else
         sb_puts(sb, DIM "(unset)" RST);
-    }
     sb_puts(sb, "\n");
 }
 
@@ -185,22 +156,18 @@ static void kvf(SB *sb, const char *key, const char *fmt, ...)
 // Coloured boolean value row (green on / red off).
 static void kv_bool(SB *sb, const char *key, bool on, const char *on_s, const char *off_s)
 {
-    sb_fg(sb, C_KEY);
-    sb_printf(sb, "  %-18s" RST, key);
-    if (on)
-        sb_fg(sb, C_ON);
-    else
-        sb_fg(sb, C_OFF);
+    sb_printf(sb, DIM "  %-18s" RST, key);
+    sb_puts(sb, on ? FG_ON : FG_OFF);
     sb_puts(sb, on ? on_s : off_s);
     sb_puts(sb, RST "\n");
 }
 
-// Key/value row with a caller-chosen value colour (for multi-state values).
-static void kv_colored(SB *sb, const char *key, int r, int g, int b, const char *val)
+// Key/value row with a caller-chosen SGR for the value (for multi-state
+// values). Pass "" to leave the value in the default foreground.
+static void kv_colored(SB *sb, const char *key, const char *sgr, const char *val)
 {
-    sb_fg(sb, C_KEY);
-    sb_printf(sb, "  %-18s" RST, key);
-    sb_fg(sb, r, g, b);
+    sb_printf(sb, DIM "  %-18s" RST, key);
+    sb_puts(sb, sgr);
     sb_puts(sb, val);
     sb_puts(sb, RST "\n");
 }
@@ -219,16 +186,14 @@ char *diag_build_report(const DiagSources *s)
 
     SB sb = { 0 };
 
-    // Banner: emoji + gradient wordmark + version, framed by heavy rules.
+    // Banner: emoji + bold wordmark + version, framed by heavy rules.
     sb_puts(&sb, "\n  ");
     rule(&sb, "━", DW);
     sb_puts(&sb, "  \U0001f338  "); // 🌸
-    gradient(&sb, "bloom-terminal", C_TITLE_A, C_TITLE_B);
-    sb_fg(&sb, C_KEY);
+    sb_puts(&sb, BOLD "bloom-terminal" RST);
     sb_puts(&sb, DIM "  ·  diagnostics" RST "\n");
-    sb_fg(&sb, C_ACCENT);
-    sb_printf(&sb, "  %s\n", BLOOM_TERMINAL_VERSION);
-    sb_puts(&sb, RST "  ");
+    sb_printf(&sb, FG_ACCENT "  %s" RST "\n", BLOOM_TERMINAL_VERSION);
+    sb_puts(&sb, "  ");
     rule(&sb, "━", DW);
 
     // Version & build
@@ -269,7 +234,7 @@ char *diag_build_report(const DiagSources *s)
         kv(&sb, "GPU", s->gpu_device);
     if (s->gpu_driver) {
         if (s->gpu_driver_libre)
-            kv_colored(&sb, "driver", C_ON, s->gpu_driver);
+            kv_colored(&sb, "driver", FG_ON, s->gpu_driver);
         else
             kv(&sb, "driver", s->gpu_driver);
     }
@@ -278,11 +243,11 @@ char *diag_build_report(const DiagSources *s)
     // nothing (no shader needed); a non-neutral curve runs either in the GPU
     // luminance-aware shader or, where that's unavailable, the uniform baked LUT.
     if (s->text_gamma == 1.0f && s->text_contrast == 0.0f)
-        kv_colored(&sb, "glyph curve", C_VAL, "neutral (identity)");
+        kv_colored(&sb, "glyph curve", "", "neutral (identity)");
     else if (s->glyph_shader)
-        kv_colored(&sb, "glyph curve", C_ON, "GPU shader (luminance-aware)");
+        kv_colored(&sb, "glyph curve", FG_ON, "GPU shader (luminance-aware)");
     else
-        kv_colored(&sb, "glyph curve", C_ACCENT, "baked LUT (uniform — no GPU shader)");
+        kv_colored(&sb, "glyph curve", FG_ACCENT, "baked LUT (uniform — no GPU shader)");
     kvf(&sb, "content scale", "%.2f", (double)s->content_scale);
     kvf(&sb, "window", "%d x %d px", s->pixel_width, s->pixel_height);
     kvf(&sb, "cell", "%d x %d px", s->cell_width, s->cell_height);
@@ -336,12 +301,10 @@ char *diag_build_report(const DiagSources *s)
     // Footer
     sb_puts(&sb, "\n  ");
     rule(&sb, "─", DW);
-    sb_fg(&sb, C_KEY);
     sb_puts(&sb, DIM "  Report issues at " RST);
-    sb_fg(&sb, C_TITLE_B);
     // Clickable OSC 8 hyperlink (cyan URL as the visible text). No explicit
     // underline — bloom-terminal draws the hyperlink underline itself.
-    sb_puts(&sb, OSC8_OPEN(ISSUES_URL) ISSUES_URL RST OSC8_CLOSE);
+    sb_puts(&sb, FG_LINK OSC8_OPEN(ISSUES_URL) ISSUES_URL RST OSC8_CLOSE);
     sb_puts(&sb, "\n\n");
 
     if (sb.oom) {

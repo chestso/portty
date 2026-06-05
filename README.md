@@ -427,6 +427,10 @@ npm install --prefix ~/.local prettier
 
 Thomas Christensen
 
+## Acknowledgments
+
+A tip of the hat to [Charmbracelet](https://charm.sh) and [charm.land](https://charm.land): bloom-terminal's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via bloom-vt), the cream foreground (`#fffdf5`) is charm.land's own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
+
 ## License
 
 MIT — see [COPYING](COPYING) for details.

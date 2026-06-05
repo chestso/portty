@@ -55,6 +55,8 @@ typedef struct
 /* Color conversion                                                    */
 /* ------------------------------------------------------------------ */
 
+/* Default foreground is charm.land's body-text cream (#fffdf5), a nod to
+ * Charmbracelet — whose CharmTone palette also seeds bloom-vt's ANSI 0-15. 🌸 */
 static const uint8_t default_fg[3] = { 0xff, 0xfd, 0xf5 };
 static const uint8_t default_bg[3] = { 0x00, 0x00, 0x00 };
 
