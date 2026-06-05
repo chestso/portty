@@ -175,6 +175,20 @@ void terminal_clear_redraw(TerminalBackend *term)
     term->clear_redraw(term);
 }
 
+void terminal_flush_damage(TerminalBackend *term)
+{
+    if (!term || !term->flush_damage)
+        return;
+    term->flush_damage(term);
+}
+
+void terminal_mark_dirty(TerminalBackend *term)
+{
+    if (!term || !term->mark_dirty)
+        return;
+    term->mark_dirty(term);
+}
+
 bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect)
 {
     if (!term || !term->get_damage_rect || !rect)

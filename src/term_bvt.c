@@ -333,6 +333,8 @@ static int bvt_back_process_input(TerminalBackend *term, const char *input,
     BvtBackendData *d = term->backend_data;
     if (!d)
         return 0;
+    /* Damage accumulates inside bloom-vt; needs_redraw becomes true when the
+     * caller drains it via terminal_flush_damage() (once per frame). */
     return (int)bvt_input_write(d->vt, (const uint8_t *)input, len);
 }
 
@@ -454,6 +456,23 @@ static void bvt_back_clear_redraw(TerminalBackend *term)
     BvtBackendData *d = term->backend_data;
     if (d)
         damage_init(d);
+}
+/* Drain bloom-vt's accumulated damage: bvt_damage_flush fires cb_damage (which
+ * unions into our rect and sets needs_redraw) only when the grid actually
+ * changed, and folds in cursor-only moves. Called once per frame. */
+static void bvt_back_flush_damage(TerminalBackend *term)
+{
+    BvtBackendData *d = term->backend_data;
+    if (d)
+        bvt_damage_flush(d->vt);
+}
+/* Flag a redraw for a change bloom-vt can't see (cursor blink, selection,
+ * scroll view, focus, resize). Full-grid repaint, so no precise rect needed. */
+static void bvt_back_mark_dirty(TerminalBackend *term)
+{
+    BvtBackendData *d = term->backend_data;
+    if (d)
+        d->needs_redraw = true;
 }
 static bool bvt_back_get_damage_rect(TerminalBackend *term,
                                      TerminalDamageRect *rect)
@@ -760,6 +779,8 @@ TerminalBackend terminal_backend_bvt = {
     .get_title = bvt_back_get_title,
     .needs_redraw = bvt_back_needs_redraw,
     .clear_redraw = bvt_back_clear_redraw,
+    .flush_damage = bvt_back_flush_damage,
+    .mark_dirty = bvt_back_mark_dirty,
     .get_damage_rect = bvt_back_get_damage_rect,
     .get_scrollback_lines = bvt_back_get_scrollback_lines,
     .consume_pushed_rows = bvt_back_consume_pushed_rows,

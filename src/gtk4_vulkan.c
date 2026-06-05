@@ -204,6 +204,32 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
         return false;
     }
 
+    // Resources for the per-frame dma-buf ownership-release barrier. We submit
+    // it on the SAME graphics queue SDL uses (we own the device), sequenced
+    // after SDL_FlushRenderer's submit, so no cross-queue contention.
+    vkGetDeviceQueue(vk->device, vk->gfx_qf, 0, &vk->gfx_queue);
+    VkCommandPoolCreateInfo cpci = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+        .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+        .queueFamilyIndex = vk->gfx_qf
+    };
+    VkCommandBufferAllocateInfo cbai = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+        .commandBufferCount = 1
+    };
+    VkFenceCreateInfo fci = { .sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO };
+    if (vkCreateCommandPool(vk->device, &cpci, NULL, &vk->cmd_pool) !=
+            VK_SUCCESS ||
+        (cbai.commandPool = vk->cmd_pool,
+         vkAllocateCommandBuffers(vk->device, &cbai, &vk->release_cmd)) !=
+            VK_SUCCESS ||
+        vkCreateFence(vk->device, &fci, NULL, &vk->release_fence) != VK_SUCCESS) {
+        vlog("Vulkan: failed to create export-release command resources\n");
+        bloom_vk_shutdown(vk);
+        return false;
+    }
+
     // Hand our instance/surface/device/queues to SDL's vulkan renderer.
     SDL_SetPointerProperty(props, SDL_PROP_RENDERER_CREATE_VULKAN_INSTANCE_POINTER,
                            vk->instance);
@@ -388,10 +414,84 @@ void bloom_vk_finish(BloomVk *vk)
         vkDeviceWaitIdle(vk->device);
 }
 
+// Submit a single queue-family-ownership image barrier on the graphics queue
+// and fence-wait for it.
+static void submit_ownership_barrier(BloomVk *vk, VkImage image,
+                                     VkImageLayout old_layout,
+                                     VkImageLayout new_layout, uint32_t src_qf,
+                                     uint32_t dst_qf,
+                                     VkAccessFlags src_access,
+                                     VkAccessFlags dst_access)
+{
+    if (!vk->device || !vk->release_cmd || image == VK_NULL_HANDLE)
+        return;
+
+    vkResetCommandBuffer(vk->release_cmd, 0);
+    VkCommandBufferBeginInfo bi = {
+        .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+        .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT
+    };
+    vkBeginCommandBuffer(vk->release_cmd, &bi);
+    VkImageMemoryBarrier barrier = {
+        .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
+        .srcAccessMask = src_access,
+        .dstAccessMask = dst_access,
+        .oldLayout = old_layout,
+        .newLayout = new_layout,
+        .srcQueueFamilyIndex = src_qf,
+        .dstQueueFamilyIndex = dst_qf,
+        .image = image,
+        .subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 }
+    };
+    vkCmdPipelineBarrier(vk->release_cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+                         VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL,
+                         1, &barrier);
+    vkEndCommandBuffer(vk->release_cmd);
+
+    vkResetFences(vk->device, 1, &vk->release_fence);
+    VkSubmitInfo si = { .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+                        .commandBufferCount = 1,
+                        .pCommandBuffers = &vk->release_cmd };
+    vkQueueSubmit(vk->gfx_queue, 1, &si, vk->release_fence);
+    vkWaitForFences(vk->device, 1, &vk->release_fence, VK_TRUE, UINT64_MAX);
+}
+
+void bloom_vk_export_release(BloomVk *vk, BloomVkTarget *t)
+{
+    // Release ownership to the foreign (compositor/GTK importer) queue family
+    // and move to GENERAL (the layout GTK imports dma-bufs as). SDL leaves the
+    // target in SHADER_READ_ONLY_OPTIMAL after SDL_SetRenderTarget(NULL)+flush.
+    // NOTE: the actual cross-device coherence is forced by the 1x1 readback the
+    // caller does while the target is still bound (see platform_gtk4.c); this
+    // barrier only handles the ownership/layout handoff for scanout.
+    submit_ownership_barrier(vk, t->image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                             VK_IMAGE_LAYOUT_GENERAL, vk->gfx_qf,
+                             VK_QUEUE_FAMILY_FOREIGN_EXT,
+                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0);
+}
+
+void bloom_vk_export_acquire(BloomVk *vk, BloomVkTarget *t)
+{
+    // Reclaim from the foreign importer and restore the layout SDL still tracks
+    // (SHADER_READ_ONLY_OPTIMAL) so SDL can render into it again.
+    submit_ownership_barrier(vk, t->image, VK_IMAGE_LAYOUT_GENERAL,
+                             VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                             VK_QUEUE_FAMILY_FOREIGN_EXT, vk->gfx_qf, 0,
+                             VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+}
+
 void bloom_vk_shutdown(BloomVk *vk)
 {
     if (vk->device) {
         vkDeviceWaitIdle(vk->device);
+        if (vk->release_fence) {
+            vkDestroyFence(vk->device, vk->release_fence, NULL);
+            vk->release_fence = VK_NULL_HANDLE;
+        }
+        if (vk->cmd_pool) {
+            vkDestroyCommandPool(vk->device, vk->cmd_pool, NULL);
+            vk->cmd_pool = VK_NULL_HANDLE;
+        }
         vkDestroyDevice(vk->device, NULL);
         vk->device = VK_NULL_HANDLE;
     }

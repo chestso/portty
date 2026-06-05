@@ -31,6 +31,11 @@ typedef struct
     uint32_t present_qf;
     PFN_vkGetMemoryFdKHR vkGetMemoryFdKHR;
     PFN_vkGetImageDrmFormatModifierPropertiesEXT vkGetImageDrmFormatModifierPropertiesEXT;
+    // For the post-render dma-buf ownership-release barrier (bloom_vk_export_release).
+    VkQueue gfx_queue;
+    VkCommandPool cmd_pool;
+    VkCommandBuffer release_cmd;
+    VkFence release_fence;
     bool ok;
 } BloomVk;
 
@@ -46,6 +51,7 @@ typedef struct
     uint64_t modifier;
     uint32_t stride;
     uint32_t offset;
+    bool released; // ownership released to the foreign queue; reacquire before reuse
 } BloomVkTarget;
 
 // Create our own VkInstance + VkDevice (external-memory extensions enabled) for
@@ -65,6 +71,22 @@ void bloom_vk_target_destroy(BloomVk *vk, BloomVkTarget *t);
 // Wait for all GPU work (SDL's render into the export image) to complete before
 // the compositor scans out the DMA-BUF.
 void bloom_vk_finish(BloomVk *vk);
+
+// Hand the just-rendered export image off to the external (compositor/GTK)
+// consumer: a queue-family-ownership release to VK_QUEUE_FAMILY_FOREIGN_EXT plus
+// a transition to VK_IMAGE_LAYOUT_GENERAL, submitted on our graphics queue and
+// fence-waited. This is what makes our writes visible to the importing device in
+// the linear DMA-BUF (a plain vkDeviceWaitIdle does not). Call after SDL has
+// finished rendering into `t->image` and left it in SHADER_READ_ONLY_OPTIMAL
+// (i.e. after SDL_SetRenderTarget(NULL) + SDL_FlushRenderer).
+void bloom_vk_export_release(BloomVk *vk, BloomVkTarget *t);
+
+// Reclaim a previously-released target from the foreign importer before SDL
+// renders into it again: a queue-family ACQUIRE (FOREIGN -> graphics) plus a
+// transition back to SHADER_READ_ONLY_OPTIMAL (the layout SDL still tracks for
+// it). Must run before SDL touches the image. Submitted on the graphics queue
+// and fence-waited.
+void bloom_vk_export_acquire(BloomVk *vk, BloomVkTarget *t);
 
 void bloom_vk_shutdown(BloomVk *vk);
 

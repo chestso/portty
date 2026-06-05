@@ -77,6 +77,13 @@ static const struct
     { GDK_KEY_KP_Equal, TERM_KEY_KP_EQUAL },
 };
 
+#ifdef HAVE_VULKAN_DMABUF
+// Number of exportable dmabuf render targets to round-robin through. Triple
+// buffering: a fresh buffer each frame so the compositor never re-receives a
+// buffer it has cached, and we never overwrite one it is still scanning out.
+#define BLOOM_VK_RING 3
+#endif
+
 // Backend-specific context
 typedef struct
 {
@@ -98,12 +105,17 @@ typedef struct
 
 #ifdef HAVE_VULKAN_DMABUF
     // Zero-copy via Vulkan: bloom owns the VkInstance/VkDevice and exports the
-    // render target as a DMA-BUF. When true, render_target aliases
-    // vk_target.texture (an exportable VkImage wrapped as an SDL render target).
-    bool vulkan_dmabuf;
-    bool vk_export_verified;
+    // render target as a DMA-BUF. render_target aliases the current ring slot's
+    // texture (an exportable VkImage wrapped as an SDL render target). A ring of
+    // buffers is essential: reusing a single dmabuf every frame leaves the
+    // compositor scanning out a buffer it has cached by identity, so it never
+    // re-presents (frozen display). Round-robin over BLOOM_VK_RING buffers hands
+    // a fresh buffer each frame; 3 covers a compositor holding up to 2 frames.
+    bool vulkan_dmabuf; // bloom owns the VkDevice + 'vulkan' SDL renderer
+    bool dmabuf_export; // export the render target as a dmabuf (vs. readback)
     BloomVk vk;
-    BloomVkTarget vk_target;
+    BloomVkTarget vk_targets[BLOOM_VK_RING];
+    int vk_ring_idx;
 #endif
 
     // Last displayed frame: reused on a no-redraw snapshot and passed to GTK
@@ -127,7 +139,6 @@ typedef struct
     char exe_path[PATH_MAX];
 
     // Render state
-    bool force_redraw;
     bool has_focus;
 
     // Stored for draw_func access
@@ -210,7 +221,7 @@ static void handle_keyboard_result(GTK4PlatformData *ctx, KeyboardResult *result
     }
 
     if (result->force_redraw) {
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
         gtk_widget_queue_draw(ctx->drawing_area);
         return;
     }
@@ -219,12 +230,12 @@ static void handle_keyboard_result(GTK4PlatformData *ctx, KeyboardResult *result
         // Reset scroll position when typing
         if (renderer_get_scroll_offset(ctx->rend) != 0) {
             renderer_reset_scroll(ctx->rend);
-            ctx->force_redraw = true;
+            terminal_mark_dirty(ctx->term);
         }
 
         // Reset cursor blink on user input
         ctx->cursor_blink_visible = true;
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
 
         // Write to PTY if callback provided raw data
         if (result->len > 0 && !result->handled && ctx->pty) {
@@ -280,8 +291,11 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
         snapshot, &(GdkRGBA){ 0, 0, 0, 1 },
         &GRAPHENE_RECT_INIT(0, 0, width, height));
 
-    bool needs_render =
-        terminal_needs_redraw(ctx->term) || ctx->force_redraw;
+    // Drain VT damage accumulated since the last snapshot so needs_redraw
+    // reflects real content/cursor changes (the controlled, once-per-frame
+    // flush point). App-level changes set the same flag via terminal_mark_dirty.
+    terminal_flush_damage(ctx->term);
+    bool needs_render = terminal_needs_redraw(ctx->term);
 
     // If nothing changed and we have a cached texture, reuse it
     if (!needs_render && ctx->prev_texture) {
@@ -306,29 +320,38 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
     if (!ctx->render_target || ctx->target_w != phys_w ||
         ctx->target_h != phys_h) {
 #ifdef HAVE_VULKAN_DMABUF
-        if (ctx->vulkan_dmabuf) {
-            // The render target is an exportable VkImage wrapped as an SDL
-            // texture; bloom_vk_target_create destroys the previous one, so we
-            // must not SDL_DestroyTexture(render_target) here (it aliases it).
+        if (ctx->dmabuf_export) {
+            // Each ring slot is an exportable VkImage wrapped as an SDL texture;
+            // bloom_vk_target_create destroys the previous one in that slot, so
+            // we must not SDL_DestroyTexture here (render_target aliases a slot).
+            // The previously presented texture aliases an old-size buffer — drop
+            // it before reallocating the ring.
             g_clear_object(&ctx->prev_texture);
-            if (!bloom_vk_target_create(&ctx->vk, ctx->sdl_renderer, phys_w,
-                                        phys_h, &ctx->vk_target)) {
-                ctx->gl_stats.render_target_create_failures++;
-                vlog("Vulkan dmabuf target create failed at %dx%d\n", phys_w,
-                     phys_h);
-                ctx->render_target = NULL;
-                return;
+            for (int i = 0; i < BLOOM_VK_RING; i++) {
+                if (!bloom_vk_target_create(&ctx->vk, ctx->sdl_renderer, phys_w,
+                                            phys_h, &ctx->vk_targets[i])) {
+                    ctx->gl_stats.render_target_create_failures++;
+                    vlog("Vulkan dmabuf target create failed at %dx%d (slot "
+                         "%d)\n",
+                         phys_w, phys_h, i);
+                    ctx->render_target = NULL;
+                    return;
+                }
             }
-            ctx->render_target = ctx->vk_target.texture;
+            ctx->vk_ring_idx = 0;
             ctx->target_w = phys_w;
             ctx->target_h = phys_h;
+            // render_target is selected per frame (round-robin) below.
             goto render_target_ready;
         }
 #endif
         if (ctx->render_target)
             SDL_DestroyTexture(ctx->render_target);
+        // RGBA32 is byte order R,G,B,A — matches GDK_MEMORY_R8G8B8A8 used by the
+        // readback path (RGBA8888 is value-order = B,G,R,A bytes on LE, which
+        // swaps R/B and renders e.g. the purple cursor pink).
         ctx->render_target = SDL_CreateTexture(
-            ctx->sdl_renderer, SDL_PIXELFORMAT_RGBA8888,
+            ctx->sdl_renderer, SDL_PIXELFORMAT_RGBA32,
             SDL_TEXTUREACCESS_TARGET, phys_w, phys_h);
         // A1.4 — NULL check before any use of render_target.
         if (!ctx->render_target) {
@@ -343,6 +366,19 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
 
 #ifdef HAVE_VULKAN_DMABUF
 render_target_ready:;
+    if (ctx->dmabuf_export) {
+        // Round-robin to the next buffer so this frame is rendered into — and
+        // exported from — one the compositor is not currently holding.
+        ctx->vk_ring_idx = (ctx->vk_ring_idx + 1) % BLOOM_VK_RING;
+        BloomVkTarget *slot = &ctx->vk_targets[ctx->vk_ring_idx];
+        // If we handed this slot to the foreign importer last cycle, reclaim it
+        // (and restore SDL's expected layout) before SDL renders into it.
+        if (slot->released) {
+            bloom_vk_export_acquire(&ctx->vk, slot);
+            slot->released = false;
+        }
+        ctx->render_target = slot->texture;
+    }
 #endif
     // Render terminal into SDL's render target texture.
     SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
@@ -356,39 +392,36 @@ render_target_ready:;
     renderer_draw_terminal(ctx->rend, ctx->term, cursor_vis);
 
 #ifdef HAVE_VULKAN_DMABUF
-    if (ctx->vulkan_dmabuf) {
-        // Ensure SDL's render into the exportable VkImage completes before the
-        // compositor scans out the DMA-BUF.
+    if (ctx->dmabuf_export) {
+        // The slot we just rendered into and now export to the compositor.
+        BloomVkTarget *t = &ctx->vk_targets[ctx->vk_ring_idx];
+
+        // Force the render to materialize into the slot AND become coherent in
+        // the linear dma-buf for GTK's separate VkDevice. A 1x1 readback while
+        // the target is still bound triggers SDL's full batch-flush + device
+        // sync (the read size is irrelevant); without it GTK imports stale or
+        // garbled pixels — on NVK the writes are not made visible by the
+        // SetRenderTarget(NULL)+flush+barrier path alone. Cheap (reads 4 bytes).
+        SDL_Rect one = { 0, 0, 1, 1 };
+        SDL_Surface *flush = SDL_RenderReadPixels(ctx->sdl_renderer, &one);
+        if (flush)
+            SDL_DestroySurface(flush);
+
+        // Unbind so SDL transitions the slot to SHADER_READ_ONLY_OPTIMAL, then
+        // flush (SDL submits and waits for GPU idle — render complete).
+        SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
         SDL_FlushRenderer(ctx->sdl_renderer);
-        bloom_vk_finish(&ctx->vk);
+        // Cross-device handoff: release ownership to the foreign importer and
+        // transition to GENERAL so GTK's separate VkDevice sees our writes in
+        // the linear dma-buf (a plain device-wait does not make them visible).
+        bloom_vk_export_release(&ctx->vk, t);
+        t->released = true; // foreign-owned until reacquired before reuse
 
-        // One-time sanity check: confirm the exportable image actually received
-        // content (guards against a silently-blank export, like the GL path).
-        if (!ctx->vk_export_verified) {
-            ctx->vk_export_verified = true;
-            SDL_Surface *s = SDL_RenderReadPixels(ctx->sdl_renderer, NULL);
-            if (s) {
-                int nonzero = 0;
-                const uint8_t *px = s->pixels;
-                int n = (s->w < 64 ? s->w : 64) * 4;
-                for (int i = 0; i < n; i++)
-                    if (px[i])
-                        nonzero++;
-                if (nonzero == 0)
-                    BLOOM_BUG_ABORT(
-                        "Vulkan DMA-BUF export verify: blank render at %dx%d",
-                        phys_w, phys_h);
-                vlog("Vulkan DMA-BUF export verified (%d non-zero bytes)\n",
-                     nonzero);
-                SDL_DestroySurface(s);
-            }
-        }
-
-        int fd = dup(ctx->vk_target.dmabuf_fd);
+        int fd = dup(t->dmabuf_fd);
         if (fd < 0) {
             ctx->gl_stats.dup_dmabuf_failures++;
-            BLOOM_BUG_ABORT("dup(vk dmabuf_fd=%d) failed: %s",
-                            ctx->vk_target.dmabuf_fd, strerror(errno));
+            BLOOM_BUG_ABORT("dup(vk dmabuf_fd=%d) failed: %s", t->dmabuf_fd,
+                            strerror(errno));
         }
 
         GdkDmabufTextureBuilder *builder = gdk_dmabuf_texture_builder_new();
@@ -396,16 +429,16 @@ render_target_ready:;
                                                gtk_widget_get_display(widget));
         gdk_dmabuf_texture_builder_set_width(builder, phys_w);
         gdk_dmabuf_texture_builder_set_height(builder, phys_h);
-        gdk_dmabuf_texture_builder_set_fourcc(builder, ctx->vk_target.fourcc);
-        gdk_dmabuf_texture_builder_set_modifier(builder, ctx->vk_target.modifier);
+        gdk_dmabuf_texture_builder_set_fourcc(builder, t->fourcc);
+        gdk_dmabuf_texture_builder_set_modifier(builder, t->modifier);
         gdk_dmabuf_texture_builder_set_n_planes(builder, 1);
         gdk_dmabuf_texture_builder_set_fd(builder, 0, fd);
-        gdk_dmabuf_texture_builder_set_stride(builder, 0, ctx->vk_target.stride);
-        gdk_dmabuf_texture_builder_set_offset(builder, 0, ctx->vk_target.offset);
+        gdk_dmabuf_texture_builder_set_stride(builder, 0, t->stride);
+        gdk_dmabuf_texture_builder_set_offset(builder, 0, t->offset);
         gdk_dmabuf_texture_builder_set_premultiplied(builder, TRUE);
-        if (ctx->prev_texture)
-            gdk_dmabuf_texture_builder_set_update_texture(builder,
-                                                          ctx->prev_texture);
+        // Each frame uses a different ring buffer, so we deliberately do not
+        // set_update_texture(prev_texture): we want GTK to treat this as a new
+        // buffer and re-present it (the whole point of the ring).
 
         GError *error = NULL;
         GdkTexture *texture = gdk_dmabuf_texture_builder_build(
@@ -418,10 +451,8 @@ render_target_ready:;
             BLOOM_BUG_ABORT(
                 "gdk_dmabuf_texture_builder_build (vulkan) failed at %dx%d "
                 "(fourcc=0x%x modifier=0x%llx stride=%u offset=%u): %s",
-                phys_w, phys_h, ctx->vk_target.fourcc,
-                (unsigned long long)ctx->vk_target.modifier,
-                ctx->vk_target.stride, ctx->vk_target.offset,
-                error ? error->message : "unknown");
+                phys_w, phys_h, t->fourcc, (unsigned long long)t->modifier,
+                t->stride, t->offset, error ? error->message : "unknown");
         }
 
         gtk_snapshot_append_texture(snapshot, texture,
@@ -429,22 +460,34 @@ render_target_ready:;
         g_clear_object(&ctx->prev_texture);
         ctx->prev_texture = texture;
         terminal_clear_redraw(ctx->term);
-        ctx->force_redraw = false;
         return;
     }
 #endif
 
     // Readback fallback — read pixels and create GdkMemoryTexture
     {
-        SDL_Surface *surface = SDL_RenderReadPixels(ctx->sdl_renderer, NULL);
+        SDL_Surface *raw = SDL_RenderReadPixels(ctx->sdl_renderer, NULL);
         SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
 
-        if (!surface) {
+        if (!raw) {
             vlog("SDL_RenderReadPixels failed: %s\n", SDL_GetError());
             return;
         }
 
-        // SDL renders with premultiplied alpha
+        // Normalize to RGBA byte order to match GDK_MEMORY_R8G8B8A8 — SDL may
+        // hand back another channel order regardless of the target format.
+        SDL_Surface *surface = raw;
+        if (raw->format != SDL_PIXELFORMAT_RGBA32) {
+            surface = SDL_ConvertSurface(raw, SDL_PIXELFORMAT_RGBA32);
+            SDL_DestroySurface(raw);
+            if (!surface) {
+                vlog("SDL_ConvertSurface to RGBA32 failed: %s\n", SDL_GetError());
+                return;
+            }
+        }
+
+        // Render target is cleared opaque each frame, so alpha is 255 — the
+        // PREMULTIPLIED format is equivalent to straight here.
         GBytes *bytes = g_bytes_new(surface->pixels,
                                     surface->h * surface->pitch);
         GdkTexture *texture = gdk_memory_texture_new(
@@ -456,11 +499,13 @@ render_target_ready:;
         gtk_snapshot_append_texture(
             snapshot, texture,
             &GRAPHENE_RECT_INIT(0, 0, width, height));
-        g_object_unref(texture);
+        // Cache as the last frame so no-redraw snapshots reuse it instead of
+        // blanking (the early-return reuse path appends ctx->prev_texture).
+        g_clear_object(&ctx->prev_texture);
+        ctx->prev_texture = texture;
     }
 
     terminal_clear_redraw(ctx->term);
-    ctx->force_redraw = false;
 }
 
 static void bloom_terminal_area_init(BloomTerminalArea *self)
@@ -601,7 +646,7 @@ static void on_click_pressed(GtkGestureClick *gesture, int n_press,
     int py = (int)(y * ctx->scale_factor);
     if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, px, py,
                                  button, true, n_press, tmod)) {
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
         gtk_widget_queue_draw(ctx->drawing_area);
     }
 }
@@ -625,7 +670,7 @@ static void on_click_released(GtkGestureClick *gesture, int n_press,
     int py = (int)(y * ctx->scale_factor);
     if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, px, py,
                                  button, false, 0, tmod)) {
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
         gtk_widget_queue_draw(ctx->drawing_area);
     }
 }
@@ -651,7 +696,7 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y,
     int py = (int)(y * ctx->scale_factor);
     if (ctx->callbacks->on_mouse(ctx->callbacks->user_data, px, py,
                                  0, any_pressed, 0, tmod)) {
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
         gtk_widget_queue_draw(ctx->drawing_area);
     }
 }
@@ -715,7 +760,7 @@ static gboolean on_scroll(GtkEventControllerScroll *controller,
         ctx->callbacks->on_scroll(ctx->callbacks->user_data, (int)(-dy * SCROLL_LINES_PER_TICK));
     }
 
-    ctx->force_redraw = true;
+    terminal_mark_dirty(ctx->term);
     gtk_widget_queue_draw(ctx->drawing_area);
     return TRUE;
 }
@@ -727,7 +772,7 @@ static void on_focus_enter(GtkEventControllerFocus *controller,
     (void)controller;
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
     ctx->has_focus = true;
-    ctx->force_redraw = true;
+    terminal_mark_dirty(ctx->term);
     gtk_im_context_focus_in(ctx->im_context);
     gtk_widget_queue_draw(ctx->drawing_area);
 }
@@ -738,7 +783,7 @@ static void on_focus_leave(GtkEventControllerFocus *controller,
     (void)controller;
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
     ctx->has_focus = false;
-    ctx->force_redraw = true;
+    terminal_mark_dirty(ctx->term);
     if (ctx->im_context && ctx->drawing_area &&
         gtk_widget_get_mapped(ctx->drawing_area))
         gtk_im_context_focus_out(ctx->im_context);
@@ -765,7 +810,7 @@ static void on_drawing_area_resize(GtkDrawingArea *area, int width, int height,
     // at physical DPI, so cols/rows must be computed in physical pixels)
     if (ctx->callbacks && ctx->callbacks->on_resize)
         ctx->callbacks->on_resize(ctx->callbacks->user_data, phys_w, phys_h);
-    ctx->force_redraw = true;
+    terminal_mark_dirty(ctx->term);
 }
 
 // PTY I/O watch callback
@@ -790,7 +835,9 @@ static gboolean on_pty_data(GIOChannel *source, GIOCondition condition,
             // Update window title if changed
             platform_set_window_title(ctx->plat, terminal_get_title(ctx->term));
 
-            ctx->force_redraw = true;
+            // Schedule a snapshot; it flushes VT damage and only repaints if
+            // the grid (or cursor) actually changed — so a no-op control
+            // sequence costs nothing.
             gtk_widget_queue_draw(ctx->drawing_area);
         } else if (n == 0) {
             vlog("PTY EOF\n");
@@ -831,7 +878,7 @@ static gboolean on_cursor_blink(gpointer user_data)
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
     if (ctx->term && terminal_get_cursor_blink(ctx->term)) {
         ctx->cursor_blink_visible = !ctx->cursor_blink_visible;
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
         gtk_widget_queue_draw(ctx->drawing_area);
     }
     return G_SOURCE_CONTINUE;
@@ -843,7 +890,7 @@ static gboolean on_autoscroll_tick_gtk(gpointer user_data)
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
     if (ctx->callbacks && ctx->callbacks->on_autoscroll_tick) {
         ctx->callbacks->on_autoscroll_tick(ctx->callbacks->user_data);
-        ctx->force_redraw = true;
+        terminal_mark_dirty(ctx->term);
         if (ctx->drawing_area)
             gtk_widget_queue_draw(ctx->drawing_area);
     }
@@ -952,6 +999,123 @@ PlatformBackend platform_backend_gtk4 = {
     .set_autoscroll = gtk4_set_autoscroll,
 };
 
+#ifdef HAVE_VULKAN_DMABUF
+// Headless cross-device coherence test (BLOOM_GTK4_SELFTEST). Renders a unique
+// solid color into each ring slot, exports it as a dma-buf, then reads it back
+// through GTK's own importer via gdk_texture_download() — the same GSK path that
+// composites for display. If the imported pixel doesn't match the just-rendered
+// color, the producer->consumer (cross-VkDevice) handoff is broken. Prints
+// PASS/FAIL per frame and exits. This is how we verify the fix without a screen.
+static void gtk4_dmabuf_selftest(GTK4PlatformData *ctx)
+{
+    // Use a width whose tight pitch (W*4) differs from the GPU row pitch so a
+    // stride/layout bug shows up (a solid color or a power-of-two width would
+    // hide it). Render an 8x8 grid of distinct-colored cells and verify each
+    // cell lands at the right place after the dma-buf round-trip through GTK.
+    const int W = 1080, H = 880, N = 12, GX = 8, GY = 8;
+    GdkDisplay *display = gdk_display_get_default();
+    BloomVkTarget targets[BLOOM_VK_RING];
+    for (int i = 0; i < BLOOM_VK_RING; i++) {
+        memset(&targets[i], 0, sizeof(targets[i]));
+        targets[i].dmabuf_fd = -1; // -1 = "no fd"; 0 would make destroy close fd 0
+        if (!bloom_vk_target_create(&ctx->vk, ctx->sdl_renderer, W, H,
+                                    &targets[i])) {
+            fprintf(stderr, "SELFTEST: target_create %d failed\n", i);
+            exit(2);
+        }
+    }
+    guchar *px = malloc((size_t)W * H * 4);
+    int fails = 0;
+    for (int k = 0; k < N; k++) {
+        BloomVkTarget *t = &targets[k % BLOOM_VK_RING];
+        if (t->released) {
+            bloom_vk_export_acquire(&ctx->vk, t);
+            t->released = false;
+        }
+        // expected color of grid cell (i,j) this frame: encodes position + frame
+        Uint8 eR[GX][GY], eG[GX][GY], eB[GX][GY];
+        SDL_SetRenderTarget(ctx->sdl_renderer, t->texture);
+        for (int j = 0; j < GY; j++) {
+            for (int i = 0; i < GX; i++) {
+                eR[i][j] = (Uint8)(i * 30 + 10);
+                eG[i][j] = (Uint8)(j * 30 + 10);
+                eB[i][j] = (Uint8)(40 + k * 30);
+                SDL_FRect r = { (float)(i * W / GX), (float)(j * H / GY),
+                                (float)(W / GX), (float)(H / GY) };
+                SDL_SetRenderDrawColor(ctx->sdl_renderer, eR[i][j], eG[i][j],
+                                       eB[i][j], 255);
+                SDL_RenderFillRect(ctx->sdl_renderer, &r);
+            }
+        }
+        // Same materialize+coherence flush the real path uses: a 1x1 readback
+        // while the target is bound.
+        SDL_Rect one = { 0, 0, 1, 1 };
+        SDL_Surface *bs = SDL_RenderReadPixels(ctx->sdl_renderer, &one);
+        if (bs)
+            SDL_DestroySurface(bs);
+        SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
+        SDL_FlushRenderer(ctx->sdl_renderer);
+        bloom_vk_export_release(&ctx->vk, t);
+        t->released = true;
+
+        int fd = dup(t->dmabuf_fd);
+        GdkDmabufTextureBuilder *b = gdk_dmabuf_texture_builder_new();
+        gdk_dmabuf_texture_builder_set_display(b, display);
+        gdk_dmabuf_texture_builder_set_width(b, W);
+        gdk_dmabuf_texture_builder_set_height(b, H);
+        gdk_dmabuf_texture_builder_set_fourcc(b, t->fourcc);
+        gdk_dmabuf_texture_builder_set_modifier(b, t->modifier);
+        gdk_dmabuf_texture_builder_set_n_planes(b, 1);
+        gdk_dmabuf_texture_builder_set_fd(b, 0, fd);
+        gdk_dmabuf_texture_builder_set_stride(b, 0, t->stride);
+        gdk_dmabuf_texture_builder_set_offset(b, 0, t->offset);
+        gdk_dmabuf_texture_builder_set_premultiplied(b, TRUE);
+        GError *err = NULL;
+        GdkTexture *tex = gdk_dmabuf_texture_builder_build(
+            b, close_dmabuf_fd, (gpointer)(intptr_t)fd, &err);
+        g_object_unref(b);
+        if (!tex) {
+            fprintf(stderr, "SELFTEST frame %d: build failed: %s\n", k,
+                    err ? err->message : "?");
+            close(fd);
+            fails++;
+            continue;
+        }
+        // gdk_texture_download writes GDK_MEMORY_DEFAULT (B8G8R8A8, bytes B,G,R,A)
+        // at the stride we pass (tightly packed W*4).
+        memset(px, 0, (size_t)W * H * 4);
+        gdk_texture_download(tex, px, (size_t)W * 4);
+        int bad = 0;
+        for (int j = 0; j < GY; j++) {
+            for (int i = 0; i < GX; i++) {
+                int x = i * W / GX + W / GX / 2, y = j * H / GY + H / GY / 2;
+                size_t c = (size_t)y * W * 4 + (size_t)x * 4;
+                Uint8 gB = px[c], gG = px[c + 1], gR = px[c + 2];
+                if (gR != eR[i][j] || gG != eG[i][j] || gB != eB[i][j]) {
+                    if (bad < 2)
+                        fprintf(stderr,
+                                "  cell(%d,%d) @%d,%d want(%d,%d,%d) got(%d,%d,%d)\n",
+                                i, j, x, y, eR[i][j], eG[i][j], eB[i][j], gR, gG,
+                                gB);
+                    bad++;
+                }
+            }
+        }
+        fprintf(stderr,
+                "SELFTEST frame %d (%dx%d stride=%u): %d/%d cells wrong %s\n", k,
+                W, H, t->stride, bad, GX * GY, bad ? "FAIL" : "PASS");
+        if (bad)
+            fails++;
+        g_object_unref(tex);
+    }
+    free(px);
+    for (int i = 0; i < BLOOM_VK_RING; i++)
+        bloom_vk_target_destroy(&ctx->vk, &targets[i]);
+    fprintf(stderr, "SELFTEST: %d/%d frames FAILED\n", fails, N);
+    exit(fails ? 1 : 0);
+}
+#endif
+
 static bool gtk4_plat_init(PlatformBackend *plat)
 {
     vlog("Initializing GTK4/libadwaita platform\n");
@@ -988,9 +1152,17 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     gtk4_singleton = ctx;
     bloom_bug_register_dump(gtk4_dump_gl_stats);
 
+#ifdef HAVE_VULKAN_DMABUF
+    // calloc zeroes dmabuf_fd to 0, but 0 is a valid fd; the "no fd" sentinel is
+    // -1. Without this, the first bloom_vk_target_create -> bloom_vk_target_destroy
+    // closes fd 0 (and cascades across ring slots), collapsing every slot onto
+    // one buffer.
+    for (int i = 0; i < BLOOM_VK_RING; i++)
+        ctx->vk_targets[i].dmabuf_fd = -1;
+#endif
+
     ctx->cursor_blink_visible = true;
     ctx->has_focus = true;
-    ctx->force_redraw = true;
     ctx->scale_factor = 1;
 
     // Cache exe path now while the binary still exists on disk.
@@ -1020,10 +1192,18 @@ static bool gtk4_plat_init(PlatformBackend *plat)
             // SDL's own vulkan device does not enable them.
             if (bloom_vk_init(&ctx->vk, ctx->sdl_window, vrp)) {
                 ctx->sdl_renderer = SDL_CreateRendererWithProperties(vrp);
-                if (ctx->sdl_renderer)
+                if (ctx->sdl_renderer) {
                     ctx->vulkan_dmabuf = true;
-                else
+                    // Zero-copy dmabuf export is the default: fast, and made
+                    // coherent across bloom's and GTK's separate VkDevices by
+                    // the VK_QUEUE_FAMILY_FOREIGN release in bloom_vk_export_release.
+                    // BLOOM_GTK4_READBACK=1 forces the CPU-readback fallback
+                    // (correct everywhere but ~170ms/frame on NVK, where
+                    // SDL_RenderReadPixels reads write-combined memory).
+                    ctx->dmabuf_export = (getenv("BLOOM_GTK4_READBACK") == NULL);
+                } else {
                     bloom_vk_shutdown(&ctx->vk);
+                }
             }
 #else
             ctx->sdl_renderer = SDL_CreateRendererWithProperties(vrp);
@@ -1080,6 +1260,11 @@ static bool gtk4_plat_init(PlatformBackend *plat)
 #endif
     vlog("GTK4 platform initialized (zero_copy=%s, renderer=%s)\n",
          zc_enabled ? "yes" : "no", SDL_GetRendererName(ctx->sdl_renderer));
+
+#ifdef HAVE_VULKAN_DMABUF
+    if (ctx->vulkan_dmabuf && getenv("BLOOM_GTK4_SELFTEST"))
+        gtk4_dmabuf_selftest(ctx); // renders, exports, reads back via GTK; exits
+#endif
 
     plat->backend_data = ctx;
     return true;
@@ -1155,8 +1340,11 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     if (ctx->vulkan_dmabuf) {
         bloom_vk_finish(&ctx->vk);
         g_clear_object(&ctx->prev_texture);
-        bloom_vk_target_destroy(&ctx->vk, &ctx->vk_target);
-        ctx->render_target = NULL; // aliased the now-destroyed wrapped texture
+        if (ctx->dmabuf_export) {
+            for (int i = 0; i < BLOOM_VK_RING; i++)
+                bloom_vk_target_destroy(&ctx->vk, &ctx->vk_targets[i]);
+            ctx->render_target = NULL; // aliased a now-destroyed wrapped texture
+        }
     }
 #endif
 
@@ -1305,7 +1493,9 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
 
     bool use_offload = false;
 #ifdef HAVE_VULKAN_DMABUF
-    use_offload = ctx->vulkan_dmabuf;
+    // Offload only makes sense for the zero-copy dmabuf path. The readback path
+    // hands GTK a CPU-backed GdkMemoryTexture, which GSK composites normally.
+    use_offload = ctx->dmabuf_export;
 #endif
     // Wrap in GtkGraphicsOffload for compositor direct scanout of the DMA-BUF.
     if (use_offload) {
@@ -1483,6 +1673,7 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
     ctx->rend = rend;
     ctx->callbacks = callbacks;
     ctx->plat = plat;
+    terminal_mark_dirty(term); // force the initial paint
 
     // Get scale factor
     ctx->scale_factor = gtk_widget_get_scale_factor(ctx->drawing_area);

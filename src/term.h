@@ -135,6 +135,12 @@ struct TerminalBackend
     const char *(*get_title)(TerminalBackend *term);
     bool (*needs_redraw)(TerminalBackend *term);
     void (*clear_redraw)(TerminalBackend *term);
+    /* Drain VT-engine damage into needs_redraw (consumer-controlled timing;
+     * call once per frame before the redraw decision). */
+    void (*flush_damage)(TerminalBackend *term);
+    /* Mark the terminal dirty for a change the VT engine can't see (cursor
+     * blink, selection, scroll view, focus, resize). */
+    void (*mark_dirty)(TerminalBackend *term);
     bool (*get_damage_rect)(TerminalBackend *term, TerminalDamageRect *rect);
     int (*get_scrollback_lines)(TerminalBackend *term);
     /* Read-and-reset count of rows pushed to scrollback since the last
@@ -196,6 +202,13 @@ bool terminal_get_cursor_blink(TerminalBackend *term);
 const char *terminal_get_title(TerminalBackend *term);
 bool terminal_needs_redraw(TerminalBackend *term);
 void terminal_clear_redraw(TerminalBackend *term);
+/* Drain accumulated VT-engine damage so terminal_needs_redraw() reflects real
+ * content changes. Call once per frame, after draining PTY input and before the
+ * redraw decision. */
+void terminal_flush_damage(TerminalBackend *term);
+/* Flag a redraw for a change the VT engine doesn't know about (cursor blink,
+ * selection, scrollback view, focus, resize). */
+void terminal_mark_dirty(TerminalBackend *term);
 bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
 int terminal_consume_pushed_rows(TerminalBackend *term);
