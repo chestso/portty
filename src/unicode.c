@@ -8,6 +8,7 @@ bool is_emoji_base_range(uint32_t cp)
     return (cp >= 0x1F300 && cp <= 0x1F5FF) || // Miscellaneous Symbols and Pictographs
            (cp >= 0x1F600 && cp <= 0x1F64F) || // Emoticons
            (cp >= 0x1F680 && cp <= 0x1F6FF) || // Transport and Map Symbols
+           (cp >= 0x1F7E0 && cp <= 0x1F7EB) || // Colored circles/squares (🟠..🟫)
            (cp >= 0x1F900 && cp <= 0x1F9FF) || // Supplemental Symbols and Pictographs
            (cp >= 0x1FA70 && cp <= 0x1FAFF);   // Symbols and Pictographs Extended-A
 }
