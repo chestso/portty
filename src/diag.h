@@ -26,6 +26,11 @@ typedef struct
     const char *config_path;  // NULL => built-in defaults
     const char *font_pattern; // requested font pattern (config/CLI), or NULL
     const char *font_path;    // resolved normal font file, or NULL
+    const char *font_source;  // provenance of the effective font, or NULL.
+                              // e.g. "config file", "-f flag", "desktop default",
+                              // or "fontconfig generic (no desktop default)" —
+                              // the last is expected on the SDL backend, which
+                              // has no desktop font integration.
     const char *hinting;      // effective FT hint target: "none"/"light"/"normal"/"mono"
     int scrollback;
     float text_gamma;

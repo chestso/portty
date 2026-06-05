@@ -293,6 +293,7 @@ char *diag_build_report(const DiagSources *s)
     kv(&sb, "config file", s->config_path ? s->config_path : DIM "(defaults)" RST);
     kv(&sb, "font pattern", or_unset(s->font_pattern));
     kv(&sb, "font resolved", or_unset(s->font_path));
+    kv(&sb, "font source", or_unset(s->font_source));
     kv(&sb, "hinting", or_unset(s->hinting));
     kvf(&sb, "scrollback", "%d lines%s", s->scrollback, s->scrollback == 0 ? " (disabled)" : "");
     if (s->text_gamma == 1.0f && s->text_contrast == 0.0f)

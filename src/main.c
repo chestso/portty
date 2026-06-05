@@ -84,8 +84,9 @@ typedef struct
     RendererBackend *rend;
     PtyContext *pty;
     PlatformBackend *plat;
-    const BloomConf *conf; // loaded config, for the diagnostics report
-    Pager *pager;          // internal pager overlay (diagnostics report, etc.)
+    const BloomConf *conf;   // loaded config, for the diagnostics report
+    const char *font_source; // where the effective font came from (diagnostics)
+    Pager *pager;            // internal pager overlay (diagnostics report, etc.)
     bool drag_pending;
     int drag_start_row; // unified row
     int drag_start_col; // display col
@@ -274,6 +275,7 @@ static void show_diagnostics_report(MainContext *ctx)
         .config_path = c ? c->source_path : NULL,
         .font_pattern = c ? c->font : NULL,
         .font_path = rd.font_path,
+        .font_source = ctx->font_source,
         // Effective hinting from the renderer (what fonts were actually loaded
         // with), not the raw config value — so the default resolves to "light"
         // rather than "(default)".
@@ -753,6 +755,9 @@ int main(int argc, char *argv[])
     int png_wait_ms = 200;
     char *demo_text = NULL;
     const char *font_name = NULL;
+    int font_from_flag = 0; // -f given on the CLI (overrides config + desktop)
+    // Where the effective font came from, surfaced in the diagnostics report.
+    const char *font_source = NULL;
     const char *colr_debug_path = NULL;
     char **exec_argv = NULL;
     const float font_size = 12.0f;
@@ -820,6 +825,7 @@ int main(int argc, char *argv[])
             break;
         case 'f':
             font_name = optarg;
+            font_from_flag = 1;
             break;
         case 'L':
             list_fonts = 1;
@@ -1058,6 +1064,20 @@ int main(int argc, char *argv[])
                 font_name = desktop_font;
         }
 
+        // Record where the effective font came from, for the diagnostics
+        // report. With no explicit font and no platform default (the SDL
+        // backend has no desktop integration), font_name stays NULL and the
+        // resolver falls back to fontconfig's generic "monospace" alias — this
+        // is by design, so name it plainly rather than leaving it a mystery.
+        if (font_from_flag)
+            font_source = "-f flag";
+        else if (conf.font)
+            font_source = "config file";
+        else if (desktop_font)
+            font_source = "desktop default";
+        else
+            font_source = "fontconfig generic (no desktop default)";
+
         // Set content scale before font loading so FreeType uses correct DPI
         float display_scale = platform_get_display_scale(plat);
         if (display_scale > 0.0f)
@@ -1154,6 +1174,7 @@ int main(int argc, char *argv[])
             .pty = pty,
             .plat = plat,
             .conf = &conf,
+            .font_source = font_source,
         };
         main_ctx.pager = pager_create(rend, plat);
 

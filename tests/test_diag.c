@@ -25,6 +25,7 @@ static DiagSources sample(void)
         .config_path = "/tmp/test/bloom.conf",
         .font_pattern = "Cascadia Code-14",
         .font_path = "/usr/share/fonts/test.ttf",
+        .font_source = "config file",
         .hinting = "light",
         .scrollback = 1000,
         .text_gamma = 1.7f,
@@ -189,11 +190,27 @@ static void test_unset_values(void)
     // NULL string fields must not crash and should render as "(unset)".
     DiagSources s = sample();
     s.font_pattern = NULL;
+    s.font_source = NULL;
     s.word_chars = NULL;
     s.title = NULL;
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
     ASSERT_TRUE(strstr(r, "(unset)") != NULL);
+    free(r);
+}
+
+static void test_font_source(void)
+{
+    // The font-source provenance flows through verbatim. On the SDL backend
+    // with no configured font this is the generic-fallback note — the by-design
+    // behaviour the report is meant to make legible.
+    DiagSources s = sample();
+    s.font_pattern = NULL; // no explicit pattern
+    s.font_source = "fontconfig generic (no desktop default)";
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "font source") != NULL);
+    ASSERT_TRUE(strstr(r, "fontconfig generic (no desktop default)") != NULL);
     free(r);
 }
 
@@ -212,6 +229,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_issues_hyperlink);
     RUN_TEST(test_gpu_driver_color);
     RUN_TEST(test_unset_values);
+    RUN_TEST(test_font_source);
 
     TEST_SUMMARY();
 }
