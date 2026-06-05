@@ -51,6 +51,7 @@ bloom-terminal uses a modular backend abstraction design:
   - Draws the frame into an `RGBA64_FLOAT` / `SRGB_LINEAR` target via SDL's GPU renderer (Vulkan/D3D12/Metal), so glyph coverage is blended in linear light and re-encoded to sRGB on present — the OpenGL renderer ignores the colorspace and is not used
   - Uses a texture atlas with shelf packing and FNV-1a hash-based lookup
   - LRU eviction occurs when the atlas fills
+  - Color-glyph (emoji) texels are sRGB→linear decoded as they enter the atlas: SDL linearizes draw/vertex colors on this path but not sampled texels, so without the decode the present-time re-encode would double-encode color emoji and wash them out. White text-coverage texels are gamma-invariant, so text is unaffected
 
 - **Font Backend**: Handles font loading, shaping, and glyph rasterization
   - Current implementation: FreeType/HarfBuzz (`font_backend_ft`)
@@ -215,7 +216,7 @@ Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting wit
 
 bloom-terminal enforces four rules for how emoji and symbols are rendered:
 
-1. **Coverage-aware emoji selection.** A codepoint routes to the color emoji font when (a) VS16 (U+FE0F) forces emoji presentation, (b) it is a regional indicator (always emoji), or (c) the emoji font actually carries the glyph. VS15 (U+FE0E) forces text presentation in all cases. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
+1. **Coverage-aware emoji selection.** A codepoint routes to the color emoji font when (a) VS16 (U+FE0F) forces emoji presentation, (b) it is a regional indicator (always emoji), or (c) the codepoint has default emoji presentation (Unicode `Emoji_Presentation`, tracked to Emoji 17.0) and the emoji font carries the glyph. VS15 (U+FE0E) forces text presentation in all cases. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
 2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell. They stay 1 cell wide unless followed by VS16.
 3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the cell width is 2 — e.g. `⚠` is 1 cell but `⚠️` is 2 cells.
 4. **Symbol-class glyphs preserve font design.** Dingbats, Misc Symbols, Misc Technical, Geometric Shapes, Supplemental Arrows-B, and Misc Symbols & Arrows rendered through a text font keep their natural design width, sit on the typographic baseline vertically, and are centered horizontally in the cell (FreeType's left bearing is intentionally discarded because mono fonts often calibrate it to an oversized advance — e.g. Noto Sans Mono ✶ has advance 1.2×em with the ink centered in that wider advance). Only vertical overflow triggers a downscale; horizontal overhang into neighbor cells is allowed and handled cleanly by the two-pass row draw (backgrounds first, then glyphs).
