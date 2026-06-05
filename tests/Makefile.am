@@ -9,6 +9,8 @@ check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
+# rend_sdl3_atlas.c uses pow() for the sRGB->linear LUT.
+test_atlas_LDADD = -lm
 
 test_unicode_SOURCES = test_unicode.c $(TEST_COMMON) ../src/unicode.c
 test_unicode_CFLAGS = $(TEST_CFLAGS)

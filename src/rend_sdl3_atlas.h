@@ -48,6 +48,13 @@ typedef struct
     uint64_t current_frame;
     SDL_Renderer *renderer;
     bool eviction_occurred;
+    // When the renderer composites in linear light (SDL gpu/vulkan into an
+    // SRGB_LINEAR target), color-glyph texels must be sRGB->linear decoded on
+    // insert: SDL re-encodes the float target on blit-out but never decodes
+    // sampled texels, so without this color emoji come back double-encoded
+    // (washed out). White text-coverage texels are gamma-invariant. Set from
+    // the renderer's linear_ok in sdl3_init.
+    bool linearize_color;
 } RendSdl3Atlas;
 
 bool rend_sdl3_atlas_init(RendSdl3Atlas *atlas, SDL_Renderer *renderer);
@@ -57,7 +64,7 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_lookup(RendSdl3Atlas *atlas, void *font_data
                                            int glyph_id, uint32_t color);
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data,
                                            int glyph_id, uint32_t color,
-                                           GlyphBitmap *bmp);
+                                           GlyphBitmap *bmp, bool is_color);
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert_empty(RendSdl3Atlas *atlas, void *font_data,
                                                  int glyph_id, uint32_t color);
 void rend_sdl3_atlas_flush(RendSdl3Atlas *atlas);

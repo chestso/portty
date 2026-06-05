@@ -996,6 +996,10 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
         free(data);
         return false;
     }
+    // On the linear-light path, color-glyph texels are sRGB->linear decoded on
+    // insert so the blit-out re-encode round-trips them (SDL never decodes
+    // sampled texels). See rend_sdl3_atlas.h.
+    data->atlas.linearize_color = data->linear_ok;
 
     // Initialize font backend with FreeType backend
     data->font = &font_backend_ft;
@@ -1236,7 +1240,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
 static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
                                        uint32_t glyph_id, uint32_t color_key,
                                        GlyphBitmap *bitmap, bool downscale,
-                                       int max_w, int max_h, bool height_only_fit)
+                                       int max_w, int max_h, bool height_only_fit,
+                                       bool is_color)
 {
     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(atlas, font_data, glyph_id, color_key);
     if (entry)
@@ -1271,7 +1276,7 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
         }
     }
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
-                                   scaled ? scaled : bitmap);
+                                   scaled ? scaled : bitmap, is_color);
     if (scaled) {
         free(scaled->pixels);
         free(scaled);
@@ -1705,7 +1710,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
                                             gb, downscale_glyph,
-                                            cache_w, cache_h, height_only_fit);
+                                            cache_w, cache_h, height_only_fit, color_baked);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
                         rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
@@ -1782,7 +1787,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                     : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
                                     glyph_bitmap, downscale_glyph,
-                                    cache_w, cache_h, height_only_fit);
+                                    cache_w, cache_h, height_only_fit, color_baked);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (atlas_glyph_id != 0) {
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
@@ -2200,10 +2205,17 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
 // bloom blends antialiased glyph coverage in *linear* light (like kitty),
 // rather than gamma-incorrectly in sRGB space. We do this by drawing the whole
 // frame into an RGBA64_FLOAT render target tagged SDL_COLORSPACE_SRGB_LINEAR:
-// SDL linearizes every sRGB input (draw colors, the sRGB glyph atlas, colormod
-// fg) on read, blends in linear, and re-encodes linear->sRGB when we blit the
-// float target back onto the active sRGB target. Every existing draw call
-// becomes gamma-correct with no change to its color values.
+// SDL linearizes sRGB *draw/vertex colors* (FillRect colors, colormod fg) on
+// read, blends in linear, and re-encodes linear->sRGB when we blit the float
+// target back onto the active sRGB target. Coverage (alpha) blends correctly
+// and solid/colormod colors round-trip exactly.
+//
+// CAVEAT: SDL does NOT decode *sampled texture texels* on this path -- only
+// draw colors. The glyph atlas is white-coverage for text (gamma-invariant) so
+// text is unaffected, but color emoji carry real RGB in the texel and would be
+// double-encoded (washed out) by the blit-out. We compensate by sRGB->linear
+// decoding color-glyph texels when they enter the atlas (rend_sdl3_atlas.c,
+// gated on RendSdl3Atlas.linearize_color), so they round-trip exactly too.
 
 // (Re)create the linear float render target to match the currently bound
 // target's pixel size. Returns false (and disables the linear path

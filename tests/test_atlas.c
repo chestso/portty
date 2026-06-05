@@ -37,7 +37,7 @@ static void test_insert_and_lookup(void)
     GlyphBitmap *bmp = make_bitmap(10, 10, 0xAA);
     void *font = (void *)0x1000;
 
-    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 42, 0xFF0000, bmp);
+    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 42, 0xFF0000, bmp, false);
     ASSERT_TRUE(entry != NULL);
     ASSERT_EQ(entry->glyph_id, 42);
     ASSERT_EQ(entry->color, 0xFF0000u);
@@ -65,11 +65,11 @@ static void test_shelf_reuse(void)
 
     // Insert two narrow glyphs with the same height — should share a shelf
     GlyphBitmap *bmp1 = make_bitmap(20, 30, 0x11);
-    RendSdl3AtlasEntry *e1 = rend_sdl3_atlas_insert(&atlas, font, 1, 0, bmp1);
+    RendSdl3AtlasEntry *e1 = rend_sdl3_atlas_insert(&atlas, font, 1, 0, bmp1, false);
     ASSERT_TRUE(e1 != NULL);
 
     GlyphBitmap *bmp2 = make_bitmap(25, 30, 0x22);
-    RendSdl3AtlasEntry *e2 = rend_sdl3_atlas_insert(&atlas, font, 2, 0, bmp2);
+    RendSdl3AtlasEntry *e2 = rend_sdl3_atlas_insert(&atlas, font, 2, 0, bmp2, false);
     ASSERT_TRUE(e2 != NULL);
 
     // Same shelf means same y coordinate
@@ -79,7 +79,7 @@ static void test_shelf_reuse(void)
 
     // Different height gets a different shelf
     GlyphBitmap *bmp3 = make_bitmap(15, 40, 0x33);
-    RendSdl3AtlasEntry *e3 = rend_sdl3_atlas_insert(&atlas, font, 3, 0, bmp3);
+    RendSdl3AtlasEntry *e3 = rend_sdl3_atlas_insert(&atlas, font, 3, 0, bmp3, false);
     ASSERT_TRUE(e3 != NULL);
     ASSERT_TRUE(e3->region.y != e1->region.y);
 
@@ -98,7 +98,7 @@ static void test_staging_buffer_contents(void)
     void *font = (void *)0x3000;
     GlyphBitmap *bmp = make_bitmap(4, 3, 0xBB);
 
-    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 10, 0, bmp);
+    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 10, 0, bmp, false);
     ASSERT_TRUE(entry != NULL);
 
     // Verify pixels in staging buffer
@@ -129,7 +129,7 @@ static void test_eviction_sets_flag(void)
     // After 40: next_shelf_y = 2000
     for (int i = 0; i < 40; i++) {
         GlyphBitmap *bmp = make_bitmap(2000, 49, 0x10 + (uint8_t)i);
-        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, 100 + i, 0, bmp);
+        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, 100 + i, 0, bmp, false);
         ASSERT_TRUE(e != NULL);
         free_bitmap(bmp);
     }
@@ -138,7 +138,7 @@ static void test_eviction_sets_flag(void)
 
     // 41st insert: needs next_shelf_y(2000) + 50 = 2050 > 2048 → eviction
     GlyphBitmap *trigger_bmp = make_bitmap(2000, 49, 0xFF);
-    RendSdl3AtlasEntry *trigger = rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp);
+    RendSdl3AtlasEntry *trigger = rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp, false);
     ASSERT_TRUE(trigger != NULL);
     ASSERT_TRUE(atlas.eviction_occurred);
 
@@ -157,13 +157,13 @@ static void test_eviction_clears_old_entries(void)
     // Fill atlas with 40 wide glyphs
     for (int i = 0; i < 40; i++) {
         GlyphBitmap *bmp = make_bitmap(2000, 49, 0x10);
-        rend_sdl3_atlas_insert(&atlas, font, 100 + i, 0, bmp);
+        rend_sdl3_atlas_insert(&atlas, font, 100 + i, 0, bmp, false);
         free_bitmap(bmp);
     }
 
     // Trigger eviction
     GlyphBitmap *trigger_bmp = make_bitmap(2000, 49, 0xFF);
-    rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp);
+    rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp, false);
     free_bitmap(trigger_bmp);
 
     // Old entries should be gone
@@ -193,7 +193,7 @@ static void test_load_factor_eviction(void)
     int threshold = REND_SDL3_ATLAS_HASH_SIZE * 3 / 4;
     for (int i = 0; i < threshold; i++) {
         GlyphBitmap *bmp = make_bitmap(1, 1, 0x11);
-        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, i, 0, bmp);
+        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, i, 0, bmp, false);
         ASSERT_TRUE(e != NULL);
         free_bitmap(bmp);
     }
@@ -202,7 +202,7 @@ static void test_load_factor_eviction(void)
 
     // Next insert should trigger load factor eviction
     GlyphBitmap *bmp = make_bitmap(1, 1, 0x22);
-    RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, threshold, 0, bmp);
+    RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, threshold, 0, bmp, false);
     ASSERT_TRUE(e != NULL);
     ASSERT_TRUE(atlas.eviction_occurred);
 
@@ -225,14 +225,14 @@ static void test_post_eviction_staging_correct(void)
     // Fill atlas to trigger eviction
     for (int i = 0; i < 40; i++) {
         GlyphBitmap *bmp = make_bitmap(2000, 49, 0x10);
-        rend_sdl3_atlas_insert(&atlas, font, 100 + i, 0, bmp);
+        rend_sdl3_atlas_insert(&atlas, font, 100 + i, 0, bmp, false);
         free_bitmap(bmp);
     }
 
     // Trigger eviction with a glyph that has a distinctive fill pattern
     uint8_t marker = 0xDE;
     GlyphBitmap *trigger_bmp = make_bitmap(2000, 49, marker);
-    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp);
+    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp, false);
     ASSERT_TRUE(entry != NULL);
     ASSERT_TRUE(atlas.eviction_occurred);
 
@@ -276,7 +276,7 @@ static void test_regression_bulk_inserts_never_fail(void)
     // should still succeed.
     for (int i = 0; i < 10000; i++) {
         GlyphBitmap *bmp = make_bitmap(1, 1, 0x55);
-        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, i, 0, bmp);
+        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, i, 0, bmp, false);
         ASSERT_TRUE(e != NULL);
         free_bitmap(bmp);
     }
@@ -301,13 +301,13 @@ static void test_regression_post_eviction_all_entries_reachable(void)
     // Fill atlas to trigger spatial eviction
     for (int i = 0; i < 40; i++) {
         GlyphBitmap *bmp = make_bitmap(2000, 49, 0x10);
-        rend_sdl3_atlas_insert(&atlas, font, 1000 + i, 0, bmp);
+        rend_sdl3_atlas_insert(&atlas, font, 1000 + i, 0, bmp, false);
         free_bitmap(bmp);
     }
 
     // Trigger eviction
     GlyphBitmap *trigger = make_bitmap(2000, 49, 0xFF);
-    rend_sdl3_atlas_insert(&atlas, font, 9999, 0, trigger);
+    rend_sdl3_atlas_insert(&atlas, font, 9999, 0, trigger, false);
     free_bitmap(trigger);
     ASSERT_TRUE(atlas.eviction_occurred);
 
@@ -315,7 +315,7 @@ static void test_regression_post_eviction_all_entries_reachable(void)
     int post_count = 200;
     for (int i = 0; i < post_count; i++) {
         GlyphBitmap *bmp = make_bitmap(8, 16, (uint8_t)(i & 0xFF));
-        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, 2000 + i, 0, bmp);
+        RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, 2000 + i, 0, bmp, false);
         ASSERT_TRUE(e != NULL);
         free_bitmap(bmp);
     }
@@ -344,13 +344,13 @@ static void test_regression_multi_glyph_staging_after_eviction(void)
     // Fill atlas to trigger eviction on the next wide insert
     for (int i = 0; i < 40; i++) {
         GlyphBitmap *bmp = make_bitmap(2000, 49, 0x10);
-        rend_sdl3_atlas_insert(&atlas, font, 1000 + i, 0, bmp);
+        rend_sdl3_atlas_insert(&atlas, font, 1000 + i, 0, bmp, false);
         free_bitmap(bmp);
     }
 
     // This wide glyph triggers eviction (2000 + 50 > 2048)
     GlyphBitmap *trigger = make_bitmap(2000, 49, 0x99);
-    RendSdl3AtlasEntry *te = rend_sdl3_atlas_insert(&atlas, font, 9999, 0, trigger);
+    RendSdl3AtlasEntry *te = rend_sdl3_atlas_insert(&atlas, font, 9999, 0, trigger, false);
     ASSERT_TRUE(te != NULL);
     ASSERT_TRUE(atlas.eviction_occurred);
     free_bitmap(trigger);
@@ -362,7 +362,7 @@ static void test_regression_multi_glyph_staging_after_eviction(void)
 
     for (int i = 0; i < 3; i++) {
         bmps[i] = make_bitmap(10, 10, fills[i]);
-        entries[i] = rend_sdl3_atlas_insert(&atlas, font, 3000 + i, 0, bmps[i]);
+        entries[i] = rend_sdl3_atlas_insert(&atlas, font, 3000 + i, 0, bmps[i], false);
         ASSERT_TRUE(entries[i] != NULL);
     }
 
@@ -395,7 +395,7 @@ static void test_regression_repeated_eviction_cycles(void)
         for (int i = 0; i < 40; i++) {
             GlyphBitmap *bmp = make_bitmap(2000, 49, 0x10);
             RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(
-                &atlas, font, cycle * 1000 + i, 0, bmp);
+                &atlas, font, cycle * 1000 + i, 0, bmp, false);
             ASSERT_TRUE(e != NULL);
             free_bitmap(bmp);
         }
@@ -403,7 +403,7 @@ static void test_regression_repeated_eviction_cycles(void)
         // Trigger eviction
         GlyphBitmap *bmp = make_bitmap(2000, 49, 0xEE);
         RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(
-            &atlas, font, cycle * 1000 + 500, 0, bmp);
+            &atlas, font, cycle * 1000 + 500, 0, bmp, false);
         ASSERT_TRUE(e != NULL);
         free_bitmap(bmp);
 

@@ -1,7 +1,25 @@
 #include "rend_sdl3_atlas.h"
 #include "common.h"
+#include <math.h>
 #include <stdlib.h>
 #include <string.h>
+
+// sRGB -> linear-light, baked to 8-bit. Used to pre-decode color-glyph texels
+// before they enter the atlas on the linear-light render path (see the
+// linearize_color note in rend_sdl3_atlas.h). The standard sRGB EOTF.
+static uint8_t s_srgb_to_linear_u8[256];
+static bool s_srgb_to_linear_ready = false;
+
+static void build_srgb_to_linear_lut(void)
+{
+    for (int i = 0; i < 256; i++) {
+        double c = i / 255.0;
+        double lin = (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
+        int v = (int)(lin * 255.0 + 0.5);
+        s_srgb_to_linear_u8[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
+    s_srgb_to_linear_ready = true;
+}
 
 // FNV-1a hash combining font_data pointer, glyph_id, and color
 static uint32_t atlas_hash(void *font_data, int glyph_id, uint32_t color)
@@ -176,7 +194,7 @@ static void atlas_evict(RendSdl3Atlas *atlas)
 
 RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data,
                                            int glyph_id, uint32_t color,
-                                           GlyphBitmap *bmp)
+                                           GlyphBitmap *bmp, bool is_color)
 {
     if (!bmp || bmp->width <= 0 || bmp->height <= 0 || !bmp->pixels)
         return NULL;
@@ -202,13 +220,30 @@ RendSdl3AtlasEntry *rend_sdl3_atlas_insert(RendSdl3Atlas *atlas, void *font_data
         }
     }
 
-    // Copy pixels to staging buffer
+    // Copy pixels to staging buffer. On the linear-light path, color glyphs
+    // (real RGB baked into the texel) are sRGB->linear decoded so the blit-out
+    // re-encode round-trips them exactly; alpha (coverage) is left untouched.
+    // Text glyphs carry white RGB + coverage alpha and need no decode.
+    bool linearize = atlas->linearize_color && is_color;
+    if (linearize && !s_srgb_to_linear_ready)
+        build_srgb_to_linear_lut();
     int staging_pitch = REND_SDL3_ATLAS_TEXTURE_SIZE * 4;
     int src_pitch = bmp->width * 4;
     for (int y = 0; y < bmp->height; y++) {
         uint8_t *dst = atlas->staging + (region.y + y) * staging_pitch + region.x * 4;
         uint8_t *src = bmp->pixels + y * src_pitch;
-        memcpy(dst, src, src_pitch);
+        if (linearize) {
+            for (int x = 0; x < bmp->width; x++) {
+                uint8_t *s = src + x * 4;
+                uint8_t *d = dst + x * 4;
+                d[0] = s_srgb_to_linear_u8[s[0]]; // R
+                d[1] = s_srgb_to_linear_u8[s[1]]; // G
+                d[2] = s_srgb_to_linear_u8[s[2]]; // B
+                d[3] = s[3];                      // A (coverage, gamma-agnostic)
+            }
+        } else {
+            memcpy(dst, src, src_pitch);
+        }
     }
 
     // Expand dirty rect to include this region
