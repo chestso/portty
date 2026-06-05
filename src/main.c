@@ -520,6 +520,21 @@ static uint16_t hyperlink_id_at(MainContext *ctx, int pixel_x, int pixel_y,
     return cell.hyperlink_id;
 }
 
+// Resolve the OSC-8 hyperlink under a pixel position and update hover state +
+// cursor shape. px<0 (or out-of-bounds) resolves to "no link". Returns true if
+// the hovered id changed (caller should trigger a redraw). Shared by on_mouse
+// (motion) and on_revalidate_hover (post-PTY re-resolution at the live pointer).
+static bool resolve_link_hover(MainContext *ctx, int px, int py)
+{
+    uint16_t hid = (px < 0) ? 0 : hyperlink_id_at(ctx, px, py, NULL, NULL);
+    if (hid == terminal_hovered_hyperlink(ctx->term))
+        return false;
+    terminal_set_hovered_hyperlink(ctx->term, hid);
+    platform_set_cursor(ctx->plat,
+                        hid != 0 ? PLATFORM_CURSOR_POINTER : PLATFORM_CURSOR_TEXT);
+    return true;
+}
+
 // Mouse callback — mod uses TERM_MOD_* flags (platform-independent)
 static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool pressed,
                      int clicks, int mod)
@@ -727,6 +742,22 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     }
 
     return hover_changed;
+}
+
+// Re-resolve OSC-8 hover at the live pointer after PTY output redrew the screen.
+// terminal_process_input clears the hovered id on every batch; without a fresh
+// motion event the underline would drop to idle until the user jiggles the
+// mouse — visible as flicker under a continuously-redrawing app. We restore it
+// here before the frame paints. Gated to the no-mouse-mode case (the app is not
+// grabbing the pointer) and disabled while the pager is modal.
+static bool on_revalidate_hover(void *user_data, int px, int py)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    if (pager_active(ctx->pager))
+        return false;
+    if (terminal_get_mouse_mode(ctx->term) != 0)
+        return false;
+    return resolve_link_hover(ctx, px, py);
 }
 
 int main(int argc, char *argv[])
@@ -1185,6 +1216,7 @@ int main(int argc, char *argv[])
             .on_scroll = on_scroll,
             .on_mouse = on_mouse,
             .on_autoscroll_tick = on_autoscroll_tick,
+            .on_revalidate_hover = on_revalidate_hover,
             .user_data = &main_ctx,
         };
 

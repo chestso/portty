@@ -63,6 +63,12 @@ struct PlatformCallbacks
     // user drags past the top/bottom edges of the window.
     void (*on_autoscroll_tick)(void *user_data);
 
+    // Re-resolve OSC 8 hover at the current pointer after content changed
+    // (e.g. an app redrew the screen) without a fresh motion event. px,py are
+    // in the same pixel space as on_mouse; (-1,-1) means the pointer is not
+    // over our content. Returns true if hover state changed (caller repaints).
+    bool (*on_revalidate_hover)(void *user_data, int px, int py);
+
     // User data passed to callbacks
     void *user_data;
 };

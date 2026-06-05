@@ -835,6 +835,38 @@ static gboolean on_pty_data(GIOChannel *source, GIOCondition condition,
             // Update window title if changed
             platform_set_window_title(ctx->plat, terminal_get_title(ctx->term));
 
+            // PTY output cleared any OSC-8 hover; re-resolve it at the live
+            // pointer so a held-still mouse over a link stays highlighted
+            // across redraws instead of flickering to idle until the next
+            // motion event. Coords are logical (bounds-checked against the
+            // drawing area) then scaled to physical pixels like on_motion.
+            if (ctx->callbacks && ctx->callbacks->on_revalidate_hover) {
+                int px = -1, py = -1;
+                GdkSurface *surface = gtk_native_get_surface(
+                    gtk_widget_get_native(ctx->drawing_area));
+                GdkDevice *pointer =
+                    surface ? gdk_seat_get_pointer(gdk_display_get_default_seat(
+                                  gdk_display_get_default()))
+                            : NULL;
+                if (surface && pointer) {
+                    double mx = 0, my = 0;
+                    gdk_surface_get_device_position(surface, pointer, &mx, &my, NULL);
+                    graphene_point_t src_pt = GRAPHENE_POINT_INIT((float)mx, (float)my);
+                    graphene_point_t dst_pt;
+                    if (gtk_widget_compute_point(GTK_WIDGET(ctx->window),
+                                                 ctx->drawing_area, &src_pt, &dst_pt) &&
+                        dst_pt.x >= 0 && dst_pt.y >= 0 &&
+                        dst_pt.x < gtk_widget_get_width(ctx->drawing_area) &&
+                        dst_pt.y < gtk_widget_get_height(ctx->drawing_area)) {
+                        px = (int)(dst_pt.x * ctx->scale_factor);
+                        py = (int)(dst_pt.y * ctx->scale_factor);
+                    }
+                }
+                if (ctx->callbacks->on_revalidate_hover(ctx->callbacks->user_data,
+                                                        px, py))
+                    terminal_mark_dirty(ctx->term);
+            }
+
             // Schedule a snapshot; it flushes VT damage and only repaints if
             // the grid (or cursor) actually changed — so a no-op control
             // sequence costs nothing.

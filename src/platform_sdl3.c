@@ -889,6 +889,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
             break;
         }
 
+        // Track whether this iteration processed PTY output, so we can
+        // re-resolve OSC-8 hover at the live pointer before painting.
+        bool pty_processed = false;
+
         // Process all pending events
         do {
             if (event.type == SDL_EVENT_USER) {
@@ -900,6 +904,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         renderer_process_pty_data(rend, term, payload->data, payload->len);
                         platform_set_window_title(plat, terminal_get_title(term));
                         free(payload);
+                        pty_processed = true;
                     }
                     break;
                 }
@@ -1085,6 +1090,21 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 }
             }
         } while (SDL_PollEvent(&event));
+
+        // PTY output cleared any OSC-8 hover; re-resolve it at the live pointer
+        // so a held-still mouse over a link stays highlighted across redraws
+        // (otherwise the underline flickers idle until the next motion event).
+        if (pty_processed && callbacks && callbacks->on_revalidate_hover) {
+            int px = -1, py = -1;
+            if (SDL_GetMouseFocus() == ctx->window) {
+                float mx, my;
+                SDL_GetMouseState(&mx, &my);
+                px = (int)mx;
+                py = (int)my;
+            }
+            if (callbacks->on_revalidate_hover(callbacks->user_data, px, py))
+                terminal_mark_dirty(term);
+        }
 
         // Drain VT damage accumulated by this iteration's PTY input, then
         // render only if anything (content, cursor, or an app-level change
