@@ -566,11 +566,23 @@ void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uin
 // grayscale glyph alpha on top of the renderer's linear-light blending.
 // gamma > 1 thickens strokes; contrast (0..100) adds contrast around the
 // midpoint. Neutral (gamma 1.0, contrast 0) is identity. Built once from the
-// global bloom_text_gamma / bloom_text_contrast. Unlike kitty (which scales the
-// curve by fg/bg luminance in its shader), this is uniform — we apply it at
-// rasterization, where the background is unknown.
+// global bloom_text_gamma / bloom_text_contrast.
+//
+// This is the FALLBACK path. When the GPU glyph shader is active (gpu/vulkan
+// renderer with SPIR-V), the renderer applies the same curve in a fragment
+// shader scaled by fg/bg luminance — so dark-on-light (reverse video) thickens
+// while light-on-dark stays neutral. In that mode we must bake RAW coverage
+// here, or the curve would be applied twice. g_shader_curve_active selects
+// which: set once at renderer init via font_ft_set_shader_curve_active(),
+// before the first glyph is rasterized.
 static unsigned char g_coverage_lut[256];
 static bool g_coverage_lut_ready = false;
+static bool g_shader_curve_active = false;
+
+void font_ft_set_shader_curve_active(bool active)
+{
+    g_shader_curve_active = active;
+}
 
 static void build_coverage_lut(void)
 {
@@ -1075,7 +1087,10 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
             unsigned char *src_row = bitmap->buffer + y * bitmap->pitch;
             unsigned char *dst_row = glyph_bitmap->pixels + y * glyph_bitmap->width * 4;
             for (int x = 0; x < (int)bitmap->width; x++) {
-                unsigned char alpha = coverage_curve(src_row[x]);
+                // Shader active: bake raw coverage; the GPU curve runs at draw
+                // time. Otherwise bake the uniform curve here (fallback path).
+                unsigned char alpha = g_shader_curve_active ? src_row[x]
+                                                            : coverage_curve(src_row[x]);
                 dst_row[x * 4 + 0] = fg_r;
                 dst_row[x * 4 + 1] = fg_g;
                 dst_row[x * 4 + 2] = fg_b;

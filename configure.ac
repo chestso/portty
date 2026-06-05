@@ -23,6 +23,13 @@ LT_INIT([dlopen])
 AC_PROG_INSTALL
 AC_PROG_MAKE_SET
 
+# glslangValidator is only needed to regenerate the committed GPU glyph-shader
+# header (src/shaders/glyph_coverage_frag_spv.h) after editing the .glsl via
+# `make regen-shaders`. Normal builds compile the committed header, so this is
+# an optional maintainer tool, not a build dependency.
+AC_PATH_PROG([GLSLANGVALIDATOR], [glslangValidator])
+AM_CONDITIONAL([HAVE_GLSLANGVALIDATOR], [test -n "$GLSLANGVALIDATOR"])
+
 # Detect cross-compilation target
 case "$host_os" in
   mingw*|msys*) host_windows=yes; host_macos=no ;;

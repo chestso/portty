@@ -17,6 +17,7 @@
 #include "rend.h"
 #include "rend_sdl3_atlas.h"
 #include "rend_sdl3_boxdraw.h"
+#include "rend_sdl3_shader.h"
 #include "unicode.h"
 #include <SDL3/SDL.h>
 #include <stdint.h>
@@ -903,6 +904,11 @@ typedef struct RendererSdl3Data
     bool linear_ok;
     bool linear_selfcheck_done;
 
+    // GPU glyph-coverage shader: applies the text_composition_strategy curve at
+    // draw time, scaled by fg/bg luminance (so reverse video thickens without
+    // bolding normal text). NULL = fall back to the atlas-baked uniform curve.
+    RendShaderState *glyph_shader;
+
     // Sixel texture cache. Keyed by the engine's stable image id; the
     // version detects pixel changes (animation) so we re-upload in place
     // via SDL_UpdateTexture instead of churning textures. Entries whose id
@@ -964,6 +970,21 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     vlog("Renderer '%s': linear-light compositing %s\n", rname ? rname : "(null)",
          data->linear_ok ? "enabled" : "disabled (sRGB blending)");
 
+    // GPU glyph-coverage shader. Only attempt on the linear-light backends
+    // (gpu/vulkan) — the shader rides on the same float target. rend_shader_create
+    // returns NULL for a neutral curve, a missing GPU device, or no SPIR-V, in
+    // which case we keep the atlas-baked curve. font_ft_set_shader_curve_active
+    // MUST run before the first glyph is rasterized (which happens on the first
+    // draw, after this init), so rasterization bakes raw coverage iff the shader
+    // is active — avoiding a double-applied curve.
+    data->glyph_shader = NULL;
+    if (data->linear_ok)
+        data->glyph_shader =
+            rend_shader_create(data->renderer, bloom_text_gamma, bloom_text_contrast);
+    font_ft_set_shader_curve_active(data->glyph_shader != NULL);
+    vlog("Glyph curve: %s\n",
+         data->glyph_shader ? "GPU shader (luminance-scaled)" : "baked LUT (uniform)");
+
     // Initialize glyph atlas
     if (!rend_sdl3_atlas_init(&data->atlas, data->renderer)) {
         vlog("Failed to initialize glyph atlas\n");
@@ -1001,6 +1022,10 @@ static void sdl3_destroy(RendererBackend *backend)
         SDL_DestroyTexture(data->linear_target);
         data->linear_target = NULL;
     }
+
+    // Destroy GPU glyph-coverage shader (no-op if it was never created)
+    rend_shader_destroy(data->glyph_shader);
+    data->glyph_shader = NULL;
 
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
@@ -1265,7 +1290,8 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                        RendSdl3AtlasEntry *entry,
                        int cell_x, int cell_y, int glyph_x_offset, int glyph_y_offset,
                        int avail_w, int avail_h, int font_ascent,
-                       bool color_baked, uint8_t mod_r, uint8_t mod_g, uint8_t mod_b)
+                       bool color_baked, uint8_t mod_r, uint8_t mod_g, uint8_t mod_b,
+                       RendShaderState *shader, float bg_luma)
 {
     if (!entry || entry->region.w <= 0)
         return;
@@ -1296,7 +1322,20 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
     }
     if (!color_baked)
         SDL_SetTextureColorMod(atlas->texture, mod_r, mod_g, mod_b);
+
+    // Non-color glyphs carry coverage in alpha and get the luminance-scaled
+    // coverage curve from the GPU shader (when active). Color glyphs blend with
+    // SDL's default shader. The shader is bound only around this one draw so
+    // cursor/selection fills keep the default pipeline.
+    bool use_shader = shader && !color_baked;
+    if (use_shader) {
+        rend_shader_set_bg_luma(shader, bg_luma);
+        rend_shader_bind(shader);
+    }
     SDL_RenderTexture(renderer, atlas->texture, &src, &dst);
+    if (use_shader)
+        rend_shader_unbind(shader);
+
     if (!color_baked)
         SDL_SetTextureColorMod(atlas->texture, 255, 255, 255);
 }
@@ -1444,6 +1483,17 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 {
     TerminalCell cell = *cell_in;
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
+
+    // Background perceptual luma (0..1) for the glyph-coverage shader's fg/bg
+    // direction. Default-bg cells render over the black-cleared linear target,
+    // so treat them as 0 — that keeps normal (light-on-dark) text neutral while
+    // reverse video (explicit light bg) thickens. Rec.709 weights match the
+    // shader's fg_luma.
+    float bg_luma = cell.bg.is_default
+                        ? 0.0f
+                        : (0.2126f * cell.bg.r + 0.7152f * cell.bg.g +
+                           0.0722f * cell.bg.b) /
+                              255.0f;
 
     int columns_to_consume = pres_w > 0 ? pres_w : 1;
 
@@ -1657,7 +1707,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     blit_glyph(data->renderer, &data->atlas, entry,
                                cell_x, cell_y, x_off,
                                y_off, avail_w, avail_h, data->font_ascent,
-                               color_baked, r, g, b);
+                               color_baked, r, g, b, data->glyph_shader, bg_luma);
                 }
             }
             free(shaped->glyph_ids);
@@ -1733,7 +1783,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                        cell_x, cell_y,
                        entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
                        avail_w, avail_h, data->font_ascent,
-                       color_baked, r, g, b);
+                       color_baked, r, g, b, data->glyph_shader, bg_luma);
     }
 
 render_cursor:
