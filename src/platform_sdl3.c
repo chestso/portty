@@ -997,7 +997,14 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         KeyboardResult result = callbacks->on_text(
                             callbacks->user_data, event.text.text);
 
-                        if (result.len > 0 && !result.handled) {
+                        // Repaint whenever the keystroke produced PTY data OR was
+                        // consumed by an app-level handler that changed the screen
+                        // (e.g. the internal pager scrolling/closing on q/j/k/space):
+                        // those return handled with no data, and the host term must
+                        // still be marked dirty or the frame only repaints on the
+                        // next unrelated event (cursor blink, PTY output). Mirrors
+                        // the KEY_DOWN handler and GTK4's handle_keyboard_result.
+                        if (result.handled || result.force_redraw || result.len > 0) {
                             // Reset scroll position when typing
                             if (renderer_get_scroll_offset(rend) != 0) {
                                 renderer_reset_scroll(rend);
@@ -1009,7 +1016,8 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                             timer_reset(ctx->timers, ctx->cursor_blink_timer);
                             terminal_mark_dirty(term);
 
-                            if (ctx->pty)
+                            // Forward only un-handled raw data to the shell.
+                            if (result.len > 0 && !result.handled && ctx->pty)
                                 pty_write(ctx->pty, result.data, result.len);
                         }
                     }
