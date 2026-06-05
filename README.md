@@ -34,6 +34,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
 - Kitty keyboard protocol (push/pop/set/query plus the Disambiguate and Report-all flags) — modern TUIs like Claude Code can tell Shift+Enter apart from plain Enter, and Ctrl+letter combos no longer collide with their literal control bytes
 - Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
+- Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
 
 ## Architecture
 
@@ -168,6 +169,24 @@ build/src/bloom-terminal -P "😀" output.png
 | `Shift+PageUp/Down`  | Scroll through scrollback buffer                     |
 | Right-click          | Copy selection if active, otherwise paste            |
 | `Ctrl+click` on link | Open OSC-8 URL via the system handler                |
+| `Ctrl+Shift+F6`      | Open the diagnostics report (built-in pager)         |
+
+### Diagnostics Report
+
+`Ctrl+Shift+F6` opens a built-in diagnostics report — version/build, renderer + GPU/driver, font resolution, effective config, and session state — in an internal scrollable pager (not an external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of your pager. Permissively-licensed open-source GPU drivers (Mesa) are shown green.
+
+While the pager is open:
+
+| Key / action                     | Effect                    |
+| -------------------------------- | ------------------------- |
+| `q` / `Esc`                      | Close                     |
+| `↑`/`↓`, `j`/`k`                 | Scroll one line           |
+| `PageUp`/`PageDown`, `Space`/`b` | Scroll one page           |
+| `g`/`Home`, `G`/`End`            | Jump to top / bottom      |
+| Mouse wheel                      | Scroll                    |
+| Drag, double-click, triple-click | Select text / word / line |
+| Right-click or `Ctrl+Shift+C`    | Copy selection            |
+| `Ctrl+click` on a link           | Open URL                  |
 
 ## Configuration
 
