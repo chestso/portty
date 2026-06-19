@@ -57,6 +57,19 @@ struct RendererBackend
     void (*set_overlay)(RendererBackend *rend, TerminalBackend *overlay);
     void (*clear_overlay)(RendererBackend *rend);
     bool (*has_overlay)(RendererBackend *rend);
+    /* Top notification panel (pure-SDL3 path only — the GTK4 platform draws a
+     * native libadwaita strip instead and never calls these). When set, the
+     * renderer draws a dismissable message bar across the top of the window.
+     * `level` is a PlatformNotifyLevel (0=info, 1=warning, 2=error). */
+    void (*set_notification)(RendererBackend *rend, const char *title,
+                             const char *body, int level);
+    void (*clear_notification)(RendererBackend *rend);
+    /* Hit-test in physical (drawable) pixels: 0 = miss, 1 = on panel (consume
+     * the click), 2 = on the close button (dismiss). */
+    int (*notification_hit)(RendererBackend *rend, int px, int py);
+    /* Set whether the close button is hovered (draws a highlight behind it).
+     * Returns true if the state changed (caller should request a repaint). */
+    bool (*set_notification_hover)(RendererBackend *rend, bool hovered);
     int (*render_to_png)(RendererBackend *rend, TerminalBackend *term,
                          const char *output_path);
     void (*set_content_scale)(RendererBackend *rend, float scale);
@@ -78,6 +91,11 @@ int renderer_get_scroll_offset(RendererBackend *rend);
 void renderer_set_overlay(RendererBackend *rend, TerminalBackend *overlay);
 void renderer_clear_overlay(RendererBackend *rend);
 bool renderer_has_overlay(RendererBackend *rend);
+void renderer_set_notification(RendererBackend *rend, const char *title,
+                               const char *body, int level);
+void renderer_clear_notification(RendererBackend *rend);
+int renderer_notification_hit(RendererBackend *rend, int px, int py);
+bool renderer_set_notification_hover(RendererBackend *rend, bool hovered);
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path);
 void renderer_set_content_scale(RendererBackend *rend, float scale);

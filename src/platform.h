@@ -21,6 +21,15 @@ typedef enum
     PLATFORM_CURSOR_POINTER,
 } PlatformCursor;
 
+// Severity of a notification panel message. Drives the SDL3 accent colour and
+// the GTK4 strip's icon + libadwaita colour class.
+typedef enum
+{
+    PLATFORM_NOTIFY_INFO = 0,
+    PLATFORM_NOTIFY_WARNING,
+    PLATFORM_NOTIFY_ERROR,
+} PlatformNotifyLevel;
+
 // Result from keyboard callbacks — bytes to write to PTY
 typedef struct
 {
@@ -124,12 +133,25 @@ struct PlatformBackend
     // Get usable display size in physical pixels. Returns false if unknown.
     bool (*get_display_size)(PlatformBackend *plat, int *width, int *height);
 
-    // Open a URL with the system's default handler. Returns true on
-    // success. Implementations: SDL_OpenURL on SDL3, gtk_show_uri on GTK4.
-    bool (*open_url)(PlatformBackend *plat, const char *url);
+    // Open a URL with the system's default handler. Returns true on success.
+    // On failure, writes a human-readable reason into `err` (size `errlen`,
+    // never overflowed, may be left untouched on success). Implementations:
+    // SDL_OpenURL on SDL3, g_app_info_launch_default_for_uri on GTK4.
+    bool (*open_url)(PlatformBackend *plat, const char *url, char *err,
+                     size_t errlen);
 
     // Set the mouse cursor shape. Used for OSC-8 hyperlink hover.
     void (*set_cursor)(PlatformBackend *plat, PlatformCursor cursor);
+
+    // Show a top notification panel with a title and optional multi-line body.
+    // SDL3 draws it via the renderer; GTK4 reveals a native libadwaita strip.
+    // The panel persists until dismissed (close button) or superseded by a
+    // newer notify() call.
+    void (*notify)(PlatformBackend *plat, const char *title, const char *body,
+                   PlatformNotifyLevel level);
+
+    // Dismiss the current notification panel (no-op if none is shown).
+    void (*notify_dismiss)(PlatformBackend *plat);
 
     // Enable or disable the drag-autoscroll tick. While enabled, the
     // backend fires `on_autoscroll_tick` on its own timer (~30Hz).
@@ -180,7 +202,11 @@ char *platform_get_default_font(PlatformBackend *plat);
 float platform_get_display_scale(PlatformBackend *plat);
 bool platform_get_display_size(PlatformBackend *plat, int *width, int *height);
 
-bool platform_open_url(PlatformBackend *plat, const char *url);
+bool platform_open_url(PlatformBackend *plat, const char *url, char *err,
+                       size_t errlen);
+void platform_notify(PlatformBackend *plat, const char *title, const char *body,
+                     PlatformNotifyLevel level);
+void platform_notify_dismiss(PlatformBackend *plat);
 void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 void platform_set_autoscroll(PlatformBackend *plat, bool enabled);
 bool platform_get_gpu_info(PlatformBackend *plat, const char **device,

@@ -35,6 +35,9 @@ enum BloomEventCode
     EVENT_PTY_CHILD_EXIT,
     EVENT_CURSOR_BLINK,
     EVENT_AUTOSCROLL_TICK,
+    // Posted by sdl3_notify to wake an idle SDL_WaitEvent and force one repaint
+    // so a notification shown out-of-band appears immediately.
+    EVENT_NOTIFY_SHOW,
 };
 
 // PTY data event payload
@@ -126,6 +129,11 @@ typedef struct
     SDL_Cursor *cursor_text;
     SDL_Cursor *cursor_pointer;
     PlatformCursor current_cursor;
+
+    // Stashed in sdl3_run so notify() can reach the renderer (which owns the
+    // SDL-drawn panel) and mark the terminal dirty for a repaint.
+    RendererBackend *rend;
+    TerminalBackend *term;
 } SDL3PlatformData;
 
 // Convert SDL modifier flags to TERM_MOD_* flags
@@ -244,7 +252,11 @@ static void sdl3_pause_pty(PlatformBackend *plat);
 static void sdl3_resume_pty(PlatformBackend *plat);
 static float sdl3_get_display_scale(PlatformBackend *plat);
 static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height);
-static bool sdl3_open_url(PlatformBackend *plat, const char *url);
+static bool sdl3_open_url(PlatformBackend *plat, const char *url, char *err,
+                          size_t errlen);
+static void sdl3_notify(PlatformBackend *plat, const char *title,
+                        const char *body, PlatformNotifyLevel level);
+static void sdl3_notify_dismiss(PlatformBackend *plat);
 static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled);
 
@@ -271,6 +283,8 @@ PlatformBackend platform_backend_sdl3 = {
     .get_display_scale = sdl3_get_display_scale,
     .get_display_size = sdl3_get_display_size,
     .open_url = sdl3_open_url,
+    .notify = sdl3_notify,
+    .notify_dismiss = sdl3_notify_dismiss,
     .set_cursor = sdl3_set_cursor,
     .set_autoscroll = sdl3_set_autoscroll,
 };
@@ -857,6 +871,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
 
     SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
 
+    // Stash for notify() (renderer-drawn panel + dirty marking)
+    ctx->rend = rend;
+    ctx->term = term;
+
     // Start cursor blink timer
     ctx->cursor_blink_visible = true;
     ctx->has_focus = true;
@@ -930,6 +948,12 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         callbacks->on_autoscroll_tick(callbacks->user_data);
                         terminal_mark_dirty(term);
                     }
+                    break;
+
+                case EVENT_NOTIFY_SHOW:
+                    // renderer_set_notification already ran in sdl3_notify;
+                    // just force a repaint so the panel appears.
+                    terminal_mark_dirty(term);
                     break;
                 }
             } else if (event.type == SDL_EVENT_QUIT) {
@@ -1243,13 +1267,48 @@ static bool sdl3_get_display_size(PlatformBackend *plat, int *width, int *height
     return true;
 }
 
-static bool sdl3_open_url(PlatformBackend *plat, const char *url)
+static bool sdl3_open_url(PlatformBackend *plat, const char *url, char *err,
+                          size_t errlen)
 {
     (void)plat;
     if (!url)
         return false;
     /* SDL_OpenURL fronts xdg-open / open / ShellExecute on the host OS. */
-    return SDL_OpenURL(url);
+    if (SDL_OpenURL(url))
+        return true;
+    if (err && errlen > 0) {
+        const char *msg = SDL_GetError();
+        snprintf(err, errlen, "%s", (msg && *msg) ? msg : "unknown error");
+    }
+    return false;
+}
+
+static void sdl3_notify(PlatformBackend *plat, const char *title,
+                        const char *body, PlatformNotifyLevel level)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    renderer_set_notification(ctx->rend, title, body, (int)level);
+
+    // Force a repaint. sdl3_notify usually runs from inside on_mouse (already
+    // mid-iteration), but posting a user event also wakes an idle SDL_WaitEvent
+    // for any out-of-band caller.
+    SDL_Event ev;
+    SDL_zero(ev);
+    ev.type = SDL_EVENT_USER;
+    ev.user.code = EVENT_NOTIFY_SHOW;
+    SDL_PushEvent(&ev);
+}
+
+static void sdl3_notify_dismiss(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    renderer_clear_notification(ctx->rend);
+    if (ctx->term)
+        terminal_mark_dirty(ctx->term);
 }
 
 static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled)

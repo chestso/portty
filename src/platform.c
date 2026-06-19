@@ -184,11 +184,29 @@ bool platform_get_display_size(PlatformBackend *plat, int *width, int *height)
     return false;
 }
 
-bool platform_open_url(PlatformBackend *plat, const char *url)
+bool platform_open_url(PlatformBackend *plat, const char *url, char *err,
+                       size_t errlen)
 {
+    if (err && errlen > 0)
+        err[0] = '\0';
     if (!plat || !plat->open_url || !url)
         return false;
-    return plat->open_url(plat, url);
+    return plat->open_url(plat, url, err, errlen);
+}
+
+void platform_notify(PlatformBackend *plat, const char *title, const char *body,
+                     PlatformNotifyLevel level)
+{
+    if (!plat || !plat->notify)
+        return;
+    plat->notify(plat, title, body, level);
+}
+
+void platform_notify_dismiss(PlatformBackend *plat)
+{
+    if (!plat || !plat->notify_dismiss)
+        return;
+    plat->notify_dismiss(plat);
 }
 
 void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor)

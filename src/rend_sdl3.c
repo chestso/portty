@@ -932,6 +932,21 @@ typedef struct RendererSdl3Data
     // bolding normal text). NULL = fall back to the atlas-baked uniform curve.
     RendShaderState *glyph_shader;
 
+    // Top notification panel (pure-SDL3 path). The message is rasterized once
+    // into notif_texture (a full-width bar) when set, and re-rasterized on
+    // resize / font reload. notif_title/notif_body retain the source strings
+    // for those rebuilds. notif_close_rect is the clickable close-button box in
+    // physical pixels (panel is anchored at y=0, so panel-local == screen).
+    bool notif_active;
+    bool notif_close_hover;
+    int notif_level;
+    char *notif_title;
+    char *notif_body;
+    SDL_Texture *notif_texture;
+    SDL_Texture *notif_close_tex; // anti-aliased "×" glyph, tinted on hover
+    int notif_h;
+    SDL_FRect notif_close_rect;
+
     // Sixel texture cache. Keyed by the engine's stable image id; the
     // version detects pixel changes (animation) so we re-upload in place
     // via SDL_UpdateTexture instead of churning textures. Entries whose id
@@ -948,6 +963,39 @@ typedef struct RendererSdl3Data
 
 // Forward declaration for sixel cache cleanup (used in sdl3_destroy)
 static void sixel_cache_clear(RendererSdl3Data *data);
+
+// Forward declaration: rebuild the notification panel texture (used by
+// sdl3_load_fonts / sdl3_resize, which precede the definition).
+static void build_notif_texture(RendererSdl3Data *data);
+
+// Destroy the notification's GPU textures (kept separate from the source
+// strings, which a rebuild reuses).
+static void notif_free_textures(RendererSdl3Data *data)
+{
+    if (data->notif_texture) {
+        SDL_DestroyTexture(data->notif_texture);
+        data->notif_texture = NULL;
+    }
+    if (data->notif_close_tex) {
+        SDL_DestroyTexture(data->notif_close_tex);
+        data->notif_close_tex = NULL;
+    }
+}
+
+// Full notification teardown: textures, retained strings, and state. Used by
+// both clear-notification and renderer destroy.
+static void notif_free(RendererSdl3Data *data)
+{
+    notif_free_textures(data);
+    free(data->notif_title);
+    data->notif_title = NULL;
+    free(data->notif_body);
+    data->notif_body = NULL;
+    data->notif_active = false;
+    data->notif_close_hover = false;
+    data->notif_h = 0;
+    data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
+}
 
 // Capture the GPU model + driver from SDL's GPU renderer device for the
 // diagnostics report. Pure SDL (portable across Vulkan/D3D12/Metal). Present
@@ -1050,6 +1098,15 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     memset(data->loaded_fallbacks, 0, sizeof(data->loaded_fallbacks));
     data->content_scale = 1.0f;
     data->font_path = NULL;
+    data->notif_active = false;
+    data->notif_close_hover = false;
+    data->notif_level = 0;
+    data->notif_title = NULL;
+    data->notif_body = NULL;
+    data->notif_texture = NULL;
+    data->notif_close_tex = NULL;
+    data->notif_h = 0;
+    data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
     data->linear_target = NULL;
     data->linear_w = 0;
     data->linear_h = 0;
@@ -1130,6 +1187,9 @@ static void sdl3_destroy(RendererBackend *backend)
     // Destroy GPU glyph-coverage shader (no-op if it was never created)
     rend_shader_destroy(data->glyph_shader);
     data->glyph_shader = NULL;
+
+    // Destroy notification panel textures + retained strings
+    notif_free(data);
 
     free(data->font_path);
     data->font_path = NULL;
@@ -1329,6 +1389,10 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     vlog("  Bold Italic font: %s\n", font_has_style(data->font, FONT_STYLE_BOLD_ITALIC) ? "Loaded" : "Not loaded");
     vlog("  Emoji font: %s\n", font_has_style(data->font, FONT_STYLE_EMOJI) ? "Loaded" : "Not loaded");
     vlog("  Fallback font: (loaded on demand)\n");
+
+    // Cell metrics changed — rebuild any active notification panel at the new size.
+    if (data->notif_active)
+        build_notif_texture(data);
 
     return 0;
 }
@@ -2452,6 +2516,260 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
     }
 }
 
+// --- Top notification panel (pure-SDL3 path) ---------------------------------
+//
+// The GTK4 platform shares this renderer but draws a native libadwaita strip
+// instead, so it never calls renderer_set_notification; notif_active defaults
+// false and the panel draw is a no-op there.
+
+// Alpha-composite a straight-alpha RGBA glyph bitmap (RGB already the fg
+// colour, coverage in alpha — see font_ft.c rasterize path) over the opaque
+// panel buffer at a baseline-relative pen position.
+static void notif_blit_glyph(uint8_t *buf, int buf_w, int buf_h,
+                             const GlyphBitmap *gb, int pen_x, int baseline)
+{
+    if (!gb || !gb->pixels || gb->width <= 0 || gb->height <= 0)
+        return;
+    int gx0 = pen_x + gb->x_offset;
+    int gy0 = baseline - gb->y_offset;
+    for (int y = 0; y < gb->height; y++) {
+        int dy = gy0 + y;
+        if (dy < 0 || dy >= buf_h)
+            continue;
+        const uint8_t *srow = gb->pixels + (size_t)y * gb->width * 4;
+        uint8_t *drow = buf + (size_t)dy * buf_w * 4;
+        for (int x = 0; x < gb->width; x++) {
+            int dx = gx0 + x;
+            if (dx < 0 || dx >= buf_w)
+                continue;
+            const uint8_t *s = srow + (size_t)x * 4;
+            uint8_t a = s[3];
+            if (!a)
+                continue;
+            uint8_t *d = drow + (size_t)dx * 4;
+            for (int c = 0; c < 3; c++)
+                d[c] = (uint8_t)((s[c] * a + d[c] * (255 - a) + 127) / 255);
+            d[3] = 255;
+        }
+    }
+}
+
+// Lay out one UTF-8 line into the panel buffer at the given baseline, returning
+// nothing. Renders monospace by glyph advance in the requested font style.
+static void notif_draw_line(RendererSdl3Data *data, uint8_t *buf, int buf_w,
+                            int buf_h, const char *text, int x0, int baseline,
+                            FontStyle style, uint8_t r, uint8_t g, uint8_t b)
+{
+    uint32_t cps[512];
+    int n = utf8_to_codepoints(text, cps, 512);
+    int pen_x = x0;
+    for (int i = 0; i < n; i++) {
+        int adv = data->cell_width;
+        GlyphBitmap *gb = font_render_glyphs(data->font, style, &cps[i], 1, r, g, b);
+        if (gb) {
+            if (gb->advance > 0)
+                adv = gb->advance;
+            notif_blit_glyph(buf, buf_w, buf_h, gb, pen_x, baseline);
+            data->font->free_glyph_bitmap(data->font, gb);
+        }
+        pen_x += adv;
+    }
+}
+
+// Shortest distance from point (px,py) to the segment (ax,ay)-(bx,by).
+static float seg_distance(float px, float py, float ax, float ay, float bx,
+                          float by)
+{
+    float vx = bx - ax, vy = by - ay;
+    float wx = px - ax, wy = py - ay;
+    float c2 = vx * vx + vy * vy;
+    float t = c2 > 0.0f ? (vx * wx + vy * wy) / c2 : 0.0f;
+    if (t < 0.0f)
+        t = 0.0f;
+    else if (t > 1.0f)
+        t = 1.0f;
+    float dx = px - (ax + t * vx), dy = py - (ay + t * vy);
+    return sqrtf(dx * dx + dy * dy);
+}
+
+// Build a `size`×`size` white texture holding an anti-aliased "×". SDL's 2D
+// renderer can't antialias geometry, so we bake coverage into the alpha channel
+// (analytic distance-to-segment) and blit the texture — the SDL-recommended way
+// to get smooth edges. The glyph is white; callers tint it via SDL_SetTextureColorMod.
+static SDL_Texture *make_close_x_texture(SDL_Renderer *r, int size)
+{
+    if (size <= 0)
+        return NULL;
+    uint8_t *buf = calloc((size_t)size * size, 4);
+    if (!buf)
+        return NULL;
+
+    float inset = (float)size * 0.30f;
+    float lo = inset, hi = (float)size - inset;
+    float hw = (float)size * 0.06f; // half stroke width
+    if (hw < 0.75f)
+        hw = 0.75f;
+
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float d = seg_distance(px, py, lo, lo, hi, hi);  // top-left → bottom-right
+            float d2 = seg_distance(px, py, hi, lo, lo, hi); // top-right → bottom-left
+            if (d2 < d)
+                d = d2;
+            float cov = hw + 0.5f - d; // 1px anti-aliased edge band
+            if (cov < 0.0f)
+                cov = 0.0f;
+            else if (cov > 1.0f)
+                cov = 1.0f;
+            uint8_t *p = buf + ((size_t)y * size + x) * 4;
+            p[0] = 255;
+            p[1] = 255;
+            p[2] = 255;
+            p[3] = (uint8_t)(cov * 255.0f + 0.5f);
+        }
+    }
+
+    SDL_Texture *tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_RGBA32,
+                                         SDL_TEXTUREACCESS_STATIC, size, size);
+    if (tex) {
+        SDL_UpdateTexture(tex, NULL, buf, size * 4);
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_LINEAR);
+    }
+    free(buf);
+    return tex;
+}
+
+// Rasterize the current notification (notif_title/notif_body/notif_level) into
+// notif_texture, a full-window-width bar. Frees any previous texture first.
+static void build_notif_texture(RendererSdl3Data *data)
+{
+    notif_free_textures(data);
+    data->notif_h = 0;
+    data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
+    data->notif_close_hover = false;
+    if (!data->notif_active || !data->font || data->width <= 0 ||
+        data->cell_height <= 0 || !font_has_style(data->font, FONT_STYLE_NORMAL))
+        return;
+
+    float scale = data->content_scale > 0 ? data->content_scale : 1.0f;
+    int pad = (int)(10.0f * scale + 0.5f);
+    int accent_w = (int)(4.0f * scale + 0.5f);
+    int gap = (int)(8.0f * scale + 0.5f);
+    int line_h = data->cell_height;
+
+    // Severity accent colour (libadwaita-ish: blue / yellow / red).
+    uint8_t ar, ag, ab;
+    switch (data->notif_level) {
+    case 2:
+        ar = 224, ag = 27, ab = 36; // error
+        break;
+    case 1:
+        ar = 245, ag = 194, ab = 17; // warning
+        break;
+    default:
+        ar = 98, ag = 160, ab = 234; // info
+        break;
+    }
+
+    // Collect lines: title (bold) then body (dim). Split each on '\n'.
+    struct
+    {
+        const char *text;
+        bool is_title;
+    } lines[16];
+    int n_lines = 0;
+    char *title_copy = data->notif_title ? strdup(data->notif_title) : NULL;
+    char *body_copy = data->notif_body ? strdup(data->notif_body) : NULL;
+    for (int pass = 0; pass < 2; pass++) {
+        char *s = pass == 0 ? title_copy : body_copy;
+        if (!s)
+            continue;
+        char *line = s;
+        for (char *p = s;; p++) {
+            if (*p == '\n' || *p == '\0') {
+                bool end = (*p == '\0');
+                *p = '\0';
+                if (n_lines < 16) {
+                    lines[n_lines].text = line;
+                    lines[n_lines].is_title = (pass == 0);
+                    n_lines++;
+                }
+                line = p + 1;
+                if (end)
+                    break;
+            }
+        }
+    }
+    if (n_lines == 0) {
+        free(title_copy);
+        free(body_copy);
+        return;
+    }
+
+    int panel_w = data->width;
+    int panel_h = pad * 2 + n_lines * line_h;
+    int close_size = line_h;
+    int close_x = panel_w - pad - close_size;
+    int close_y = (panel_h - close_size) / 2;
+    int text_x = pad + accent_w + gap;
+
+    uint8_t *bufp = calloc((size_t)panel_w * panel_h, 4);
+    if (!bufp) {
+        free(title_copy);
+        free(body_copy);
+        return;
+    }
+    // Background fill (dark panel) + left severity accent stripe. Opaque by
+    // default; translucent when notification transparency is opted in (the
+    // texture blends over the terminal). The accent stripe stays opaque.
+    uint8_t bg_a = bloom_notification_transparent ? 205 : 255;
+    for (int y = 0; y < panel_h; y++) {
+        for (int x = 0; x < panel_w; x++) {
+            uint8_t *d = bufp + ((size_t)y * panel_w + x) * 4;
+            bool stripe = (x >= pad && x < pad + accent_w && y >= pad && y < panel_h - pad);
+            d[0] = stripe ? ar : 38;
+            d[1] = stripe ? ag : 38;
+            d[2] = stripe ? ab : 44;
+            d[3] = stripe ? 255 : bg_a;
+        }
+    }
+
+    // Text lines.
+    FontStyle bold = font_has_style(data->font, FONT_STYLE_BOLD) ? FONT_STYLE_BOLD
+                                                                 : FONT_STYLE_NORMAL;
+    for (int i = 0; i < n_lines; i++) {
+        int baseline = pad + i * line_h + data->font_ascent;
+        if (lines[i].is_title)
+            notif_draw_line(data, bufp, panel_w, panel_h, lines[i].text, text_x,
+                            baseline, bold, 236, 236, 241);
+        else
+            notif_draw_line(data, bufp, panel_w, panel_h, lines[i].text, text_x,
+                            baseline, FONT_STYLE_NORMAL, 190, 190, 198);
+    }
+
+    // The close "×" is NOT baked here — it is drawn at frame time on top of the
+    // texture (and on top of the hover highlight) so the highlight sits cleanly
+    // behind a crisp glyph instead of muddying a baked one. See sdl3_draw_terminal.
+
+    SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                         SDL_TEXTUREACCESS_STATIC, panel_w, panel_h);
+    if (tex) {
+        SDL_UpdateTexture(tex, NULL, bufp, panel_w * 4);
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        data->notif_texture = tex;
+        data->notif_h = panel_h;
+        data->notif_close_rect =
+            (SDL_FRect){ (float)close_x, (float)close_y, (float)close_size, (float)close_size };
+        data->notif_close_tex = make_close_x_texture(data->renderer, close_size);
+    }
+
+    free(bufp);
+    free(title_copy);
+    free(body_copy);
+}
+
 // Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
 // insert glyphs with no draw calls, and if eviction occurred mid-pass, flush the
 // partial staging and re-populate so destroyed glyphs are re-rasterized; then
@@ -2515,6 +2833,25 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
 
     // Draw the scene gamma-correct (linear-light) and overlay sixels.
     draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
+
+    // Top notification panel. Drawn after draw_scene_linear's encode-out blit
+    // (which overwrites the backbuffer with BLENDMODE_NONE), so it composites as
+    // sRGB UI chrome over the finished terminal frame. SDL3 path only — the
+    // GTK4 platform uses a native libadwaita strip and never sets this.
+    if (data->notif_active && data->notif_texture) {
+        SDL_FRect dst = { 0.0f, 0.0f, (float)data->width, (float)data->notif_h };
+        SDL_RenderTexture(data->renderer, data->notif_texture, NULL, &dst);
+
+        // Anti-aliased close "×", blitted on top and tinted by hover state
+        // (brighter on hover) via colour modulation. Drawn from a baked alpha
+        // texture because SDL's 2D renderer can't antialias geometry.
+        if (data->notif_close_tex && data->notif_close_rect.w > 0) {
+            uint8_t lum = data->notif_close_hover ? 245 : 170;
+            SDL_SetTextureColorMod(data->notif_close_tex, lum, lum, lum);
+            SDL_RenderTexture(data->renderer, data->notif_close_tex, NULL,
+                              &data->notif_close_rect);
+        }
+    }
 }
 
 static void sdl3_present(RendererBackend *backend)
@@ -2543,6 +2880,9 @@ static void sdl3_resize(RendererBackend *backend, int width, int height)
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     data->width = width;
     data->height = height;
+    // Panel spans the full window width, so a resize requires a rebuild.
+    if (data->notif_active)
+        build_notif_texture(data);
 }
 
 static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *cell_height)
@@ -2656,6 +2996,58 @@ static bool sdl3_has_overlay(RendererBackend *backend)
 
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     return data->overlay != NULL;
+}
+
+static void sdl3_set_notification(RendererBackend *backend, const char *title,
+                                  const char *body, int level)
+{
+    if (!backend || !backend->backend_data)
+        return;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    free(data->notif_title);
+    free(data->notif_body);
+    data->notif_title = title ? strdup(title) : NULL;
+    data->notif_body = body ? strdup(body) : NULL;
+    data->notif_level = level;
+    data->notif_active = true;
+    build_notif_texture(data);
+}
+
+static void sdl3_clear_notification(RendererBackend *backend)
+{
+    if (!backend || !backend->backend_data)
+        return;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    notif_free(data);
+}
+
+static bool sdl3_set_notification_hover(RendererBackend *backend, bool hovered)
+{
+    if (!backend || !backend->backend_data)
+        return false;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (!data->notif_active)
+        hovered = false;
+    if (data->notif_close_hover == hovered)
+        return false;
+    data->notif_close_hover = hovered;
+    return true;
+}
+
+static int sdl3_notification_hit(RendererBackend *backend, int px, int py)
+{
+    if (!backend || !backend->backend_data)
+        return 0;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (!data->notif_active || !data->notif_texture)
+        return 0;
+    if (px < 0 || px >= data->width || py < 0 || py >= data->notif_h)
+        return 0;
+    SDL_FRect c = data->notif_close_rect;
+    if ((float)px >= c.x && (float)px < c.x + c.w && (float)py >= c.y &&
+        (float)py < c.y + c.h)
+        return 2;
+    return 1;
 }
 
 static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
@@ -2837,6 +3229,10 @@ RendererBackend renderer_backend_sdl3 = {
     .set_overlay = sdl3_set_overlay,
     .clear_overlay = sdl3_clear_overlay,
     .has_overlay = sdl3_has_overlay,
+    .set_notification = sdl3_set_notification,
+    .clear_notification = sdl3_clear_notification,
+    .notification_hit = sdl3_notification_hit,
+    .set_notification_hover = sdl3_set_notification_hover,
     .render_to_png = sdl3_render_to_png,
     .set_content_scale = sdl3_set_content_scale,
 };

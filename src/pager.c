@@ -342,8 +342,9 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
         char url[4096];
         size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
         if (n > 0 && terminal_hyperlink_is_safe(url)) {
-            if (!platform_open_url(p->plat, url))
-                fprintf(stderr, "ERROR: failed to open URL\n");
+            char err[256];
+            if (!platform_open_url(p->plat, url, err, sizeof(err)))
+                fprintf(stderr, "ERROR: failed to open URL: %s\n", err);
         } else if (n > 0) {
             fprintf(stderr, "WARNING: refusing to open URL with disallowed scheme: %s\n",
                     url);

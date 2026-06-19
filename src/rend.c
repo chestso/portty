@@ -104,6 +104,35 @@ bool renderer_has_overlay(RendererBackend *rend)
     return rend->has_overlay(rend);
 }
 
+void renderer_set_notification(RendererBackend *rend, const char *title,
+                               const char *body, int level)
+{
+    if (!rend || !rend->set_notification)
+        return;
+    rend->set_notification(rend, title, body, level);
+}
+
+void renderer_clear_notification(RendererBackend *rend)
+{
+    if (!rend || !rend->clear_notification)
+        return;
+    rend->clear_notification(rend);
+}
+
+int renderer_notification_hit(RendererBackend *rend, int px, int py)
+{
+    if (!rend || !rend->notification_hit)
+        return 0;
+    return rend->notification_hit(rend, px, py);
+}
+
+bool renderer_set_notification_hover(RendererBackend *rend, bool hovered)
+{
+    if (!rend || !rend->set_notification_hover)
+        return false;
+    return rend->set_notification_hover(rend, hovered);
+}
+
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path)
 {

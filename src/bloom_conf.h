@@ -14,17 +14,18 @@ typedef enum
 
 typedef struct
 {
-    char *font;            /* NULL = not set */
-    int cols;              /* 0 = not set */
-    int rows;              /* 0 = not set */
-    BloomHintMode hinting; /* BLOOM_HINT_UNSET = not set */
-    int verbose;           /* -1 = not set, 0 = false, 1 = true */
-    char *word_chars;      /* NULL = not set */
-    char *platform;        /* NULL = not set; "sdl3" or "gtk4" */
-    int scrollback;        /* -1 = not set; >= 0 = lines (0 disables) */
-    float text_gamma;      /* < 0 = unset (neutral); kitty text_composition_strategy gamma */
-    float text_contrast;   /* < 0 = unset (neutral); kitty contrast, 0..100 */
-    char *source_path;     /* path the config was loaded from, or NULL (defaults) */
+    char *font;                    /* NULL = not set */
+    int cols;                      /* 0 = not set */
+    int rows;                      /* 0 = not set */
+    BloomHintMode hinting;         /* BLOOM_HINT_UNSET = not set */
+    int verbose;                   /* -1 = not set, 0 = false, 1 = true */
+    char *word_chars;              /* NULL = not set */
+    char *platform;                /* NULL = not set; "sdl3" or "gtk4" */
+    int scrollback;                /* -1 = not set; >= 0 = lines (0 disables) */
+    float text_gamma;              /* < 0 = unset (neutral); kitty text_composition_strategy gamma */
+    float text_contrast;           /* < 0 = unset (neutral); kitty contrast, 0..100 */
+    int notification_transparency; /* -1 = unset; 0 = opaque (default); 1 = translucent */
+    char *source_path;             /* path the config was loaded from, or NULL (defaults) */
 } BloomConf;
 
 void bloom_conf_init(BloomConf *conf);

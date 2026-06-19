@@ -51,8 +51,9 @@
 
 /* Global verbose flag - controls debug output */
 int verbose = 0;
-float bloom_text_gamma = 1.0f;    /* neutral (pure linear-correct) */
-float bloom_text_contrast = 0.0f; /* neutral */
+float bloom_text_gamma = 1.0f;               /* neutral (pure linear-correct) */
+float bloom_text_contrast = 0.0f;            /* neutral */
+bool bloom_notification_transparent = false; /* opaque notification panel by default */
 
 /* ASan/UBSan runtime defaults. Only compiled in when the binary is
  * built with -fsanitize=address. detect_leaks=0 silences GTK/Mesa exit
@@ -546,6 +547,32 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     if (pager_active(ctx->pager))
         return pager_mouse(ctx->pager, pixel_x, pixel_y, button, pressed, clicks, mod);
 
+    // The SDL3 notification panel floats above the terminal. While the pointer
+    // is over it, the panel owns the cursor (pointer over the close button, with
+    // a hover highlight), suppresses link hover underneath, and consumes the
+    // event so the terminal doesn't react beneath it. (No-op on the GTK4 path —
+    // its native strip handles its own input and cursor.)
+    int notif_hit = renderer_notification_hit(ctx->rend, pixel_x, pixel_y);
+    if (notif_hit != 0) {
+        if (pressed && button == 1 && notif_hit == 2) {
+            platform_notify_dismiss(ctx->plat);
+            platform_set_cursor(ctx->plat, PLATFORM_CURSOR_TEXT);
+            return true;
+        }
+        platform_set_cursor(ctx->plat, notif_hit == 2 ? PLATFORM_CURSOR_POINTER
+                                                      : PLATFORM_CURSOR_TEXT);
+        if (renderer_set_notification_hover(ctx->rend, notif_hit == 2))
+            terminal_mark_dirty(ctx->term);
+        if (terminal_hovered_hyperlink(ctx->term) != 0) {
+            terminal_set_hovered_hyperlink(ctx->term, 0);
+            terminal_mark_dirty(ctx->term);
+        }
+        return true;
+    }
+    // Pointer left the panel — clear any lingering close-button hover highlight.
+    if (renderer_set_notification_hover(ctx->rend, false))
+        terminal_mark_dirty(ctx->term);
+
     int mouse_mode = terminal_get_mouse_mode(ctx->term);
     bool shift_held = (mod & TERM_MOD_SHIFT) != 0;
 
@@ -573,11 +600,23 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
                                                    link_col, url, sizeof(url));
             if (n > 0 && terminal_hyperlink_is_safe(url)) {
                 vlog("Opening OSC-8 URL: %s\n", url);
-                if (!platform_open_url(ctx->plat, url))
-                    fprintf(stderr, "ERROR: failed to open URL\n");
+                char err[256];
+                if (!platform_open_url(ctx->plat, url, err, sizeof(err))) {
+                    // Bound the URL so a very long link can't blow up (or
+                    // truncate) the one-line title.
+                    char title[256];
+                    char body[320];
+                    snprintf(title, sizeof(title), "Couldn't open %.200s", url);
+                    snprintf(body, sizeof(body), "Error is: %.256s", err);
+                    fprintf(stderr, "ERROR: %s — %s\n", title, body);
+                    platform_notify(ctx->plat, title, body, PLATFORM_NOTIFY_ERROR);
+                }
             } else if (n > 0) {
-                fprintf(stderr, "WARNING: refusing to open URL with disallowed scheme: %s\n",
-                        url);
+                char title[256];
+                snprintf(title, sizeof(title), "Refusing to open %.200s", url);
+                fprintf(stderr, "WARNING: %s (disallowed scheme)\n", title);
+                platform_notify(ctx->plat, title, "Disallowed URL scheme",
+                                PLATFORM_NOTIFY_WARNING);
             }
             return true;
         }
@@ -839,6 +878,8 @@ int main(int argc, char *argv[])
         bloom_text_gamma = conf.text_gamma;
     if (conf.text_contrast >= 0.0f)
         bloom_text_contrast = conf.text_contrast;
+    if (conf.notification_transparency == 1)
+        bloom_notification_transparent = true;
 
     while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:", long_options, NULL)) != -1) {
         switch (opt) {

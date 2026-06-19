@@ -2,9 +2,15 @@
 #define COMMON_H
 
 #include <stdarg.h>
+#include <stdbool.h>
 
 /* Global verbose flag - defined in main.c */
 extern int verbose;
+
+/* Notification panel transparency (defined in main.c, set from config). When
+ * false (default) the top notification panel is fully opaque; when true it is
+ * drawn translucent (SDL3: alpha background; GTK4: a translucent .osd surface). */
+extern bool bloom_notification_transparent;
 
 /* kitty-style text_composition_strategy knob (defined in main.c, set from
  * config). Applied as a uniform coverage curve to grayscale glyph alpha in

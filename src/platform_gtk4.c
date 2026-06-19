@@ -141,6 +141,18 @@ typedef struct
     // Render state
     bool has_focus;
 
+    // Notification strip: a libadwaita-styled `.osd .card` box inside a
+    // GtkRevealer, floated at the top of the content via a GtkOverlay. Built
+    // once in gtk4_create_window; gtk4_notify updates the labels/icon/severity
+    // and reveals it. notif_level_class is the currently-applied severity class
+    // (.error/.warning/.accent), tracked so it can be removed on the next call.
+    GtkWidget *notif_revealer;
+    GtkWidget *notif_box;
+    GtkWidget *notif_icon;
+    GtkWidget *notif_title_label;
+    GtkWidget *notif_body_label;
+    const char *notif_level_class;
+
     // Stored for draw_func access
     TerminalBackend *term;
     RendererBackend *rend;
@@ -998,7 +1010,11 @@ static void gtk4_resume_pty(PlatformBackend *plat);
 static char *gtk4_get_default_font(PlatformBackend *plat);
 static float gtk4_get_display_scale(PlatformBackend *plat);
 static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height);
-static bool gtk4_open_url(PlatformBackend *plat, const char *url);
+static bool gtk4_open_url(PlatformBackend *plat, const char *url, char *err,
+                          size_t errlen);
+static void gtk4_notify(PlatformBackend *plat, const char *title,
+                        const char *body, PlatformNotifyLevel level);
+static void gtk4_notify_dismiss(PlatformBackend *plat);
 static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled);
 static bool gtk4_get_gpu_info(PlatformBackend *plat, const char **device,
@@ -1029,6 +1045,8 @@ PlatformBackend platform_backend_gtk4 = {
     .get_display_scale = gtk4_get_display_scale,
     .get_display_size = gtk4_get_display_size,
     .open_url = gtk4_open_url,
+    .notify = gtk4_notify,
+    .notify_dismiss = gtk4_notify_dismiss,
     .set_cursor = gtk4_set_cursor,
     .set_autoscroll = gtk4_set_autoscroll,
     .get_gpu_info = gtk4_get_gpu_info,
@@ -1161,6 +1179,15 @@ static bool gtk4_plat_init(PlatformBackend *plat)
 
     // Initialize libadwaita (also initializes GTK4)
     adw_init();
+
+    // Force the dark color scheme so libadwaita's semantic colors (card text,
+    // .dimmed, and the .warning/.error/.accent text+accents used by the
+    // notification strip) resolve to light-on-dark, matching the forced-black
+    // terminal window. Without this the app follows the system scheme and can
+    // render dark text on our dark surfaces. Our explicit window/headerbar CSS
+    // (USER priority) still wins over the scheme's defaults.
+    adw_style_manager_set_color_scheme(adw_style_manager_get_default(),
+                                       ADW_COLOR_SCHEME_FORCE_DARK);
 
     // Initialize SDL video (needed for offscreen rendering)
     if (!SDL_SetAppMetadata("bloom-terminal", BLOOM_TERMINAL_VERSION, "bloom-terminal")) {
@@ -1462,6 +1489,75 @@ static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
     gtk_widget_grab_focus(ctx->drawing_area);
 }
 
+// Defined later (after gtk4_open_url); used by gtk4_build_notification.
+static void on_notif_close_clicked(GtkButton *btn, gpointer user_data);
+
+// Build the floating top notification strip (hidden initially) and stash its
+// widgets on ctx. A libadwaita `.osd .card` box holds a severity icon, a bold
+// title, a wrapping dimmed multi-line detail label, and a flat circular close
+// button, all inside a slide-down GtkRevealer.
+static void gtk4_build_notification(GTK4PlatformData *ctx)
+{
+    GtkWidget *revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(revealer),
+                                     GTK_REVEALER_TRANSITION_TYPE_SLIDE_DOWN);
+    gtk_widget_set_halign(revealer, GTK_ALIGN_FILL);
+    gtk_widget_set_valign(revealer, GTK_ALIGN_START);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
+
+    // .card supplies the rounded corners + drop shadow; .bloom-notification
+    // overrides the background to be opaque by default. Transparency is opt-in
+    // via the config-derived bloom_notification_transparent flag.
+    GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    gtk_widget_add_css_class(box, "card");
+    gtk_widget_add_css_class(box, "bloom-notification");
+    if (bloom_notification_transparent)
+        gtk_widget_add_css_class(box, "bloom-transparent");
+    gtk_widget_set_margin_top(box, 6);
+    gtk_widget_set_margin_start(box, 6);
+    gtk_widget_set_margin_end(box, 6);
+
+    GtkWidget *icon = gtk_image_new_from_icon_name("dialog-information-symbolic");
+    gtk_widget_set_valign(icon, GTK_ALIGN_START);
+
+    GtkWidget *text_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    gtk_widget_set_hexpand(text_box, TRUE);
+
+    GtkWidget *title_label = gtk_label_new("");
+    gtk_widget_add_css_class(title_label, "heading");
+    gtk_label_set_xalign(GTK_LABEL(title_label), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(title_label), TRUE);
+
+    GtkWidget *body_label = gtk_label_new("");
+    gtk_widget_add_css_class(body_label, "dimmed");
+    gtk_label_set_xalign(GTK_LABEL(body_label), 0.0f);
+    gtk_label_set_wrap(GTK_LABEL(body_label), TRUE);
+    gtk_label_set_selectable(GTK_LABEL(body_label), TRUE);
+
+    gtk_box_append(GTK_BOX(text_box), title_label);
+    gtk_box_append(GTK_BOX(text_box), body_label);
+
+    GtkWidget *close_btn = gtk_button_new_from_icon_name("window-close-symbolic");
+    gtk_widget_add_css_class(close_btn, "flat");
+    gtk_widget_add_css_class(close_btn, "circular");
+    gtk_widget_set_valign(close_btn, GTK_ALIGN_START);
+    gtk_widget_set_tooltip_text(close_btn, "Dismiss");
+    g_signal_connect(close_btn, "clicked", G_CALLBACK(on_notif_close_clicked), ctx);
+
+    gtk_box_append(GTK_BOX(box), icon);
+    gtk_box_append(GTK_BOX(box), text_box);
+    gtk_box_append(GTK_BOX(box), close_btn);
+
+    gtk_revealer_set_child(GTK_REVEALER(revealer), box);
+
+    ctx->notif_revealer = revealer;
+    ctx->notif_box = box;
+    ctx->notif_icon = icon;
+    ctx->notif_title_label = title_label;
+    ctx->notif_body_label = body_label;
+    ctx->notif_level_class = NULL;
+}
+
 static bool gtk4_create_window(PlatformBackend *plat, const char *title,
                                int width, int height)
 {
@@ -1491,6 +1587,17 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
         "}"
         "toolbarview > .top-bar headerbar:backdrop {"
         "  background: @headerbar_backdrop_color;"
+        "}"
+        /* Notification strip: opaque by default; the .bloom-transparent
+         * modifier (set from config) makes it translucent. Overrides the
+         * .card/.osd background since this provider sits at USER priority. */
+        ".bloom-notification {"
+        "  background-color: #303034;"
+        "  border-radius: 12px;"
+        "  padding: 10px 12px;"
+        "}"
+        ".bloom-notification.bloom-transparent {"
+        "  background-color: alpha(#1c1c20, 0.80);"
         "}");
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(), GTK_STYLE_PROVIDER(css_provider),
@@ -1533,17 +1640,28 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     use_offload = ctx->dmabuf_export;
 #endif
     // Wrap in GtkGraphicsOffload for compositor direct scanout of the DMA-BUF.
+    GtkWidget *content_widget;
     if (use_offload) {
         GtkWidget *offload = gtk_graphics_offload_new(ctx->drawing_area);
         gtk_graphics_offload_set_enabled(GTK_GRAPHICS_OFFLOAD(offload),
                                          GTK_GRAPHICS_OFFLOAD_ENABLED);
         gtk_graphics_offload_set_black_background(
             GTK_GRAPHICS_OFFLOAD(offload), TRUE);
-        adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), offload);
+        content_widget = offload;
     } else {
-        adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view),
-                                     ctx->drawing_area);
+        content_widget = ctx->drawing_area;
     }
+
+    // Float the notification strip over the terminal via a GtkOverlay so it does
+    // not resize/reflow the shell. The strip is the overlay child (top-aligned);
+    // the terminal is the main child. (While the strip is visible, GTK may drop
+    // the offload's direct scanout — fine, scanout resumes when it is dismissed.)
+    GtkWidget *overlay = gtk_overlay_new();
+    gtk_overlay_set_child(GTK_OVERLAY(overlay), content_widget);
+    gtk4_build_notification(ctx);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), ctx->notif_revealer);
+    adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), overlay);
+
     adw_window_set_content(ADW_WINDOW(ctx->window), toolbar_view);
 
     // Connect resize signal
@@ -1924,23 +2042,84 @@ static bool gtk4_get_display_size(PlatformBackend *plat, int *width, int *height
     return true;
 }
 
-static bool gtk4_open_url(PlatformBackend *plat, const char *url)
+static bool gtk4_open_url(PlatformBackend *plat, const char *url, char *err,
+                          size_t errlen)
 {
     (void)plat;
     if (!url)
         return false;
     /* g_app_info_launch_default_for_uri picks the user's preferred handler
-     * via xdg-mime / portals. Async to avoid blocking the GTK main loop. */
+     * via xdg-mime / portals. */
     GError *error = NULL;
     gboolean ok = g_app_info_launch_default_for_uri(url, NULL, &error);
     if (!ok) {
-        fprintf(stderr, "ERROR: open URL failed: %s\n",
-                error ? error->message : "unknown");
+        const char *msg = (error && error->message && *error->message)
+                              ? error->message
+                              : "unknown error";
+        fprintf(stderr, "ERROR: open URL failed: %s\n", msg);
+        if (err && errlen > 0)
+            snprintf(err, errlen, "%s", msg);
         if (error)
             g_error_free(error);
         return false;
     }
     return true;
+}
+
+static void on_notif_close_clicked(GtkButton *btn, gpointer user_data)
+{
+    (void)btn;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+    if (ctx->notif_revealer)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->notif_revealer), FALSE);
+}
+
+static void gtk4_notify(PlatformBackend *plat, const char *title,
+                        const char *body, PlatformNotifyLevel level)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (!ctx->notif_revealer)
+        return;
+
+    const char *icon, *css;
+    switch (level) {
+    case PLATFORM_NOTIFY_ERROR:
+        icon = "dialog-error-symbolic";
+        css = "error";
+        break;
+    case PLATFORM_NOTIFY_WARNING:
+        icon = "dialog-warning-symbolic";
+        css = "warning";
+        break;
+    default:
+        icon = "dialog-information-symbolic";
+        css = "accent";
+        break;
+    }
+    gtk_image_set_from_icon_name(GTK_IMAGE(ctx->notif_icon), icon);
+
+    /* Swap the libadwaita severity colour class on the box. */
+    if (ctx->notif_level_class)
+        gtk_widget_remove_css_class(ctx->notif_box, ctx->notif_level_class);
+    gtk_widget_add_css_class(ctx->notif_box, css);
+    ctx->notif_level_class = css; /* string literal — stable lifetime */
+
+    gtk_label_set_text(GTK_LABEL(ctx->notif_title_label), title ? title : "");
+    gtk_label_set_text(GTK_LABEL(ctx->notif_body_label), body ? body : "");
+    gtk_widget_set_visible(ctx->notif_body_label, body && *body);
+
+    gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->notif_revealer), TRUE);
+}
+
+static void gtk4_notify_dismiss(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (ctx->notif_revealer)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->notif_revealer), FALSE);
 }
 
 static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
