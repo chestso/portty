@@ -137,13 +137,13 @@ static void test_scrollback(void)
 static void test_altscreen_neutral(void)
 {
     // "alt screen: no" is a neutral state, not an error — it must not be
-    // emitted in the red (C_OFF) colour. With linear_light on, the sample has
+    // emitted in the red (FG_OFF) colour. With linear_light on, the sample has
     // no other red element, so the red SGR escape should be wholly absent.
     DiagSources s = sample(); // altscreen = false, linear_light = true
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
     ASSERT_TRUE(strstr(r, "no") != NULL);
-    ASSERT_TRUE(strstr(r, "\x1b[38;2;255;85;85m") == NULL);
+    ASSERT_TRUE(strstr(r, "\x1b[31m") == NULL);
     free(r);
 }
 
@@ -162,14 +162,14 @@ static void test_issues_hyperlink(void)
 
 static void test_gpu_driver_color(void)
 {
-    // Permissively-licensed open-source driver → green (C_ON, 80;250;123)
+    // Permissively-licensed open-source driver → green (FG_ON, SGR 32)
     // immediately preceding the driver text.
     DiagSources s = sample();
     s.gpu_driver = "NVK — Mesa";
     s.gpu_driver_libre = true;
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
-    ASSERT_TRUE(strstr(r, "\x1b[38;2;80;250;123m"
+    ASSERT_TRUE(strstr(r, "\x1b[32m"
                           "NVK — Mesa") != NULL);
     free(r);
 
@@ -180,7 +180,7 @@ static void test_gpu_driver_color(void)
     r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
     ASSERT_TRUE(strstr(r, "NVIDIA") != NULL);
-    ASSERT_TRUE(strstr(r, "\x1b[38;2;80;250;123m"
+    ASSERT_TRUE(strstr(r, "\x1b[32m"
                           "NVIDIA") == NULL);
     free(r);
 }
