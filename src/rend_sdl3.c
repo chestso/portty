@@ -1932,6 +1932,82 @@ render_cursor:
     }
 }
 
+// Flush one coalesced SGR-underline run [vis_start, vis_end) on `row`, in the
+// given style (1=single … 5=dashed) and color. Shared by the mid-row and
+// end-of-row flushes in render_visible_cells.
+static void flush_underline_run(RendererSdl3Data *data, int row, int vis_start,
+                                int vis_end, unsigned int style, Uint8 r,
+                                Uint8 g, Uint8 b)
+{
+    float pd = data->content_scale;
+    int thickness = (int)roundf(1.0f * pd);
+    if (thickness < 1)
+        thickness = 1;
+    int cell_y = row * data->cell_height;
+    int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
+    if (underline_y + thickness > cell_y + data->cell_height)
+        underline_y = cell_y + data->cell_height - thickness;
+    int run_x = vis_start * data->cell_width;
+    int run_w = (vis_end - vis_start) * data->cell_width;
+    SDL_SetRenderDrawColor(data->renderer, r, g, b, UNDERLINE_COLOR_A);
+    switch (style) {
+    case 1:
+        draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
+        break;
+    case 2:
+        draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
+        break;
+    case 3:
+        draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd, r, g, b);
+        break;
+    case 4:
+        draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
+        break;
+    case 5:
+        draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
+        break;
+    }
+}
+
+// Flush one coalesced OSC-8 hyperlink underline run [vis_start, vis_end) on
+// `row`: a solid line when hovered, else a faint dotted line.
+static void flush_hyperlink_run(RendererSdl3Data *data, int row, int vis_start,
+                                int vis_end, bool hover)
+{
+    float pd = data->content_scale;
+    int thickness = (int)roundf(1.0f * pd);
+    if (thickness < 1)
+        thickness = 1;
+    int cell_y = row * data->cell_height;
+    int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
+    if (link_y + thickness > cell_y + data->cell_height)
+        link_y = cell_y + data->cell_height - thickness;
+    int run_x = vis_start * data->cell_width;
+    int run_w = (vis_end - vis_start) * data->cell_width;
+    Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
+    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(data->renderer, HYPERLINK_COLOR_R, HYPERLINK_COLOR_G,
+                           HYPERLINK_COLOR_B, a);
+    if (hover)
+        draw_underline_single(data->renderer, run_x, link_y, run_w, pd);
+    else
+        draw_underline_dotted(data->renderer, run_x, link_y, run_w, pd);
+    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+}
+
+// Flush one coalesced strikethrough run [vis_start, vis_end) on `row`.
+static void flush_strike_run(RendererSdl3Data *data, int row, int vis_start,
+                             int vis_end, Uint8 r, Uint8 g, Uint8 b)
+{
+    float pd = data->content_scale;
+    int cell_y = row * data->cell_height;
+    int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
+    int run_x = vis_start * data->cell_width;
+    int run_w = (vis_end - vis_start) * data->cell_width;
+    SDL_SetRenderDrawColor(data->renderer, r, g, b, 255);
+    draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
+}
+
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
                                  bool cursor_visible, bool populate_only)
@@ -1976,37 +2052,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 bool same_run = (run_style != 0 && cs == run_style && cr == run_r &&
                                  cg == run_g && cb == run_b);
                 if (run_style != 0 && !same_run) {
-                    // Flush current run
-                    float pd = data->content_scale;
-                    int thickness = (int)roundf(1.0f * pd);
-                    if (thickness < 1)
-                        thickness = 1;
-                    int cell_y = row * data->cell_height;
-                    int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
-                    if (underline_y + thickness > cell_y + data->cell_height)
-                        underline_y = cell_y + data->cell_height - thickness;
-                    int run_x = vis_run_start * data->cell_width;
-                    int run_w = (vis_run_end - vis_run_start) * data->cell_width;
-                    SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b,
-                                           UNDERLINE_COLOR_A);
-                    switch (run_style) {
-                    case 1:
-                        draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
-                        break;
-                    case 2:
-                        draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
-                        break;
-                    case 3:
-                        draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd,
-                                             run_r, run_g, run_b);
-                        break;
-                    case 4:
-                        draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
-                        break;
-                    case 5:
-                        draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
-                        break;
-                    }
+                    flush_underline_run(data, row, vis_run_start, vis_run_end,
+                                        run_style, run_r, run_g, run_b);
                     run_style = 0;
                 }
                 if (cs != 0 && run_style == 0) {
@@ -2018,38 +2065,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 }
                 vis_run_end = it.vis_col + it.pres_w;
             }
-            if (run_style != 0) {
-                // Flush final run
-                float pd = data->content_scale;
-                int thickness = (int)roundf(1.0f * pd);
-                if (thickness < 1)
-                    thickness = 1;
-                int cell_y = row * data->cell_height;
-                int underline_y = cell_y + data->font_ascent + (int)roundf(2.0f * pd);
-                if (underline_y + thickness > cell_y + data->cell_height)
-                    underline_y = cell_y + data->cell_height - thickness;
-                int run_x = vis_run_start * data->cell_width;
-                int run_w = (vis_run_end - vis_run_start) * data->cell_width;
-                SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, UNDERLINE_COLOR_A);
-                switch (run_style) {
-                case 1:
-                    draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
-                    break;
-                case 2:
-                    draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
-                    break;
-                case 3:
-                    draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd, run_r,
-                                         run_g, run_b);
-                    break;
-                case 4:
-                    draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
-                    break;
-                case 5:
-                    draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
-                    break;
-                }
-            }
+            if (run_style != 0)
+                flush_underline_run(data, row, vis_run_start, vis_run_end,
+                                    run_style, run_r, run_g, run_b);
         }
         // Pass 3b: draw OSC-8 hyperlink underlines. Coalesce by hyperlink_id
         // so a single link with adjacent cells sharing the same id renders
@@ -2067,27 +2085,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 uint16_t hid = it.cell.hyperlink_id;
                 bool same_run = (run_id != 0 && hid == run_id);
                 if (run_id != 0 && !same_run) {
-                    // Flush current run
-                    float pd = data->content_scale;
-                    int thickness = (int)roundf(1.0f * pd);
-                    if (thickness < 1)
-                        thickness = 1;
-                    int cell_y = row * data->cell_height;
-                    int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
-                    if (link_y + thickness > cell_y + data->cell_height)
-                        link_y = cell_y + data->cell_height - thickness;
-                    int run_x = vis_run_start * data->cell_width;
-                    int run_w = (vis_run_end - vis_run_start) * data->cell_width;
-                    bool hover = (run_id == hovered);
-                    Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
-                    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-                    SDL_SetRenderDrawColor(data->renderer, HYPERLINK_COLOR_R,
-                                           HYPERLINK_COLOR_G, HYPERLINK_COLOR_B, a);
-                    if (hover)
-                        draw_underline_single(data->renderer, run_x, link_y, run_w, pd);
-                    else
-                        draw_underline_dotted(data->renderer, run_x, link_y, run_w, pd);
-                    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+                    flush_hyperlink_run(data, row, vis_run_start, vis_run_end,
+                                        run_id == hovered);
                     run_id = 0;
                 }
                 if (hid != 0 && run_id == 0) {
@@ -2096,28 +2095,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 }
                 vis_run_end = it.vis_col + it.pres_w;
             }
-            if (run_id != 0) {
-                float pd = data->content_scale;
-                int thickness = (int)roundf(1.0f * pd);
-                if (thickness < 1)
-                    thickness = 1;
-                int cell_y = row * data->cell_height;
-                int link_y = cell_y + data->font_ascent + (int)roundf(3.0f * pd);
-                if (link_y + thickness > cell_y + data->cell_height)
-                    link_y = cell_y + data->cell_height - thickness;
-                int run_x = vis_run_start * data->cell_width;
-                int run_w = (vis_run_end - vis_run_start) * data->cell_width;
-                bool hover = (run_id == hovered);
-                Uint8 a = hover ? HYPERLINK_HOVER_ALPHA : HYPERLINK_IDLE_ALPHA;
-                SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-                SDL_SetRenderDrawColor(data->renderer, HYPERLINK_COLOR_R,
-                                       HYPERLINK_COLOR_G, HYPERLINK_COLOR_B, a);
-                if (hover)
-                    draw_underline_single(data->renderer, run_x, link_y, run_w, pd);
-                else
-                    draw_underline_dotted(data->renderer, run_x, link_y, run_w, pd);
-                SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
-            }
+            if (run_id != 0)
+                flush_hyperlink_run(data, row, vis_run_start, vis_run_end,
+                                    run_id == hovered);
         }
 
         // Pass 4: draw strikethroughs as continuous spans across consecutive cells
@@ -2132,14 +2112,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 Uint8 cr = it.cell.fg.r, cg = it.cell.fg.g, cb = it.cell.fg.b;
                 bool same_run = in_run && cs && cr == run_r && cg == run_g && cb == run_b;
                 if (in_run && !same_run) {
-                    // Flush current run
-                    float pd = data->content_scale;
-                    int cell_y = row * data->cell_height;
-                    int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
-                    int run_x = vis_run_start * data->cell_width;
-                    int run_w = (vis_run_end - vis_run_start) * data->cell_width;
-                    SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, 255);
-                    draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
+                    flush_strike_run(data, row, vis_run_start, vis_run_end, run_r,
+                                     run_g, run_b);
                     in_run = false;
                 }
                 if (cs && !in_run) {
@@ -2151,15 +2125,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 }
                 vis_run_end = it.vis_col + it.pres_w;
             }
-            if (in_run) {
-                float pd = data->content_scale;
-                int cell_y = row * data->cell_height;
-                int strike_y = cell_y + data->font_ascent - data->font_cap_height / 2;
-                int run_x = vis_run_start * data->cell_width;
-                int run_w = (vis_run_end - vis_run_start) * data->cell_width;
-                SDL_SetRenderDrawColor(data->renderer, run_r, run_g, run_b, 255);
-                draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
-            }
+            if (in_run)
+                flush_strike_run(data, row, vis_run_start, vis_run_end, run_r,
+                                 run_g, run_b);
         }
     }
 }
@@ -2484,6 +2452,26 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
     }
 }
 
+// Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
+// insert glyphs with no draw calls, and if eviction occurred mid-pass, flush the
+// partial staging and re-populate so destroyed glyphs are re-rasterized; then
+// flush staging to the GPU. The caller must have called rend_sdl3_atlas_begin_frame
+// first; on return the atlas is ready for the draw pass. Doing the upload while
+// the render queue is empty avoids the implicit flush inside SDL_UpdateTexture
+// interfering with in-flight draw commands.
+static void populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
+                           int rows, int cols, bool cursor_visible)
+{
+    data->atlas.eviction_occurred = false;
+    render_visible_cells(data, term, rows, cols, cursor_visible, true);
+    if (data->atlas.eviction_occurred) {
+        rend_sdl3_atlas_flush(&data->atlas);
+        data->atlas.eviction_occurred = false;
+        render_visible_cells(data, term, rows, cols, cursor_visible, true);
+    }
+    rend_sdl3_atlas_flush(&data->atlas);
+}
+
 static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
                                bool cursor_visible)
 {
@@ -2523,28 +2511,9 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
     if (display_cols > term_cols)
         display_cols = term_cols;
 
-    // Two-phase render: populate atlas first (no draw calls), then flush
-    // staging buffers to GPU while the render queue is empty, then draw.
-    // This avoids the implicit render queue flush inside SDL_UpdateTexture
-    // interfering with in-flight draw commands.
+    populate_atlas(data, term, display_rows, display_cols, cursor_visible);
 
-    // Phase 1: Populate atlas (insert missing glyphs, no draws)
-    data->atlas.eviction_occurred = false;
-    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, true);
-
-    // If eviction occurred during Phase 1, flush the partial staging data and
-    // re-populate so glyphs that were destroyed by eviction get re-rasterized
-    // into staging before the final flush uploads to GPU.
-    if (data->atlas.eviction_occurred) {
-        rend_sdl3_atlas_flush(&data->atlas);
-        data->atlas.eviction_occurred = false;
-        render_visible_cells(data, term, display_rows, display_cols, cursor_visible, true);
-    }
-
-    // Phase 2: Flush staging buffers to GPU (render queue is empty)
-    rend_sdl3_atlas_flush(&data->atlas);
-
-    // Phase 3+4: Draw the scene gamma-correct (linear-light) and overlay sixels.
+    // Draw the scene gamma-correct (linear-light) and overlay sixels.
     draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
 }
 
@@ -2790,22 +2759,9 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     }
 
     rend_sdl3_atlas_begin_frame(&data->atlas);
+    populate_atlas(data, term, render_rows, render_cols, false);
 
-    // Phase 1: Populate atlas (no draw calls)
-    data->atlas.eviction_occurred = false;
-    render_visible_cells(data, term, render_rows, render_cols, false, true);
-
-    // If eviction occurred during Phase 1, flush and re-populate
-    if (data->atlas.eviction_occurred) {
-        rend_sdl3_atlas_flush(&data->atlas);
-        data->atlas.eviction_occurred = false;
-        render_visible_cells(data, term, render_rows, render_cols, false, true);
-    }
-
-    // Phase 2: Flush staging buffers to GPU
-    rend_sdl3_atlas_flush(&data->atlas);
-
-    // Phase 3+4: Draw the scene gamma-correct (linear-light) into `target`
+    // Draw the scene gamma-correct (linear-light) into `target`
     // so the PNG matches on-screen output, including the sixel overlay.
     draw_scene_linear(data, term, render_rows, render_cols, false, true);
 
