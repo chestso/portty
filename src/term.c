@@ -245,10 +245,13 @@ bool terminal_hyperlink_is_safe(const char *uri)
     if (!uri)
         return false;
     /* Allow-list: only the schemes a desktop user expects to invoke from a
-     * terminal click. javascript:, data:, vbscript:, file:// (no), etc. are
-     * refused — pasted/escaped link smuggling is the realistic threat. */
+     * terminal click. javascript:, data:, vbscript:, etc. stay refused —
+     * pasted/escaped link smuggling is the realistic threat. file:// is
+     * allowed: tools like Claude Code, compilers, and grep emit file:///abs
+     * links to project files, and the required Ctrl-click is the
+     * human-in-the-loop safeguard against a smuggled target. */
     static const char *const allowed[] = {
-        "http://", "https://", "ftp://", "ftps://", "mailto:", NULL
+        "http://", "https://", "ftp://", "ftps://", "mailto:", "file://", NULL
     };
     for (int i = 0; allowed[i]; i++) {
         size_t n = strlen(allowed[i]);

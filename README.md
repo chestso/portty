@@ -228,7 +228,7 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `word_chars`                | Character string                                      | `A-Za-z0-9_-/` | Characters treated as word for double-click                                                                                 |
 | `scrollback`                | Non-negative integer                                  | `1000`         | Scrollback history lines (0 disables)                                                                                       |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`      | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30) |
-| `notification_transparency` | `true`/`false`                                        | `false`        | Draw the top notification panel translucent instead of opaque                                                              |
+| `notification_transparency` | `true`/`false`                                        | `false`        | Draw the top notification panel translucent instead of opaque                                                               |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 

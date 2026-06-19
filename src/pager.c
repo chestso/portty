@@ -135,6 +135,10 @@ bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
     free(p->text);
     p->text = copy;
 
+    // Drop any link hint left over from the main terminal — the pager owns the
+    // hint channel while it is open and re-resolves on the next hover.
+    platform_set_link_hint(p->plat, NULL, 0);
+
     if (!was_open)
         platform_pause_pty(p->plat); // freeze background output behind the overlay
     return true;
@@ -148,6 +152,7 @@ void pager_close(Pager *p)
     free(p->text);
     p->text = NULL;
     p->hovered = 0;
+    platform_set_link_hint(p->plat, NULL, 0);
     platform_set_cursor(p->plat, PLATFORM_CURSOR_TEXT);
     platform_resume_pty(p->plat);
 }
@@ -329,11 +334,19 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     bool in_grid = cell_at(p, pixel_x, pixel_y, &row, &col);
     uint16_t hid = in_grid ? link_at(p, row, col) : 0;
 
-    // Hover feedback (link pointer vs text cursor).
+    // Hover feedback (link pointer vs text cursor) + the real-URI hint pill,
+    // positioned via the pixel-Y anchor like the main terminal.
     if (hid != p->hovered) {
         terminal_set_hovered_hyperlink(p->term, hid);
         platform_set_cursor(p->plat,
                             hid != 0 ? PLATFORM_CURSOR_POINTER : PLATFORM_CURSOR_TEXT);
+        if (hid != 0) {
+            char url[4096];
+            size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
+            platform_set_link_hint(p->plat, n > 0 ? url : NULL, pixel_y);
+        } else {
+            platform_set_link_hint(p->plat, NULL, pixel_y);
+        }
         p->hovered = hid;
     }
 

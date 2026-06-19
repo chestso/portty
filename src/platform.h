@@ -153,6 +153,13 @@ struct PlatformBackend
     // Dismiss the current notification panel (no-op if none is shown).
     void (*notify_dismiss)(PlatformBackend *plat);
 
+    // Show (or update) a transient hover hint revealing the real URI of the
+    // OSC-8 link under the pointer; url == NULL/"" hides it. anchor_py is the
+    // hovered link's physical-pixel Y, used to position the hint clear of the
+    // link (top, flipping to bottom). SDL3 draws a full-width strip via the
+    // renderer; GTK4 reveals a native .osd pill. Independent of notify().
+    void (*set_link_hint)(PlatformBackend *plat, const char *url, int anchor_py);
+
     // Enable or disable the drag-autoscroll tick. While enabled, the
     // backend fires `on_autoscroll_tick` on its own timer (~30Hz).
     void (*set_autoscroll)(PlatformBackend *plat, bool enabled);
@@ -207,6 +214,7 @@ bool platform_open_url(PlatformBackend *plat, const char *url, char *err,
 void platform_notify(PlatformBackend *plat, const char *title, const char *body,
                      PlatformNotifyLevel level);
 void platform_notify_dismiss(PlatformBackend *plat);
+void platform_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py);
 void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 void platform_set_autoscroll(PlatformBackend *plat, bool enabled);
 bool platform_get_gpu_info(PlatformBackend *plat, const char **device,

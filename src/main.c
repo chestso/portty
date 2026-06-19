@@ -527,12 +527,24 @@ static uint16_t hyperlink_id_at(MainContext *ctx, int pixel_x, int pixel_y,
 // (motion) and on_revalidate_hover (post-PTY re-resolution at the live pointer).
 static bool resolve_link_hover(MainContext *ctx, int px, int py)
 {
-    uint16_t hid = (px < 0) ? 0 : hyperlink_id_at(ctx, px, py, NULL, NULL);
+    int link_row = 0, link_col = 0;
+    uint16_t hid = (px < 0) ? 0 : hyperlink_id_at(ctx, px, py, &link_row, &link_col);
     if (hid == terminal_hovered_hyperlink(ctx->term))
         return false;
     terminal_set_hovered_hyperlink(ctx->term, hid);
     platform_set_cursor(ctx->plat,
                         hid != 0 ? PLATFORM_CURSOR_POINTER : PLATFORM_CURSOR_TEXT);
+    // Reveal the real target URI in a transient hover hint, positioned clear
+    // of the link via the pixel-Y anchor. hid == 0 (pointer off any link)
+    // hides it.
+    if (hid != 0) {
+        char url[4096];
+        size_t n = terminal_cell_get_hyperlink(ctx->term, link_row, link_col, url,
+                                               sizeof(url));
+        platform_set_link_hint(ctx->plat, n > 0 ? url : NULL, py);
+    } else {
+        platform_set_link_hint(ctx->plat, NULL, py);
+    }
     return true;
 }
 
@@ -554,6 +566,8 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     // its native strip handles its own input and cursor.)
     int notif_hit = renderer_notification_hit(ctx->rend, pixel_x, pixel_y);
     if (notif_hit != 0) {
+        // Pointer is over the panel — no link underneath it to hint.
+        platform_set_link_hint(ctx->plat, NULL, 0);
         if (pressed && button == 1 && notif_hit == 2) {
             platform_notify_dismiss(ctx->plat);
             platform_set_cursor(ctx->plat, PLATFORM_CURSOR_TEXT);
@@ -581,45 +595,46 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     // We update the cursor + hover-id and trigger a redraw on changes.
     bool hover_changed = false;
     if (mouse_mode == 0 || shift_held) {
-        int link_row, link_col;
-        uint16_t hid = hyperlink_id_at(ctx, pixel_x, pixel_y, &link_row, &link_col);
-        uint16_t prev = terminal_hovered_hyperlink(ctx->term);
-        if (hid != prev) {
-            terminal_set_hovered_hyperlink(ctx->term, hid);
-            platform_set_cursor(ctx->plat,
-                                hid != 0 ? PLATFORM_CURSOR_POINTER
-                                         : PLATFORM_CURSOR_TEXT);
-            hover_changed = true;
-        }
+        // Update hover state, cursor shape, and the link-hint (centralized in
+        // resolve_link_hover so the post-PTY revalidation path stays in sync).
+        hover_changed = resolve_link_hover(ctx, pixel_x, pixel_y);
 
         // Ctrl + left-click on a link cell: open URL, swallow the event so
         // it does not start a selection.
-        if (hid != 0 && button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
-            char url[4096];
-            size_t n = terminal_cell_get_hyperlink(ctx->term, link_row,
-                                                   link_col, url, sizeof(url));
-            if (n > 0 && terminal_hyperlink_is_safe(url)) {
-                vlog("Opening OSC-8 URL: %s\n", url);
-                char err[256];
-                if (!platform_open_url(ctx->plat, url, err, sizeof(err))) {
-                    // Bound the URL so a very long link can't blow up (or
-                    // truncate) the one-line title.
+        if (button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
+            int link_row, link_col;
+            uint16_t hid = hyperlink_id_at(ctx, pixel_x, pixel_y, &link_row, &link_col);
+            if (hid != 0) {
+                char url[4096];
+                size_t n = terminal_cell_get_hyperlink(ctx->term, link_row,
+                                                       link_col, url, sizeof(url));
+                if (n > 0 && terminal_hyperlink_is_safe(url)) {
+                    vlog("Opening OSC-8 URL: %s\n", url);
+                    char err[256];
+                    if (!platform_open_url(ctx->plat, url, err, sizeof(err))) {
+                        // Bound the URL so a very long link can't blow up (or
+                        // truncate) the one-line title.
+                        char title[256];
+                        char body[320];
+                        snprintf(title, sizeof(title), "Couldn't open %.200s", url);
+                        snprintf(body, sizeof(body), "Error is: %.256s", err);
+                        fprintf(stderr, "ERROR: %s — %s\n", title, body);
+                        platform_notify(ctx->plat, title, body, PLATFORM_NOTIFY_ERROR);
+                    }
+                } else if (n > 0) {
                     char title[256];
-                    char body[320];
-                    snprintf(title, sizeof(title), "Couldn't open %.200s", url);
-                    snprintf(body, sizeof(body), "Error is: %.256s", err);
-                    fprintf(stderr, "ERROR: %s — %s\n", title, body);
-                    platform_notify(ctx->plat, title, body, PLATFORM_NOTIFY_ERROR);
+                    snprintf(title, sizeof(title), "Refusing to open %.200s", url);
+                    fprintf(stderr, "WARNING: %s (disallowed scheme)\n", title);
+                    platform_notify(ctx->plat, title, "Disallowed URL scheme",
+                                    PLATFORM_NOTIFY_WARNING);
                 }
-            } else if (n > 0) {
-                char title[256];
-                snprintf(title, sizeof(title), "Refusing to open %.200s", url);
-                fprintf(stderr, "WARNING: %s (disallowed scheme)\n", title);
-                platform_notify(ctx->plat, title, "Disallowed URL scheme",
-                                PLATFORM_NOTIFY_WARNING);
+                return true;
             }
-            return true;
         }
+    } else {
+        // A mouse-mode app owns the pointer (and Shift isn't overriding) — drop
+        // any lingering link hint from a prior hover.
+        platform_set_link_hint(ctx->plat, NULL, 0);
     }
 
     // Forward to terminal if mouse mode is active and Shift is not held

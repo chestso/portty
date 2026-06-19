@@ -209,6 +209,13 @@ void platform_notify_dismiss(PlatformBackend *plat)
     plat->notify_dismiss(plat);
 }
 
+void platform_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py)
+{
+    if (!plat || !plat->set_link_hint)
+        return;
+    plat->set_link_hint(plat, url, anchor_py);
+}
+
 void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor)
 {
     if (!plat || !plat->set_cursor)

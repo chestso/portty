@@ -153,6 +153,14 @@ typedef struct
     GtkWidget *notif_body_label;
     const char *notif_level_class;
 
+    // OSC-8 hover hint: a compact `.osd` pill (a GtkLabel in a GtkRevealer)
+    // floated in a corner of the same GtkOverlay. Shows the link's real URI;
+    // its vertical alignment flips (bottom by default, top when the link is
+    // low) so it never covers the link. Non-interactive (can_target FALSE) so
+    // it never blocks hovering/clicking the link beneath it.
+    GtkWidget *hint_revealer;
+    GtkWidget *hint_label;
+
     // Stored for draw_func access
     TerminalBackend *term;
     RendererBackend *rend;
@@ -713,6 +721,21 @@ static void on_motion(GtkEventControllerMotion *controller, double x, double y,
     }
 }
 
+// Pointer left the drawing area — drop any link-hover hint pill + underline.
+static void on_motion_leave(GtkEventControllerMotion *controller, gpointer user_data)
+{
+    (void)controller;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+    if (ctx->hint_revealer)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->hint_revealer), FALSE);
+    if (ctx->term) {
+        terminal_set_hovered_hyperlink(ctx->term, 0);
+        terminal_mark_dirty(ctx->term);
+        if (ctx->drawing_area)
+            gtk_widget_queue_draw(ctx->drawing_area);
+    }
+}
+
 // Scroll handler
 static gboolean on_scroll(GtkEventControllerScroll *controller,
                           double dx, double dy, gpointer user_data)
@@ -795,6 +818,8 @@ static void on_focus_leave(GtkEventControllerFocus *controller,
     (void)controller;
     GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
     ctx->has_focus = false;
+    if (ctx->hint_revealer)
+        gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->hint_revealer), FALSE);
     terminal_mark_dirty(ctx->term);
     if (ctx->im_context && ctx->drawing_area &&
         gtk_widget_get_mapped(ctx->drawing_area))
@@ -1015,6 +1040,7 @@ static bool gtk4_open_url(PlatformBackend *plat, const char *url, char *err,
 static void gtk4_notify(PlatformBackend *plat, const char *title,
                         const char *body, PlatformNotifyLevel level);
 static void gtk4_notify_dismiss(PlatformBackend *plat);
+static void gtk4_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py);
 static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled);
 static bool gtk4_get_gpu_info(PlatformBackend *plat, const char **device,
@@ -1047,6 +1073,7 @@ PlatformBackend platform_backend_gtk4 = {
     .open_url = gtk4_open_url,
     .notify = gtk4_notify,
     .notify_dismiss = gtk4_notify_dismiss,
+    .set_link_hint = gtk4_set_link_hint,
     .set_cursor = gtk4_set_cursor,
     .set_autoscroll = gtk4_set_autoscroll,
     .get_gpu_info = gtk4_get_gpu_info,
@@ -1558,6 +1585,41 @@ static void gtk4_build_notification(GTK4PlatformData *ctx)
     ctx->notif_level_class = NULL;
 }
 
+// Build the floating OSC-8 link-hint pill (hidden initially): a single-line
+// .osd label, middle-ellipsized, inside a crossfading GtkRevealer pinned to a
+// corner. Non-interactive so it never intercepts pointer events from the
+// terminal/link beneath it.
+static void gtk4_build_link_hint(GTK4PlatformData *ctx)
+{
+    GtkWidget *revealer = gtk_revealer_new();
+    gtk_revealer_set_transition_type(GTK_REVEALER(revealer),
+                                     GTK_REVEALER_TRANSITION_TYPE_CROSSFADE);
+    gtk_revealer_set_transition_duration(GTK_REVEALER(revealer), 120);
+    // Bottom-left corner by default; gtk4_set_link_hint flips valign to the top
+    // when a low link would be covered. Margins keep it off the window edge.
+    gtk_widget_set_halign(revealer, GTK_ALIGN_START);
+    gtk_widget_set_valign(revealer, GTK_ALIGN_END);
+    gtk_widget_set_margin_start(revealer, 9);
+    gtk_widget_set_margin_end(revealer, 9);
+    gtk_widget_set_margin_top(revealer, 9);
+    gtk_widget_set_margin_bottom(revealer, 9);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
+    gtk_widget_set_can_target(revealer, FALSE);
+
+    GtkWidget *label = gtk_label_new("");
+    gtk_widget_add_css_class(label, "osd");
+    gtk_widget_add_css_class(label, "bloom-link-hint");
+    gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
+    gtk_label_set_max_width_chars(GTK_LABEL(label), 80);
+    gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
+    gtk_widget_set_can_target(label, FALSE);
+
+    gtk_revealer_set_child(GTK_REVEALER(revealer), label);
+
+    ctx->hint_revealer = revealer;
+    ctx->hint_label = label;
+}
+
 static bool gtk4_create_window(PlatformBackend *plat, const char *title,
                                int width, int height)
 {
@@ -1598,6 +1660,12 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
         "}"
         ".bloom-notification.bloom-transparent {"
         "  background-color: alpha(#1c1c20, 0.80);"
+        "}"
+        /* OSC-8 link-hint pill: the .osd class supplies the translucent dark
+         * GNOME on-screen-display look; this shapes it into a rounded pill. */
+        ".bloom-link-hint {"
+        "  padding: 4px 12px;"
+        "  border-radius: 9999px;"
         "}");
     gtk_style_context_add_provider_for_display(
         gdk_display_get_default(), GTK_STYLE_PROVIDER(css_provider),
@@ -1660,6 +1728,8 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     gtk_overlay_set_child(GTK_OVERLAY(overlay), content_widget);
     gtk4_build_notification(ctx);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), ctx->notif_revealer);
+    gtk4_build_link_hint(ctx);
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), ctx->hint_revealer);
     adw_toolbar_view_set_content(ADW_TOOLBAR_VIEW(toolbar_view), overlay);
 
     adw_window_set_content(ADW_WINDOW(ctx->window), toolbar_view);
@@ -1855,6 +1925,7 @@ static void gtk4_run(PlatformBackend *plat, TerminalBackend *term,
     // Mouse motion
     GtkEventController *motion_controller = gtk_event_controller_motion_new();
     g_signal_connect(motion_controller, "motion", G_CALLBACK(on_motion), ctx);
+    g_signal_connect(motion_controller, "leave", G_CALLBACK(on_motion_leave), ctx);
     gtk_widget_add_controller(ctx->drawing_area, motion_controller);
 
     // Scroll
@@ -2120,6 +2191,30 @@ static void gtk4_notify_dismiss(PlatformBackend *plat)
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
     if (ctx->notif_revealer)
         gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->notif_revealer), FALSE);
+}
+
+// OSC-8 hover hint: reveal/update the .osd pill with the link's real URI.
+// url == NULL/"" hides it. Flips the pill from its default bottom corner to
+// the top when the hovered link is in the bottom half (where the pill sits),
+// so it never covers the link being hovered.
+static void gtk4_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
+    if (!ctx->hint_revealer || !ctx->hint_label)
+        return;
+    if (!url || !url[0]) {
+        gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->hint_revealer), FALSE);
+        return;
+    }
+    gtk_label_set_text(GTK_LABEL(ctx->hint_label), url);
+    int scale = ctx->scale_factor > 0 ? ctx->scale_factor : 1;
+    int logical_y = anchor_py / scale;
+    int h = gtk_widget_get_height(ctx->drawing_area);
+    GtkAlign valign = (h > 0 && logical_y > h / 2) ? GTK_ALIGN_START : GTK_ALIGN_END;
+    gtk_widget_set_valign(ctx->hint_revealer, valign);
+    gtk_revealer_set_reveal_child(GTK_REVEALER(ctx->hint_revealer), TRUE);
 }
 
 static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor)

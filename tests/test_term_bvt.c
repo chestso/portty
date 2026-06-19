@@ -260,9 +260,11 @@ static void test_hyperlink_safety(void)
     ASSERT_TRUE(terminal_hyperlink_is_safe("https://example.com"));
     ASSERT_TRUE(terminal_hyperlink_is_safe("HTTP://example.com")); /* case-insensitive scheme */
     ASSERT_TRUE(terminal_hyperlink_is_safe("mailto:hi@example.com"));
+    /* file:// is allowed — tools emit file:///abs links to local files. */
+    ASSERT_TRUE(terminal_hyperlink_is_safe("file:///home/user/x.c"));
+    ASSERT_TRUE(terminal_hyperlink_is_safe("FILE:///home/user/x.c")); /* case-insensitive */
     ASSERT_FALSE(terminal_hyperlink_is_safe("javascript:alert(1)"));
     ASSERT_FALSE(terminal_hyperlink_is_safe("data:text/html,<script>"));
-    ASSERT_FALSE(terminal_hyperlink_is_safe("file:///etc/passwd"));
     ASSERT_FALSE(terminal_hyperlink_is_safe(""));
     ASSERT_FALSE(terminal_hyperlink_is_safe(NULL));
 }

@@ -257,6 +257,7 @@ static bool sdl3_open_url(PlatformBackend *plat, const char *url, char *err,
 static void sdl3_notify(PlatformBackend *plat, const char *title,
                         const char *body, PlatformNotifyLevel level);
 static void sdl3_notify_dismiss(PlatformBackend *plat);
+static void sdl3_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py);
 static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled);
 
@@ -285,6 +286,7 @@ PlatformBackend platform_backend_sdl3 = {
     .open_url = sdl3_open_url,
     .notify = sdl3_notify,
     .notify_dismiss = sdl3_notify_dismiss,
+    .set_link_hint = sdl3_set_link_hint,
     .set_cursor = sdl3_set_cursor,
     .set_autoscroll = sdl3_set_autoscroll,
 };
@@ -1064,6 +1066,14 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
             } else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
                        event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
                 ctx->has_focus = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
+                if (!ctx->has_focus)
+                    renderer_set_link_hint(ctx->rend, NULL, 0);
+                terminal_mark_dirty(term);
+            } else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
+                // Pointer left the window — drop any link hover hint + underline.
+                renderer_set_link_hint(ctx->rend, NULL, 0);
+                if (term)
+                    terminal_set_hovered_hyperlink(term, 0);
                 terminal_mark_dirty(term);
             } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
                 if (event.wheel.y != 0) {
@@ -1309,6 +1319,17 @@ static void sdl3_notify_dismiss(PlatformBackend *plat)
     renderer_clear_notification(ctx->rend);
     if (ctx->term)
         terminal_mark_dirty(ctx->term);
+}
+
+// Hover hint: forward to the renderer-drawn strip. The repaint is driven by
+// the caller (on_mouse / revalidate return true → mark dirty), except for the
+// out-of-band pointer-leave path, which marks dirty itself.
+static void sdl3_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py)
+{
+    if (!plat || !plat->backend_data)
+        return;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    renderer_set_link_hint(ctx->rend, url, anchor_py);
 }
 
 static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled)

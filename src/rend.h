@@ -70,6 +70,11 @@ struct RendererBackend
     /* Set whether the close button is hovered (draws a highlight behind it).
      * Returns true if the state changed (caller should request a repaint). */
     bool (*set_notification_hover)(RendererBackend *rend, bool hovered);
+    /* Transient OSC-8 hover hint (pure-SDL3 path; GTK4 uses a native pill).
+     * Draws a single-line full-width strip showing the link's real URI;
+     * url == NULL/"" hides it. anchor_py is the link's physical-pixel Y — the
+     * strip sits at the top, flipping to the bottom when the link is up there. */
+    void (*set_link_hint)(RendererBackend *rend, const char *url, int anchor_py);
     int (*render_to_png)(RendererBackend *rend, TerminalBackend *term,
                          const char *output_path);
     void (*set_content_scale)(RendererBackend *rend, float scale);
@@ -96,6 +101,7 @@ void renderer_set_notification(RendererBackend *rend, const char *title,
 void renderer_clear_notification(RendererBackend *rend);
 int renderer_notification_hit(RendererBackend *rend, int px, int py);
 bool renderer_set_notification_hover(RendererBackend *rend, bool hovered);
+void renderer_set_link_hint(RendererBackend *rend, const char *url, int anchor_py);
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path);
 void renderer_set_content_scale(RendererBackend *rend, float scale);

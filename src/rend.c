@@ -133,6 +133,13 @@ bool renderer_set_notification_hover(RendererBackend *rend, bool hovered)
     return rend->set_notification_hover(rend, hovered);
 }
 
+void renderer_set_link_hint(RendererBackend *rend, const char *url, int anchor_py)
+{
+    if (!rend || !rend->set_link_hint)
+        return;
+    rend->set_link_hint(rend, url, anchor_py);
+}
+
 int renderer_render_to_png(RendererBackend *rend, TerminalBackend *term,
                            const char *output_path)
 {

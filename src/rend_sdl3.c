@@ -947,6 +947,18 @@ typedef struct RendererSdl3Data
     int notif_h;
     SDL_FRect notif_close_rect;
 
+    // Transient OSC-8 hover hint: a single-line full-width strip showing the
+    // link's real URI, rasterized into hint_texture via the notification glyph
+    // layout (no close button / accent). hint_text is retained for resize /
+    // font-reload rebuilds. hint_anchor_py is the hovered link's pixel-Y; the
+    // strip sits at the top, flipping to the bottom when the link is in the
+    // band it would cover (so it never hides the link being hovered).
+    bool hint_active;
+    char *hint_text;
+    SDL_Texture *hint_texture;
+    int hint_h;
+    int hint_anchor_py;
+
     // Sixel texture cache. Keyed by the engine's stable image id; the
     // version detects pixel changes (animation) so we re-upload in place
     // via SDL_UpdateTexture instead of churning textures. Entries whose id
@@ -967,6 +979,23 @@ static void sixel_cache_clear(RendererSdl3Data *data);
 // Forward declaration: rebuild the notification panel texture (used by
 // sdl3_load_fonts / sdl3_resize, which precede the definition).
 static void build_notif_texture(RendererSdl3Data *data);
+
+// Forward declaration: rebuild the link-hint strip texture (same rebuild
+// triggers as the notification panel — resize / font reload).
+static void build_hint_texture(RendererSdl3Data *data);
+
+// Tear down the link-hint strip: texture, retained URI, and state.
+static void hint_free(RendererSdl3Data *data)
+{
+    if (data->hint_texture) {
+        SDL_DestroyTexture(data->hint_texture);
+        data->hint_texture = NULL;
+    }
+    free(data->hint_text);
+    data->hint_text = NULL;
+    data->hint_active = false;
+    data->hint_h = 0;
+}
 
 // Destroy the notification's GPU textures (kept separate from the source
 // strings, which a rebuild reuses).
@@ -1107,6 +1136,11 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->notif_close_tex = NULL;
     data->notif_h = 0;
     data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
+    data->hint_active = false;
+    data->hint_text = NULL;
+    data->hint_texture = NULL;
+    data->hint_h = 0;
+    data->hint_anchor_py = 0;
     data->linear_target = NULL;
     data->linear_w = 0;
     data->linear_h = 0;
@@ -1188,8 +1222,9 @@ static void sdl3_destroy(RendererBackend *backend)
     rend_shader_destroy(data->glyph_shader);
     data->glyph_shader = NULL;
 
-    // Destroy notification panel textures + retained strings
+    // Destroy notification panel + link-hint textures and retained strings
     notif_free(data);
+    hint_free(data);
 
     free(data->font_path);
     data->font_path = NULL;
@@ -1393,6 +1428,8 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     // Cell metrics changed — rebuild any active notification panel at the new size.
     if (data->notif_active)
         build_notif_texture(data);
+    if (data->hint_active)
+        build_hint_texture(data);
 
     return 0;
 }
@@ -2770,6 +2807,118 @@ static void build_notif_texture(RendererSdl3Data *data)
     free(body_copy);
 }
 
+// Byte length of the UTF-8 sequence starting with lead byte `c`.
+static int utf8_seq_len(unsigned char c)
+{
+    return (c < 0x80) ? 1 : (c < 0xE0) ? 2
+                        : (c < 0xF0)   ? 3
+                                       : 4;
+}
+
+// Middle-truncate `src` to at most `max_cols` display columns (codepoints),
+// inserting a "…" ellipsis, into the NUL-terminated buffer `out`. URIs that
+// already fit are copied verbatim. Operates on codepoint boundaries so a
+// multibyte sequence is never split.
+static void hint_truncate_middle(const char *src, char *out, size_t out_cap,
+                                 int max_cols)
+{
+    if (!out || out_cap == 0)
+        return;
+    if (!src) {
+        out[0] = '\0';
+        return;
+    }
+    if (max_cols < 5)
+        max_cols = 5; // room for head + ellipsis + tail
+    size_t len = strlen(src);
+    int ncp = 0;
+    for (size_t i = 0; i < len;)
+        i += utf8_seq_len((unsigned char)src[i]), ncp++;
+    if (ncp <= max_cols) {
+        snprintf(out, out_cap, "%s", src);
+        return;
+    }
+    int head = (max_cols - 1) / 2;
+    int tail = max_cols - 1 - head;
+    size_t head_bytes = 0;
+    for (int idx = 0; idx < head && head_bytes < len;)
+        head_bytes += utf8_seq_len((unsigned char)src[head_bytes]), idx++;
+    size_t tail_start = 0;
+    for (int idx = 0; idx < ncp - tail && tail_start < len;)
+        tail_start += utf8_seq_len((unsigned char)src[tail_start]), idx++;
+
+    size_t pos = 0;
+    if (head_bytes > out_cap - 1)
+        head_bytes = out_cap - 1;
+    memcpy(out, src, head_bytes);
+    pos = head_bytes;
+    static const char ell[3] = { (char)0xE2, (char)0x80, (char)0xA6 }; /* U+2026 */
+    for (int k = 0; k < 3 && pos + 1 < out_cap; k++)
+        out[pos++] = ell[k];
+    size_t tail_bytes = len - tail_start;
+    if (tail_bytes > out_cap - 1 - pos)
+        tail_bytes = out_cap - 1 - pos;
+    memcpy(out + pos, src + tail_start, tail_bytes);
+    pos += tail_bytes;
+    out[pos] = '\0';
+}
+
+// Rasterize the hover-hint URI (hint_text) into hint_texture, a single-line
+// full-window-width strip. Frees any previous texture first. Reuses the
+// notification glyph-layout path; neutral styling, no close button or accent.
+static void build_hint_texture(RendererSdl3Data *data)
+{
+    if (data->hint_texture) {
+        SDL_DestroyTexture(data->hint_texture);
+        data->hint_texture = NULL;
+    }
+    data->hint_h = 0;
+    if (!data->hint_active || !data->hint_text || !data->font || data->width <= 0 ||
+        data->cell_height <= 0 || data->cell_width <= 0 ||
+        !font_has_style(data->font, FONT_STYLE_NORMAL))
+        return;
+
+    float scale = data->content_scale > 0 ? data->content_scale : 1.0f;
+    int pad = (int)(8.0f * scale + 0.5f);
+    int line_h = data->cell_height;
+    int panel_w = data->width;
+    int panel_h = pad * 2 + line_h;
+
+    int avail_px = panel_w - 2 * pad;
+    int max_cols = avail_px > 0 ? avail_px / data->cell_width : 0;
+    char trunc[1024];
+    hint_truncate_middle(data->hint_text, trunc, sizeof(trunc), max_cols);
+
+    uint8_t *bufp = calloc((size_t)panel_w * panel_h, 4);
+    if (!bufp)
+        return;
+    // Dark neutral fill, opaque by default; translucent when notification
+    // transparency is opted in (matches the panel).
+    uint8_t bg_a = bloom_notification_transparent ? 205 : 255;
+    for (int y = 0; y < panel_h; y++) {
+        for (int x = 0; x < panel_w; x++) {
+            uint8_t *d = bufp + ((size_t)y * panel_w + x) * 4;
+            d[0] = 38;
+            d[1] = 38;
+            d[2] = 44;
+            d[3] = bg_a;
+        }
+    }
+    int baseline = pad + data->font_ascent;
+    notif_draw_line(data, bufp, panel_w, panel_h, trunc, pad, baseline,
+                    FONT_STYLE_NORMAL, 210, 210, 220);
+
+    SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                         SDL_TEXTUREACCESS_STATIC, panel_w, panel_h);
+    if (tex) {
+        SDL_UpdateTexture(tex, NULL, bufp, panel_w * 4);
+        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+        data->hint_texture = tex;
+        data->hint_h = panel_h;
+    }
+    free(bufp);
+}
+
 // Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
 // insert glyphs with no draw calls, and if eviction occurred mid-pass, flush the
 // partial staging and re-populate so destroyed glyphs are re-rasterized; then
@@ -2852,6 +3001,25 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
                               &data->notif_close_rect);
         }
     }
+
+    // Transient OSC-8 link-hint strip — same sRGB-chrome compositing as the
+    // panel. Anchored at the top; flips to the bottom when the hovered link is
+    // in the top band the strip would cover, and is pushed below an active
+    // notification panel so the two never overlap.
+    if (data->hint_active && data->hint_texture && data->hint_h > 0) {
+        int top_band = data->hint_h;
+        if (data->notif_active && data->notif_h > 0)
+            top_band += data->notif_h;
+        float y;
+        if (data->hint_anchor_py >= 0 && data->hint_anchor_py < top_band)
+            y = (float)(data->height - data->hint_h); // link is up top — flip down
+        else if (data->notif_active && data->notif_h > 0)
+            y = (float)data->notif_h; // stack below the notification panel
+        else
+            y = 0.0f;
+        SDL_FRect dst = { 0.0f, y, (float)data->width, (float)data->hint_h };
+        SDL_RenderTexture(data->renderer, data->hint_texture, NULL, &dst);
+    }
 }
 
 static void sdl3_present(RendererBackend *backend)
@@ -2880,9 +3048,11 @@ static void sdl3_resize(RendererBackend *backend, int width, int height)
     RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
     data->width = width;
     data->height = height;
-    // Panel spans the full window width, so a resize requires a rebuild.
+    // Panel + hint span the full window width, so a resize requires a rebuild.
     if (data->notif_active)
         build_notif_texture(data);
+    if (data->hint_active)
+        build_hint_texture(data);
 }
 
 static bool sdl3_get_cell_size(RendererBackend *backend, int *cell_width, int *cell_height)
@@ -3032,6 +3202,30 @@ static bool sdl3_set_notification_hover(RendererBackend *backend, bool hovered)
         return false;
     data->notif_close_hover = hovered;
     return true;
+}
+
+static void sdl3_set_link_hint(RendererBackend *backend, const char *url,
+                               int anchor_py)
+{
+    if (!backend || !backend->backend_data)
+        return;
+    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
+    if (!url || !url[0]) {
+        if (data->hint_active)
+            hint_free(data);
+        return;
+    }
+    // Same URI already shown — just refresh the anchor (link may have moved)
+    // without rebuilding the texture on every motion event.
+    if (data->hint_active && data->hint_text && strcmp(data->hint_text, url) == 0) {
+        data->hint_anchor_py = anchor_py;
+        return;
+    }
+    free(data->hint_text);
+    data->hint_text = strdup(url);
+    data->hint_active = (data->hint_text != NULL);
+    data->hint_anchor_py = anchor_py;
+    build_hint_texture(data);
 }
 
 static int sdl3_notification_hit(RendererBackend *backend, int px, int py)
@@ -3233,6 +3427,7 @@ RendererBackend renderer_backend_sdl3 = {
     .clear_notification = sdl3_clear_notification,
     .notification_hit = sdl3_notification_hit,
     .set_notification_hover = sdl3_set_notification_hover,
+    .set_link_hint = sdl3_set_link_hint,
     .render_to_png = sdl3_render_to_png,
     .set_content_scale = sdl3_set_content_scale,
 };
