@@ -1,6 +1,5 @@
 #include "rend_sdl3_atlas.h"
 #include "common.h"
-#include <math.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -13,9 +12,7 @@ static bool s_srgb_to_linear_ready = false;
 static void build_srgb_to_linear_lut(void)
 {
     for (int i = 0; i < 256; i++) {
-        double c = i / 255.0;
-        double lin = (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
-        int v = (int)(lin * 255.0 + 0.5);
+        int v = (int)(rend_srgb_to_linear((uint8_t)i) * 255.0f + 0.5f);
         s_srgb_to_linear_u8[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
     }
     s_srgb_to_linear_ready = true;

@@ -3,12 +3,31 @@
 
 #include "font.h"
 #include <SDL3/SDL.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 
 #define REND_SDL3_ATLAS_HASH_SIZE    8192
 #define REND_SDL3_ATLAS_TEXTURE_SIZE 2048
 #define REND_SDL3_ATLAS_MAX_SHELVES  128
+
+// sRGB transfer function, single-sourced here for every CPU-side color-space
+// conversion in the renderer (the color-glyph atlas linearize LUT and the
+// notification/link-hint panel glyph blend). The standard sRGB EOTF/OETF.
+static inline float rend_srgb_to_linear(uint8_t v)
+{
+    double c = v / 255.0;
+    double lin = (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
+    return (float)lin;
+}
+
+static inline uint8_t rend_linear_to_srgb(float lin)
+{
+    double l = lin;
+    double s = (l <= 0.0031308) ? (l * 12.92) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);
+    int v = (int)(s * 255.0 + 0.5);
+    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+}
 
 typedef struct
 {

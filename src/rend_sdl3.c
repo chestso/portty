@@ -2561,7 +2561,19 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
 
 // Alpha-composite a straight-alpha RGBA glyph bitmap (RGB already the fg
 // colour, coverage in alpha — see font_ft.c rasterize path) over the opaque
-// panel buffer at a baseline-relative pen position.
+// panel buffer at a baseline-relative pen position. The coverage blend runs in
+// linear light (decode fg/bg sRGB -> linear, blend, re-encode) so panel/hint
+// text matches the gamma-correct weight of the terminal grid, which SDL blends
+// in an SRGB_LINEAR float target. See rend_srgb_to_linear / rend_linear_to_srgb.
+//
+// This blends in linear light unconditionally — there is no linear_ok check
+// here, unlike draw_scene_linear's grid path. The SDL3 platform forces the
+// "gpu" renderer and aborts startup if it is unavailable (platform_sdl3.c),
+// precisely so the grid never blends in sRGB space, so a linear-capable
+// renderer is guaranteed wherever these panels are drawn. (The panels are
+// SDL3-only; GTK4 uses a native libadwaita strip.) The grid's !linear_ok
+// branch only survives as a guard for a runtime float-target allocation
+// failure, a degraded state not worth mirroring here.
 static void notif_blit_glyph(uint8_t *buf, int buf_w, int buf_h,
                              const GlyphBitmap *gb, int pen_x, int baseline)
 {
@@ -2584,8 +2596,12 @@ static void notif_blit_glyph(uint8_t *buf, int buf_w, int buf_h,
             if (!a)
                 continue;
             uint8_t *d = drow + (size_t)dx * 4;
-            for (int c = 0; c < 3; c++)
-                d[c] = (uint8_t)((s[c] * a + d[c] * (255 - a) + 127) / 255);
+            float af = a / 255.0f;
+            for (int c = 0; c < 3; c++) {
+                float fg = rend_srgb_to_linear(s[c]);
+                float bg = rend_srgb_to_linear(d[c]);
+                d[c] = rend_linear_to_srgb(fg * af + bg * (1.0f - af));
+            }
             d[3] = 255;
         }
     }
