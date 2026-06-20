@@ -2391,8 +2391,11 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
 // toggle) churns GPU allocations and forces SDL's GPU backend to rebuild
 // pipelines tied to the target format; that path has crashed on NVK (a
 // zeroed/freed VkPipeline bound during the command-queue flush). A stable
-// grow-only target removes that per-resize churn. Returns false (and disables
-// the linear path permanently) if the GPU can't allocate the float target.
+// grow-only target removes that per-resize churn. draw_scene_linear
+// additionally calls SDL_FlushRenderer before each SDL_SetRenderTarget
+// switch to invalidate any cached pipeline state that a swapchain rebuild
+// may have freed. Returns false (and disables the linear path permanently)
+// if the GPU can't allocate the float target.
 static bool ensure_linear_target(RendererSdl3Data *data, int *out_w, int *out_h)
 {
     if (out_w)
@@ -2563,8 +2566,20 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
     int out_w = 0, out_h = 0;
     bool linear = ensure_linear_target(data, &out_w, &out_h);
 
-    if (linear)
+    if (linear) {
+        // Flush any pending commands from the previous frame and invalidate
+        // cached pipeline state.  After a swapchain rebuild (e.g. fullscreen
+        // toggle), NVK frees the old VkPipeline objects.  If the SDL3 GPU
+        // backend still holds a cached pipeline reference from the previous
+        // frame's render pass, the BindGraphicsPipeline inside
+        // SDL_SetRenderTarget's internal command-queue flush will dereference
+        // a freed handle and SIGSEGV.  SDL_FlushRenderer submits the pending
+        // command queue and invalidates all cached state so SDL will prepare
+        // fresh state for the new render pass, avoiding the stale-pipeline
+        // bind.
+        SDL_FlushRenderer(data->renderer);
         SDL_SetRenderTarget(data->renderer, data->linear_target);
+    }
 
     SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
     SDL_RenderClear(data->renderer);
@@ -2573,6 +2588,7 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
         render_sixel_images(data, term);
 
     if (linear) {
+        SDL_FlushRenderer(data->renderer);
         SDL_SetRenderTarget(data->renderer, dst);
         SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
         // The target is grow-only and may be larger than the output: copy only

@@ -396,6 +396,106 @@ static void test_selection_skips_wide_continuation(void)
     terminal_destroy(&t);
 }
 
+/* ------------------------------------------------------------------ */
+/* Alt-screen resize regression tests                                 */
+/*                                                                    */
+/* Motivating crash: leaving alt screen after a resize restored a grid */
+/* allocated at the old (smaller) dimensions while vt->cols reflected */
+/* the new (larger) size.  bvt_get_cell overflowed the page's cells   */
+/* array → heap-buffer-overflow (ASan).  The bloom-vt fix reflows   */
+/* the restored grid to match current dimensions.                    */
+/* ------------------------------------------------------------------ */
+
+/* Enter alt screen, resize wider, exit alt screen.                   */
+/* Before the fix, reading cells at col >= old_cols overflowed.       */
+static void test_altscreen_resize_wider_readable(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 10, 24) != NULL);
+    feed(&t, "ABCDEFGHIJ");
+
+    /* Enter alt screen, resize wider (10 -> 20 cols), exit. */
+    feed(&t, "\x1b[?1049h");
+    terminal_resize(&t, 20, 24);
+    feed(&t, "\x1b[?1049l");
+
+    int rows, cols;
+    terminal_get_dimensions(&t, &rows, &cols);
+    ASSERT_EQ(cols, 20);
+
+    /* Every cell in the grid must be readable without overflow. */
+    TerminalCell cell;
+    for (int r = 0; r < rows; r++) {
+        for (int c = 0; c < cols; c++) {
+            ASSERT_EQ(terminal_get_cell(&t, r, c, &cell), 0);
+        }
+    }
+
+    /* Content reflowed into 20-col grid: "ABCDEFGHIJ" on row 0 cols 0-9. */
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &cell), 0);
+    ASSERT_EQ(cell.cp, (uint32_t)'A');
+    ASSERT_EQ(terminal_get_cell(&t, 0, 9, &cell), 0);
+    ASSERT_EQ(cell.cp, (uint32_t)'J');
+
+    terminal_destroy(&t);
+}
+
+/* Enter alt screen, resize narrower, exit alt screen.                */
+/* The restored 20-col grid must reflow into 10 cols, wrapping the    */
+/* 20-char line across two rows instead of truncating it.             */
+/*                                                                     */
+/* With scrollback, the 1-row-at-20-cols line wraps to 2 rows at     */
+/* 10 cols.  Verify that 'K' (the 11th character) is present in the    */
+/* grid or recent scrollback — not silently dropped by truncation.     */
+static void test_altscreen_resize_narrower_reflows(void)
+{
+    TerminalBackend t = terminal_backend_bvt;
+    ASSERT_TRUE(terminal_init(&t, 20, 5) != NULL);
+    /* 20 characters — fits one row at 20 cols. */
+    feed(&t, "ABCDEFGHIJKLMNOPQRST");
+
+    feed(&t, "\x1b[?1049h");
+    terminal_resize(&t, 10, 5);
+    feed(&t, "\x1b[?1049l");
+
+    int rows, cols;
+    terminal_get_dimensions(&t, &rows, &cols);
+    ASSERT_EQ(cols, 10);
+
+    /* 'K' must survive reflow — it cannot be silently truncated. */
+    TerminalCell c;
+    bool found_k = false;
+    for (int r = 0; r < rows && !found_k; r++) {
+        for (int cc = 0; cc < cols && !found_k; cc++) {
+            if (terminal_get_cell(&t, r, cc, &c) == 0 && c.cp == (uint32_t)'K')
+                found_k = true;
+        }
+    }
+    if (!found_k) {
+        int sb = terminal_get_scrollback_lines(&t);
+        for (int s = 0; s < sb && !found_k; s++) {
+            for (int cc = 0; cc < cols && !found_k; cc++) {
+                if (terminal_get_scrollback_cell(&t, s, cc, &c) == 0 &&
+                    c.cp == (uint32_t)'K')
+                    found_k = true;
+            }
+        }
+    }
+    ASSERT_TRUE(found_k);
+
+    /* 'A' must also survive. */
+    bool found_a = false;
+    for (int r = 0; r < rows && !found_a; r++) {
+        for (int cc = 0; cc < cols && !found_a; cc++) {
+            if (terminal_get_cell(&t, r, cc, &c) == 0 && c.cp == (uint32_t)'A')
+                found_a = true;
+        }
+    }
+    ASSERT_TRUE(found_a);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -417,6 +517,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_hyperlink_safety);
     RUN_TEST(test_hyperlink_hover_state);
     RUN_TEST(test_bvt_new_independent);
+    RUN_TEST(test_altscreen_resize_wider_readable);
+    RUN_TEST(test_altscreen_resize_narrower_reflows);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }
