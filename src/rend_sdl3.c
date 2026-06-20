@@ -2382,11 +2382,24 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
 // decoding color-glyph texels when they enter the atlas (rend_sdl3_atlas.c,
 // gated on RendSdl3Atlas.linearize_color), so they round-trip exactly too.
 
-// (Re)create the linear float render target to match the currently bound
-// target's pixel size. Returns false (and disables the linear path
-// permanently) if the GPU can't allocate the float target.
-static bool ensure_linear_target(RendererSdl3Data *data)
+// Ensure a linear float render target large enough for the currently bound
+// target's pixel size, writing that size to *out_w/*out_h (the top-left region
+// the caller must render into and blit back out). The target is GROW-ONLY:
+// linear_w/linear_h track the *allocated* size, which is always >= the output,
+// and it is only ever reallocated to grow — never to shrink. Recreating this
+// large RGBA64F target on every resize (especially a fullscreen<->windowed
+// toggle) churns GPU allocations and forces SDL's GPU backend to rebuild
+// pipelines tied to the target format; that path has crashed on NVK (a
+// zeroed/freed VkPipeline bound during the command-queue flush). A stable
+// grow-only target removes that per-resize churn. Returns false (and disables
+// the linear path permanently) if the GPU can't allocate the float target.
+static bool ensure_linear_target(RendererSdl3Data *data, int *out_w, int *out_h)
 {
+    if (out_w)
+        *out_w = 0;
+    if (out_h)
+        *out_h = 0;
+
     if (!data->linear_ok)
         return false;
 
@@ -2394,8 +2407,19 @@ static bool ensure_linear_target(RendererSdl3Data *data)
     if (!SDL_GetCurrentRenderOutputSize(data->renderer, &w, &h) || w <= 0 || h <= 0)
         return false;
 
-    if (data->linear_target && data->linear_w == w && data->linear_h == h)
+    if (out_w)
+        *out_w = w;
+    if (out_h)
+        *out_h = h;
+
+    // Reuse whenever the existing target already covers the output (grow-only).
+    if (data->linear_target && data->linear_w >= w && data->linear_h >= h)
         return true;
+
+    // Need a bigger target. Grow each dimension independently so the allocation
+    // only ever expands (and so a later resize back up reuses it).
+    int alloc_w = data->linear_w > w ? data->linear_w : w;
+    int alloc_h = data->linear_h > h ? data->linear_h : h;
 
     if (data->linear_target) {
         SDL_DestroyTexture(data->linear_target);
@@ -2411,15 +2435,15 @@ static bool ensure_linear_target(RendererSdl3Data *data)
                           SDL_COLORSPACE_SRGB_LINEAR);
     SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER,
                           SDL_TEXTUREACCESS_TARGET);
-    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, w);
-    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, h);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, alloc_w);
+    SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, alloc_h);
     SDL_Texture *tex = SDL_CreateTextureWithProperties(data->renderer, props);
     SDL_DestroyProperties(props);
 
     if (!tex) {
         vlog("Linear render target %dx%d unavailable (%s); falling back to "
              "legacy sRGB blending\n",
-             w, h, SDL_GetError());
+             alloc_w, alloc_h, SDL_GetError());
         data->linear_ok = false;
         return false;
     }
@@ -2427,9 +2451,10 @@ static bool ensure_linear_target(RendererSdl3Data *data)
     SDL_SetTextureScaleMode(tex, SDL_SCALEMODE_NEAREST);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_NONE);
     data->linear_target = tex;
-    data->linear_w = w;
-    data->linear_h = h;
-    vlog("Linear render target created: %dx%d RGBA64F / SRGB_LINEAR\n", w, h);
+    data->linear_w = alloc_w;
+    data->linear_h = alloc_h;
+    vlog("Linear render target grown to %dx%d RGBA64F / SRGB_LINEAR (output %dx%d)\n",
+         alloc_w, alloc_h, w, h);
     return true;
 }
 
@@ -2535,7 +2560,8 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
                               bool cursor_visible, bool with_sixel)
 {
     SDL_Texture *dst = SDL_GetRenderTarget(data->renderer);
-    bool linear = ensure_linear_target(data);
+    int out_w = 0, out_h = 0;
+    bool linear = ensure_linear_target(data, &out_w, &out_h);
 
     if (linear)
         SDL_SetRenderTarget(data->renderer, data->linear_target);
@@ -2549,7 +2575,12 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
     if (linear) {
         SDL_SetRenderTarget(data->renderer, dst);
         SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
-        SDL_RenderTexture(data->renderer, data->linear_target, NULL, NULL);
+        // The target is grow-only and may be larger than the output: copy only
+        // the used top-left out_w x out_h region 1:1 (same size + NEAREST scale
+        // = exact copy, so the linear->sRGB re-encode is byte-identical). A
+        // NULL/NULL blit would scale the whole oversized target into dst.
+        SDL_FRect used = { 0.0f, 0.0f, (float)out_w, (float)out_h };
+        SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
     }
 }
 
