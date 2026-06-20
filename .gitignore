@@ -116,6 +116,9 @@ opencode.jsonc
 # Crush configuration
 crush.json
 .crushignore
+.crush/*
+!.crush/skills/
+!.crush/skills/**
 
 # AI assistant configuration
 CLAUDE.md
