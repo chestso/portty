@@ -24,11 +24,13 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - OSC 52 clipboard set — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy text to the system clipboard via escape sequence. Read queries (`OSC 52 ; c ; ?`) are silently refused so any program running in the terminal — including processes on the remote end of an SSH session — can't ask the terminal to hand it the contents of your clipboard (passwords, tokens, etc.).
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
-- OSC-8 hyperlinks — dotted Charm-purple underline at rest, solid on hover with pointer cursor; Ctrl+click opens via the system handler. Scheme allow-list (http/https/ftp/ftps/mailto) refuses `javascript:`, `data:`, `file://`, etc.
+- OSC-8 hyperlinks — dotted Charm-purple underline at rest, solid on hover with pointer cursor; a hover hint shows the full URI. Ctrl+click opens via the system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
+- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), rendered natively on GTK4 or by the SDL3 renderer; dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
+- Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
 - Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
@@ -106,19 +108,24 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 - `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`, installs the GTK4 plugin to `$prefix/lib/bloom-terminal/`
 - `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
+- `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
 
 ### Helper Scripts
 
-| Script                      | Purpose                                                         |
-| --------------------------- | --------------------------------------------------------------- |
-| `scripts/build-mingw64.sh`  | Cross-compile for Windows using Fedora's mingw64 toolchain      |
-| `scripts/build-osxcross.sh` | Cross-compile for macOS using osxcross                          |
-| `scripts/profile.sh`        | Build with `-pg`, run a benchmark, write `profile-report.txt`   |
-| `scripts/vm-w32.sh CMD`     | Windows VM lifecycle (`setup`/`install`/`run`/`deploy`)         |
-| `scripts/vm-mac.sh CMD`     | macOS VM lifecycle (`setup`/`install`/`run`/`deploy`)           |
-| `scripts/ref-png.sh T OUT`  | Generate reference PNG of TEXT using hb-view                    |
-| `scripts/ref-layers.sh T P` | Export each COLR v1 paint layer as `<P>_layer00.png` etc.       |
-| `scripts/setup-osxcross.sh` | One-time osxcross toolchain setup (used by `build-osxcross.sh`) |
+| Script                        | Purpose                                                                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `scripts/build-mingw64.sh`    | Cross-compile for Windows using Fedora's mingw64 toolchain                                 |
+| `scripts/build-osxcross.sh`   | Cross-compile for macOS using osxcross                                                     |
+| `scripts/profile.sh`          | Build with `-pg`, run a benchmark, write `profile-report.txt`                              |
+| `scripts/vm-w32.sh CMD`       | Windows VM lifecycle (`setup`/`install`/`run`/`deploy`)                                    |
+| `scripts/vm-mac.sh CMD`       | macOS VM lifecycle (`setup`/`install`/`run`/`deploy`)                                      |
+| `scripts/ref-png.sh T OUT`    | Generate reference PNG of TEXT using hb-view                                               |
+| `scripts/ref-layers.sh T P`   | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                                  |
+| `scripts/colr_layers.py`      | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer)           |
+| `scripts/gen_icon.py`         | Generate app icons (SVG + PNG)                                                             |
+| `scripts/pty_record.py`       | Record PTY traffic from a child process (debug feature-detect probes)                      |
+| `scripts/build-macos-deps.sh` | Cross-compile all macOS dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) via osxcross |
+| `scripts/setup-osxcross.sh`   | One-time osxcross toolchain setup (used by `build-osxcross.sh`)                            |
 
 ## Usage
 
@@ -140,24 +147,30 @@ build/src/bloom-terminal --demo "Hello, world!"
 
 # Render text to a PNG file
 build/src/bloom-terminal -P "😀" output.png
+
+# Render a command's output to PNG
+build/src/bloom-terminal -P "" --exec ls --wait 500 output.png
 ```
 
 ### CLI Flags
 
-| Flag                      | Description                                                     |
-| ------------------------- | --------------------------------------------------------------- |
-| `-h`                      | Show help message                                               |
-| `-v`                      | Verbose output (font resolution, COLR, atlas events)            |
-| `-f PATTERN`              | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)      |
-| `-g COLSxROWS`            | Initial terminal size (default: 80x24)                          |
-| `-P TEXT`                 | Render TEXT to PNG (output path as positional arg)              |
-| `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. |
-| `-L` / `--list-fonts`     | List available monospace fonts and exit                         |
-| `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)       |
-| `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                            |
-| `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)               |
-| `-d TEXT` / `--demo TEXT` | Display TEXT in terminal without spawning a shell (for testing) |
-| `-s N` / `--scrollback N` | Scrollback history lines (default: 1000, 0 to disable)          |
+| Flag                      | Description                                                                   |
+| ------------------------- | ----------------------------------------------------------------------------- |
+| `-h`                      | Show help message                                                             |
+| `-v`                      | Verbose output (font resolution, COLR, atlas events)                          |
+| `-f PATTERN`              | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                    |
+| `-g COLSxROWS`            | Initial terminal size (default: 80x24)                                        |
+| `-P TEXT`                 | Render TEXT to PNG (output path as positional arg)                            |
+| `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc.               |
+| `-L` / `--list-fonts`     | List available monospace fonts and exit                                       |
+| `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)                     |
+| `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                                          |
+| `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)                             |
+| `-d TEXT` / `--demo TEXT` | Display TEXT in terminal without spawning a shell (for testing)               |
+| `-V` / `--version`        | Print version and dependency versions, then exit                              |
+| `--exec CMD`              | With `-P`, spawn CMD on a PTY and render its output to PNG                    |
+| `--wait MS`               | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
+| `-s N` / `--scrollback N` | Scrollback history lines (default: 1000, 0 to disable)                        |
 
 ### Keyboard Shortcuts
 
@@ -185,7 +198,7 @@ While the pager is open:
 | `g`/`Home`, `G`/`End`            | Jump to top / bottom      |
 | Mouse wheel                      | Scroll                    |
 | Drag, double-click, triple-click | Select text / word / line |
-| Right-click or `Ctrl+Shift+C`    | Copy selection            |
+| `Ctrl+C` or `Ctrl+Shift+C`       | Copy selection            |
 | `Ctrl+click` on a link           | Open URL                  |
 
 ## Configuration
@@ -399,6 +412,19 @@ Then run bloom-terminal from the USB drive or copy it locally.
 ```bash
 cd build && make check
 ```
+
+| Test             | What it covers                                        |
+| ---------------- | ----------------------------------------------------- |
+| `test_atlas`     | Texture atlas: insert/lookup, shelf packing, eviction |
+| `test_unicode`   | Emoji detection, ZWJ, skin tones, UTF-8 decoding      |
+| `test_conf`      | Config parser: fonts, geometry, hinting, booleans     |
+| `test_term_bvt`  | Terminal backend bridging to bloom-vt                 |
+| `test_osc52`     | OSC 52 clipboard set sequences                        |
+| `test_sixel`     | Sixel image end-to-end through host bridge            |
+| `test_diag`      | Diagnostics report generation                         |
+| `test_pty_pause` | PTY pause/resume during selection (POSIX only)        |
+
+Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
 The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `BLOOM_GTK4_SELFTEST=1 bloom-terminal --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
 
