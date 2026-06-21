@@ -1045,6 +1045,7 @@ static void gtk4_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void gtk4_set_autoscroll(PlatformBackend *plat, bool enabled);
 static bool gtk4_get_gpu_info(PlatformBackend *plat, const char **device,
                               const char **driver, bool *libre);
+static bool gtk4_spawn_new_terminal(PlatformBackend *plat);
 
 // Backend definition
 PlatformBackend platform_backend_gtk4 = {
@@ -1077,6 +1078,7 @@ PlatformBackend platform_backend_gtk4 = {
     .set_cursor = gtk4_set_cursor,
     .set_autoscroll = gtk4_set_autoscroll,
     .get_gpu_info = gtk4_get_gpu_info,
+    .spawn_new_terminal = gtk4_spawn_new_terminal,
 };
 
 #ifdef HAVE_VULKAN_DMABUF
@@ -1474,13 +1476,14 @@ static void child_setup(gpointer user_data)
     setsid();
 }
 
-static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
+static bool gtk4_spawn_new_terminal(PlatformBackend *plat)
 {
-    (void)button;
-    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+    if (!plat || !plat->backend_data)
+        return false;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
 
     if (!ctx->exe_path[0])
-        return;
+        return false;
 
     char cwd_path[PATH_MAX] = "";
     int pty_child_pid = ctx->pty ? pty_get_child_pid(ctx->pty) : -1;
@@ -1506,13 +1509,21 @@ static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
 
     if (ok) {
         g_child_watch_add(child_pid, on_child_exited, NULL);
-    } else {
-        if (error) {
-            vlog("Failed to spawn terminal: %s\n", error->message);
-            g_error_free(error);
-        }
+        return true;
     }
+    if (error) {
+        vlog("Failed to spawn terminal: %s\n", error->message);
+        g_error_free(error);
+    }
+    return false;
+}
 
+static void on_new_terminal_clicked(GtkButton *button, gpointer user_data)
+{
+    (void)button;
+    GTK4PlatformData *ctx = (GTK4PlatformData *)user_data;
+
+    gtk4_spawn_new_terminal(ctx->plat);
     gtk_widget_grab_focus(ctx->drawing_area);
 }
 

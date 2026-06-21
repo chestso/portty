@@ -172,6 +172,11 @@ struct PlatformBackend
     bool (*get_gpu_info)(PlatformBackend *plat, const char **device,
                          const char **driver, bool *libre);
 
+    // Spawn a new terminal window. The platform resolves the child's CWD
+    // from the PTY child process and launches a new instance of the same
+    // binary. Returns true on success.
+    bool (*spawn_new_terminal)(PlatformBackend *plat);
+
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
 };
@@ -219,5 +224,6 @@ void platform_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 void platform_set_autoscroll(PlatformBackend *plat, bool enabled);
 bool platform_get_gpu_info(PlatformBackend *plat, const char **device,
                            const char **driver, bool *libre);
+bool platform_spawn_new_terminal(PlatformBackend *plat);
 
 #endif /* PLATFORM_H */

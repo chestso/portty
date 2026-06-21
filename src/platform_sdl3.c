@@ -130,6 +130,9 @@ typedef struct
     SDL_Cursor *cursor_pointer;
     PlatformCursor current_cursor;
 
+    // Cached exe path (resolved once at startup via SDL_GetBasePath)
+    char exe_path[PATH_MAX];
+
     // Stashed in sdl3_run so notify() can reach the renderer (which owns the
     // SDL-drawn panel) and mark the terminal dirty for a repaint.
     RendererBackend *rend;
@@ -260,6 +263,57 @@ static void sdl3_notify_dismiss(PlatformBackend *plat);
 static void sdl3_set_link_hint(PlatformBackend *plat, const char *url, int anchor_py);
 static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled);
+static bool sdl3_spawn_new_terminal(PlatformBackend *plat);
+
+static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return false;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+
+    if (!ctx->exe_path[0])
+        return false;
+
+    char cwd_path[PATH_MAX] = "";
+    int pty_child_pid = ctx->pty ? pty_get_child_pid(ctx->pty) : -1;
+    if (pty_child_pid > 0) {
+        char proc_cwd[64];
+        snprintf(proc_cwd, sizeof(proc_cwd), "/proc/%d/cwd", pty_child_pid);
+        ssize_t cwd_len = readlink(proc_cwd, cwd_path, sizeof(cwd_path) - 1);
+        if (cwd_len > 0)
+            cwd_path[cwd_len] = '\0';
+        else
+            cwd_path[0] = '\0';
+    }
+
+#ifdef _WIN32
+    // On Windows, use SDL_CreateProcess for simplicity
+    char *argv[] = { ctx->exe_path, NULL };
+    SDL_Process *proc = SDL_CreateProcess(argv, 0);
+    if (proc) {
+        SDL_DestroyProcess(proc);
+        return true;
+    }
+    vlog("Failed to spawn terminal: %s\n", SDL_GetError());
+    return false;
+#else
+    pid_t pid = fork();
+    if (pid < 0) {
+        vlog("Failed to fork for new terminal: %s\n", strerror(errno));
+        return false;
+    }
+    if (pid == 0) {
+        // Child process
+        setsid();
+        if (cwd_path[0])
+            chdir(cwd_path);
+        execl(ctx->exe_path, ctx->exe_path, NULL);
+        _exit(1);
+    }
+    // Parent — reap automatically (grandchild inherits from setsid)
+    return true;
+#endif
+}
 
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
@@ -289,6 +343,7 @@ PlatformBackend platform_backend_sdl3 = {
     .set_link_hint = sdl3_set_link_hint,
     .set_cursor = sdl3_set_cursor,
     .set_autoscroll = sdl3_set_autoscroll,
+    .spawn_new_terminal = sdl3_spawn_new_terminal,
 };
 
 // PTY reader thread function
@@ -625,6 +680,13 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     ctx->cursor_blink_visible = true;
 
     plat->backend_data = ctx;
+
+    // Cache exe path now while the binary still exists on disk.
+    // SDL_GetBasePath() caches internally and is platform-independent.
+    const char *base = SDL_GetBasePath();
+    if (base)
+        snprintf(ctx->exe_path, sizeof(ctx->exe_path), "%s" PACKAGE, base);
+
     return true;
 }
 

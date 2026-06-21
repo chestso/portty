@@ -394,6 +394,13 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
         return result;
     }
 
+    // Ctrl+Shift+N → spawn a new terminal window in the shell's CWD
+    if (key == TERM_KEY_NONE && codepoint == 'N' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
+        platform_spawn_new_terminal(ctx->plat);
+        result.handled = true;
+        return result;
+    }
+
     // Special keys
     if (key != TERM_KEY_NONE) {
         terminal_send_key(ctx->term, key, mod);

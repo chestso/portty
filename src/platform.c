@@ -237,3 +237,10 @@ bool platform_get_gpu_info(PlatformBackend *plat, const char **device,
         return false;
     return plat->get_gpu_info(plat, device, driver, libre);
 }
+
+bool platform_spawn_new_terminal(PlatformBackend *plat)
+{
+    if (!plat || !plat->spawn_new_terminal)
+        return false;
+    return plat->spawn_new_terminal(plat);
+}
