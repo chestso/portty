@@ -117,6 +117,7 @@ opencode.jsonc
 crush.json
 .crushignore
 .crush/*
+!.crush/
 !.crush/skills/
 !.crush/skills/**
 
