@@ -905,10 +905,34 @@ static char *sdl3_clipboard_get(PlatformBackend *plat)
     return SDL_GetClipboardText();
 }
 
+static const void *clipboard_data_callback(void *userdata, const char *mime_type,
+                                           size_t *size)
+{
+    (void)mime_type;
+    const char *text = (const char *)userdata;
+    if (size)
+        *size = text ? strlen(text) : 0;
+    return text;
+}
+
+static void clipboard_cleanup_callback(void *userdata)
+{
+    free(userdata);
+}
+
 static bool sdl3_clipboard_set(PlatformBackend *plat, const char *text)
 {
     (void)plat;
-    return SDL_SetClipboardText(text);
+    char *copy = strdup(text ? text : "");
+    if (!copy)
+        return false;
+    static const char *const mime_types[] = { "text/plain;charset=utf-8" };
+    if (!SDL_SetClipboardData(clipboard_data_callback, clipboard_cleanup_callback,
+                              copy, mime_types, 1)) {
+        free(copy);
+        return false;
+    }
+    return true;
 }
 
 static void sdl3_clipboard_free(PlatformBackend *plat, char *text)
