@@ -1045,7 +1045,8 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
 
         // Process all pending events
         do {
-            if (event.type == SDL_EVENT_USER) {
+            switch (event.type) {
+            case SDL_EVENT_USER:
                 switch (event.user.code) {
                 case EVENT_PTY_DATA:
                 {
@@ -1093,10 +1094,14 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     terminal_mark_dirty(term);
                     break;
                 }
-            } else if (event.type == SDL_EVENT_QUIT) {
+                break;
+
+            case SDL_EVENT_QUIT:
                 vlog("SDL quit event received\n");
                 SDL_SetAtomicInt(&ctx->quit_requested, 1);
-            } else if (event.type == SDL_EVENT_KEY_DOWN) {
+                break;
+
+            case SDL_EVENT_KEY_DOWN:
                 if (callbacks) {
                     int sdl_key = event.key.key;
                     int sdl_mod = event.key.mod;
@@ -1156,7 +1161,9 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         }
                     }
                 }
-            } else if (event.type == SDL_EVENT_TEXT_INPUT) {
+                break;
+
+            case SDL_EVENT_TEXT_INPUT:
                 if (callbacks && callbacks->on_text) {
                     // Skip if Ctrl or Alt is held
                     if (!(SDL_GetModState() & (SDL_KMOD_CTRL | SDL_KMOD_ALT))) {
@@ -1188,29 +1195,39 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         }
                     }
                 }
-            } else if (event.type == SDL_EVENT_WINDOW_RESIZED) {
+                break;
+
+            case SDL_EVENT_WINDOW_RESIZED:
                 if (callbacks && callbacks->on_resize) {
                     callbacks->on_resize(callbacks->user_data,
                                          event.window.data1,
                                          event.window.data2);
                 }
                 terminal_mark_dirty(term);
-            } else if (event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                break;
+
+            case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 vlog("Window close requested\n");
                 SDL_SetAtomicInt(&ctx->quit_requested, 1);
-            } else if (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED ||
-                       event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                break;
+
+            case SDL_EVENT_WINDOW_FOCUS_GAINED:
+            case SDL_EVENT_WINDOW_FOCUS_LOST:
                 ctx->has_focus = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
                 if (!ctx->has_focus)
                     renderer_set_link_hint(ctx->rend, NULL, 0);
                 terminal_mark_dirty(term);
-            } else if (event.type == SDL_EVENT_WINDOW_MOUSE_LEAVE) {
+                break;
+
+            case SDL_EVENT_WINDOW_MOUSE_LEAVE:
                 // Pointer left the window — drop any link hover hint + underline.
                 renderer_set_link_hint(ctx->rend, NULL, 0);
                 if (term)
                     terminal_set_hovered_hyperlink(term, 0);
                 terminal_mark_dirty(term);
-            } else if (event.type == SDL_EVENT_MOUSE_WHEEL) {
+                break;
+
+            case SDL_EVENT_MOUSE_WHEEL:
                 if (event.wheel.y != 0) {
                     bool consumed = false;
                     if (callbacks && callbacks->on_mouse) {
@@ -1229,8 +1246,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     }
                 }
                 terminal_mark_dirty(term);
-            } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN ||
-                       event.type == SDL_EVENT_MOUSE_BUTTON_UP) {
+                break;
+
+            case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            case SDL_EVENT_MOUSE_BUTTON_UP:
                 if (callbacks && callbacks->on_mouse) {
                     bool pressed = (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN);
                     int button = event.button.button;
@@ -1247,7 +1266,9 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         terminal_mark_dirty(term);
                     }
                 }
-            } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                break;
+
+            case SDL_EVENT_MOUSE_MOTION:
                 if (callbacks && callbacks->on_mouse) {
                     bool any_button_pressed = (event.motion.state != 0);
                     int tmod = sdl_mod_to_term(SDL_GetModState());
@@ -1257,6 +1278,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         terminal_mark_dirty(term);
                     }
                 }
+                break;
+
+            default:
+                break;
             }
         } while (SDL_PollEvent(&event));
 
