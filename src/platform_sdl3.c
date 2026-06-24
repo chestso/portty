@@ -237,6 +237,7 @@ static void set_window_icon(SDL_Window *win)
 // Forward declarations
 static bool sdl3_plat_init(PlatformBackend *plat);
 static void sdl3_plat_destroy(PlatformBackend *plat);
+static void clipboard_deferred_free_flush(void);
 static bool sdl3_create_window(PlatformBackend *plat, const char *title,
                                int width, int height);
 static void sdl3_show_window(PlatformBackend *plat);
@@ -748,6 +749,9 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
         ctx->cursor_pointer = NULL;
     }
 
+    // Flush any remaining deferred clipboard frees
+    clipboard_deferred_free_flush();
+
     // Destroy SDL resources
     if (ctx->sdl_renderer) {
         SDL_DestroyRenderer(ctx->sdl_renderer);
@@ -915,9 +919,42 @@ static const void *clipboard_data_callback(void *userdata, const char *mime_type
     return text;
 }
 
+// On Wayland, the compositor may still dispatch data_source_send for a
+// cancelled clipboard offer.  The Wayland protocol is asynchronous: a
+// wl_data_source.send event that was already queued in the socket buffer
+// before the client called wl_data_source_destroy will still be dispatched
+// on the next wl_display_dispatch_queue_pending call.  SDL_SetClipboardData
+// calls SDL_CancelClipboardData(0) which immediately invokes this cleanup
+// callback, but the compositor's pending send has not been processed yet.
+// If we free immediately, the subsequent data_source_handle_send calls
+// clipboard_data_callback on freed memory (use-after-free).
+//
+// Only one deferred pointer is needed.  The compositor can only have a
+// pending data_source_send for the source that was current at the time of
+// the last wl_display_dispatch.  Sources created and replaced between two
+// dispatches were never visible to the compositor (our
+// wl_data_device_set_selection writes are buffered until the next dispatch),
+// so the compositor cannot have queued a send for them.  Each cleanup
+// callback frees any previous deferred string (which by now is safe — it
+// has survived past the dispatch boundary) and defers the new one instead.
+static char *clipboard_pending_free;
+
 static void clipboard_cleanup_callback(void *userdata)
 {
-    free(userdata);
+    char *ptr = (char *)userdata;
+    if (!ptr)
+        return;
+    // Free the previously deferred string — it has survived past at least
+    // one event loop iteration, so any pending Wayland send for it has
+    // already been dispatched.
+    free(clipboard_pending_free);
+    clipboard_pending_free = ptr;
+}
+
+static void clipboard_deferred_free_flush(void)
+{
+    free(clipboard_pending_free);
+    clipboard_pending_free = NULL;
 }
 
 static bool sdl3_clipboard_set(PlatformBackend *plat, const char *text)
@@ -1210,6 +1247,12 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 }
             }
         } while (SDL_PollEvent(&event));
+
+        // Flush the deferred clipboard string.  By now SDL_PumpEvents (inside
+        // SDL_PollEvent) has drained all pending Wayland dispatch, so any
+        // data_source_send for the old clipboard offer has completed and the
+        // string is safe to free.
+        clipboard_deferred_free_flush();
 
         // PTY output cleared any OSC-8 hover; re-resolve it at the live pointer
         // so a held-still mouse over a link stays highlighted across redraws
