@@ -353,7 +353,7 @@ static void draw_frame(const char *filename, int total_frames, int fps,
     char title[256];
     int n = snprintf(title, sizeof(title),
                      "\x1b[38;5;117m bloom-lottie-player \x1b[0m"
-                     "\x1b[38;5;245m%s\x1b[0m",
+                     "\x1b[38;5;250m%s \x1b[0m",
                      filename);
     if (n > 0)
         write(STDOUT_FILENO, title, (size_t)n);
@@ -361,7 +361,7 @@ static void draw_frame(const char *filename, int total_frames, int fps,
     /* Side borders */
     for (int r = 2; r < term_rows - 1; r++) {
         move_cursor(r, 1);
-        write(STDOUT_FILENO, "\x1b[38;5;240m", 12);
+        write(STDOUT_FILENO, "\x1b[38;5;117m", 12);
         write(STDOUT_FILENO, "\xe2\x94\x82", 3); /* │ */
         move_cursor(r, term_cols);
         write(STDOUT_FILENO, "\xe2\x94\x82", 3); /* │ */
@@ -379,7 +379,7 @@ static void draw_frame(const char *filename, int total_frames, int fps,
     move_cursor(term_rows, 1);
     write(STDOUT_FILENO, "\x1b[38;5;250m\x1b[44m", 16);
     char bar[512];
-    const char *play_icon = playing ? "\xe2\x8f\xb5" : "\xe2\x8f\xb8"; /* ⏵ / ⏸ */
+    const char *play_icon = playing ? "\xe2\x96\xb6\xef\xb8\x8f" : "\xe2\x8f\xb8\xef\xb8\x8f"; /* ▶︎ / ⏸︎ */
     const char *loop_icon = loop ? "loop" : "once";
     const char *layer_icon = bg_layer ? "bg" : "fg";
     n = snprintf(bar, sizeof(bar),
@@ -387,8 +387,8 @@ static void draw_frame(const char *filename, int total_frames, int fps,
                  play_icon, fps, speed, loop_icon, layer_icon, opacity * 100);
     if (n > 0) {
         write(STDOUT_FILENO, bar, (size_t)n);
-        /* Pad rest of bar with spaces */
-        int pad = term_cols - n - 1;
+        /* Subtract 3 invisible VS16 bytes from play_icon */
+        int pad = term_cols - (n - 3) - 1;
         for (int i = 0; i < pad; i++)
             write(STDOUT_FILENO, " ", 1);
     }
@@ -406,23 +406,25 @@ static void redraw_info_bar(int current_frame, int total_frames, int fps,
                             int term_rows, int term_cols)
 {
     move_cursor(term_rows, 1);
+    write(STDOUT_FILENO, "\x1b[38;5;250m\x1b[44m", 16);
     char bar[512];
     const char *play_icon =
-        playing ? "\xe2\x8f\xb5" : "\xe2\x8f\xb8"; /* ⏵ / ⏸ */
+        playing ? "\xe2\x96\xb6\xef\xb8\x8f" : "\xe2\x8f\xb8\xef\xb8\x8f"; /* ▶︎ / ⏸︎ */
     const char *loop_str = loop ? "loop" : "once";
     const char *layer_str = bg_layer ? "bg" : "fg";
     int n = snprintf(bar, sizeof(bar),
-                     "\x1b[38;5;250m\x1b[44m %s  frame: %d/%d  %dfps  %.1fx  "
-                     "%s  %s  %.0f%% \x1b[0m",
+                     " %s  frame: %d/%d  %dfps  %.1fx  "
+                     "%s  %s  %.0f%% ",
                      play_icon, current_frame, total_frames, fps, speed,
                      loop_str, layer_str, opacity * 100);
     if (n > 0) {
         write(STDOUT_FILENO, bar, (size_t)n);
-        int pad = term_cols - n - 1;
+        /* Subtract 3 invisible VS16 bytes from play_icon */
+        int pad = term_cols - (n - 3) - 1;
         for (int i = 0; i < pad; i++)
             write(STDOUT_FILENO, " ", 1);
-        write(STDOUT_FILENO, "\x1b[0m", 4);
     }
+    write(STDOUT_FILENO, "\x1b[0m", 4);
 }
 
 /* ------------------------------------------------------------------ */
@@ -839,6 +841,9 @@ int main(int argc, char **argv)
                     playing = false;
                 }
                 last_time = now;
+                redraw_info_bar(current_frame, total_frames, meta.fr,
+                                speed, playing, loop, bg_layer, opacity,
+                                term_rows, term_cols);
             }
         } else {
             clock_gettime(CLOCK_MONOTONIC, &last_time);
