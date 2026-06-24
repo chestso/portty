@@ -117,7 +117,7 @@ struct TerminalBackend
     uint16_t hovered_hyperlink_id;
 
     // Backend function pointers
-    bool (*init)(TerminalBackend *term, int width, int height);
+    bool (*init)(TerminalBackend *term, const BvtConfig *cfg);
     void (*destroy)(TerminalBackend *term);
     void (*resize)(TerminalBackend *term, int width, int height);
     int (*process_input)(TerminalBackend *term, const char *input, size_t len);
@@ -190,9 +190,16 @@ struct TerminalBackend
     // the pixel size of a character cell so it can place images in rows.
     const BvtSixel *(*get_sixels)(TerminalBackend *term, int *count);
     void (*set_cell_px)(TerminalBackend *term, int cell_w, int cell_h);
+
+    // Lottie animations (owned by the VT engine). Same ownership model as
+    // sixel: engine owns pixel data, host owns GPU texture cache.
+    const BvtLottie *(*get_lotties)(TerminalBackend *term, int *count);
+    const BvtLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
+                                                       uint64_t id, int *count);
+    bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
 };
 
-TerminalBackend *terminal_init(TerminalBackend *term, int width, int height);
+TerminalBackend *terminal_init(TerminalBackend *term, const BvtConfig *cfg);
 void terminal_destroy(TerminalBackend *term);
 void terminal_resize(TerminalBackend *term, int width, int height);
 void terminal_set_scrollback_size(TerminalBackend *term, int lines);
@@ -366,5 +373,11 @@ int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_c
 // tells the engine the cell pixel size for row placement.
 const BvtSixel *terminal_get_sixels(TerminalBackend *term, int *count);
 void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h);
+
+// Lottie animation API. Same ownership model as sixel.
+const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count);
+const BvtLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
+                                                         uint64_t id, int *count);
+bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
 
 #endif /* TERM_H */

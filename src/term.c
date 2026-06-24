@@ -74,12 +74,12 @@ static int codepoint_to_utf8(uint32_t cp, char *buf)
     return 0;
 }
 
-TerminalBackend *terminal_init(TerminalBackend *backend, int width, int height)
+TerminalBackend *terminal_init(TerminalBackend *backend, const BvtConfig *cfg)
 {
     if (!backend || !backend->init)
         return NULL;
 
-    if (!backend->init(backend, width, height))
+    if (!backend->init(backend, cfg))
         return NULL;
 
     return backend;
@@ -670,6 +670,32 @@ void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
 {
     if (term && term->set_cell_px)
         term->set_cell_px(term, cell_w, cell_h);
+}
+
+const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count)
+{
+    if (count)
+        *count = 0;
+    if (!term || !term->get_lotties)
+        return NULL;
+    return term->get_lotties(term, count);
+}
+
+const BvtLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
+                                                         uint64_t id, int *count)
+{
+    if (count)
+        *count = 0;
+    if (!term || !term->get_lottie_placements)
+        return NULL;
+    return term->get_lottie_placements(term, id, count);
+}
+
+bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us)
+{
+    if (!term || !term->lottie_tick)
+        return false;
+    return term->lottie_tick(term, now_us);
 }
 
 // Emoji width paradigm.

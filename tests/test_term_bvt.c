@@ -32,7 +32,14 @@ static void feed(TerminalBackend *t, const char *s)
 static void test_visible_wrap_continuation(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 5, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 5;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "abcdef");
 
     ASSERT_FALSE(terminal_get_line_continuation(&t, 0));
@@ -49,7 +56,14 @@ static void test_visible_wrap_continuation(void)
 static void test_scrollback_wrap_continuation(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 5, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 5;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     /* "abcdef" wraps row 0 → row 1. Then push lots of newlines so both
      * rows scroll into history. */
     feed(&t, "abcdef");
@@ -74,7 +88,15 @@ static void test_scrollback_wrap_continuation(void)
 static void test_resize_grows_and_reflows(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 5, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 5;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        cfg.reflow = true;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "abcdef");
     /* Confirm initial wrap. */
     ASSERT_TRUE(terminal_get_line_continuation(&t, 1));
@@ -96,7 +118,15 @@ static void test_resize_grows_and_reflows(void)
 static void test_resize_shrinks_and_reflows(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 10, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 10;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        cfg.reflow = true;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "abcdefghij");
     ASSERT_FALSE(terminal_get_line_continuation(&t, 1));
 
@@ -117,7 +147,14 @@ static void test_resize_shrinks_and_reflows(void)
 static void test_long_cluster_survives_accessor(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     /* U+1F468 ZWJ U+1F469 ZWJ U+1F467 ZWJ U+1F466 — 7 codepoints. */
     feed(&t,
          "\xf0\x9f\x91\xa8\xe2\x80\x8d"
@@ -150,7 +187,14 @@ static void test_long_cluster_survives_accessor(void)
 static void test_selection_preserves_spaces(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "hello world");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -167,7 +211,14 @@ static void test_selection_preserves_spaces(void)
 static void test_selection_across_rows(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "hello world\r\nfoo bar\r\nbaz");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -186,7 +237,14 @@ static void test_selection_across_rows(void)
 static void test_selection_with_tab(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 40;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "foo\tbar");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -205,7 +263,14 @@ static void test_selection_with_tab(void)
 static void test_selection_after_cursor_movement(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "foo\x1b[5Cbar");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -224,7 +289,14 @@ static void test_selection_after_cursor_movement(void)
 static void test_hyperlink_basic(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 40;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     /* OSC 8 ; ; https://charm.land ST  Charm  OSC 8 ; ; ST */
     feed(&t,
          "\x1b]8;;https://charm.land\x1b\\"
@@ -274,7 +346,14 @@ static void test_hyperlink_safety(void)
 static void test_hyperlink_hover_state(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
 
     ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
     terminal_set_hovered_hyperlink(&t, 7);
@@ -295,7 +374,12 @@ static void test_hyperlink_hover_state(void)
  * This is what the internal pager builds its overlay from. */
 static void test_bvt_new_independent(void)
 {
-    TerminalBackend *t = term_bvt_new(40, 4);
+    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    cfg.cols = 40;
+    cfg.rows = 4;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    TerminalBackend *t = term_bvt_new(&cfg);
     ASSERT_NOT_NULL(t);
 
     int rows = 0, cols = 0;
@@ -324,7 +408,14 @@ static void test_bvt_new_independent(void)
 static void test_selection_strips_trailing_null_cells(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "hi");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -343,7 +434,14 @@ static void test_selection_strips_trailing_null_cells(void)
 static void test_selection_strips_trailing_real_spaces(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "hi                  ");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -362,7 +460,14 @@ static void test_selection_strips_trailing_real_spaces(void)
 static void test_selection_keeps_interior_spaces_on_full_row(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 40, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 40;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "foo\tbar");
 
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
@@ -380,7 +485,14 @@ static void test_selection_keeps_interior_spaces_on_full_row(void)
 static void test_selection_skips_wide_continuation(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 2) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     /* "中x" — '中' is a 2-cell CJK char (U+4E2D, UTF-8 e4 b8 ad). */
     feed(&t, "\xe4\xb8\xad"
              "x");
@@ -411,7 +523,15 @@ static void test_selection_skips_wide_continuation(void)
 static void test_altscreen_resize_wider_readable(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 10, 24) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 10;
+        cfg.rows = 24;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        cfg.reflow = true;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     feed(&t, "ABCDEFGHIJ");
 
     /* Enter alt screen, resize wider (10 -> 20 cols), exit. */
@@ -450,7 +570,15 @@ static void test_altscreen_resize_wider_readable(void)
 static void test_altscreen_resize_narrower_reflows(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 5) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 5;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        cfg.reflow = true;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     /* 20 characters — fits one row at 20 cols. */
     feed(&t, "ABCDEFGHIJKLMNOPQRST");
 

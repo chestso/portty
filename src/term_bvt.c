@@ -264,19 +264,16 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
-static bool bvt_back_init(TerminalBackend *term, int width, int height)
+static bool bvt_back_init(TerminalBackend *term, const BvtConfig *cfg)
 {
     BvtBackendData *d = calloc(1, sizeof(*d));
     if (!d)
         return false;
 #ifdef BLOOM_HARDEN_HEAP
-    /* One-time hookup of the heap_stats post-mortem dump into the
-     * bloom_bug chain. Safe to call multiple times — heap_harden_init
-     * just registers itself if not already done. */
     heap_harden_init();
-    d->vt = bvt_new_with_allocator(height, width, &bvt_hardened_allocator);
+    d->vt = bvt_new_with_allocator(cfg, &bvt_hardened_allocator);
 #else
-    d->vt = bvt_new(height, width); /* rows, cols */
+    d->vt = bvt_new(cfg);
 #endif
     if (!d->vt) {
         free(d);
@@ -284,7 +281,6 @@ static bool bvt_back_init(TerminalBackend *term, int width, int height)
     }
     d->cursor_visible = true;
     d->cursor_blink = true;
-    bvt_set_reflow(d->vt, true);
 
     BvtCallbacks cb = {
         .damage = cb_damage,
@@ -437,6 +433,22 @@ static const BvtSixel *bvt_back_get_sixels(TerminalBackend *term, int *count)
 {
     BvtBackendData *d = term->backend_data;
     return bvt_get_sixels(d->vt, count);
+}
+static const BvtLottie *bvt_back_get_lotties(TerminalBackend *term, int *count)
+{
+    BvtBackendData *d = term->backend_data;
+    return bvt_get_lotties(d->vt, count);
+}
+static const BvtLottiePlacement *bvt_back_get_lottie_placements(
+    TerminalBackend *term, uint64_t id, int *count)
+{
+    BvtBackendData *d = term->backend_data;
+    return bvt_get_lottie_placements(d->vt, id, count);
+}
+static bool bvt_back_lottie_tick(TerminalBackend *term, uint64_t now_us)
+{
+    BvtBackendData *d = term->backend_data;
+    return bvt_lottie_tick(d->vt, now_us);
 }
 static void bvt_back_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
 {
@@ -817,9 +829,12 @@ TerminalBackend terminal_backend_bvt = {
     .set_scrollback_size = bvt_back_set_scrollback_size,
     .get_sixels = bvt_back_get_sixels,
     .set_cell_px = bvt_back_set_cell_px,
+    .get_lotties = bvt_back_get_lotties,
+    .get_lottie_placements = bvt_back_get_lottie_placements,
+    .lottie_tick = bvt_back_lottie_tick,
 };
 
-TerminalBackend *term_bvt_new(int cols, int rows)
+TerminalBackend *term_bvt_new(const BvtConfig *cfg)
 {
     TerminalBackend *t = malloc(sizeof(*t));
     if (!t)
@@ -835,7 +850,7 @@ TerminalBackend *term_bvt_new(int cols, int rows)
     t->clipboard_set_cb = NULL;
     t->clipboard_set_data = NULL;
     t->hovered_hyperlink_id = 0;
-    if (!terminal_init(t, cols, rows)) {
+    if (!terminal_init(t, cfg)) {
         free(t);
         return NULL;
     }

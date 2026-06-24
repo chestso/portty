@@ -31,6 +31,7 @@
 #define FALLBACK_CACHE_SIZE  64
 #define MAX_LOADED_FALLBACKS 8
 #define SIXEL_CACHE_MAX      256 // matches the engine's live-image cap
+#define LOTIE_CACHE_MAX      64  // lottie animations are fewer but larger
 
 typedef struct
 {
@@ -971,10 +972,22 @@ typedef struct RendererSdl3Data
         int w, h;
     } sixel_cache[SIXEL_CACHE_MAX];
     int sixel_cache_count;
+
+    // Lottie texture cache. Same pattern as sixel: keyed by engine's stable
+    // id, version-gated re-upload, reconcile-evict each frame.
+    struct
+    {
+        SDL_Texture *texture;
+        uint64_t id;
+        uint32_t version;
+        int w, h;
+    } lottie_cache[LOTIE_CACHE_MAX];
+    int lottie_cache_count;
 } RendererSdl3Data;
 
 // Forward declaration for sixel cache cleanup (used in sdl3_destroy)
 static void sixel_cache_clear(RendererSdl3Data *data);
+static void lottie_cache_clear(RendererSdl3Data *data);
 
 // Forward declaration: rebuild the notification panel texture (used by
 // sdl3_load_fonts / sdl3_resize, which precede the definition).
@@ -1211,6 +1224,9 @@ static void sdl3_destroy(RendererBackend *backend)
 
     // Destroy sixel texture cache
     sixel_cache_clear(data);
+
+    // Destroy lottie texture cache
+    lottie_cache_clear(data);
 
     // Destroy linear-light render target
     if (data->linear_target) {
@@ -2109,6 +2125,8 @@ static void flush_strike_run(RendererSdl3Data *data, int row, int vis_start,
     draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
 }
 
+static bool cell_under_bg_lottie(TerminalBackend *term, int row, int col);
+
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
                                  bool cursor_visible, bool populate_only)
@@ -2125,11 +2143,14 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
         int unified_row = row - data->scroll_offset;
         TerminalRowIter it;
 
-        // Pass 1: draw all cell backgrounds for this row
+        // Pass 1: draw all cell backgrounds for this row.
+        // Skip cells covered by a background-layer Lottie placement — the
+        // animation pixels will replace the cell bg anyway, avoiding overdraw.
         if (!populate_only) {
             terminal_row_iter_init(&it, term, unified_row, display_cols);
             while (terminal_row_iter_next(&it)) {
-                render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
+                if (!cell_under_bg_lottie(term, row, it.vis_col))
+                    render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
             }
         }
         // Pass 2: draw glyphs, cursors, and selection overlays
@@ -2364,6 +2385,163 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
 }
 
 // ---------------------------------------------------------------------------
+// Lottie animation cache and rendering
+// ---------------------------------------------------------------------------
+
+static void lottie_cache_clear(RendererSdl3Data *data)
+{
+    for (int i = 0; i < data->lottie_cache_count; i++) {
+        if (data->lottie_cache[i].texture)
+            SDL_DestroyTexture(data->lottie_cache[i].texture);
+    }
+    data->lottie_cache_count = 0;
+}
+
+static void lottie_cache_reconcile(RendererSdl3Data *data,
+                                   const BvtLottie *anims, int count)
+{
+    for (int i = 0; i < data->lottie_cache_count;) {
+        bool live = false;
+        for (int j = 0; j < count; j++) {
+            if (anims[j].id == data->lottie_cache[i].id) {
+                live = true;
+                break;
+            }
+        }
+        if (live) {
+            i++;
+        } else {
+            if (data->lottie_cache[i].texture)
+                SDL_DestroyTexture(data->lottie_cache[i].texture);
+            data->lottie_cache[i] =
+                data->lottie_cache[--data->lottie_cache_count];
+        }
+    }
+}
+
+static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
+                                       const BvtLottie *anim)
+{
+    for (int i = 0; i < data->lottie_cache_count; i++) {
+        if (data->lottie_cache[i].id != anim->id)
+            continue;
+        if (data->lottie_cache[i].w != anim->canvas_w ||
+            data->lottie_cache[i].h != anim->canvas_h) {
+            if (data->lottie_cache[i].texture)
+                SDL_DestroyTexture(data->lottie_cache[i].texture);
+            data->lottie_cache[i].texture = NULL;
+        } else if (data->lottie_cache[i].version != anim->version) {
+            SDL_UpdateTexture(data->lottie_cache[i].texture, NULL, anim->rgba,
+                              anim->canvas_w * 4);
+            data->lottie_cache[i].version = anim->version;
+            return data->lottie_cache[i].texture;
+        } else {
+            return data->lottie_cache[i].texture;
+        }
+        SDL_Texture *t = SDL_CreateTexture(
+            data->renderer, SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC, anim->canvas_w, anim->canvas_h);
+        if (!t)
+            return NULL;
+        SDL_UpdateTexture(t, NULL, anim->rgba, anim->canvas_w * 4);
+        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
+        data->lottie_cache[i].texture = t;
+        data->lottie_cache[i].version = anim->version;
+        data->lottie_cache[i].w = anim->canvas_w;
+        data->lottie_cache[i].h = anim->canvas_h;
+        return t;
+    }
+
+    SDL_Texture *tex = SDL_CreateTexture(
+        data->renderer, SDL_PIXELFORMAT_RGBA32,
+        SDL_TEXTUREACCESS_STATIC, anim->canvas_w, anim->canvas_h);
+    if (!tex)
+        return NULL;
+    SDL_UpdateTexture(tex, NULL, anim->rgba, anim->canvas_w * 4);
+    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+
+    if (data->lottie_cache_count >= LOTIE_CACHE_MAX) {
+        SDL_DestroyTexture(tex);
+        return NULL;
+    }
+    int n = data->lottie_cache_count++;
+    data->lottie_cache[n].texture = tex;
+    data->lottie_cache[n].id = anim->id;
+    data->lottie_cache[n].version = anim->version;
+    data->lottie_cache[n].w = anim->canvas_w;
+    data->lottie_cache[n].h = anim->canvas_h;
+    return tex;
+}
+
+static bool cell_under_bg_lottie(TerminalBackend *term, int row, int col)
+{
+    int count = 0;
+    const BvtLottie *anims = terminal_get_lotties(term, &count);
+    for (int i = 0; i < count; i++) {
+        int pl_count = 0;
+        const BvtLottiePlacement *pls =
+            terminal_get_lottie_placements(term, anims[i].id, &pl_count);
+        for (int j = 0; j < pl_count; j++) {
+            if (pls[j].layer != 1)
+                continue;
+            int sr = pls[j].row;
+            if (row >= sr && row < sr + pls[j].rows &&
+                col >= pls[j].col && col < pls[j].col + pls[j].cols)
+                return true;
+        }
+    }
+    return false;
+}
+
+static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
+                                uint8_t target_layer)
+{
+    int count = 0;
+    const BvtLottie *anims = terminal_get_lotties(term, &count);
+    lottie_cache_reconcile(data, anims, count);
+    if (count == 0)
+        return;
+
+    for (int i = 0; i < count; i++) {
+        const BvtLottie *anim = &anims[i];
+        int pl_count = 0;
+        const BvtLottiePlacement *pls =
+            terminal_get_lottie_placements(term, anim->id, &pl_count);
+
+        SDL_Texture *tex = lottie_get_texture(data, anim);
+        if (!tex)
+            continue;
+
+        for (int j = 0; j < pl_count; j++) {
+            const BvtLottiePlacement *pl = &pls[j];
+            if (pl->layer != target_layer)
+                continue;
+
+            int screen_row = pl->row + data->scroll_offset;
+            int px = pl->col * data->cell_width;
+            int py = screen_row * data->cell_height;
+            int pw = pl->cols * data->cell_width;
+            int ph = pl->rows * data->cell_height;
+
+            if (py + ph <= 0 || py >= data->height)
+                continue;
+            if (px + pw <= 0 || px >= data->width)
+                continue;
+
+            if (pl->opacity_x256 < 255)
+                SDL_SetTextureAlphaModFloat(tex,
+                                            (float)pl->opacity_x256 / 255.0f);
+
+            SDL_FRect dst = { (float)px, (float)py, (float)pw, (float)ph };
+            SDL_RenderTexture(data->renderer, tex, NULL, &dst);
+
+            if (pl->opacity_x256 < 255)
+                SDL_SetTextureAlphaModFloat(tex, 1.0f);
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Linear-light compositing
 // ---------------------------------------------------------------------------
 //
@@ -2584,6 +2762,8 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
     SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
+    render_lottie_layer(data, term, 1); /* background lottie */
+    render_lottie_layer(data, term, 0); /* foreground lottie */
     if (with_sixel)
         render_sixel_images(data, term);
 

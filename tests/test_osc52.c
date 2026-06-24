@@ -110,7 +110,14 @@ static void install(TerminalBackend *t, ClipboardCapture *c)
 static void test_osc52_set_clipboard_bel(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     ClipboardCapture cap;
     install(&t, &cap);
 
@@ -128,7 +135,14 @@ static void test_osc52_set_clipboard_bel(void)
 static void test_osc52_set_clipboard_st(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     ClipboardCapture cap;
     install(&t, &cap);
 
@@ -147,7 +161,14 @@ static void test_osc52_selection_variants(void)
     const char *prefixes[] = { "c", "p", "s", "cs", "" };
     for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
         TerminalBackend t = terminal_backend_bvt;
-        ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+        {
+            BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+            cfg.cols = 20;
+            cfg.rows = 4;
+            cfg.cell_w_px = 10;
+            cfg.cell_h_px = 20;
+            ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+        };
         ClipboardCapture cap;
         install(&t, &cap);
 
@@ -166,7 +187,14 @@ static void test_osc52_selection_variants(void)
 static void test_osc52_query_refused(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     ClipboardCapture cap;
     install(&t, &cap);
 
@@ -182,7 +210,14 @@ static void test_osc52_query_refused(void)
 static void test_osc52_malformed_b64(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     ClipboardCapture cap;
     install(&t, &cap);
 
@@ -200,7 +235,14 @@ static void test_osc52_malformed_b64(void)
 static void test_osc52_no_semicolon(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     ClipboardCapture cap;
     install(&t, &cap);
 
@@ -216,7 +258,14 @@ static void test_osc52_no_semicolon(void)
 static void test_osc52_empty_payload_clears(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 4) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     ClipboardCapture cap;
     install(&t, &cap);
 

@@ -35,6 +35,7 @@ enum BloomEventCode
     EVENT_PTY_CHILD_EXIT,
     EVENT_CURSOR_BLINK,
     EVENT_AUTOSCROLL_TICK,
+    EVENT_LOTTIE_TICK,
     // Posted by sdl3_notify to wake an idle SDL_WaitEvent and force one repaint
     // so a notification shown out-of-band appears immediately.
     EVENT_NOTIFY_SHOW,
@@ -121,6 +122,7 @@ typedef struct
     TimerManager *timers;
     TimerId cursor_blink_timer;
     TimerId autoscroll_timer;
+    TimerId lottie_timer;
     bool cursor_blink_visible;
     bool has_focus;
 
@@ -678,6 +680,7 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     }
     ctx->cursor_blink_timer = TIMER_INVALID;
     ctx->autoscroll_timer = TIMER_INVALID;
+    ctx->lottie_timer = TIMER_INVALID;
     ctx->cursor_blink_visible = true;
 
     plat->backend_data = ctx;
@@ -1006,6 +1009,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
     ctx->cursor_blink_timer = timer_add(ctx->timers, CURSOR_BLINK_INTERVAL_MS, true,
                                         EVENT_CURSOR_BLINK, NULL);
 
+    // Start lottie animation tick timer (~60 fps)
+    ctx->lottie_timer = timer_add(ctx->timers, 16, true,
+                                  EVENT_LOTTIE_TICK, NULL);
+
     // Start PTY reader thread (skip in demo mode when no PTY)
     SDL_SetAtomicInt(&ctx->running, 1);
     SDL_SetAtomicInt(&ctx->quit_requested, 0);
@@ -1073,6 +1080,11 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         callbacks->on_autoscroll_tick(callbacks->user_data);
                         terminal_mark_dirty(term);
                     }
+                    break;
+
+                case EVENT_LOTTIE_TICK:
+                    if (terminal_lottie_tick(term, SDL_GetTicksNS()))
+                        terminal_mark_dirty(term);
                     break;
 
                 case EVENT_NOTIFY_SHOW:

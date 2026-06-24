@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the bloom-vt include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(BLOOM_VT_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel test_diag
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel test_lottie test_diag
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -38,6 +38,13 @@ test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
     ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
 test_sixel_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
 test_sixel_LDADD = $(BLOOM_VT_LIBS)
+
+# Lottie end-to-end through the host bridge: feed an APC sequence via
+# terminal_process_input and read animations back via terminal_get_lotties.
+test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
+    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
+test_lottie_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
+test_lottie_LDADD = $(BLOOM_VT_LIBS)
 
 # test_pty_pause depends on POSIX PTY APIs
 if !HOST_WINDOWS

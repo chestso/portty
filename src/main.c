@@ -1114,10 +1114,16 @@ int main(int argc, char *argv[])
     // FreeType is initialized in renderer_init, not here
     vlog("FreeType will be initialized in renderer\n");
 
-    // Initialize terminal with cell dimensions (cols x rows). bloom-vt
-    // is the only backend now that libvterm has been removed.
+    // Initialize terminal. Cell pixel size defaults to 10x20; updated
+    // once font loading completes.  Reflow is enabled by default.
     TerminalBackend *vt_backend = &terminal_backend_bvt;
-    term = terminal_init(vt_backend, init_cols, init_rows);
+    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    cfg.rows = init_rows;
+    cfg.cols = init_cols;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    cfg.reflow = true;
+    term = terminal_init(vt_backend, &cfg);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
         platform_destroy(plat);

@@ -33,7 +33,14 @@ static const uint8_t *px(const BvtSixel *s, int x, int y)
 static void test_bridge_decode(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 10) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     terminal_set_cell_px(&t, 10, 6);
 
     feed(&t, "\x1bPq#1;2;100;0;0#1BB\x1b\\");
@@ -61,7 +68,14 @@ static void test_bridge_decode(void)
 static void test_bridge_no_cell_size(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 10) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     /* deliberately no terminal_set_cell_px */
     feed(&t, "\x1bPq#1;2;0;100;0#1~\x1b\\");
 
@@ -76,7 +90,14 @@ static void test_bridge_no_cell_size(void)
 static void test_bridge_animation(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 10) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     terminal_set_cell_px(&t, 10, 6);
     feed(&t, "\x1b[?80h"); /* in-place */
 
@@ -100,7 +121,14 @@ static void test_bridge_animation(void)
 static void test_bridge_clear(void)
 {
     TerminalBackend t = terminal_backend_bvt;
-    ASSERT_TRUE(terminal_init(&t, 20, 10) != NULL);
+    {
+        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
     terminal_set_cell_px(&t, 10, 6);
     feed(&t, "\x1bPq#1;2;100;0;0#1~\x1b\\");
     int n = -1;

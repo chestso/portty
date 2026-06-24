@@ -11,6 +11,6 @@ extern TerminalBackend terminal_backend_bvt;
  * global directly, this yields a distinct instance suitable for a second,
  * PTY-less terminal (e.g. the pager overlay). Returns NULL on failure.
  * Free with terminal_destroy() followed by free(). */
-TerminalBackend *term_bvt_new(int cols, int rows);
+TerminalBackend *term_bvt_new(const BvtConfig *cfg);
 
 #endif /* TERM_BVT_H */

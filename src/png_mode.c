@@ -56,7 +56,12 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
         fprintf(stderr, "ERROR: Failed to create GPU renderer: %s\n", SDL_GetError());
         return -1;
     }
-    ctx->term = terminal_init(select_backend(), cols, rows);
+    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    cfg.rows = rows;
+    cfg.cols = cols;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ctx->term = terminal_init(select_backend(), &cfg);
     if (!ctx->term) {
         fprintf(stderr, "ERROR: Failed to initialize terminal for PNG\n");
         return -1;

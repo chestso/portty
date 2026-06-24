@@ -79,7 +79,14 @@ static void feed_text(TerminalBackend *term, const char *s)
 // renderer (which positions the view at the top). Returns false on failure.
 static bool overlay_build(Pager *p, const char *text, int cols, int rows)
 {
-    TerminalBackend *t = term_bvt_new(cols, rows);
+    int cell_w = 10, cell_h = 20;
+    renderer_get_cell_size(p->rend, &cell_w, &cell_h);
+    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    cfg.cols = cols;
+    cfg.rows = rows;
+    cfg.cell_w_px = cell_w;
+    cfg.cell_h_px = cell_h;
+    TerminalBackend *t = term_bvt_new(&cfg);
     if (!t)
         return false;
 
