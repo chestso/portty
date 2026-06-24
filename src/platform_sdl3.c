@@ -1083,7 +1083,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     break;
 
                 case EVENT_LOTTIE_TICK:
-                    if (terminal_lottie_tick(term, SDL_GetTicksNS()))
+                    if (terminal_lottie_tick(term, SDL_GetTicksNS() / 1000))
                         terminal_mark_dirty(term);
                     break;
 
