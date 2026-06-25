@@ -19,7 +19,6 @@
 #include "term.h"
 #include "term_bvt.h"
 
-#include <stdlib.h>
 #include <string.h>
 
 extern TerminalBackend terminal_backend_bvt;

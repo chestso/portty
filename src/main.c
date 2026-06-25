@@ -30,7 +30,6 @@
 #include "term.h"
 #include "term_bvt.h"
 #include <SDL3/SDL.h>
-#include <errno.h>
 #include <getopt.h>
 #include <limits.h>
 #include <stdio.h>
