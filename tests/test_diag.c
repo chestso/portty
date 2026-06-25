@@ -244,7 +244,7 @@ static void test_vt_features_section(void)
     ASSERT_TRUE(strstr(r, "ThorVG") != NULL);
     ASSERT_TRUE(strstr(r, "OSC 8") != NULL);
     ASSERT_TRUE(strstr(r, "OSC 52") != NULL);
-    // bracketed paste / sync / focus / sixel scrolling are "inactive"/"off"
+    // runtime modes show neutral "off" (not red — default is not an error)
     ASSERT_TRUE(strstr(r, "bracketed paste") != NULL);
     ASSERT_TRUE(strstr(r, "sync output") != NULL);
     ASSERT_TRUE(strstr(r, "focus reporting") != NULL);
@@ -255,17 +255,17 @@ static void test_vt_features_section(void)
 
 static void test_vt_features_enabled(void)
 {
-    // When features are enabled, the report shows the "on" labels in green.
+    // Compile-time features show green/red; runtime modes show neutral on/off.
     DiagSources s = sample();
-    s.bracketed_paste = true;
     s.hardened_heap = true;
+    s.bracketed_paste = true;
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
-    // Green SGR (FG_ON = \x1b[32m) precedes "active" for bracketed paste
-    ASSERT_TRUE(strstr(r, "bracketed paste") != NULL);
-    ASSERT_TRUE(strstr(r, "active") != NULL);
-    // Green SGR precedes "enabled" for hardened heap
+    // hardened heap is a compile-time feature — green "enabled"
     ASSERT_TRUE(strstr(r, "enabled") != NULL);
+    // bracketed paste is a runtime mode — neutral "on" (no green/red SGR)
+    ASSERT_TRUE(strstr(r, "bracketed paste") != NULL);
+    ASSERT_TRUE(strstr(r, "on") != NULL);
     free(r);
 }
 

@@ -274,11 +274,14 @@ char *diag_build_report(const DiagSources *s)
     kv(&sb, "capabilities", "sixel  OSC 8  grapheme clusters  reflow");
     kv_bool(&sb, "lottie rasterizer", s->lottie_rasterizer, "ThorVG", "unavailable (blank frames)");
     kv_bool(&sb, "OSC 52 (clipboard)", s->osc52, "wired", "not wired");
-    kv_bool(&sb, "bracketed paste", s->bracketed_paste, "active", "inactive");
-    kv_bool(&sb, "sync output", s->sync_output, "active", "inactive");
-    kv_bool(&sb, "focus reporting", s->focus_reporting, "active", "inactive");
-    kv_bool(&sb, "sixel scrolling", s->sixel_scrolling, "on (DECSDM)", "off");
     kv_bool(&sb, "hardened heap", s->hardened_heap, "enabled", "disabled");
+    // Runtime modes — transient protocol state toggled by the running
+    // application via escape sequences (DECSET/DECRES), not user settings.
+    // "Off" is the default neutral state, not a missing feature.
+    kv(&sb, "bracketed paste", s->bracketed_paste ? "on" : "off");
+    kv(&sb, "sync output", s->sync_output ? "on" : "off");
+    kv(&sb, "focus reporting", s->focus_reporting ? "on" : "off");
+    kv(&sb, "sixel scrolling", s->sixel_scrolling ? "on" : "off");
 
     // Session / environment
     section(&sb, "SESSION");
