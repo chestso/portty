@@ -29,10 +29,10 @@ texture cache and compositing.
 
 ### Design Goals
 
-1. **Non-destructive overlay** — animations are supplemental; terminal cells
+1. **Non-destructive foreground** — animations are supplemental; terminal cells
    (text, colors, SGR attributes) remain fully interactive underneath.
 2. **Background or foreground** — animations can render _behind_ text (as cell
-   background replacement) or _in front of_ text (as overlay), with per-pixel
+   background replacement) or _in front of_ text (as foreground), with per-pixel
    alpha transparency.
 3. **Cell-anchored** — animations are attached to a rectangular cell region and
    scroll with text, exactly like sixel images.
@@ -526,7 +526,7 @@ Rendering (inside draw_scene_linear):
   A. render_visible_cells()               // cell backgrounds + text + decorations
   B. render_lottie_backgrounds()          // ← NEW: layer==1 animations, behind text
   C. render_lottie_foregrounds()          // ← NEW: layer==0 animations, over text
-  D. render_sixel_images()                // sixel overlay (unchanged)
+  D. render_sixel_images()                // sixel images (unchanged)
 
   Linear→sRGB encode-out blit
 ```
@@ -536,7 +536,7 @@ Rendering (inside draw_scene_linear):
 - Background Lottie renders **between** the cell background pass and the glyph
   pass, so text appears on top of the animation.
 - Foreground Lottie renders **after** all cell rendering (including text), so
-  the animation overlays everything.
+  the animation appears in front of everything.
 
 ### 2.2 Texture Cache (identical pattern to sixel)
 
