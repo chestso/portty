@@ -98,6 +98,13 @@ PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 PKG_CHECK_MODULES([BLOOM_VT], [bloom-vt])
 
+# ThorVG — soft dependency of bloom-vt for Lottie rasterization. When present,
+# bloom-vt renders Lottie animations; when absent, the API compiles but
+# produces blank frames. Detect here so the diagnostics report can surface it.
+PKG_CHECK_MODULES([THORVG], [thorvg-1],
+  [AC_DEFINE([HAVE_THORVG], [1], [ThorVG available for Lottie rasterization])],
+  [AC_MSG_WARN([thorvg-1 not found — Lottie rasterization will be disabled])])
+
 # Capture dependency versions and build info for --help output
 BUILD_CC_VERSION=$($CC --version 2>/dev/null | head -1 || echo "$CC")
 AC_DEFINE_UNQUOTED([BUILD_CC], ["$BUILD_CC_VERSION"], [C compiler version string])

@@ -294,6 +294,25 @@ static void show_diagnostics_report(MainContext *ctx)
         .title = terminal_get_title(ctx->term),
         .altscreen = terminal_is_altscreen(ctx->term),
         .mouse_mode = terminal_get_mouse_mode(ctx->term),
+        // VT engine features — runtime modes are queried from bloom-vt so
+        // the report reflects live state. Always-on capabilities (sixel,
+        // OSC 8, grapheme clusters, reflow) are listed by diag.c.
+        .vt_backend = ctx->term->name,
+#ifdef HAVE_THORVG
+        .lottie_rasterizer = true,
+#else
+        .lottie_rasterizer = false,
+#endif
+        .osc52 = ctx->term->clipboard_set_cb != NULL,
+        .bracketed_paste = terminal_get_mode(ctx->term, BVT_MODE_BRACKETED_PASTE),
+        .sync_output = terminal_get_mode(ctx->term, BVT_MODE_SYNC_OUTPUT),
+        .focus_reporting = terminal_get_mode(ctx->term, BVT_MODE_FOCUS_REPORTING),
+        .sixel_scrolling = terminal_get_mode(ctx->term, BVT_MODE_SIXEL_SCROLLING),
+#ifdef BLOOM_HARDEN_HEAP
+        .hardened_heap = true,
+#else
+        .hardened_heap = false,
+#endif
     };
 
     char *report = diag_build_report(&src);

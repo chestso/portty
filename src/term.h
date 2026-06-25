@@ -197,6 +197,10 @@ struct TerminalBackend
     const BvtLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
                                                        uint64_t id, int *count);
     bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
+
+    // Query a bloom-vt mode (BvtMode). Returns false if the backend or mode
+    // is unavailable.
+    bool (*get_mode)(TerminalBackend *term, BvtMode mode);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, const BvtConfig *cfg);
@@ -379,5 +383,9 @@ const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count);
 const BvtLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
                                                          uint64_t id, int *count);
 bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
+
+// Query a bloom-vt mode (BvtMode). Returns false if the backend or mode
+// is unavailable.
+bool terminal_get_mode(TerminalBackend *term, BvtMode mode);
 
 #endif /* TERM_H */

@@ -351,6 +351,13 @@ bool terminal_get_line_continuation(TerminalBackend *term, int row)
     return term->get_line_continuation(term, row);
 }
 
+bool terminal_get_mode(TerminalBackend *term, BvtMode mode)
+{
+    if (!term || !term->get_mode)
+        return false;
+    return term->get_mode(term, mode);
+}
+
 // --- Selection API ---
 
 void terminal_selection_clear(TerminalBackend *term)

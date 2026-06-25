@@ -45,6 +45,16 @@ typedef struct
     const char *title;
     bool altscreen;
     int mouse_mode;
+
+    // VT engine features (bloom-vt)
+    const char *vt_backend; // VT engine name, e.g. "bloom-vt"
+    bool lottie_rasterizer; // ThorVG available for Lottie rasterization
+    bool osc52;             // OSC 52 clipboard set wired up
+    bool bracketed_paste;   // BVT_MODE_BRACKETED_PASTE active
+    bool sync_output;       // BVT_MODE_SYNC_OUTPUT active
+    bool focus_reporting;   // BVT_MODE_FOCUS_REPORTING active
+    bool sixel_scrolling;   // BVT_MODE_SIXEL_SCROLLING active
+    bool hardened_heap;     // BLOOM_HARDEN_HEAP compile-time guard
 } DiagSources;
 
 // Build the formatted, ANSI-styled UTF-8 diagnostics document (truecolor,

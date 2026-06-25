@@ -38,6 +38,14 @@ static DiagSources sample(void)
         .title = "bash",
         .altscreen = false,
         .mouse_mode = 0,
+        .vt_backend = "bloom-vt",
+        .lottie_rasterizer = true,
+        .osc52 = true,
+        .bracketed_paste = false,
+        .sync_output = false,
+        .focus_reporting = false,
+        .sixel_scrolling = false,
+        .hardened_heap = false,
     };
     return s;
 }
@@ -55,6 +63,7 @@ static void test_contains_sections(void)
     ASSERT_TRUE(strstr(r, "VERSION & BUILD") != NULL);
     ASSERT_TRUE(strstr(r, "RENDERING") != NULL);
     ASSERT_TRUE(strstr(r, "CONFIGURATION") != NULL);
+    ASSERT_TRUE(strstr(r, "VT FEATURES") != NULL);
     ASSERT_TRUE(strstr(r, "SESSION") != NULL);
     ASSERT_TRUE(strstr(r, "SYSTEM") != NULL);
     free(r);
@@ -137,13 +146,20 @@ static void test_scrollback(void)
 static void test_altscreen_neutral(void)
 {
     // "alt screen: no" is a neutral state, not an error — it must not be
-    // emitted in the red (FG_OFF) colour. With linear_light on, the sample has
-    // no other red element, so the red SGR escape should be wholly absent.
-    DiagSources s = sample(); // altscreen = false, linear_light = true
+    // emitted in the red (FG_OFF) colour. Verify the "alt screen" key is
+    // followed by plain "no" without the red SGR escape (other sections
+    // legitimately use red for disabled features, so a whole-report check
+    // would be too broad).
+    DiagSources s = sample(); // altscreen = false
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
-    ASSERT_TRUE(strstr(r, "no") != NULL);
-    ASSERT_TRUE(strstr(r, "\x1b[31m") == NULL);
+    const char *alt = strstr(r, "alt screen");
+    ASSERT_TRUE(alt != NULL);
+    // The "no" value follows the key; red SGR (\x1b[31m) must not appear
+    // between "alt screen" and the "no" value.
+    const char *red = strstr(alt, "\x1b[31m");
+    const char *newline = strchr(alt, '\n');
+    ASSERT_TRUE(red == NULL || red > newline);
     free(r);
 }
 
@@ -214,6 +230,57 @@ static void test_font_source(void)
     free(r);
 }
 
+static void test_vt_features_section(void)
+{
+    // The VT FEATURES section shows the engine name and feature flags.
+    DiagSources s = sample();
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "engine") != NULL);
+    ASSERT_TRUE(strstr(r, "bloom-vt") != NULL);
+    // sixel, OSC 8 appear in the static capabilities line; lottie in the boolean
+    ASSERT_TRUE(strstr(r, "sixel") != NULL);
+    ASSERT_TRUE(strstr(r, "lottie rasterizer") != NULL);
+    ASSERT_TRUE(strstr(r, "ThorVG") != NULL);
+    ASSERT_TRUE(strstr(r, "OSC 8") != NULL);
+    ASSERT_TRUE(strstr(r, "OSC 52") != NULL);
+    // bracketed paste / sync / focus / sixel scrolling are "inactive"/"off"
+    ASSERT_TRUE(strstr(r, "bracketed paste") != NULL);
+    ASSERT_TRUE(strstr(r, "sync output") != NULL);
+    ASSERT_TRUE(strstr(r, "focus reporting") != NULL);
+    ASSERT_TRUE(strstr(r, "sixel scrolling") != NULL);
+    ASSERT_TRUE(strstr(r, "hardened heap") != NULL);
+    free(r);
+}
+
+static void test_vt_features_enabled(void)
+{
+    // When features are enabled, the report shows the "on" labels in green.
+    DiagSources s = sample();
+    s.bracketed_paste = true;
+    s.hardened_heap = true;
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    // Green SGR (FG_ON = \x1b[32m) precedes "active" for bracketed paste
+    ASSERT_TRUE(strstr(r, "bracketed paste") != NULL);
+    ASSERT_TRUE(strstr(r, "active") != NULL);
+    // Green SGR precedes "enabled" for hardened heap
+    ASSERT_TRUE(strstr(r, "enabled") != NULL);
+    free(r);
+}
+
+static void test_lottie_rasterizer_off(void)
+{
+    // Without ThorVG, lottie rasterizer shows "unavailable" in red.
+    DiagSources s = sample();
+    s.lottie_rasterizer = false;
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "lottie rasterizer") != NULL);
+    ASSERT_TRUE(strstr(r, "unavailable") != NULL);
+    free(r);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -230,6 +297,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_gpu_driver_color);
     RUN_TEST(test_unset_values);
     RUN_TEST(test_font_source);
+    RUN_TEST(test_vt_features_section);
+    RUN_TEST(test_vt_features_enabled);
+    RUN_TEST(test_lottie_rasterizer_off);
 
     TEST_SUMMARY();
 }

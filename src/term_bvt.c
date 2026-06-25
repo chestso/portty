@@ -789,6 +789,14 @@ static void bvt_back_set_scrollback_size(TerminalBackend *term, int lines)
     bvt_set_scrollback_size(d->vt, lines);
 }
 
+static bool bvt_back_get_mode(TerminalBackend *term, BvtMode mode)
+{
+    BvtBackendData *d = term->backend_data;
+    if (!d)
+        return false;
+    return bvt_get_mode(d->vt, mode);
+}
+
 /* ------------------------------------------------------------------ */
 /* vtable                                                              */
 /* ------------------------------------------------------------------ */
@@ -832,6 +840,7 @@ TerminalBackend terminal_backend_bvt = {
     .get_lotties = bvt_back_get_lotties,
     .get_lottie_placements = bvt_back_get_lottie_placements,
     .lottie_tick = bvt_back_lottie_tick,
+    .get_mode = bvt_back_get_mode,
 };
 
 TerminalBackend *term_bvt_new(const BvtConfig *cfg)
