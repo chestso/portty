@@ -21,7 +21,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Sixel graphics — DCS sixel images are decoded and stored inside bloom-vt and anchored to the grid, so they scroll, enter scrollback, and clear with the text they sit on. Spec coverage includes RLE, RGB and DEC HLS color (correct blue-origin hue), transparency, and raster attributes. Capability is advertised so sixel-aware tools (`img2sixel`, `lsix`, `chafa`) actually emit graphics: the DA1 reply reports `4`, plus DECSET 80/1070/8452 and XTSMGRAPHICS. Animated/in-place updates (DECSDM mode 80) swap frames in place — the renderer re-uploads a cached texture by the engine's image id + version, and the engine recycles pixel buffers from a pool so streaming same-size frames doesn't churn the heap
 - Lottie animations — APC sequences (`ESC _ … ST`) with base64-encoded JSON payloads load, place, and control Lottie animations on the grid. Eight commands (load, load-chunk, place, play, pause, stop, seek, delete) manage animation state and placement tracking. Placements carry per-instance opacity and layer (foreground or background). Animations scroll with the text, enter scrollback, and are cleared with the rows they sit on — the same ownership model as sixel. ThorVG rasterizes each frame; the host fetches RGBA pixels via the bloom-vt API (`bvt_get_lotties()`, `bvt_get_lottie_placements()`, `bvt_lottie_tick()`) and composites them as overlay layers. A standalone player (`bloom-lottie-player`) provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling
 - Procedural box drawing and block element rendering (U+2500–U+257F)
-- Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste)
+- Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard set — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy text to the system clipboard via escape sequence. Read queries (`OSC 52 ; c ; ?`) are silently refused so any program running in the terminal — including processes on the remote end of an SSH session — can't ask the terminal to hand it the contents of your clipboard (passwords, tokens, etc.).
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
@@ -175,15 +175,16 @@ build/src/bloom-terminal -P "" --exec ls --wait 500 output.png
 
 ### Keyboard Shortcuts
 
-| Shortcut             | Action                                               |
-| -------------------- | ---------------------------------------------------- |
-| `Ctrl+C`             | Copy selection to clipboard (sends SIGINT otherwise) |
-| `Ctrl+Shift+C`       | Copy selection to clipboard                          |
-| `Ctrl+Shift+V`       | Paste from clipboard                                 |
-| `Shift+PageUp/Down`  | Scroll through scrollback buffer                     |
-| Right-click          | Copy selection if active, otherwise paste            |
-| `Ctrl+click` on link | Open OSC-8 URL via the system handler                |
-| `Ctrl+Shift+F6`      | Open the diagnostics report (built-in pager)         |
+| Shortcut             | Action                                                                       |
+| -------------------- | ---------------------------------------------------------------------------- |
+| `Ctrl+C`             | Copy selection to clipboard (sends SIGINT otherwise)                         |
+| `Ctrl+Shift+C`       | Copy selection to clipboard                                                  |
+| `Ctrl+Shift+V`       | Paste from clipboard                                                         |
+| `Shift+PageUp/Down`  | Scroll through scrollback buffer                                             |
+| `Shift+drag`         | Override: select text when app owns the pointer (mouse mode) or in altscreen |
+| Right-click          | Copy selection if active, otherwise paste (works in altscreen too)           |
+| `Ctrl+click` on link | Open OSC-8 URL via the system handler                                        |
+| `Ctrl+Shift+F6`      | Open the diagnostics report (built-in pager)                                 |
 
 ### Diagnostics Report
 
@@ -414,17 +415,19 @@ Then run bloom-terminal from the USB drive or copy it locally.
 cd build && make check
 ```
 
-| Test             | What it covers                                        |
-| ---------------- | ----------------------------------------------------- |
-| `test_atlas`     | Texture atlas: insert/lookup, shelf packing, eviction |
-| `test_unicode`   | Emoji detection, ZWJ, skin tones, UTF-8 decoding      |
-| `test_conf`      | Config parser: fonts, geometry, hinting, booleans     |
-| `test_term_bvt`  | Terminal backend bridging to bloom-vt                 |
-| `test_osc52`     | OSC 52 clipboard set sequences                        |
-| `test_sixel`     | Sixel image end-to-end through host bridge            |
-| `test_lottie`    | Lottie animation bridge to bloom-vt                   |
-| `test_diag`      | Diagnostics report generation                         |
-| `test_pty_pause` | PTY pause/resume during selection (POSIX only)        |
+| Test                      | What it covers                                                        |
+| ------------------------- | --------------------------------------------------------------------- |
+| `test_atlas`              | Texture atlas: insert/lookup, shelf packing, eviction                 |
+| `test_unicode`            | Emoji detection, ZWJ, skin tones, UTF-8 decoding                      |
+| `test_conf`               | Config parser: fonts, geometry, hinting, booleans                     |
+| `test_term_bvt`           | Terminal backend bridging to bloom-vt                                 |
+| `test_osc52`              | OSC 52 clipboard set sequences                                        |
+| `test_clipboard_deferred` | Wayland clipboard deferred-free invariant (use-after-free regression) |
+| `test_altscreen_mouse`    | Altscreen/mouse-mode state and dispatch logic                         |
+| `test_sixel`              | Sixel image end-to-end through host bridge                            |
+| `test_lottie`             | Lottie animation bridge to bloom-vt                                   |
+| `test_diag`               | Diagnostics report generation                                         |
+| `test_pty_pause`          | PTY pause/resume during selection (POSIX only)                        |
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 

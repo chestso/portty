@@ -714,6 +714,17 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
         return false;
     }
 
+    // In altscreen the application owns the display.  When no mouse protocol
+    // is active, the app hasn't claimed the pointer — but terminal-level
+    // selection can still clobber the app's own clipboard operations (OSC 52)
+    // and produce confusing visual artifacts over the app's UI.  Shift
+    // overrides, giving the user an escape hatch (matches kitty, VTE, and
+    // Alacritty convention for Shift-to-select).  Right-click paste is
+    // allowed through since it's useful even in altscreen apps.
+    if (in_altscreen && !shift_held && mouse_mode == 0 && button != 3) {
+        return hover_changed;
+    }
+
     int display_row, display_col;
     if (!pixel_to_cell(ctx, pixel_x, pixel_y, &display_row, &display_col))
         return false;

@@ -210,15 +210,23 @@ static bool should_forward_button(int mouse_mode, int button, bool pressed)
 }
 
 /* After should_forward returns false and the event is not a wheel
- * button, the event falls through to terminal-level selection.
- * This function returns true when the event reaches the selection
- * code path (i.e. it is NOT swallowed and NOT forwarded to the app). */
-static bool reaches_selection(int mouse_mode,
+ * button, the event may reach terminal-level selection or right-click
+ * paste.  This function returns true when the event reaches the
+ * selection code path (i.e. it is NOT swallowed and NOT forwarded
+ * to the app).
+ *
+ * In altscreen with no mouse protocol active, the application owns the
+ * display: left-click/drag selection is blocked to avoid clobbering
+ * app clipboard operations and visual artifacts.  Shift overrides.
+ * Right-click paste (button 3) is allowed through regardless. */
+static bool reaches_selection(bool in_altscreen, int mouse_mode,
                               int button, bool shift_held)
 {
     if (mouse_mode > 0 && !shift_held)
         return false;
     if (button == 4 || button == 5)
+        return false;
+    if (in_altscreen && !shift_held && mouse_mode == 0 && button != 3)
         return false;
     return true;
 }
@@ -228,7 +236,7 @@ static bool reaches_selection(int mouse_mode,
 static void test_dispatch_altscreen_mouse2_forwards_click(void)
 {
     ASSERT_TRUE(should_forward_button(2, 1, true));
-    ASSERT_FALSE(reaches_selection(2, 1, false));
+    ASSERT_FALSE(reaches_selection(true, 2, 1, false));
 }
 
 /* Crush scenario: altscreen + mouse_mode=2, drag motion → must forward
@@ -236,32 +244,54 @@ static void test_dispatch_altscreen_mouse2_forwards_click(void)
 static void test_dispatch_altscreen_mouse2_forwards_drag(void)
 {
     ASSERT_TRUE(should_forward_button(2, 0, true));
-    ASSERT_FALSE(reaches_selection(2, 0, false));
+    ASSERT_FALSE(reaches_selection(true, 2, 0, false));
 }
 
-/* Altscreen + mouse_mode=0 (no mouse protocol): left click must NOT be
- * forwarded (no protocol to receive it) and must fall through to
- * terminal-level selection. An app that wants to control the mouse
- * must enable a mouse mode; the terminal must not silently swallow
- * events when the app hasn't claimed them. */
-static void test_dispatch_altscreen_no_mouse_allows_selection(void)
+/* Altscreen + mouse_mode=0 (no mouse protocol), left click: the app
+ * hasn't claimed the pointer but it owns the display.  Terminal-level
+ * selection is blocked to avoid clobbering app clipboard operations
+ * and visual artifacts over the app's UI. */
+static void test_dispatch_altscreen_no_mouse_blocks_selection(void)
 {
     ASSERT_FALSE(should_forward_button(0, 1, true));
-    ASSERT_TRUE(reaches_selection(0, 1, false));
+    ASSERT_FALSE(reaches_selection(true, 0, 1, false));
 }
 
-/* Primary screen + mouse_mode=0: normal selection works. */
+/* Altscreen + mouse_mode=0 + Shift: the user's escape hatch.  Selection
+ * is allowed because Shift explicitly overrides the guard. */
+static void test_dispatch_altscreen_no_mouse_shift_allows_selection(void)
+{
+    ASSERT_FALSE(should_forward_button(0, 1, true));
+    ASSERT_TRUE(reaches_selection(true, 0, 1, true));
+}
+
+/* Altscreen + mouse_mode=0, right-click: paste is still useful even in
+ * altscreen apps, so it must not be blocked. */
+static void test_dispatch_altscreen_no_mouse_allows_right_click(void)
+{
+    ASSERT_FALSE(should_forward_button(0, 3, true));
+    ASSERT_TRUE(reaches_selection(true, 0, 3, false));
+}
+
+/* Altscreen + mouse_mode=0, drag motion: blocked like left click. */
+static void test_dispatch_altscreen_no_mouse_blocks_drag(void)
+{
+    ASSERT_FALSE(should_forward_button(0, 0, true));
+    ASSERT_FALSE(reaches_selection(true, 0, 0, false));
+}
+
+/* Primary screen + mouse_mode=0: normal selection works (no guard). */
 static void test_dispatch_primary_no_mouse_allows_selection(void)
 {
     ASSERT_FALSE(should_forward_button(0, 1, true));
-    ASSERT_TRUE(reaches_selection(0, 1, false));
+    ASSERT_TRUE(reaches_selection(false, 0, 1, false));
 }
 
 /* Primary screen + mouse_mode=1 (BTN_EVENT): click forwarded. */
 static void test_dispatch_primary_mouse1_forwards_click(void)
 {
     ASSERT_TRUE(should_forward_button(1, 1, true));
-    ASSERT_FALSE(reaches_selection(1, 1, false));
+    ASSERT_FALSE(reaches_selection(false, 1, 1, false));
 }
 
 /* mouse_mode=1 does NOT forward motion events (only button press/release). */
@@ -311,7 +341,10 @@ int main(int argc, char *argv[])
 
     RUN_TEST(test_dispatch_altscreen_mouse2_forwards_click);
     RUN_TEST(test_dispatch_altscreen_mouse2_forwards_drag);
-    RUN_TEST(test_dispatch_altscreen_no_mouse_allows_selection);
+    RUN_TEST(test_dispatch_altscreen_no_mouse_blocks_selection);
+    RUN_TEST(test_dispatch_altscreen_no_mouse_shift_allows_selection);
+    RUN_TEST(test_dispatch_altscreen_no_mouse_allows_right_click);
+    RUN_TEST(test_dispatch_altscreen_no_mouse_blocks_drag);
     RUN_TEST(test_dispatch_primary_no_mouse_allows_selection);
     RUN_TEST(test_dispatch_primary_mouse1_forwards_click);
     RUN_TEST(test_dispatch_mouse1_no_motion_forward);
