@@ -2350,7 +2350,7 @@ static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const BvtSixel *im
     return tex;
 }
 
-// Render sixel images overlaid on the terminal. The engine returns each
+// Render sixel images on top of the terminal. The engine returns each
 // image's anchor as a unified row (>= 0 visible, < 0 scrollback); the
 // display row is unified_row + scroll_offset, identical to how cells map.
 static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
@@ -3223,7 +3223,7 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
 
     populate_atlas(data, term, display_rows, display_cols, cursor_visible);
 
-    // Draw the scene gamma-correct (linear-light) and overlay sixels.
+    // Draw the scene gamma-correct (linear-light) and draw sixel images.
     draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
 
     // Top notification panel. Drawn after draw_scene_linear's encode-out blit
@@ -3591,7 +3591,7 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     populate_atlas(data, term, render_rows, render_cols, false);
 
     // Draw the scene gamma-correct (linear-light) into `target`
-    // so the PNG matches on-screen output, including the sixel overlay.
+    // so the PNG matches on-screen output, including sixel images.
     draw_scene_linear(data, term, render_rows, render_cols, false, true);
 
     data->width = saved_w;
