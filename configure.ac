@@ -17,6 +17,7 @@ AC_SUBST([BLOOM_TERMINAL_VERSION])
 AC_MSG_NOTICE([bloom-terminal version: $BLOOM_TERMINAL_VERSION])
 
 # Check for programs
+user_cflags="$CFLAGS"
 AC_PROG_CC
 AM_PROG_AR
 LT_INIT([dlopen])
@@ -44,22 +45,29 @@ if test "x$host_windows" = "xno"; then
   AC_SEARCH_LIBS([dlopen], [dl])
 fi
 
-# Debug option
+# Build mode selection (--enable-release > --enable-debug > default ASan)
 AC_ARG_ENABLE([debug],
   [AS_HELP_STRING([--enable-debug],
-    [enable debug symbols and disable optimizations])],
+    [unsanitized debug build (-O0 -g3, no ASan)])],
   [enable_debug=$enableval],
   [enable_debug=no])
 
-# Set CFLAGS based on debug option
-if test "x$enable_debug" = "xyes"; then
-  CFLAGS="-O0 -g3 $CFLAGS"
-  AC_MSG_NOTICE([Debug mode enabled: CFLAGS set to -O0 -g3])
-else
-  # Use default optimization if CFLAGS not set by user
-  if test "x$CFLAGS" = "x"; then
-    CFLAGS="-O2"
-  fi
+AC_ARG_ENABLE([release],
+  [AS_HELP_STRING([--enable-release],
+    [optimized release build (-O3 -DNDEBUG)])],
+  [enable_release=$enableval],
+  [enable_release=no])
+
+if test "x$enable_release" = "xyes"; then
+  CFLAGS="-O3 -DNDEBUG"
+  AC_MSG_NOTICE([Release mode: CFLAGS set to -O3 -DNDEBUG])
+elif test "x$enable_debug" = "xyes"; then
+  CFLAGS="-O0 -g3"
+  AC_MSG_NOTICE([Debug mode: CFLAGS set to -O0 -g3])
+elif test "x$user_cflags" = "x"; then
+  CFLAGS="-O1 -g3 -fno-omit-frame-pointer -fno-common -fsanitize=address,undefined -fno-sanitize-recover=undefined"
+  LDFLAGS="-fsanitize=address,undefined $LDFLAGS"
+  AC_MSG_NOTICE([ASan+UBSan mode (default): CFLAGS=$CFLAGS])
 fi
 
 # BLOOM_HARDEN_HEAP — install the hardened BvtAllocator wrapper that

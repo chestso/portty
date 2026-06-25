@@ -94,13 +94,13 @@ The project uses GNU Autotools. From a fresh checkout:
 ```bash
 ./autogen.sh
 mkdir build && cd build
-../configure --prefix=$HOME/.local --enable-debug
+../configure --prefix=$HOME/.local
 make -j$(nproc)
 make check
 make install
 ```
 
-If GTK4 and libadwaita are available, the plugin is built automatically. Pass `--disable-gtk4` to `configure` to skip it. Pass plain `CFLAGS` (e.g. `CFLAGS="-O3 -DNDEBUG"`) for a release build instead of `--enable-debug`.
+If GTK4 and libadwaita are available, the plugin is built automatically. Pass `--disable-gtk4` to `configure` to skip it. Use `--enable-release` for an optimized build or `--enable-debug` for unsanitized debug.
 
 ### Make Targets
 
