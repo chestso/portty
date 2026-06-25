@@ -130,12 +130,23 @@ static void section(SB *sb, const char *title)
     rule(sb, "─", DW);
 }
 
-// Key/value row: dim key padded into an 18-col gutter, then the value (or dim
-// "(unset)") in the default foreground. 18 keeps a 2-space gap even for the
-// longest key.
+// Sub-section header inside a section: italic title, thin rule.
+static void subsection(SB *sb, const char *title, const char *desc)
+{
+    sb_puts(sb, "\n  ");
+    sb_printf(sb, ITAL FG_HEADER "%s" RST, title);
+    if (desc)
+        sb_printf(sb, DIM "  %s" RST, desc);
+    sb_puts(sb, "\n  ");
+    rule(sb, "─", DW);
+}
+
+// Key/value row: dim key padded into a 20-col gutter, then the value (or dim
+// "(unset)") in the default foreground. 20 keeps a 2-space gap even for the
+// longest key ("lottie rasterizer").
 static void kv(SB *sb, const char *key, const char *val)
 {
-    sb_printf(sb, DIM "  %-18s" RST, key);
+    sb_printf(sb, DIM "  %-20s" RST, key);
     if (val && *val)
         sb_puts(sb, val);
     else
@@ -156,7 +167,7 @@ static void kvf(SB *sb, const char *key, const char *fmt, ...)
 // Coloured boolean value row (green on / red off).
 static void kv_bool(SB *sb, const char *key, bool on, const char *on_s, const char *off_s)
 {
-    sb_printf(sb, DIM "  %-18s" RST, key);
+    sb_printf(sb, DIM "  %-20s" RST, key);
     sb_puts(sb, on ? FG_ON : FG_OFF);
     sb_puts(sb, on ? on_s : off_s);
     sb_puts(sb, RST "\n");
@@ -166,7 +177,7 @@ static void kv_bool(SB *sb, const char *key, bool on, const char *on_s, const ch
 // values). Pass "" to leave the value in the default foreground.
 static void kv_colored(SB *sb, const char *key, const char *sgr, const char *val)
 {
-    sb_printf(sb, DIM "  %-18s" RST, key);
+    sb_printf(sb, DIM "  %-20s" RST, key);
     sb_puts(sb, sgr);
     sb_puts(sb, val);
     sb_puts(sb, RST "\n");
@@ -271,22 +282,15 @@ char *diag_build_report(const DiagSources *s)
     // VT engine features
     section(&sb, "VT FEATURES");
     kv(&sb, "engine", or_unset(s->vt_backend));
-    kv(&sb, "capabilities", "sixel  OSC 8  grapheme clusters  reflow");
+    kv(&sb, "capabilities", "sixel " FG_RULE "·" RST " OSC 8 " FG_RULE "·" RST " grapheme clusters " FG_RULE "·" RST " reflow");
     kv_bool(&sb, "lottie rasterizer", s->lottie_rasterizer, "ThorVG", "unavailable (blank frames)");
     kv_bool(&sb, "OSC 52 (clipboard)", s->osc52, "wired", "not wired");
     kv_bool(&sb, "hardened heap", s->hardened_heap, "enabled", "disabled");
-    kv(&sb, DIM "runtime modes" RST, DIM "toggled by the running application via DECSET" RST);
+    subsection(&sb, "runtime modes", "toggled by the running application via DECSET");
     kv(&sb, "bracketed paste", s->bracketed_paste ? "on" : "off");
     kv(&sb, "sync output", s->sync_output ? "on" : "off");
     kv(&sb, "focus reporting", s->focus_reporting ? "on" : "off");
     kv(&sb, "sixel scrolling", s->sixel_scrolling ? "on" : "off");
-
-    // Session / environment
-    section(&sb, "SESSION");
-    kv(&sb, "TERM", or_unset(s->term_env));
-    kv(&sb, "COLORTERM", or_unset(s->colorterm_env));
-    kv(&sb, "LANG", or_unset(s->lang_env));
-    kv(&sb, "title", or_unset(s->title));
     // Neutral state, not a good/bad condition — use the plain value colour
     // rather than kv_bool's green/red (red "no" wrongly reads as an error).
     kv(&sb, "alt screen", s->altscreen ? "yes" : "no");
@@ -294,6 +298,13 @@ char *diag_build_report(const DiagSources *s)
         kv(&sb, "mouse mode", "off");
     else
         kvf(&sb, "mouse mode", "on (mode %d)", s->mouse_mode);
+
+    // Session / environment
+    section(&sb, "SESSION");
+    kv(&sb, "TERM", or_unset(s->term_env));
+    kv(&sb, "COLORTERM", or_unset(s->colorterm_env));
+    kv(&sb, "LANG", or_unset(s->lang_env));
+    kv(&sb, "title", or_unset(s->title));
 
     // System
     section(&sb, "SYSTEM");
