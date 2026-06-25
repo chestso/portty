@@ -48,6 +48,23 @@ typedef struct
     char data[];
 } PtyDataPayload;
 
+// Deferred clipboard free list (Wayland use-after-free workaround).
+// See the detailed comment near clipboard_cleanup_callback below.
+typedef struct ClipboardDeferredFree
+{
+    char *ptr;
+    int age; // number of event-loop iterations survived
+    struct ClipboardDeferredFree *next;
+} ClipboardDeferredFree;
+static ClipboardDeferredFree *clipboard_deferred_head;
+
+// Minimum age before a deferred string is safe to free.  The string
+// must survive the iteration where cleanup fires plus one more full
+// iteration, because the compositor's data_source_send can arrive
+// during the SDL_WaitEvent of the *next* iteration (observed with
+// libdecor-gtk under Wayland).
+#define CLIPBOARD_DEFERRED_MIN_AGE 2
+
 // SDL keycode → terminal key mapping
 static const struct
 {
@@ -239,7 +256,7 @@ static void set_window_icon(SDL_Window *win)
 // Forward declarations
 static bool sdl3_plat_init(PlatformBackend *plat);
 static void sdl3_plat_destroy(PlatformBackend *plat);
-static void clipboard_deferred_free_flush(void);
+static void clipboard_deferred_free_advance(void);
 static bool sdl3_create_window(PlatformBackend *plat, const char *title,
                                int width, int height);
 static void sdl3_show_window(PlatformBackend *plat);
@@ -753,7 +770,12 @@ static void sdl3_plat_destroy(PlatformBackend *plat)
     }
 
     // Flush any remaining deferred clipboard frees
-    clipboard_deferred_free_flush();
+    while (clipboard_deferred_head) {
+        ClipboardDeferredFree *next = clipboard_deferred_head->next;
+        free(clipboard_deferred_head->ptr);
+        free(clipboard_deferred_head);
+        clipboard_deferred_head = next;
+    }
 
     // Destroy SDL resources
     if (ctx->sdl_renderer) {
@@ -926,38 +948,57 @@ static const void *clipboard_data_callback(void *userdata, const char *mime_type
 // cancelled clipboard offer.  The Wayland protocol is asynchronous: a
 // wl_data_source.send event that was already queued in the socket buffer
 // before the client called wl_data_source_destroy will still be dispatched
-// on the next wl_display_dispatch_queue_pending call.  SDL_SetClipboardData
+// on a future wl_display_dispatch_queue_pending call.  SDL_SetClipboardData
 // calls SDL_CancelClipboardData(0) which immediately invokes this cleanup
 // callback, but the compositor's pending send has not been processed yet.
 // If we free immediately, the subsequent data_source_handle_send calls
 // clipboard_data_callback on freed memory (use-after-free).
 //
-// Only one deferred pointer is needed.  The compositor can only have a
-// pending data_source_send for the source that was current at the time of
-// the last wl_display_dispatch.  Sources created and replaced between two
-// dispatches were never visible to the compositor (our
-// wl_data_device_set_selection writes are buffered until the next dispatch),
-// so the compositor cannot have queued a send for them.  Each cleanup
-// callback frees any previous deferred string (which by now is safe — it
-// has survived past the dispatch boundary) and defers the new one instead.
-static char *clipboard_pending_free;
+// Each cancelled string is appended to a linked list with an age counter.
+// The event loop increments all ages once per iteration and frees any that
+// have reached CLIPBOARD_DEFERRED_MIN_AGE.  This ensures every string
+// survives at least that many full iterations.
+//
+// A list is used instead of a fixed-size ring because the number of
+// clipboard_set calls per iteration is unbounded: a user selection and
+// multiple OSC 52 sequences from the PTY can all fire in the same
+// iteration, each cancelling the previous offer.  Only the offer that was
+// active at the last wl_display_dispatch boundary can have a pending
+// data_source_send, but we cannot know which one that was, so all are
+// deferred.  The list automatically handles any burst size.
 
 static void clipboard_cleanup_callback(void *userdata)
 {
     char *ptr = (char *)userdata;
     if (!ptr)
         return;
-    // Free the previously deferred string — it has survived past at least
-    // one event loop iteration, so any pending Wayland send for it has
-    // already been dispatched.
-    free(clipboard_pending_free);
-    clipboard_pending_free = ptr;
+    ClipboardDeferredFree *entry = malloc(sizeof(*entry));
+    if (!entry) {
+        // Allocation failure — free immediately (better than leaking
+        // and better than a UAF; the race window is narrow).
+        free(ptr);
+        return;
+    }
+    entry->ptr = ptr;
+    entry->age = 0;
+    entry->next = clipboard_deferred_head;
+    clipboard_deferred_head = entry;
 }
 
-static void clipboard_deferred_free_flush(void)
+static void clipboard_deferred_free_advance(void)
 {
-    free(clipboard_pending_free);
-    clipboard_pending_free = NULL;
+    ClipboardDeferredFree **pp = &clipboard_deferred_head;
+    while (*pp) {
+        (*pp)->age++;
+        if ((*pp)->age >= CLIPBOARD_DEFERRED_MIN_AGE) {
+            ClipboardDeferredFree *old = *pp;
+            *pp = old->next;
+            free(old->ptr);
+            free(old);
+        } else {
+            pp = &(*pp)->next;
+        }
+    }
 }
 
 static bool sdl3_clipboard_set(PlatformBackend *plat, const char *text)
@@ -1285,11 +1326,10 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
             }
         } while (SDL_PollEvent(&event));
 
-        // Flush the deferred clipboard string.  By now SDL_PumpEvents (inside
-        // SDL_PollEvent) has drained all pending Wayland dispatch, so any
-        // data_source_send for the old clipboard offer has completed and the
-        // string is safe to free.
-        clipboard_deferred_free_flush();
+        // Age and prune deferred-clipboard entries.  By now SDL_PumpEvents
+        // (inside SDL_PollEvent) has drained the Wayland dispatch, so entries
+        // that have reached CLIPBOARD_DEFERRED_MIN_AGE are safe to free.
+        clipboard_deferred_free_advance();
 
         // PTY output cleared any OSC-8 hover; re-resolve it at the live pointer
         // so a held-still mouse over a link stays highlighted across redraws

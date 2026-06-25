@@ -664,9 +664,10 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     }
 
     // Forward to terminal if mouse mode is active and Shift is not held
+    bool in_altscreen = terminal_is_altscreen(ctx->term);
+
     if (mouse_mode > 0 && !shift_held) {
         bool should_forward = false;
-        bool in_altscreen = terminal_is_altscreen(ctx->term);
 
         if (button == 4 || button == 5) {
             should_forward = in_altscreen || (mouse_mode > 0);
