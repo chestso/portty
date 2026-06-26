@@ -67,7 +67,7 @@ bloom-terminal uses a modular backend abstraction design:
 - **Font Resolver Backend**: Handles font discovery and selection
   - Linux: Fontconfig (`font_resolve_backend_fc`)
   - macOS: Core Text (`font_resolve_backend_ct`) with `CTFontCreateForString` codepoint fallback
-  - Windows: Native registry-based resolver (`font_resolve_backend_w32`) with FreeType codepoint fallback
+  - Windows: Native resolver (`font_resolve_backend_w32`) — GDI enumeration + DirectWrite path resolution for UWP/Store fonts + FreeType codepoint fallback
 
 Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`, `RendererBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
 
@@ -350,7 +350,7 @@ The default build mode skips ASan/UBSan (not available on MinGW) and uses unsani
 ### Windows Details
 
 - **PTY**: ConPTY (`CreatePseudoConsole`) instead of Unix PTYs (`src/pty_w32.c`)
-- **Font resolver**: Native Windows registry-based font discovery (`src/font_resolve_w32.c`) replaces Fontconfig. Default fallback chain: Cascadia Mono → Consolas → Courier New.
+- **Font resolver**: Native Windows font discovery (`src/font_resolve_w32.c`) replaces Fontconfig. Uses `EnumFontFamiliesExW` (GDI) for accurate family/style/pitch enumeration, dual registry scan (HKLM + HKCU) for file path resolution of traditional installed fonts, and DirectWrite (`IDWriteLocalFontFileLoader::GetFilePathFromKey`) as a fallback for UWP/Store fonts (e.g. Cascadia Mono) that GDI can enumerate but the registry cannot resolve. The system default console font is read from `HKCU\Console\FaceName` (resolving the `__DefaultTTFont__` sentinel). Default monospace fallback chain: Cascadia Mono → Cascadia Code → Consolas → Courier New.
 - **DWM styling**: Dark title bar, Mica backdrop, custom caption color, rounded corners on Windows 11 (degrades gracefully on older versions)
 - **Platform**: SDL3 only (GTK4 backend is not available on Windows)
 
