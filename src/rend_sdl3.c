@@ -31,7 +31,7 @@
 #define FALLBACK_CACHE_SIZE  64
 #define MAX_LOADED_FALLBACKS 8
 #define SIXEL_CACHE_MAX      256 // matches the engine's live-image cap
-#define LOTIE_CACHE_MAX      64  // lottie animations are fewer but larger
+#define LOTTIE_CACHE_MAX     64  // lottie animations are fewer but larger
 
 typedef struct
 {
@@ -981,7 +981,7 @@ typedef struct RendererSdl3Data
         uint64_t id;
         uint32_t version;
         int w, h;
-    } lottie_cache[LOTIE_CACHE_MAX];
+    } lottie_cache[LOTTIE_CACHE_MAX];
     int lottie_cache_count;
 } RendererSdl3Data;
 
@@ -2460,7 +2460,7 @@ static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
     SDL_UpdateTexture(tex, NULL, anim->rgba, anim->canvas_w * 4);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
 
-    if (data->lottie_cache_count >= LOTIE_CACHE_MAX) {
+    if (data->lottie_cache_count >= LOTTIE_CACHE_MAX) {
         SDL_DestroyTexture(tex);
         return NULL;
     }

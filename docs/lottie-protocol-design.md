@@ -560,7 +560,7 @@ struct {
     uint64_t     id;           /* matches BvtLottie.id */
     uint32_t     version;      /* matches BvtLottie.version */
     int          w, h;         /* pixel dimensions */
-} lottie_cache[LOTIE_CACHE_MAX];  /* 64 entries (note: spelling matches code) */
+} lottie_cache[LOTTIE_CACHE_MAX];  /* 64 entries */
 int lottie_cache_count;
 ```
 
