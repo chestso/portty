@@ -297,11 +297,7 @@ static void show_diagnostics_report(MainContext *ctx)
         // the report reflects live state. Always-on capabilities (sixel,
         // OSC 8, grapheme clusters, reflow) are listed by diag.c.
         .vt_backend = ctx->term->name,
-#ifdef HAVE_THORVG
-        .lottie_rasterizer = true,
-#else
-        .lottie_rasterizer = false,
-#endif
+        .lottie_rasterizer = bvt_have_lottie(),
         .osc52 = ctx->term->clipboard_set_cb != NULL,
         .bracketed_paste = terminal_get_mode(ctx->term, BVT_MODE_BRACKETED_PASTE),
         .sync_output = terminal_get_mode(ctx->term, BVT_MODE_SYNC_OUTPUT),
