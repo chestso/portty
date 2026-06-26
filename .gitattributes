@@ -6,6 +6,9 @@
 
 * text=auto eol=lf
 
+# Windows-native scripts need CRLF for PowerShell to handle correctly
+*.ps1 text eol=crlf
+
 # Binary files — don't touch
 *.png  binary
 *.ico  binary
