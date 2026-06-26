@@ -33,6 +33,8 @@ endif
 
 if HOST_WINDOWS
 install-data-local:
+	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti \
+	    || echo "  WARNING: Failed to install terminfo (is ncurses installed?)" >&2
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/install-shortcut.ps1" \
 	    -ExePath "$(DESTDIR)$(bindir)/bloom-terminal.exe" \
@@ -40,6 +42,9 @@ install-data-local:
 	    || echo "  WARNING: Failed to create Start Menu shortcut" >&2
 
 uninstall-local:
+	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-vty-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/uninstall-shortcut.ps1" \
 	    || echo "  WARNING: Failed to remove Start Menu shortcut" >&2
