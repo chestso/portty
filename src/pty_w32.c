@@ -219,36 +219,36 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
 
 #ifdef BLOOM_DATADIR
     /* Build TERMINFO_DIRS so MSYS2 programs can find our terminfo.
-     * On Windows ncurses uses ';' as the path separator and forward
-     * slashes to avoid the colon in drive letters (C:\) being
-     * misinterpreted as a separator.  An empty trailing separator
-     * tells ncurses to also check the compiled-in default paths. */
+     * MSYS2's ncurses (msys-ncursesw6.dll) uses ':' as the path
+     * separator and expects native Windows backslash paths.  An
+     * empty trailing ':' tells ncurses to also check the
+     * compiled-in default paths. */
     {
         char buf[8192];
         const char *home = getenv("HOME");
         const char *existing = getenv("TERMINFO_DIRS");
 
-        /* Convert backslashes to forward slashes in HOME */
-        char home_slash[4096];
-        if (home) {
-            snprintf(home_slash, sizeof(home_slash), "%s", home);
-            for (char *p = home_slash; *p; p++)
-                if (*p == '\\')
-                    *p = '/';
-        }
+        /* Convert forward slashes to backslashes in BLOOM_DATADIR
+         * (configure emits MSYS2-style /c/... paths) */
+        char datadir_bs[4096];
+        snprintf(datadir_bs, sizeof(datadir_bs), "%s", BLOOM_DATADIR);
+        for (char *p = datadir_bs; *p; p++)
+            if (*p == '/')
+                *p = '\\';
 
+        /* HOME may already have backslashes on Windows */
         if (existing) {
             snprintf(buf, sizeof(buf),
-                     BLOOM_DATADIR "/terminfo;%s/.terminfo;%s",
-                     home ? home_slash : "", existing);
+                     "%s\\terminfo:%s\\.terminfo:%s",
+                     datadir_bs, home ? home : "", existing);
         } else {
             snprintf(buf, sizeof(buf),
-                     BLOOM_DATADIR "/terminfo;%s/.terminfo;",
-                     home ? home_slash : "");
+                     "%s\\terminfo:%s\\.terminfo:",
+                     datadir_bs, home ? home : "");
         }
         WCHAR wbuf[8192];
-        size_t wlen = mbstowcs(wbuf, buf, 4096);
-        if (wlen > 0 && wlen < 4096) {
+        size_t wlen = mbstowcs(wbuf, buf, sizeof(wbuf) / sizeof(wbuf[0]));
+        if (wlen > 0 && wlen < sizeof(wbuf) / sizeof(wbuf[0])) {
             /* Prepend TERMINFO_DIRS= */
             static const WCHAR prefix[] = L"TERMINFO_DIRS=";
             size_t prefix_len = wcslen(prefix);
