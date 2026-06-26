@@ -217,13 +217,62 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         }
     }
 
-    /* Copy parent environment */
+#ifdef BLOOM_DATADIR
+    /* Build TERMINFO_DIRS so MSYS2 programs can find our terminfo.
+     * On Windows ncurses uses ';' as the path separator and forward
+     * slashes to avoid the colon in drive letters (C:\) being
+     * misinterpreted as a separator.  An empty trailing separator
+     * tells ncurses to also check the compiled-in default paths. */
+    {
+        char buf[8192];
+        const char *home = getenv("HOME");
+        const char *existing = getenv("TERMINFO_DIRS");
+
+        /* Convert backslashes to forward slashes in HOME */
+        char home_slash[4096];
+        if (home) {
+            snprintf(home_slash, sizeof(home_slash), "%s", home);
+            for (char *p = home_slash; *p; p++)
+                if (*p == '\\')
+                    *p = '/';
+        }
+
+        if (existing) {
+            snprintf(buf, sizeof(buf),
+                     BLOOM_DATADIR "/terminfo;%s/.terminfo;%s",
+                     home ? home_slash : "", existing);
+        } else {
+            snprintf(buf, sizeof(buf),
+                     BLOOM_DATADIR "/terminfo;%s/.terminfo;",
+                     home ? home_slash : "");
+        }
+        WCHAR wbuf[8192];
+        size_t wlen = mbstowcs(wbuf, buf, 4096);
+        if (wlen > 0 && wlen < 4096) {
+            /* Prepend TERMINFO_DIRS= */
+            static const WCHAR prefix[] = L"TERMINFO_DIRS=";
+            size_t prefix_len = wcslen(prefix);
+            if (ep + prefix_len + wlen + 1 < envBlock + 65536) {
+                wmemcpy(ep, prefix, prefix_len);
+                ep += prefix_len;
+                wmemcpy(ep, wbuf, wlen + 1);
+                ep += wlen + 1;
+            }
+        }
+    }
+#endif
+
+    /* Copy parent environment, skipping TERMINFO_DIRS since we set it above */
     if (parent_env) {
         LPWCH p = parent_env;
         while (*p) {
             size_t len = wcslen(p);
             if (ep + len + 1 >= envBlock + 65536)
                 break;
+            if (wcsncmp(p, L"TERMINFO_DIRS=", 14) == 0) {
+                p += len + 1;
+                continue;
+            }
             wmemcpy(ep, p, len + 1);
             ep += len + 1;
             p += len + 1;
