@@ -337,6 +337,74 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
 #endif
 }
 
+#ifdef _WIN32
+static char *sdl3_get_default_font(PlatformBackend *plat)
+{
+    (void)plat;
+
+    /* Read the user's preferred console font from the registry.
+     * HKCU\Console\FaceName is set by Windows when the user changes
+     * the console font in cmd.exe properties. */
+    HKEY hkey;
+    LONG rc = RegOpenKeyExW(HKEY_CURRENT_USER, L"Console", 0,
+                            KEY_READ, &hkey);
+    if (rc != ERROR_SUCCESS)
+        return NULL;
+
+    WCHAR face_w[256];
+    DWORD len = sizeof(face_w);
+    DWORD type;
+    rc = RegQueryValueExW(hkey, L"FaceName", NULL, &type,
+                          (BYTE *)face_w, &len);
+    RegCloseKey(hkey);
+
+    if (rc != ERROR_SUCCESS || type != REG_SZ)
+        return NULL;
+
+    /* Skip generic placeholders — "__DefaultTTFont__" means "use the
+     * system default TrueType console font", which is the "00" entry
+     * under HKLM\...\Console\TrueTypeFont (Consolas on all modern
+     * Windows).  Raster "Terminal" and legacy "0" are not useful. */
+    if (_wcsicmp(face_w, L"0") == 0 ||
+        _wcsicmp(face_w, L"Terminal") == 0)
+        return NULL;
+
+    if (_wcsicmp(face_w, L"__DefaultTTFont__") == 0) {
+        /* Resolve the system default TT console font from the
+         * TrueTypeFont registry key.  The "00" value is the default
+         * TrueType font (Consolas on modern Windows). */
+        HKEY ttkey;
+        rc = RegOpenKeyExW(
+            HKEY_LOCAL_MACHINE,
+            L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\"
+            L"Console\\TrueTypeFont",
+            0, KEY_READ, &ttkey);
+        if (rc != ERROR_SUCCESS)
+            return NULL;
+
+        len = sizeof(face_w);
+        rc = RegQueryValueExW(ttkey, L"00", NULL, &type,
+                              (BYTE *)face_w, &len);
+        RegCloseKey(ttkey);
+
+        if (rc != ERROR_SUCCESS || type != REG_SZ)
+            return NULL;
+    }
+
+    int utf8_len = WideCharToMultiByte(CP_UTF8, 0, face_w, -1,
+                                       NULL, 0, NULL, NULL);
+    if (utf8_len <= 0)
+        return NULL;
+    char *buf = malloc(utf8_len);
+    if (!buf)
+        return NULL;
+    WideCharToMultiByte(CP_UTF8, 0, face_w, -1, buf, utf8_len,
+                        NULL, NULL);
+    vlog("W32: system default console font: %s\n", buf);
+    return buf;
+}
+#endif
+
 // Backend definition
 PlatformBackend platform_backend_sdl3 = {
     .name = "sdl3",
@@ -366,6 +434,9 @@ PlatformBackend platform_backend_sdl3 = {
     .set_cursor = sdl3_set_cursor,
     .set_autoscroll = sdl3_set_autoscroll,
     .spawn_new_terminal = sdl3_spawn_new_terminal,
+#ifdef _WIN32
+    .get_default_font = sdl3_get_default_font,
+#endif
 };
 
 // PTY reader thread function

@@ -77,7 +77,7 @@ bloom_terminal_SOURCES += bloom-terminal.rc
 endif HAVE_WINDRES
 
 if HOST_WINDOWS
-bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi
+bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite
 bloom_terminal_LDFLAGS = -mwindows
 else !HOST_WINDOWS
 if HOST_MACOS

@@ -854,16 +854,18 @@ static bool on_revalidate_hover(void *user_data, int px, int py)
 int main(int argc, char *argv[])
 {
 #ifdef _WIN32
-    /* GUI subsystem detaches from console — reattach so stdout/stderr
-     * work when launched from cmd.exe (needed for --list-fonts, -h, -v).
-     * Detach immediately after so closing the parent shell doesn't
-     * kill the terminal process. */
+    /* GUI subsystem has no console — reattach to the parent's console
+     * so stdout/stderr work when launched from cmd.exe.  For short-lived
+     * commands (--list-fonts, -h, -v) we keep the console so output
+     * reaches the user.  For the long-running GUI we detach after
+     * initial output so closing the parent shell doesn't kill us. */
+    bool console_attached = false;
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         freopen("CONOUT$", "w", stdout);
         freopen("CONOUT$", "w", stderr);
         fflush(stdout);
         fflush(stderr);
-        FreeConsole();
+        console_attached = true;
     }
 #endif
 
@@ -1201,6 +1203,14 @@ int main(int argc, char *argv[])
 
     // Only create window and renderer if we're going to run the event loop
     if (running) {
+#ifdef _WIN32
+        // Detach from the parent console now that startup output is done.
+        // The GUI process must not stay attached or closing the parent
+        // shell will kill it.  Short-lived commands (--list-fonts, -h)
+        // already returned above while the console was still attached.
+        if (console_attached)
+            FreeConsole();
+#endif
         // Create window (placeholder size; will be resized after font loading)
         if (!platform_create_window(plat, "bloom-terminal", 800, 600)) {
             terminal_destroy(term);
@@ -1239,7 +1249,11 @@ int main(int argc, char *argv[])
         else if (desktop_font)
             font_source = "desktop default";
         else
+#ifdef _WIN32
+            font_source = "system default (no console font set)";
+#else
             font_source = "fontconfig generic (no desktop default)";
+#endif
 
         // Set content scale before font loading so FreeType uses correct DPI
         float display_scale = platform_get_display_scale(plat);
