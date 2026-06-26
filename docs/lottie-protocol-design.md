@@ -241,19 +241,19 @@ For Lottie files exceeding ~4 KB of base64, chunk the upload:
               ┌─────────────────────┼─────────────────────┐
               ▼                     ▼                     ▼
         ┌──────────┐        ┌──────────────┐       ┌───────────┐
-        │  load /   │        │  play/pause/ │       │  delete /  │
-        │  load-    │        │  stop/seek / │       │  place     │
-        │  chunk    │        │  place       │       │            │
+        │  load /  │        │  play/pause/ │       │  delete / │
+        │  load-   │        │  stop/seek / │       │  place    │
+        │  chunk   │        │  place       │       │           │
         └────┬─────┘        └──────┬───────┘       └─────┬─────┘
-             │                      │                     │
-             ▼                      ▼                     ▼
-  ┌─────────────────┐   ┌──────────────────┐   ┌─────────────────┐
-  │ Parse Lottie JSON│   │ Update playback  │   │ Remove record + │
-  │ Init ThorVG      │   │ state in LtRec   │   │ destroy painter │
-  │ Rasterize frame 0│   │ Re-rasterize if  │   │ release rgba buf│
-  │ Store in LtRec   │   │ frame changed    │   │ version++       │
-  └─────────────────┘   │ version++        │   └─────────────────┘
-                         └──────────────────┘
+             │                     │                     │
+             ▼                     ▼                     ▼
+  ┌───────────────────┐   ┌──────────────────┐   ┌─────────────────┐
+  │ Parse Lottie JSON │   │ Update playback  │   │ Remove record + │
+  │ Init ThorVG       │   │ state in LtRec   │   │ destroy painter │
+  │ Rasterize frame 0 │   │ Re-rasterize if  │   │ release rgba buf│
+  │ Store in LtRec    │   │ frame changed    │   │ version++       │
+  └───────────────────┘   │ version++        │   └─────────────────┘
+                          └──────────────────┘
 ```
 
 **New internal structures in bloom-vt:**
