@@ -214,6 +214,20 @@ static void test_comments_and_blank_lines(void)
     cleanup_tmp(path);
 }
 
+static void test_parse_shell(void)
+{
+    char *path = write_tmp_conf("[terminal]\nshell = /usr/bin/bash --norc\n");
+    ASSERT_NOT_NULL(path);
+
+    BloomConf conf;
+    bloom_conf_init(&conf);
+    ASSERT_TRUE(bloom_conf_load_path(&conf, path));
+    ASSERT_STR_EQ(conf.shell, "/usr/bin/bash --norc");
+
+    bloom_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
 static void test_unknown_keys_ignored(void)
 {
     char *path = write_tmp_conf("[terminal]\nunknown_key = whatever\nfont = ok\n");
@@ -288,6 +302,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_scrollback_zero);
     RUN_TEST(test_parse_scrollback_invalid);
     RUN_TEST(test_comments_and_blank_lines);
+    RUN_TEST(test_parse_shell);
     RUN_TEST(test_unknown_keys_ignored);
     RUN_TEST(test_wrong_section_ignored);
     RUN_TEST(test_nonexistent_file);

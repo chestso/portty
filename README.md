@@ -224,6 +224,7 @@ platform = gtk4
 verbose = false
 word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
 scrollback = 1000
+shell = /bin/bash
 text_composition_strategy = kitty
 ```
 
@@ -231,17 +232,18 @@ text_composition_strategy = kitty
 
 All keys are optional. Only the `[terminal]` section is recognized.
 
-| Key                         | Values                                                | Default        | Description                                                                                                                 |
-| --------------------------- | ----------------------------------------------------- | -------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `font`                      | Fontconfig pattern                                    | `monospace`    | Font family and size (e.g. `monospace-16`)                                                                                  |
-| `geometry`                  | `COLSxROWS`                                           | `80x24`        | Initial terminal dimensions                                                                                                 |
-| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`        | FreeType hinting mode                                                                                                       |
-| `platform`                  | `sdl3`, `gtk4`                                        | `sdl3`         | Platform backend                                                                                                            |
-| `verbose`                   | `true`/`false`                                        | `false`        | Debug output                                                                                                                |
-| `word_chars`                | Character string                                      | `A-Za-z0-9_-/` | Characters treated as word for double-click                                                                                 |
-| `scrollback`                | Non-negative integer                                  | `1000`         | Scrollback history lines (0 disables)                                                                                       |
-| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`      | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30) |
-| `notification_transparency` | `true`/`false`                                        | `false`        | Draw the top notification panel translucent instead of opaque                                                               |
+| Key                         | Values                                                | Default            | Description                                                                                                                                          |
+| --------------------------- | ----------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `font`                      | Fontconfig pattern                                    | `monospace`        | Font family and size (e.g. `monospace-16`)                                                                                                           |
+| `geometry`                  | `COLSxROWS`                                           | `80x24`            | Initial terminal dimensions                                                                                                                          |
+| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`            | FreeType hinting mode                                                                                                                                |
+| `platform`                  | `sdl3`, `gtk4`                                        | `sdl3`             | Platform backend                                                                                                                                     |
+| `verbose`                   | `true`/`false`                                        | `false`            | Debug output                                                                                                                                         |
+| `word_chars`                | Character string                                      | `A-Za-z0-9_-/`     | Characters treated as word for double-click                                                                                                          |
+| `scrollback`                | Non-negative integer                                  | `1000`             | Scrollback history lines (0 disables)                                                                                                                |
+| `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC` | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
+| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`          | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
+| `notification_transparency` | `true`/`false`                                        | `false`            | Draw the top notification panel translucent instead of opaque                                                                                        |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 

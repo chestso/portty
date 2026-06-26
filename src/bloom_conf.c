@@ -93,6 +93,7 @@ void bloom_conf_init(BloomConf *conf)
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
     conf->notification_transparency = -1;
+    conf->shell = NULL;
     conf->source_path = NULL;
 }
 
@@ -206,6 +207,9 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
             } else {
                 conf->scrollback = (int)n;
             }
+        } else if (strcmp(key, "shell") == 0) {
+            free(conf->shell);
+            conf->shell = strdup(val);
         } else if (strcmp(key, "text_composition_strategy") == 0) {
             /* kitty-compatible: "kitty" (gamma 1.7, contrast 30),
              * "neutral"/"correct" (pure linear), or "<gamma> [contrast]". */
@@ -247,11 +251,12 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
     fclose(fp);
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d verbose=%d"
-         " word_chars=%s platform=%s scrollback=%d text_gamma=%.2f"
+         " word_chars=%s platform=%s scrollback=%d shell=%s text_gamma=%.2f"
          " text_contrast=%.1f\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
          conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
          conf->platform ? conf->platform : "(unset)", conf->scrollback,
+         conf->shell ? conf->shell : "(unset)",
          conf->text_gamma, conf->text_contrast);
 
     return true;
@@ -276,6 +281,8 @@ void bloom_conf_free(BloomConf *conf)
     conf->word_chars = NULL;
     free(conf->platform);
     conf->platform = NULL;
+    free(conf->shell);
+    conf->shell = NULL;
     free(conf->source_path);
     conf->source_path = NULL;
 }

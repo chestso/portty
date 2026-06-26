@@ -25,6 +25,7 @@ typedef struct
     float text_gamma;              /* < 0 = unset (neutral); kitty text_composition_strategy gamma */
     float text_contrast;           /* < 0 = unset (neutral); kitty contrast, 0..100 */
     int notification_transparency; /* -1 = unset; 0 = opaque (default); 1 = translucent */
+    char *shell;                   /* NULL = not set; overrides $SHELL/COMSPEC when no -- args */
     char *source_path;             /* path the config was loaded from, or NULL (defaults) */
 } BloomConf;
 

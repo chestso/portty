@@ -1024,6 +1024,34 @@ int main(int argc, char *argv[])
     // After getopt, remaining args (after --) are the command to execute
     if (optind < argc) {
         exec_argv = &argv[optind];
+    } else if (conf.shell) {
+        // No -- args given: use the shell from config (overrides $SHELL/COMSPEC).
+        // Split on whitespace to support arguments, e.g. "bash --norc".
+        char *shell_copy = strdup(conf.shell);
+        if (!shell_copy) {
+            fprintf(stderr, "ERROR: Out of memory\n");
+            return 1;
+        }
+        char *tokens[64];
+        int ntok = 0;
+        char *tok = strtok(shell_copy, " \t");
+        while (tok && ntok < 63) {
+            tokens[ntok++] = tok;
+            tok = strtok(NULL, " \t");
+        }
+        tokens[ntok] = NULL;
+
+        char **shell_argv = calloc(ntok + 1, sizeof(char *));
+        if (!shell_argv) {
+            free(shell_copy);
+            fprintf(stderr, "ERROR: Out of memory\n");
+            return 1;
+        }
+        for (int i = 0; i < ntok; i++)
+            shell_argv[i] = strdup(tokens[i]);
+        shell_argv[ntok] = NULL;
+        free(shell_copy);
+        exec_argv = shell_argv;
     }
 
     // List monospace fonts and exit
