@@ -14,8 +14,9 @@
 | Scroll/clear/cull                     | **Done** | `bvt_lottie_note_scroll`, `bvt_lottie_clear_display_rows`, `bvt_lottie_clear_all`                          |
 | ThorVG rasterization                  | **Done** | `lt_rasterize()` with ThorVG C API; sRGB→linear pre-linearization; `--disable-thorvg` fallback zeroes RGBA |
 | Host bridge (term.h/term_bvt.c)       | **Done** | `get_lotties`, `get_lottie_placements`, `lottie_tick` vtable entries                                       |
-| Host renderer (rend_sdl3.c)           | **Done** | `lottie_cache[]`, `lottie_cache_reconcile`, `render_lottie_layer()`                                        |
-| Host-side test (test_lottie)          | **Done** | 14 test cases covering load/play/pause/stop/seek/delete/place/tick/clear                                   |
+| Host renderer (rend_sdl3.c)           | **Done** | `lottie_cache[]` (64 entries), `lottie_cache_reconcile`, `render_lottie_layer()`                           |
+| Engine-side tests (test_bvt_lottie)   | **Done** | 22 test cases covering load/place/delete/play/pause/stop/seek/tick/chunk/scroll/clear/resize/opacity       |
+| Host-side tests (test_lottie)         | **Done** | 14 test cases covering load/play/pause/stop/seek/delete/place/tick/clear/background                        |
 
 ---
 
@@ -48,7 +49,7 @@ texture cache and compositing.
 
 | Resource                 | Owner                       | Analogy to sixel               |
 | ------------------------ | --------------------------- | ------------------------------ |
-| JSON parse tree          | bloom-vt                    | N/A (sixel has no parse tree)  |
+| Raw Lottie JSON body     | bloom-vt                    | N/A (sixel has no parse tree)  |
 | ThorVG painter/surface   | bloom-vt                    | Sixel decoder state            |
 | RGBA pixel buffer        | bloom-vt (`BvtLottie.rgba`) | `BvtSixel.rgba` (engine-owned) |
 | GPU texture cache        | bloom-terminal              | Sixel texture cache            |
@@ -231,8 +232,8 @@ For Lottie files exceeding ~4 KB of base64, chunk the upload:
 
 ```
                          ┌──────────────────────┐
-  APC ──────────────────►│  bvt_apc_lottie()    │
-                         │  (new in parser.c)   │
+  APC ──────────────────►│ bvt_lottie_apc_      │
+                         │ dispatch()           │
                          └──────────┬───────────┘
                                     │
                            base64-decode
@@ -251,9 +252,11 @@ For Lottie files exceeding ~4 KB of base64, chunk the upload:
   │ Parse Lottie JSON │   │ Update playback  │   │ Remove record + │
   │ Init ThorVG       │   │ state in LtRec   │   │ destroy painter │
   │ Rasterize frame 0 │   │ Re-rasterize if  │   │ release rgba buf│
-  │ Store in LtRec    │   │ frame changed    │   │ version++       │
-  └───────────────────┘   │ version++        │   └─────────────────┘
-                          └──────────────────┘
+  │ Un-premultiply +  │   │ frame changed    │   │ release arena   │
+  │ BGRA→RGBA +       │   │ version++        │   │ version++       │
+  │ sRGB→linear       │   └──────────────────┘   └─────────────────┘
+  │ Store in LtRec    │
+  └───────────────────┘
 ```
 
 **New internal structures in bloom-vt:**
@@ -266,10 +269,9 @@ typedef struct
     uint64_t id;             /* client-assigned id (stable cache key) */
     uint32_t version;        /* bumps on any state change */
 
-    /* Parsed Lottie data — currently stores raw JSON for future ThorVG use.
-     * A full arena allocator for parsed nodes is deferred until ThorVG
-     * integration. */
-    void     *json_root;     /* root JSON node (arena-allocated) */
+    /* Raw Lottie JSON body — stored for ThorVG's tvg_picture_load_data().
+     * ThorVG parses internally; no separate parse tree is needed. */
+    void     *json_root;     /* unused (retained for struct compat) */
 
     /* Rasterized pixel buffer (engine-owned, like SxRec.rgba) */
     uint8_t  *rgba;          /* RGBA32 pixel data for current frame */
@@ -301,9 +303,8 @@ typedef struct
     int         placement_count;
     int         placement_cap;
 
-    /* Arena for JSON parse tree — currently stores raw Lottie JSON body.
-     * Will become a full bump arena when parsed node access is needed
-     * (e.g., ThorVG painter construction). */
+    /* Arena for raw Lottie JSON body — passed to tvg_picture_load_data().
+     * ThorVG parses JSON internally; no separate parse tree/arena is needed. */
     uint8_t  *arena_base;
     size_t     arena_offset;
     size_t     arena_cap;
@@ -366,9 +367,9 @@ case BVT_STATE_APC_STRING:
 The lottie protocol uses APC exclusively — there is no OSC 837 path.
 
 The engine parses the JSON, manages animation state, **rasterizes frames**
-(currently stubbed — RGBA buffer is zeroed pending ThorVG integration),
-and exposes RGBA pixel data. The host queries the current state each frame
-(§2.1).
+(via ThorVG when available; RGBA buffer is zeroed when built with
+`--disable-thorvg`), and exposes RGBA pixel data. The host queries the
+current state each frame (§2.1).
 
 ### 1.5 Public API Additions (bloom_vt.h)
 
@@ -376,10 +377,11 @@ and exposes RGBA pixel data. The host queries the current state each frame
 /* A placement of a Lottie animation on the terminal grid. Anchored by
  * absolute line so the animation scrolls with text. `layer` is 0 for
  * foreground (drawn over text), 1 for background (drawn behind text).
- * `opacity_x256` is the per-placement opacity scaled to 0–255. */
+ * `opacity_x256` is the per-placement opacity scaled to 0–255.
+ * `id` is auto-assigned by the engine (stable, unique per placement). */
 typedef struct
 {
-    uint64_t id;
+    uint64_t id;           /* auto-assigned stable placement id */
     long     abs_line;       /* absolute line index (engine-internal) */
     int      row;            /* display-relative row (abs_line - abs_top) */
     int      col;
@@ -433,7 +435,8 @@ void bvt_lottie_note_scroll(BvtTerm *vt, int lines);
 /* Notify Lottie subsystem of display clear. */
 void bvt_lottie_clear_display_rows(BvtTerm *vt, int top, int bot);
 
-/* Free all Lottie state (painters, surfaces, arenas, pixel buffers). */
+/* Free all Lottie state (painters, surfaces, arenas, pixel buffers).
+ * Internal-only (declared in bloom_vt_internal.h, not the public header). */
 void bvt_lottie_state_free(BvtTerm *vt);
 ```
 
@@ -495,7 +498,11 @@ static void lt_rasterize(LtRec *r) {
     tvg_canvas_draw(r->tvg_canvas, true);
     tvg_canvas_sync(r->tvg_canvas);
 
-    // Pre-linearize sRGB → linear for correct compositing
+    // ThorVG outputs premultiplied BGRA — convert to non-premultiplied
+    // linear-light RGBA for correct compositing in the host renderer.
+    // 1. Un-premultiply (divide RGB by alpha × 255)
+    // 2. Swap R↔B (BGRA → RGBA byte order)
+    // 3. Linearize each RGB channel (sRGB → linear)
     lt_linearize_rgba(r->rgba, r->px_w, r->px_h);
     r->dirty = true;
 }
@@ -523,9 +530,9 @@ Frame start:
   4. bvt_get_sixels(vt, &sixel_count)     // pull sixel state (unchanged)
 
 Rendering (inside draw_scene_linear):
-  A. render_visible_cells()               // cell backgrounds + text + decorations
-  B. render_lottie_backgrounds()          // ← NEW: layer==1 animations, behind text
-  C. render_lottie_foregrounds()          // ← NEW: layer==0 animations, over text
+  A. render_visible_cells()               // per-row: cell bg (skip under bg-lottie) + glyphs + decorations
+  B. render_lottie_layer(data, term, 1)    // background-layer animations (alpha-blended over cells)
+  C. render_lottie_layer(data, term, 0)    // foreground-layer animations (over everything)
   D. render_sixel_images()                // sixel images (unchanged)
 
   Linear→sRGB encode-out blit
@@ -533,10 +540,13 @@ Rendering (inside draw_scene_linear):
 
 **Two-pass Lottie rendering** solves the "background vs foreground" split:
 
-- Background Lottie renders **between** the cell background pass and the glyph
-  pass, so text appears on top of the animation.
-- Foreground Lottie renders **after** all cell rendering (including text), so
-  the animation appears in front of everything.
+- Background Lottie (layer=1) renders **after** all cell content (backgrounds,
+  glyphs, decorations) with alpha blending. For cells covered by a
+  background-layer placement, the cell's solid background is skipped during
+  pass A (`cell_under_bg_lottie` check), so the animation replaces the cell
+  background. Text on top is then alpha-blended with the animation underneath.
+- Foreground Lottie (layer=0) renders **after** background Lottie, so the
+  animation appears in front of everything including text.
 
 ### 2.2 Texture Cache (identical pattern to sixel)
 
@@ -550,7 +560,7 @@ struct {
     uint64_t     id;           /* matches BvtLottie.id */
     uint32_t     version;      /* matches BvtLottie.version */
     int          w, h;         /* pixel dimensions */
-} lottie_cache[LOTTIE_CACHE_MAX];  /* 128 entries */
+} lottie_cache[LOTIE_CACHE_MAX];  /* 64 entries (note: spelling matches code) */
 int lottie_cache_count;
 ```
 
@@ -579,16 +589,13 @@ frame.
 
 ### 2.3 Rendering Integration
 
-New functions in `rend_sdl3.c`:
+A single parameterized function handles both layers:
 
 ```c
-// Render background-layer Lottie animations (behind text)
-// Called AFTER cell backgrounds (pass 1) but BEFORE glyphs (pass 2)
-static void render_lottie_backgrounds(RendererSdl3Data *data, TerminalBackend *term);
-
-// Render foreground-layer Lottie animations (over text)
-// Called AFTER all cell rendering but BEFORE sixels
-static void render_lottie_foregrounds(RendererSdl3Data *data, TerminalBackend *term);
+// Render Lottie animations for a given layer.
+// layer=1: background (alpha-blended after cells, cell bg skipped underneath)
+// layer=0: foreground (drawn over everything)
+static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term, int layer);
 ```
 
 **Placement rendering** (mirrors `render_sixel_images`):
@@ -631,26 +638,29 @@ for (int i = 0; i < lottie_count; i++) {
 ### 2.4 Linear-Light Considerations
 
 Lottie animations with semi-transparent pixels must composite correctly in
-the linear-light pipeline. Two options:
+the linear-light pipeline. The implementation uses **Option A** (pre-linearize
+at rasterization time).
 
-**Option A (recommended): Pre-linearize at rasterization time.**
+**Actual `lt_linearize_rgba` pipeline** (called after ThorVG rasterization):
 
-- ThorVG renders in sRGB. In `lt_rasterize()`, linearize the RGBA pixels
-  before storing in `rec->rgba` — same as the atlas linearize step for color
-  emoji.
-- The host uploads already-linearized pixels; the GPU texture is in linear
-  space. Alpha compositing in the linear render target is then correct.
-- For background animations with text on top, this is critical for correct
-  alpha blending at edges.
+1. **Un-premultiply**: ThorVG outputs premultiplied alpha (BGRA byte order on
+   little-endian). Each RGB channel is divided by alpha and scaled to 255 to
+   reverse premultiplication.
+2. **Swap R↔B**: ThorVG's BGRA byte order is converted to the RGBA byte order
+   expected by the host renderer.
+3. **sRGB→linear**: Each RGB channel is linearized using the sRGB transfer
+   function (`s/12.92` for low values, `((s+0.055)/1.055)^2.4` otherwise).
+   Alpha is left unchanged (non-premultiplied).
 
-**Option B: Use GPU-side linearization.**
+The host uploads already-linearized RGBA pixels; the GPU texture is in linear
+space. Alpha compositing in the linear render target is then correct. For
+background animations with text on top, this is critical for correct alpha
+blending at edges.
 
-- Upload sRGB pixels, but create the texture with `SDL_COLORSPACE_SRGB_LINEAR`
-  so SDL3 linearizes on sample.
-- Requires SDL3 ≥ 3.2.0 with correct colorspace texture support.
-
-Option A is preferred for consistency with the existing atlas linearize step
-and because it keeps the host simple (no colorspace awareness needed).
+**Alternative (not used): GPU-side linearization.** Upload sRGB pixels, but
+create the texture with `SDL_COLORSPACE_SRGB_LINEAR` so SDL3 linearizes on
+sample. This would require SDL3 ≥ 3.2.0 with correct colorspace texture
+support and adds host-side complexity with no benefit over pre-linearization.
 
 ### 2.5 TerminalBackend Interface Additions
 
@@ -660,15 +670,27 @@ struct TerminalBackend {
     // ... existing pointers ...
 
     const BvtLottie *(*get_lotties)(TerminalBackend *term, int *count);
+    const BvtLottiePlacement *(*get_lottie_placements)(TerminalBackend *term, uint64_t id, int *count);
+    bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
 };
 
-/* In term.c — new thin wrappers */
+/* In term.h — new thin wrappers */
 const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count);
+const BvtLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term, uint64_t id, int *count);
+bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
 
-/* In term_bvt.c — bridge implementation */
+/* In term_bvt.c — bridge implementations */
 static const BvtLottie *bvt_back_get_lotties(TerminalBackend *term, int *count) {
     BvtBackendData *d = term->backend_data;
     return bvt_get_lotties(d->vt, count);
+}
+static const BvtLottiePlacement *bvt_back_get_lottie_placements(TerminalBackend *term, uint64_t id, int *count) {
+    BvtBackendData *d = term->backend_data;
+    return bvt_get_lottie_placements(d->vt, id, count);
+}
+static bool bvt_back_lottie_tick(TerminalBackend *term, uint64_t now_us) {
+    BvtBackendData *d = term->backend_data;
+    return bvt_lottie_tick(d->vt, now_us);
 }
 ```
 
@@ -680,8 +702,10 @@ static const BvtLottie *bvt_back_get_lotties(TerminalBackend *term, int *count) 
 
 Lottie animations have three distinct memory pressure points:
 
-1. **JSON parse tree** — the Lottie JSON structure, potentially large (50+ KB
-   per animation). This is _static_ for the animation's lifetime.
+1. **Raw Lottie JSON** — the Lottie JSON body, potentially large (50+ KB
+   per animation), stored in the per-animation arena and passed to ThorVG's
+   `tvg_picture_load_data()`. This is _static_ for the animation's lifetime.
+   ThorVG parses internally; no separate parse tree is maintained.
 2. **ThorVG painter + surface** — internal rasterization state, opaque to us.
    One per animation, alive for the animation's lifetime.
 3. **RGBA pixel buffer** — canvas, size = `w × h × 4`. Owned by bloom-vt
@@ -692,12 +716,17 @@ Lottie animations have three distinct memory pressure points:
 The primary fragmentation risk is repeated alloc/free of JSON trees and pixel
 buffers as animations are loaded and deleted.
 
-### 3.2 Arena Allocator for JSON Parse Trees
+### 3.2 Arena for Raw Lottie JSON Body
 
-**Current implementation (simplified):** The current code stores the raw
-Lottie JSON body in a `malloc`'d buffer (`LtRec.arena_base`). This buffer
-is freed on animation deletion. The full arena allocator described below
-will be needed when ThorVG integration requires parsed JSON node access.
+The current implementation stores the raw Lottie JSON body in a `malloc`'d
+buffer (`LtRec.arena_base`) and passes it to ThorVG's
+`tvg_picture_load_data()`. ThorVG parses JSON internally; no separate
+parse tree or arena allocator is needed. The buffer is freed on animation
+deletion.
+
+The full arena allocator described below was originally planned for a
+custom JSON parser. It is **no longer needed** since ThorVG handles parsing
+internally, but the design is retained for reference.
 
 **Design: Per-animation arena with slab-allocated nodes.**
 
@@ -785,7 +814,7 @@ memory.
 | Live pixel data (engine)     | 128 MiB       | `LT_LIVE_MAX` — matches sixel budget                |
 | Spare buffer pool (engine)   | 64 MiB        | `LT_RETAIN_MAX` — retains buffers for reuse         |
 | Per-animation JSON arena     | No hard limit | Soft: reject if arena > 2 MiB                       |
-| GPU texture cache (host)     | 128 entries   | `LOTTIE_CACHE_MAX` — 128 animations × 1 texture     |
+| GPU texture cache (host)     | 64 entries    | `LOTIE_CACHE_MAX` — 64 animations × 1 texture       |
 
 **Budget enforcement:**
 
@@ -798,7 +827,7 @@ memory.
 
 The critical design property: **advancing a frame produces no allocations.**
 
-- The JSON parse tree is immutable after `load`.
+- The raw Lottie JSON body is immutable after `load`.
 - ThorVG rasterizes in-place into the surface, then `memcpy` into the
   pre-allocated `rec->rgba` buffer.
 - The GPU texture is updated in-place via `SDL_UpdateTexture()`.
@@ -811,16 +840,16 @@ or if a new animation is loaded while the spare pool is empty.
 
 ### 3.6 Summary: Allocation Points
 
-| Event                           | Allocations                                                     | Deallocations                                                                                |
-| ------------------------------- | --------------------------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `load`                          | 1 arena, 1 RGBA buffer, 1 ThorVG painter+surface, 1 GPU texture | 0                                                                                            |
-| `delete`                        | 0                                                               | arena_destroy, RGBA buffer → spare pool or free, ThorVG painter destroy, GPU texture destroy |
-| Frame advance                   | 0                                                               | 0                                                                                            |
-| Replace (`load` with same `id`) | 0 (arena reset + reuse, RGBA buffer reuse, painter reuse)       | 0                                                                                            |
-| Scroll-off cull                 | 0                                                               | arena_destroy, RGBA buffer → spare, painter destroy, GPU texture destroy                     |
+| Event                           | Allocations                                                     | Deallocations                                                                             |
+| ------------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `load`                          | 1 arena, 1 RGBA buffer, 1 ThorVG painter+surface, 1 GPU texture | 0                                                                                         |
+| `delete`                        | 0                                                               | arena free, RGBA buffer → spare pool or free, ThorVG painter destroy, GPU texture destroy |
+| Frame advance                   | 0                                                               | 0                                                                                         |
+| Replace (`load` with same `id`) | 0 (arena reset + reuse, RGBA buffer reuse, painter reuse)       | 0                                                                                         |
+| Scroll-off cull                 | 0                                                               | arena free, RGBA buffer → spare, painter destroy, GPU texture destroy                     |
 
-**Per-animation lifetime allocations: 4** (arena, RGBA buffer, painter,
-GPU texture).
+**Per-animation lifetime allocations: 4** (arena buffer, RGBA buffer, ThorVG
+painter+surface, GPU texture).
 **Per-frame allocations during playback: 0.**
 
 ### 3.7 Comparison with Sixel Memory Model
@@ -833,7 +862,7 @@ GPU texture).
 | Decode/rasterize state          | Sixel decoder (internal)  | ThorVG painter (internal)   |
 | Version bump on change          | `SxRec.version++`         | `LtRec.version++`           |
 | Buffer reuse on replace         | `r->cap >= need` check    | `r->rgba_cap >= need` check |
-| GPU texture cache               | `sixel_cache[256]` (host) | `lottie_cache[128]` (host)  |
+| GPU texture cache               | `sixel_cache[256]` (host) | `lottie_cache[64]` (host)   |
 | Texture update on change        | `SDL_UpdateTexture`       | `SDL_UpdateTexture`         |
 | Per-frame alloc during playback | 0                         | 0                           |
 
@@ -849,20 +878,22 @@ supplemental visual layer.
 
 **User experience:**
 
-- **Background layer**: animation renders behind cell text. The cell's
-  background color is _not drawn_ for cells covered by a background animation
-  (the animation pixels serve as the background instead). This avoids double-
-  drawing (animation under opaque bg).
-- **Foreground layer**: animation renders over cell text with alpha blending.
-  Text is fully visible through transparent regions of the animation.
+- **Background layer**: the animation is alpha-blended over all cell content
+  (backgrounds + text + decorations). For cells covered by a background-layer
+  placement, the cell's solid background color is skipped during
+  `render_visible_cells` (via `cell_under_bg_lottie`), so the animation
+  replaces the cell background. Text drawn on top then composites correctly
+  against the animation.
+- **Foreground layer**: animation renders over all cell content with alpha
+  blending. Text is fully visible through transparent regions of the animation.
 
-**Implementation detail in `render_visible_cells()`:**
+**Actual render pipeline order** (per frame in `draw_scene_linear`):
 
-During pass 1 (cell backgrounds), check if a background-layer Lottie placement
-covers the current cell. If so, skip the `SDL_FillRect` for that cell's
-background — the animation will provide the visual background. This is an
-optimization; without it, the animation simply composites over the cell bg
-(which also works, just with unnecessary overdraw).
+1. `render_visible_cells()` — per-row: cell backgrounds (skipped under bg-lottie),
+   glyphs, cursors, selection, underlines, strikethroughs
+2. `render_lottie_layer(data, term, 1)` — background-layer animations (alpha-blended)
+3. `render_lottie_layer(data, term, 0)` — foreground-layer animations
+4. `render_sixel_images()` — sixel images
 
 ### 4.2 Scroll Behavior
 
@@ -878,7 +909,8 @@ Lottie placements scroll identically to sixel images:
 - `ED` (erase display): `bvt_lottie_clear_display_rows()` removes foreground
   placements in the cleared row range. Background placements survive (text
   erase should not remove background decorations).
-- Terminal reset: all animations deleted.
+- Terminal reset: `bvt_lottie_clear_all()` removes all animations (internal-only,
+  called from `bvt_free()`; not exposed in the public `bloom_vt.h` header).
 
 ### 4.4 Selection and Cursor
 
@@ -895,10 +927,14 @@ On terminal resize:
 
 - bloom-vt's cell pixel dimensions (`cell_w_px`/`cell_h_px`) are updated
   via `bvt_set_cell_pixels()` with new cell dimensions.
-- The engine re-computes `px_w`/`px_h` from the new cell pixel size, re-allocates
-  the RGBA buffer if needed, and re-rasterizes via ThorVG. `design_w`/`design_h`
-  (from Lottie JSON) remain unchanged.
-- `version++` signals the host to re-create/re-upload the GPU texture.
+- **Existing placements are not re-rasterized.** The pixel dimensions
+  (`px_w`/`px_h`) of existing animations remain based on the cell size at
+  the time of placement. Only new placements use the updated cell pixel
+  dimensions.
+- `design_w`/`design_h` (from Lottie JSON) remain unchanged for all
+  animations.
+- **Future improvement**: re-rasterize existing placements when cell pixel
+  dimensions change, so animations scale correctly after resize.
 
 ### 4.6 Alternate Screen
 
@@ -955,7 +991,7 @@ APC eyJjbWQiOiJzZWVrIiwiaWQiOjEsImZyYW1lIjoxNX0= ST
 
 ## 6. Implementation Plan
 
-### Phase 1: bloom-vt — Protocol, State, and Rasterization ✅ (mostly done)
+### Phase 1: bloom-vt — Protocol, State, and Rasterization ✅
 
 1. ✅ Add ThorVG dependency to bloom-vt's build system (`--disable-thorvg`, auto-detect via pkg-config).
 2. ✅ Add `BvtLottieState` to `BvtTerm` internal struct (lazy, `vt->lottie`).
@@ -968,13 +1004,13 @@ APC eyJjbWQiOiJzZWVrIiwiaWQiOjEsImZyYW1lIjoxNX0= ST
    - ✅ `lt_cmd_delete()` — release rgba buffer, remove record.
    - ✅ `lt_cmd_load_chunk()` — chunked upload with accumulator.
    - ✅ `bvt_lottie_tick()` — advance playing animations, mark dirty.
-   - ✅ `lt_rasterize()` — ThorVG integration with sRGB→linear pre-linearization.
+   - ✅ `lt_rasterize()` — ThorVG integration with un-premultiply + BGRA→RGBA swap + sRGB→linear pre-linearization.
    - ✅ `bvt_lottie_note_scroll()` / `bvt_lottie_clear_display_rows()`.
    - ✅ `bvt_get_lotties()` / `bvt_get_lottie_placements()` — snapshot queries.
 5. ✅ Integrate spare buffer pool (mirrors `SxSpare`).
 6. ✅ Add `bvt_lottie_state_free()` to `bvt_free()`.
-7. ✅ Arena: simplified (raw JSON storage passed to `tvg_picture_load_data`; full arena allocator not needed).
-8. ✅ Unit tests for protocol parsing, state management (host-side test in Phase 2, engine-side test_bvt_lottie).
+7. ✅ Arena: raw JSON storage passed to `tvg_picture_load_data`; full arena allocator not needed.
+8. ✅ Engine-side unit tests — `test_bvt_lottie` with 22 test cases.
 
 ### Phase 2: bloom-terminal — Texture Cache and Compositing ✅ (done)
 
@@ -986,10 +1022,10 @@ APC eyJjbWQiOiJzZWVrIiwiaWQiOjEsImZyYW1lIjoxNX0= ST
 4. ✅ Integrate into `draw_scene_linear()` pipeline.
 5. ✅ End-to-end test via `test_lottie.c` (14 test cases).
 
-### Phase 3: Polish ✅ (mostly done)
+### Phase 3: Polish ✅
 
 1. ✅ Skip cell bg draw under background-layer placements (overdraw optimization — `cell_under_bg_lottie` in `rend_sdl3.c`).
-2. ✅ Resize handling — design space (from JSON `w`/`h`) is separate from rasterization pixel dimensions (placement cells × cell pixel size). On resize, `px_w`/`px_h` update, RGBA buffer may grow, and ThorVG re-rasterizes. See §4.5.
+2. ✅ Resize handling — design space (from JSON `w`/`h`) is separate from rasterization pixel dimensions (placement cells × cell pixel size). Existing placements are **not** re-rasterized on cell-pixel change; only new placements use the updated dimensions. See §4.5.
 3. ✅ Budget enforcement and eviction (`lt_evict_to_budget`, mirrors sixel).
 4. ⏳ Performance profiling — ensure 60 FPS with 10+ concurrent animations.
 5. ✅ ~~Configuration option~~ — removed; `--disable-thorvg` at build time is sufficient (mirrors sixel which has no runtime toggle).
@@ -1073,9 +1109,12 @@ whether the pixels come from CPU or GPU rasterization.
 
 ## 8. Open Questions
 
-1. **JSON parser choice**: ✅ Resolved — cJSON embedded, nodes allocated from
-   the per-animation arena. ThorVG also parses internally via
-   `tvg_picture_load_data()`.
+1. **JSON parser choice**: ✅ Resolved — ThorVG parses JSON internally via
+   `tvg_picture_load_data()`. The engine does not maintain its own parse tree;
+   the arena stores raw JSON bytes for ThorVG consumption. A lightweight JSON
+   parser (`lt_json_find_key`) is used only for extracting top-level command
+   fields (`cmd`, `id`, `lottie`, `placement`, etc.) from the base64-decoded
+   payload.
 
 2. **Text layers**: ⏳ Skipped — Lottie text layers with embedded font data
    are not a priority for terminal UI animations (spinners, icons, progress
@@ -1089,7 +1128,9 @@ whether the pixels come from CPU or GPU rasterization.
 4. **HiDPI scaling**: ✅ Resolved — the rasterization uses `px_w`/`px_h` (placement cells × cell_pixels) rather than the Lottie JSON's design-space `w`/`h`. ThorVG scales from design space to pixel dimensions via `tvg_picture_set_size()`.
    This naturally accounts for DPI since the cell pixel dimensions are known at
    creation time via `BvtConfig.cell_w_px`/`cell_h_px` (and updated on resize
-   via `bvt_set_cell_pixels()`).
+   via `bvt_set_cell_pixels()`). **Caveat**: existing placements are not
+   re-rasterized when cell pixels change; only new placements pick up the
+   updated dimensions.
 
 5. **Concurrent rasterization**: For many animations, rasterization could be
    parallelized across threads. ThorVG is not thread-safe per-painter, but
