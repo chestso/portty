@@ -855,10 +855,15 @@ int main(int argc, char *argv[])
 {
 #ifdef _WIN32
     /* GUI subsystem detaches from console — reattach so stdout/stderr
-     * work when launched from cmd.exe (needed for --list-fonts, -h, -v) */
+     * work when launched from cmd.exe (needed for --list-fonts, -h, -v).
+     * Detach immediately after so closing the parent shell doesn't
+     * kill the terminal process. */
     if (AttachConsole(ATTACH_PARENT_PROCESS)) {
         freopen("CONOUT$", "w", stdout);
         freopen("CONOUT$", "w", stderr);
+        fflush(stdout);
+        fflush(stderr);
+        FreeConsole();
     }
 #endif
 
