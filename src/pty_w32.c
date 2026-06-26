@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <wchar.h>
 #include <windows.h>
 
 struct PtyContext
@@ -106,6 +107,10 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
     STARTUPINFOEXW si;
     ZeroMemory(&si, sizeof(si));
     si.StartupInfo.cb = sizeof(STARTUPINFOEXW);
+    si.StartupInfo.dwFlags = STARTF_USESTDHANDLES;
+    si.StartupInfo.hStdInput = INVALID_HANDLE_VALUE;
+    si.StartupInfo.hStdOutput = INVALID_HANDLE_VALUE;
+    si.StartupInfo.hStdError = INVALID_HANDLE_VALUE;
 
     SIZE_T attr_size = 0;
     InitializeProcThreadAttributeList(NULL, 1, 0, &attr_size);
@@ -138,15 +143,34 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
     /* Build command line */
     WCHAR cmdline[MAX_PATH * 2];
     if (argv && argv[0]) {
-        /* Convert argv to a single command line string */
-        MultiByteToWideChar(CP_UTF8, 0, argv[0], -1, cmdline,
-                            MAX_PATH * 2);
+        /* .cmd/.bat scripts cannot be executed directly by
+         * CreateProcessW — they must be invoked through cmd.exe.
+         * Detect the extension and prepend "cmd.exe /c " so that
+         * e.g. "bloom-terminal -- msys2_shell.cmd -ucrt64" works. */
+        const char *ext = strrchr(argv[0], '.');
+        int is_cmd_script = ext &&
+                            (_stricmp(ext, ".cmd") == 0 || _stricmp(ext, ".bat") == 0);
+
+        WCHAR *p = cmdline;
+        if (is_cmd_script) {
+            const char *comspec = getenv("COMSPEC");
+            if (!comspec)
+                comspec = "cmd.exe";
+            MultiByteToWideChar(CP_UTF8, 0, comspec, -1, p,
+                                MAX_PATH * 2);
+            p += wcslen(p);
+            wcscpy(p, L" /c ");
+            p += 4;
+        }
+
+        MultiByteToWideChar(CP_UTF8, 0, argv[0], -1, p,
+                            (MAX_PATH * 2) - (p - cmdline));
+        p += wcslen(p);
         for (int i = 1; argv[i]; i++) {
-            wcscat(cmdline, L" ");
-            WCHAR arg_w[MAX_PATH];
-            MultiByteToWideChar(CP_UTF8, 0, argv[i], -1, arg_w,
-                                MAX_PATH);
-            wcscat(cmdline, arg_w);
+            *p++ = L' ';
+            MultiByteToWideChar(CP_UTF8, 0, argv[i], -1, p,
+                                (MAX_PATH * 2) - (p - cmdline));
+            p += wcslen(p);
         }
     } else {
         /* Default shell: use COMSPEC (usually cmd.exe) */
@@ -159,12 +183,63 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
 
     vlog("PTY: spawning '%ls'\n", cmdline);
 
+    /* Build an explicit Unicode environment block for the child process.
+     * Inheriting the parent environment (lpEnvironment=NULL) causes ConPTY
+     * child processes to exit immediately on Windows 11 — the MSYS2 parent
+     * environment contains Unix-style paths and variables that confuse the
+     * Windows process. Instead, snapshot the current environment via
+     * GetEnvironmentStringsW and append our terminal-specific overrides
+     * (TERM, COLORTERM, TERM_PROGRAM), then pass the block with
+     * CREATE_UNICODE_ENVIRONMENT — the same approach Windows Terminal uses.
+     *
+     * GetEnvironmentStringsW returns a double-null-terminated block in the
+     * format KEY=VALUE\0KEY=VALUE\0\0, which is exactly what
+     * CreateProcessW expects when CREATE_UNICODE_ENVIRONMENT is set. We
+     * copy it and prepend our overrides so they take precedence (Windows
+     * uses the first occurrence of each variable name). */
+    LPWCH parent_env = GetEnvironmentStringsW();
+    WCHAR envBlock[65536];
+    WCHAR *ep = envBlock;
+
+    /* Prepend terminal-specific overrides (first occurrence wins) */
+    {
+        static const WCHAR *overrides[] = {
+            L"TERM=bloom-terminal-vty-256color",
+            L"COLORTERM=truecolor",
+            L"TERM_PROGRAM=ghostty",
+        };
+        for (int i = 0; i < 3; i++) {
+            size_t len = wcslen(overrides[i]);
+            if (ep + len + 1 >= envBlock + 65536)
+                break;
+            wmemcpy(ep, overrides[i], len + 1);
+            ep += len + 1;
+        }
+    }
+
+    /* Copy parent environment */
+    if (parent_env) {
+        LPWCH p = parent_env;
+        while (*p) {
+            size_t len = wcslen(p);
+            if (ep + len + 1 >= envBlock + 65536)
+                break;
+            wmemcpy(ep, p, len + 1);
+            ep += len + 1;
+            p += len + 1;
+        }
+        FreeEnvironmentStringsW(parent_env);
+    }
+    *ep = L'\0'; /* double-null terminator */
+
     /* Spawn the child process */
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
 
     if (!CreateProcessW(NULL, cmdline, NULL, NULL, FALSE,
-                        EXTENDED_STARTUPINFO_PRESENT, NULL, NULL,
+                        EXTENDED_STARTUPINFO_PRESENT |
+                            CREATE_UNICODE_ENVIRONMENT,
+                        envBlock, NULL,
                         &si.StartupInfo, &pi)) {
         fprintf(stderr, "ERROR: CreateProcessW failed: %lu\n",
                 GetLastError());

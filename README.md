@@ -2,7 +2,7 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Cross-compiles for Windows (ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Features
 
@@ -115,10 +115,8 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 
 | Script                        | Purpose                                                                                    |
 | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `scripts/build-mingw64.sh`    | Cross-compile for Windows using Fedora's mingw64 toolchain                                 |
 | `scripts/build-osxcross.sh`   | Cross-compile for macOS using osxcross                                                     |
 | `scripts/profile.sh`          | Build with `-pg`, run a benchmark, write `profile-report.txt`                              |
-| `scripts/vm-w32.sh CMD`       | Windows VM lifecycle (`setup`/`install`/`run`/`deploy`)                                    |
 | `scripts/vm-mac.sh CMD`       | macOS VM lifecycle (`setup`/`install`/`run`/`deploy`)                                      |
 | `scripts/ref-png.sh T OUT`    | Generate reference PNG of TEXT using hb-view                                               |
 | `scripts/ref-layers.sh T P`   | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                                  |
@@ -321,36 +319,31 @@ sudo dnf install gtk4-devel libadwaita-devel vulkan-loader-devel libdrm-devel
 sudo dnf install bear
 ```
 
-## Windows Cross-Compilation
+## Windows Native Build
 
-bloom-terminal can be cross-compiled for Windows using Fedora's mingw64 toolchain. The Windows build uses ConPTY for terminal emulation.
+bloom-terminal builds natively on Windows using MSYS2 with the UCRT64 environment. The Windows build uses ConPTY for terminal emulation.
 
-### Prerequisites (Fedora)
+### Prerequisites
+
+Install MSYS2, then in a UCRT64 shell:
 
 ```bash
-sudo dnf install mingw64-gcc mingw64-SDL3 mingw64-freetype mingw64-harfbuzz mingw64-fontconfig mingw64-libpng
+pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
+      mingw-w64-ucrt-x86_64-freetype mingw-w64-ucrt-x86_64-harfbuzz \
+      mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-autotools
 ```
 
 ### Building
 
 ```bash
-./scripts/build-mingw64.sh
+./autogen.sh   # or: aclocal && autoheader && automake && autoconf
+mkdir build && cd build
+../configure --disable-gtk4
+make -j$(nproc)
+make check
 ```
 
-This produces `build-mingw64/src/.libs/bloom-terminal.exe` with all required DLLs copied alongside. The mingw64 build uses a separate directory so it doesn't conflict with the Linux `build/`.
-
-### Testing with QEMU/KVM
-
-For full interactive testing (ConPTY shell sessions), use a Windows VM with QEMU/KVM:
-
-```bash
-./scripts/vm-w32.sh setup    # Download ISOs, create disk images (one-time)
-./scripts/vm-w32.sh install  # Boot VM from ISO to install Windows
-./scripts/vm-w32.sh deploy   # Cross-compile and write files to VM transfer disk
-./scripts/vm-w32.sh run      # Boot the VM (transfer disk appears as second drive)
-```
-
-The installer requires a virtio storage driver: **Load driver** → **Browse** → `F:` → `viostor/w11/amd64`.
+The default build mode skips ASan/UBSan (not available on MinGW) and uses unsanitized debug flags automatically.
 
 ### Windows Details
 
@@ -380,7 +373,7 @@ osxcross is installed into `./osxcross/` (gitignored). All dependencies (zlib, l
 ./scripts/build-osxcross.sh
 ```
 
-This produces `build-osxcross/src/bloom-terminal` (Mach-O 64-bit x86_64). The osxcross build uses a separate directory so it doesn't conflict with the Linux `build/` or Windows `build-mingw64/`.
+This produces `build-osxcross/src/bloom-terminal` (Mach-O 64-bit x86_64). The osxcross build uses a separate directory so it doesn't conflict with the Linux `build/`.
 
 ### Testing with QEMU/KVM
 

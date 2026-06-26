@@ -65,9 +65,17 @@ elif test "x$enable_debug" = "xyes"; then
   CFLAGS="-O0 -g3"
   AC_MSG_NOTICE([Debug mode: CFLAGS set to -O0 -g3])
 elif test "x$user_cflags" = "x"; then
-  CFLAGS="-O1 -g3 -fno-omit-frame-pointer -fno-common -fsanitize=address,undefined -fno-sanitize-recover=undefined"
-  LDFLAGS="-fsanitize=address,undefined $LDFLAGS"
-  AC_MSG_NOTICE([ASan+UBSan mode (default): CFLAGS=$CFLAGS])
+  dnl ASan/UBSan is not available on Windows/MinGW. Fall back to
+  dnl unsanitized debug when cross-compiling or building natively on
+  dnl Windows (MinGW does not ship libasan/libubsan).
+  if test "x$host_windows" = "xyes"; then
+    CFLAGS="-O1 -g3 -fno-omit-frame-pointer -fno-common"
+    AC_MSG_NOTICE([Debug mode (no ASan on Windows): CFLAGS=$CFLAGS])
+  else
+    CFLAGS="-O1 -g3 -fno-omit-frame-pointer -fno-common -fsanitize=address,undefined -fno-sanitize-recover=undefined"
+    LDFLAGS="-fsanitize=address,undefined $LDFLAGS"
+    AC_MSG_NOTICE([ASan+UBSan mode (default): CFLAGS=$CFLAGS])
+  fi
 fi
 
 # BLOOM_HARDEN_HEAP — install the hardened BvtAllocator wrapper that

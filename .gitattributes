@@ -1,0 +1,17 @@
+# Enforce LF line endings for all text files — this project is developed
+# primarily on GNU/Linux.  Git's core.autocrlf on Windows would silently
+# convert LF to CRLF in the working tree and back on commit, but that
+# causes diff noise and can break shell scripts and Makefile recipes.
+# Pin everything to LF so the working tree matches what's in the repo.
+
+* text=auto eol=lf
+
+# Binary files — don't touch
+*.png  binary
+*.ico  binary
+*.exe  binary
+*.dll  binary
+*.so   binary
+*.o    binary
+*.a    binary
+*.spv  binary

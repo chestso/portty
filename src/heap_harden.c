@@ -2,7 +2,9 @@
 
 #include "bloom_bug.h"
 
+#ifndef _WIN32
 #include <execinfo.h>
+#endif
 #include <inttypes.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -44,6 +46,7 @@ static struct
  * frames[3] is what we want — the bvt internal site that asked for
  * memory. backtrace() can return fewer frames on a shallow stack; use
  * the deepest available. */
+#ifndef _WIN32
 static void *capture_site(void)
 {
     void *frames[4];
@@ -52,6 +55,12 @@ static void *capture_site(void)
         return NULL;
     return frames[n - 1];
 }
+#else
+static void *capture_site(void)
+{
+    return NULL;
+}
+#endif
 
 static void ring_record(size_t size, void *site)
 {
@@ -93,7 +102,11 @@ static void heap_harden_dump(void)
             ++n;
         }
     }
+#ifndef _WIN32
     char **syms = (n > 0) ? backtrace_symbols(frames, (int)n) : NULL;
+#else
+    char **syms = NULL;
+#endif
     for (uint32_t i = 0; i < n; ++i) {
         fprintf(stderr, "  [%2u] size=%zu site=%p%s%s\n", i, sizes[i],
                 frames[i], syms ? " " : "", syms ? syms[i] : "");

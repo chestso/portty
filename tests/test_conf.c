@@ -2,18 +2,34 @@
 #include "test_helpers.h"
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
 
 /* Write content to a temp file and return the path (caller must free) */
 static char *write_tmp_conf(const char *content)
 {
+#ifdef _WIN32
+    char tmpdir[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tmpdir) == 0)
+        return NULL;
+    char path[MAX_PATH];
+    if (GetTempFileNameA(tmpdir, "bloom", 0, path) == 0)
+        return NULL;
+    FILE *fp = fopen(path, "w");
+#else
     char path[] = "/tmp/bloom_test_conf_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0)
         return NULL;
     FILE *fp = fdopen(fd, "w");
+#endif
     if (!fp) {
+#ifndef _WIN32
         close(fd);
+#endif
         return NULL;
     }
     fputs(content, fp);

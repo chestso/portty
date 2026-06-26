@@ -294,6 +294,7 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
     if (!ctx->exe_path[0])
         return false;
 
+#ifndef _WIN32
     char cwd_path[PATH_MAX] = "";
     int pty_child_pid = ctx->pty ? pty_get_child_pid(ctx->pty) : -1;
     if (pty_child_pid > 0) {
@@ -305,10 +306,11 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
         else
             cwd_path[0] = '\0';
     }
+#endif
 
 #ifdef _WIN32
     // On Windows, use SDL_CreateProcess for simplicity
-    char *argv[] = { ctx->exe_path, NULL };
+    const char *const argv[] = { ctx->exe_path, NULL };
     SDL_Process *proc = SDL_CreateProcess(argv, 0);
     if (proc) {
         SDL_DestroyProcess(proc);

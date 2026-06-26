@@ -21,7 +21,7 @@ bloom_version.h: bloom_version_force
 	fi
 bloom_version_force:
 
-bin_PROGRAMS = bloom-terminal bloom-lottie-player
+bin_PROGRAMS = bloom-terminal
 
 # Platform-specific implementations
 if HOST_WINDOWS
@@ -74,7 +74,7 @@ bloom_terminal_LDADD = $(SDL3_LIBS) \
 
 if HOST_WINDOWS
 bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi
-bloom_terminal_LDFLAGS =
+bloom_terminal_LDFLAGS = -mwindows
 else !HOST_WINDOWS
 if HOST_MACOS
 bloom_terminal_LDFLAGS = -framework CoreText -framework CoreFoundation \
@@ -90,10 +90,14 @@ endif
 
 AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'
 
-# bloom-lottie-player: standalone TUI Lottie player (no external deps, libc only)
+# bloom-lottie-player: standalone TUI Lottie player (POSIX only — uses
+# termios, ioctl, readlink; not yet ported to Windows)
+if !HOST_WINDOWS
+bin_PROGRAMS += bloom-lottie-player
 bloom_lottie_player_SOURCES = bloom_lottie_player.c
 bloom_lottie_player_LDADD =
 bloom_lottie_player_LDFLAGS =
+endif
 
 # Optional GTK4/libadwaita platform backend (built as dlopen plugin)
 if HAVE_GTK4

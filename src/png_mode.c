@@ -10,7 +10,11 @@
 #include "term.h"
 #include "term_bvt.h"
 #include <SDL3/SDL.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <poll.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -154,10 +158,31 @@ int png_render_exec(const char *cmd, int wait_ms, int cols, int rows,
     /* Drain PTY into the chosen backend until child exits or wait_ms
      * elapses. After EOF we still pump for a short tail in case the
      * kernel hasn't delivered every byte yet. */
+#ifndef _WIN32
     int fd = pty_get_master_fd(pty);
+#endif
     long long deadline = now_ms() + wait_ms;
     char buf[4096];
     while (now_ms() < deadline) {
+#ifdef _WIN32
+        HANDLE h = (HANDLE)pty_get_process_handle(pty);
+        if (h != INVALID_HANDLE_VALUE) {
+            DWORD wait_result =
+                WaitForSingleObject(h, (wait_ms > 50) ? 50 : (DWORD)wait_ms);
+            (void)wait_result;
+        }
+        ssize_t n = pty_read(pty, buf, sizeof(buf));
+        if (n > 0)
+            terminal_process_input(ctx.term, buf, (size_t)n);
+        else if (n <= 0)
+            break;
+        if (!pty_is_running(pty)) {
+            n = pty_read(pty, buf, sizeof(buf));
+            if (n > 0)
+                terminal_process_input(ctx.term, buf, (size_t)n);
+            break;
+        }
+#else
         struct pollfd pfd = { .fd = fd, .events = POLLIN };
         int wait = (int)(deadline - now_ms());
         if (wait <= 0)
@@ -180,6 +205,7 @@ int png_render_exec(const char *cmd, int wait_ms, int cols, int rows,
         }
         if (pfd.revents & (POLLHUP | POLLERR))
             break;
+#endif
     }
 
     ret = renderer_render_to_png(ctx.rend, ctx.term, output_path);
