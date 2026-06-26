@@ -10,6 +10,7 @@ Outputs:
     data/icons/hicolor/scalable/apps/bloom-terminal.svg
     data/icons/hicolor/symbolic/apps/bloom-terminal-symbolic.svg
     data/icons/hicolor/256x256/apps/bloom-terminal.png
+    data/icons/bloom-terminal.ico
 """
 
 import os
@@ -193,6 +194,19 @@ def main():
     img = generate_png(512, 256)
     img.save(out_path, "PNG")
     print(f"Generated {out_path} (256x256)")
+
+    # Windows ICO (256x256 PNG wrapped in ICO container — no Pillow needed)
+    ico_dir = os.path.join(PROJECT_DIR, "data", "icons")
+    os.makedirs(ico_dir, exist_ok=True)
+    ico_path = os.path.join(ico_dir, "bloom-terminal.ico")
+    import struct
+    with open(out_path, "rb") as f:
+        png_data = f.read()
+    ico_header = struct.pack("<HHH", 0, 1, 1)
+    ico_entry = struct.pack("<BBBBHHIH", 0, 0, 0, 0, 1, 32, len(png_data), 22)
+    with open(ico_path, "wb") as f:
+        f.write(ico_header + ico_entry + png_data)
+    print(f"Generated {ico_path}")
 
 
 if __name__ == "__main__":

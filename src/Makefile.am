@@ -48,7 +48,7 @@ bloom_terminal_SOURCES = main.c bloom_conf.c diag.c pager.c base64.c term.c term
 # glslang is NOT a build dependency — the normal build just compiles the header.
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
-EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h
+EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h bloom-terminal.rc
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:
@@ -71,6 +71,10 @@ AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
 # Linker flags
 bloom_terminal_LDADD = $(SDL3_LIBS) \
     $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) $(BLOOM_VT_LIBS) -lm
+
+if HAVE_WINDRES
+bloom_terminal_SOURCES += bloom-terminal.rc
+endif HAVE_WINDRES
 
 if HOST_WINDOWS
 bloom_terminal_LDADD += -ladvapi32 -lshell32 -ldwmapi

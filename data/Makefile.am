@@ -16,6 +16,11 @@ emacs_DATA = bloom-terminal.el
 
 EXTRA_DIST = bloom-terminal.ti bloom-terminal.el
 
+if HOST_WINDOWS
+iconwindowsdir = $(datadir)/icons
+iconwindows_DATA = icons/bloom-terminal.ico
+endif HOST_WINDOWS
+
 if !HOST_WINDOWS
 install-data-local:
 	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti
@@ -25,3 +30,17 @@ uninstall-local:
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-vty-256color
 	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal
 endif
+
+if HOST_WINDOWS
+install-data-local:
+	@powershell -NoProfile -ExecutionPolicy Bypass \
+	    -File "$(top_srcdir)/scripts/install-shortcut.ps1" \
+	    -ExePath "$(DESTDIR)$(bindir)/bloom-terminal.exe" \
+	    -IconPath "$(DESTDIR)$(datadir)/icons/bloom-terminal.ico" \
+	    || echo "  WARNING: Failed to create Start Menu shortcut" >&2
+
+uninstall-local:
+	@powershell -NoProfile -ExecutionPolicy Bypass \
+	    -File "$(top_srcdir)/scripts/uninstall-shortcut.ps1" \
+	    || echo "  WARNING: Failed to remove Start Menu shortcut" >&2
+endif HOST_WINDOWS
