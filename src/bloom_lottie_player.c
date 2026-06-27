@@ -460,8 +460,9 @@ static void draw_frame(const char *filename, int total_frames, int fps,
     const char *loop_icon = loop ? "loop" : "once";
     const char *layer_icon = bg_layer ? "bg" : "fg";
     n = snprintf(bar, sizeof(bar),
-                 " %s  %dfps  %.1fx  %s  %s  %.0f%%  [space] pause  [q] quit ",
-                 play_icon, fps, speed, loop_icon, layer_icon, opacity * 100);
+                 " %s  frame: %d/%d  %dfps  %.1fx  %s  %s  %.0f%%  [space] %s  [q] quit ",
+                 play_icon, 0, total_frames, fps, speed, loop_icon, layer_icon,
+                 opacity * 100, playing ? "pause" : "play");
     if (n > 0) {
         write(STDOUT_FILENO, bar, (size_t)n);
         /* Subtract 3 invisible VS16 bytes from play_icon */
@@ -471,8 +472,6 @@ static void draw_frame(const char *filename, int total_frames, int fps,
     }
     write(STDOUT_FILENO, "\x1b[0m", 4);
 
-    (void)total_frames;
-    (void)fps;
     (void)anim_row;
     (void)anim_col;
 }
@@ -491,9 +490,10 @@ static void redraw_info_bar(int current_frame, int total_frames, int fps,
     const char *layer_str = bg_layer ? "bg" : "fg";
     int n = snprintf(bar, sizeof(bar),
                      " %s  frame: %d/%d  %dfps  %.1fx  "
-                     "%s  %s  %.0f%% ",
+                     "%s  %s  %.0f%%  [space] %s  [q] quit ",
                      play_icon, current_frame, total_frames, fps, speed,
-                     loop_str, layer_str, opacity * 100);
+                     loop_str, layer_str, opacity * 100,
+                     playing ? "pause" : "play");
     if (n > 0) {
         write(STDOUT_FILENO, bar, (size_t)n);
         /* Subtract 3 invisible VS16 bytes from play_icon */
