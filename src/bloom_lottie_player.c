@@ -26,8 +26,10 @@
  *   q/Esc    Quit
  */
 
+#ifndef _WIN32
 #define _POSIX_C_SOURCE 200809L
 #define _DEFAULT_SOURCE
+#endif
 
 #include <errno.h>
 #include <fcntl.h>
@@ -37,10 +39,35 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#ifdef _WIN32
+#include <io.h>
+#include <unistd.h>
+#include <windows.h>
+#else
 #include <sys/ioctl.h>
 #include <termios.h>
-#include <time.h>
 #include <unistd.h>
+#endif
+
+#ifdef _WIN32
+static void *xmemmem(const void *haystack, size_t haystacklen,
+                     const void *needle, size_t needlelen)
+{
+    if (needlelen == 0)
+        return (void *)haystack;
+    if (haystacklen < needlelen)
+        return NULL;
+    const char *h = (const char *)haystack;
+    for (size_t i = 0; i <= haystacklen - needlelen; i++) {
+        if (memcmp(h + i, needle, needlelen) == 0)
+            return (void *)(h + i);
+    }
+    return NULL;
+}
+#define memmem xmemmem
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  Constants                                                         */
@@ -251,8 +278,57 @@ static void apc_place(int row, int col, int rows, int cols,
 /*  Terminal control                                                  */
 /* ------------------------------------------------------------------ */
 
-static struct termios saved_termios;
 static bool raw_mode_active = false;
+
+#ifdef _WIN32
+static DWORD saved_in_mode = 0;
+static DWORD saved_out_mode = 0;
+static UINT saved_output_cp = 0;
+
+static void enter_raw_mode(void)
+{
+    HANDLE hIn = GetStdHandle(STD_INPUT_HANDLE);
+    HANDLE hOut = GetStdHandle(STD_OUTPUT_HANDLE);
+    GetConsoleMode(hIn, &saved_in_mode);
+    GetConsoleMode(hOut, &saved_out_mode);
+    saved_output_cp = GetConsoleOutputCP();
+    DWORD in_mode = saved_in_mode;
+    in_mode &= ~(ENABLE_ECHO_INPUT | ENABLE_LINE_INPUT |
+                 ENABLE_PROCESSED_INPUT);
+    in_mode |= ENABLE_VIRTUAL_TERMINAL_INPUT;
+    SetConsoleMode(hIn, in_mode);
+    SetConsoleMode(hOut, saved_out_mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
+    SetConsoleOutputCP(CP_UTF8);
+    _setmode(STDOUT_FILENO, _O_BINARY);
+    _setmode(STDIN_FILENO, _O_BINARY);
+    raw_mode_active = true;
+}
+
+static void exit_raw_mode(void)
+{
+    if (raw_mode_active) {
+        SetConsoleMode(GetStdHandle(STD_INPUT_HANDLE), saved_in_mode);
+        SetConsoleMode(GetStdHandle(STD_OUTPUT_HANDLE), saved_out_mode);
+        SetConsoleOutputCP(saved_output_cp);
+        raw_mode_active = false;
+    }
+}
+
+static void get_terminal_size(int *rows, int *cols)
+{
+    CONSOLE_SCREEN_BUFFER_INFO csbi;
+    if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &csbi) &&
+        csbi.srWindow.Bottom >= csbi.srWindow.Top &&
+        csbi.srWindow.Right >= csbi.srWindow.Left) {
+        *rows = csbi.srWindow.Bottom - csbi.srWindow.Top + 1;
+        *cols = csbi.srWindow.Right - csbi.srWindow.Left + 1;
+    } else {
+        *rows = 24;
+        *cols = 80;
+    }
+}
+#else
+static struct termios saved_termios;
 
 static void enter_raw_mode(void)
 {
@@ -285,6 +361,7 @@ static void get_terminal_size(int *rows, int *cols)
         *cols = 80;
     }
 }
+#endif
 
 /* ------------------------------------------------------------------ */
 /*  TUI drawing                                                       */
@@ -588,6 +665,50 @@ static void compute_placement(int canvas_w, int canvas_h,
 }
 
 /* ------------------------------------------------------------------ */
+/*  Platform helpers                                                  */
+/* ------------------------------------------------------------------ */
+
+static double monotonic_seconds(void)
+{
+#ifdef _WIN32
+    static LARGE_INTEGER freq = { 0 };
+    if (freq.QuadPart == 0)
+        QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart / (double)freq.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
+}
+
+static int read_key(char *buf, size_t bufsize)
+{
+#ifdef _WIN32
+    HANDLE hStdin = GetStdHandle(STD_INPUT_HANDLE);
+    DWORD ret = WaitForSingleObject(hStdin, 100);
+    if (ret != WAIT_OBJECT_0)
+        return 0;
+    DWORD n = 0;
+    if (!ReadFile(hStdin, buf, (DWORD)bufsize, &n, NULL))
+        return -1;
+    return (int)n;
+#else
+    fd_set fds;
+    FD_ZERO(&fds);
+    FD_SET(STDIN_FILENO, &fds);
+    struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 };
+    int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
+    if (ret <= 0)
+        return 0;
+    ssize_t n = read(STDIN_FILENO, buf, bufsize);
+    return n > 0 ? (int)n : 0;
+#endif
+}
+
+/* ------------------------------------------------------------------ */
 /*  Main                                                              */
 /* ------------------------------------------------------------------ */
 
@@ -703,8 +824,13 @@ int main(int argc, char **argv)
     clear_screen();
 
     /* Draw TUI frame */
-    const char *basename = strrchr(filepath, '/');
-    basename = basename ? basename + 1 : filepath;
+    const char *sep = strrchr(filepath, '/');
+#ifdef _WIN32
+    const char *sep_bs = strrchr(filepath, '\\');
+    if (sep_bs && (!sep || sep_bs > sep))
+        sep = sep_bs;
+#endif
+    const char *basename = sep ? sep + 1 : filepath;
     draw_frame(basename, total_frames, meta.fr, speed, true, loop, bg_layer,
                opacity,
                term_rows, term_cols, place_row, place_col,
@@ -719,22 +845,15 @@ int main(int argc, char **argv)
     bool playing = true;
     bool running = true;
     int current_frame = 0;
-    struct timespec last_time;
-    clock_gettime(CLOCK_MONOTONIC, &last_time);
+    double last_time = monotonic_seconds();
 
     while (running) {
         /* Read key with 100ms timeout */
-        fd_set fds;
-        FD_ZERO(&fds);
-        FD_SET(STDIN_FILENO, &fds);
-        struct timeval tv = { .tv_sec = 0, .tv_usec = 100000 };
-        int ret = select(STDIN_FILENO + 1, &fds, NULL, NULL, &tv);
-
-        if (ret > 0) {
+        {
             char buf[16];
-            ssize_t n = read(STDIN_FILENO, buf, sizeof(buf));
+            int n = read_key(buf, sizeof(buf));
             if (n > 0) {
-                for (ssize_t i = 0; i < n; i++) {
+                for (int i = 0; i < n; i++) {
                     char ch = buf[i];
                     /* Handle escape sequences for arrow keys */
                     if (ch == '\x1b' && i + 2 < n) {
@@ -828,10 +947,8 @@ int main(int argc, char **argv)
 
         /* Update local frame counter (approximate) */
         if (playing) {
-            struct timespec now;
-            clock_gettime(CLOCK_MONOTONIC, &now);
-            double elapsed = (now.tv_sec - last_time.tv_sec) +
-                             (now.tv_nsec - last_time.tv_nsec) / 1e9;
+            double now = monotonic_seconds();
+            double elapsed = now - last_time;
             if (elapsed > 0.1) {
                 current_frame += (int)(elapsed * meta.fr * speed);
                 if (loop)
@@ -846,7 +963,7 @@ int main(int argc, char **argv)
                                 term_rows, term_cols);
             }
         } else {
-            clock_gettime(CLOCK_MONOTONIC, &last_time);
+            last_time = monotonic_seconds();
         }
     }
 
