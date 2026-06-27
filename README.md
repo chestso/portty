@@ -110,7 +110,7 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 - `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
-- `make gen-ico` — (Windows/MSYS2 UCRT64 only) regenerate `data/icons/bloom-terminal.ico` from the source SVG via ImageMagick (auto-installs `imagemagick` + `librsvg` via pacman if missing)
+- `make gen-ico` — (Windows/MSYS2 UCRT64 only) regenerate `data/icons/bloom-terminal.ico` from the source SVG via ImageMagick (requires the `imagemagick` + `librsvg` prerequisites)
 
 ### Helper Scripts
 
@@ -335,13 +335,16 @@ Install [MSYS2](https://www.msys2.org/), then in a UCRT64 shell (`msys2_shell.cm
 pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
       mingw-w64-ucrt-x86_64-freetype mingw-w64-ucrt-x86_64-harfbuzz \
       mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-autotools
+
+# Optional: only needed to regenerate the Windows .ico (make gen-ico / --gen-ico)
+pacman -S mingw-w64-ucrt-x86_64-imagemagick mingw-w64-ucrt-x86_64-librsvg
 ```
 
 bloom-vt is not in the official pacman repo — build and install it separately (`make install` in the bloom-vt repo, or ensure `PKG_CONFIG_PATH` points at its build output).
 
 ### Building
 
-The easiest way is the helper script, which can be run from any shell (git-bash, cmd, PowerShell, or an MSYS2 shell). It re-execs into a real MSYS2 UCRT64 shell, installs deps via pacman, applies the `sh` workaround (see below), and runs the full build:
+The easiest way is the helper script, which can be run from any shell (git-bash, cmd, PowerShell, or an MSYS2 shell). It re-execs into a real MSYS2 UCRT64 shell, applies the `sh` workaround (see below), and runs the full build. It assumes the [prerequisites](#prerequisites) are already installed:
 
 ```bash
 ./scripts/build-ucrt64.sh            # autoreconf + configure + make + check
@@ -371,7 +374,7 @@ The committed `data/icons/bloom-terminal.ico` is a multi-resolution icon (256/12
 make -C build/data gen-ico
 ```
 
-The `make gen-ico` target uses ImageMagick (with librsvg for SVG input). If `magick` is not on `PATH`, it auto-installs `mingw-w64-ucrt-x86_64-imagemagick` and `mingw-w64-ucrt-x86_64-librsvg` via `/usr/bin/pacman`.
+The `make gen-ico` target uses ImageMagick (with librsvg for SVG input), which must be installed beforehand — see the [prerequisites](#prerequisites) `pacman` command.
 
 ### `autoreconf` fails on scoop-installed MSYS2 (sh workaround)
 

@@ -67,27 +67,41 @@ export PATH="$FIXSH_DIR:$PATH"
 trap 'rm -rf "$FIXSH_DIR"' EXIT
 echo "==> Applied sh workaround (shadowed /usr/bin/sh with bash copy)"
 
-# Ensure build dependencies are installed. bloom-vt is NOT in the official
-# pacman repo — it must be built/installed separately, so only require it via
-# pkg-config and omit it from the pacman list.
-echo "==> Ensuring build dependencies (pacman -S --needed)"
-pacman -S --noconfirm --needed \
-	mingw-w64-ucrt-x86_64-gcc \
-	mingw-w64-ucrt-x86_64-sdl3 \
-	mingw-w64-ucrt-x86_64-freetype \
-	mingw-w64-ucrt-x86_64-harfbuzz \
-	mingw-w64-ucrt-x86_64-libpng \
-	mingw-w64-ucrt-x86_64-autotools 2>&1 | tail -3 || true
-
-if [ "$GEN_ICO" -eq 1 ]; then
-	echo "==> Installing icon tools (ImageMagick + librsvg for SVG input)"
-	pacman -S --noconfirm --needed \
-		mingw-w64-ucrt-x86_64-imagemagick \
-		mingw-w64-ucrt-x86_64-librsvg 2>&1 | tail -3 || true
+# Sanitize ACLOCAL_PATH. When this script is re-execed into the MSYS2
+# shell from a Windows parent (git-bash/cmd/PowerShell), ACLOCAL_PATH
+# may arrive as a Windows-style value ("C:\...\ucrt64\share\aclocal;C:\
+# ...\usr\share\aclocal") — backslashes and ';' separators. MSYS2's
+# aclocal (a perl script) splits on ':' (not ';') and can't stat those
+# mangled paths, so autoreconf dies with:
+#   aclocal-1.18: error: file '/Users/.../usr/share/aclocal/progtest.m4'
+#   does not exist
+# (the drive-letter prefix gets eaten, leaving a path missing its /c/
+# mount). /etc/profile would set the correct POSIX value interactively,
+# but non-interactive `msys2_shell.cmd -c` shells inherit the broken
+# Windows env verbatim. Convert each element to a POSIX path (cygpath)
+# and join with ':'; if anything looks off, fall back to unsetting it —
+# aclocal's built-in default (/usr/share/aclocal) is correct on its own.
+if [ -n "${ACLOCAL_PATH:-}" ]; then
+	sane=""
+	IFS=';' read -ra _ac_elems <<<"$ACLOCAL_PATH"
+	for _el in "${_ac_elems[@]}"; do
+		[ -z "$_el" ] && continue
+		if _posix="$(cygpath -u "$_el" 2>/dev/null)"; then
+			sane="${sane:+$sane:}$_posix"
+		fi
+	done
+	if [ -n "$sane" ]; then
+		export ACLOCAL_PATH="$sane"
+		echo "==> Sanitized ACLOCAL_PATH -> $ACLOCAL_PATH"
+	else
+		unset ACLOCAL_PATH
+		echo "==> Unset unusable ACLOCAL_PATH (aclocal defaults apply)"
+	fi
 fi
 
-# Always regenerate the autotools files so maintainer-mode rebuilds don't
-# trigger aclocal with a broken m4 path mid-build.
+# Always regenerate the autotools files. The ACLOCAL_PATH sanitization
+# above is what makes this reliable (without it, aclocal scans mangled
+# Windows paths and autoreconf dies).
 echo "==> autoreconf -fi"
 autoreconf -fi
 
