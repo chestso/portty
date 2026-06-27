@@ -1003,11 +1003,8 @@ static void clipboard_read_callback(GObject *source_object, GAsyncResult *res,
 
     GdkClipboard *clipboard = GDK_CLIPBOARD(source_object);
     char *text = gdk_clipboard_read_text_finish(clipboard, res, NULL);
-    if (text && text[0] != '\0' && ctx->pty) {
-        terminal_start_paste(ctx->term);
-        pty_write(ctx->pty, text, strlen(text));
-        terminal_end_paste(ctx->term);
-    }
+    if (text && text[0] != '\0' && ctx->pty)
+        platform_paste_text(ctx->term, ctx->pty, text, strlen(text));
     g_free(text);
 }
 

@@ -123,6 +123,21 @@ bool platform_clipboard_paste_async(PlatformBackend *plat,
     return plat->clipboard_paste_async(plat, term, pty);
 }
 
+void platform_paste_text(TerminalBackend *term, PtyContext *pty,
+                         const char *text, size_t len)
+{
+    if (!term || !pty || !text || len == 0)
+        return;
+    size_t plen = 0;
+    char *paste = terminal_paste_normalize(text, len, &plen);
+    if (!paste)
+        return;
+    terminal_start_paste(term);
+    pty_write(pty, paste, plen);
+    terminal_end_paste(term);
+    free(paste);
+}
+
 bool platform_register_pty(PlatformBackend *plat, PtyContext *pty)
 {
     if (!plat || !plat->register_pty) {

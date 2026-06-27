@@ -202,6 +202,14 @@ void platform_clipboard_free(PlatformBackend *plat, char *text);
 bool platform_clipboard_paste_async(PlatformBackend *plat,
                                     TerminalBackend *term, PtyContext *pty);
 
+/* Paste `text` (len bytes) into the PTY with line-ending normalization
+ * and bracketed-paste framing. Normalizes CRLF / bare LF to a single
+ * CR (see terminal_paste_normalize) so a multi-line paste produces one
+ * Enter per line, then wraps the write in terminal_start/end_paste.
+ * Shared by the SDL3 sync path (main.c) and the GTK4 async callback. */
+void platform_paste_text(TerminalBackend *term, PtyContext *pty,
+                         const char *text, size_t len);
+
 bool platform_register_pty(PlatformBackend *plat, PtyContext *pty);
 void platform_run(PlatformBackend *plat, TerminalBackend *term,
                   RendererBackend *rend, PlatformCallbacks *callbacks);

@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the bloom-vt include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(BLOOM_VT_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_altscreen_mouse
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -27,6 +27,12 @@ test_diag_CFLAGS = $(TEST_CFLAGS) -I$(top_builddir)/src
 # that entries survive CLIPBOARD_DEFERRED_MIN_AGE advances.
 test_clipboard_deferred_SOURCES = test_clipboard_deferred.c $(TEST_COMMON)
 test_clipboard_deferred_CFLAGS = $(TEST_CFLAGS)
+
+# Clipboard line-ending normalization (the fix for blank lines after
+# every pasted line on Windows CRLF clipboards). Pure byte transform —
+# the logic is replicated inline, no SDL/bloom-vt dependency.
+test_paste_normalize_SOURCES = test_paste_normalize.c $(TEST_COMMON)
+test_paste_normalize_CFLAGS = $(TEST_CFLAGS)
 
 # Altscreen + mouse-tracking mode state through the bloom-vt bridge.
 # Regression test for the on_mouse guard: altscreen without mouse_mode

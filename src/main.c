@@ -376,11 +376,8 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
         // Try async paste first (GTK4), fall back to synchronous (SDL3)
         if (!platform_clipboard_paste_async(ctx->plat, ctx->term, ctx->pty)) {
             char *clipboard = platform_clipboard_get(ctx->plat);
-            if (clipboard && clipboard[0] != '\0') {
-                terminal_start_paste(ctx->term);
-                pty_write(ctx->pty, clipboard, strlen(clipboard));
-                terminal_end_paste(ctx->term);
-            }
+            if (clipboard && clipboard[0] != '\0')
+                platform_paste_text(ctx->term, ctx->pty, clipboard, strlen(clipboard));
             platform_clipboard_free(ctx->plat, clipboard);
         }
         result.handled = true;

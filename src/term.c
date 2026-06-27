@@ -344,6 +344,53 @@ void terminal_end_paste(TerminalBackend *term)
     term->end_paste(term);
 }
 
+/* Normalize paste text so each logical line produces a single Enter.
+ *
+ * The PTY line discipline treats both '\r' and '\n' as a carriage
+ * return / Enter. Windows clipboards store lines as CRLF, so pasting
+ * them verbatim sends two Enters per line — one for '\r' and one for
+ * '\n' — which shows up as a blank line after every pasted line. Bare
+ * LF (X11/Wayland clipboards) is also accepted and mapped to CR.
+ *
+ * The result is NUL-terminated and returned in a malloc'd buffer the
+ * caller must free(); NULL on allocation failure. *out_len receives
+ * the byte length excluding the NUL. */
+char *terminal_paste_normalize(const char *text, size_t len, size_t *out_len)
+{
+    if (!text || len == 0) {
+        if (out_len)
+            *out_len = 0;
+        return NULL;
+    }
+    /* Worst case: every byte becomes '\r' (only happens for a run of
+     * bare LFs), so the buffer is never larger than len. */
+    char *buf = (char *)malloc(len + 1);
+    if (!buf) {
+        if (out_len)
+            *out_len = 0;
+        return NULL;
+    }
+    size_t j = 0;
+    for (size_t i = 0; i < len; i++) {
+        char c = text[i];
+        if (c == '\r') {
+            buf[j++] = '\r';
+            /* Skip a following LF so CRLF collapses to one CR. */
+            if (i + 1 < len && text[i + 1] == '\n')
+                i++;
+        } else if (c == '\n') {
+            /* Bare LF → CR (Enter). */
+            buf[j++] = '\r';
+        } else {
+            buf[j++] = c;
+        }
+    }
+    buf[j] = '\0';
+    if (out_len)
+        *out_len = j;
+    return buf;
+}
+
 bool terminal_get_line_continuation(TerminalBackend *term, int row)
 {
     if (!term || !term->get_line_continuation)

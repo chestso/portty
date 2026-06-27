@@ -325,6 +325,15 @@ void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod);
 void terminal_start_paste(TerminalBackend *term);
 void terminal_end_paste(TerminalBackend *term);
 
+/* Normalize clipboard line endings for pasting into the PTY. Converts
+ * CRLF and bare LF to a single CR (the PTY "Enter" byte), so a
+ * multi-line clipboard paste produces one Enter per line instead of
+ * two (which on Windows CRLF clipboards inserts a blank line after
+ * every line). Returns a malloc'd, NUL-terminated buffer the caller
+ * frees, or NULL. *out_len (if non-NULL) receives the byte length
+ * excluding the NUL. */
+char *terminal_paste_normalize(const char *text, size_t len, size_t *out_len);
+
 // Line continuation (soft-wrap) query
 bool terminal_get_line_continuation(TerminalBackend *term, int row);
 
