@@ -1197,6 +1197,65 @@ int main(int argc, char *argv[])
     // Only create window and renderer if we're going to run the event loop
     if (running) {
 #ifdef _WIN32
+        // When launched from MSYS2/Cygwin bash, the shell uses POSIX
+        // waitpid() semantics — it blocks until the child exits, even
+        // for GUI-subsystem binaries.  cmd.exe and PowerShell check
+        // the PE subsystem and return immediately for GUI apps, but
+        // MSYS2 bash does not.  Re-exec ourselves with DETACHED_PROCESS
+        // so the original process can exit and unblock the parent shell.
+        // A sentinel env var prevents infinite re-exec.
+        if (console_attached && !getenv("_BLOOM_DETACHED")) {
+            const char *msystem = getenv("MSYSTEM");
+            const char *msys = getenv("MSYS");
+            if (msystem || msys) {
+                char exe[MAX_PATH];
+                GetModuleFileNameA(NULL, exe, MAX_PATH);
+                // Build command line from original argv
+                char cmdline[32768];
+                char *cp = cmdline;
+                for (int i = 0; i < argc; i++) {
+                    if (i > 0)
+                        *cp++ = ' ';
+                    const char *s = argv[i];
+                    BOOL need_quote = FALSE;
+                    for (const char *c = s; *c; c++)
+                        if (*c == ' ' || *c == '\t' || *c == '"')
+                            need_quote = TRUE;
+                    if (need_quote) {
+                        *cp++ = '"';
+                        while (*s) {
+                            if (*s == '"')
+                                *cp++ = '"';
+                            *cp++ = *s;
+                            s++;
+                        }
+                        *cp++ = '"';
+                    } else {
+                        while (*s)
+                            *cp++ = *s++;
+                    }
+                }
+                *cp = '\0';
+                // Set sentinel so the re-exec'd child skips this block
+                SetEnvironmentVariableA("_BLOOM_DETACHED", "1");
+                STARTUPINFOA si;
+                ZeroMemory(&si, sizeof(si));
+                si.cb = sizeof(si);
+                PROCESS_INFORMATION pi;
+                ZeroMemory(&pi, sizeof(pi));
+                if (CreateProcessA(exe, cmdline, NULL, NULL, FALSE,
+                                   DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                                   NULL, NULL, &si, &pi)) {
+                    CloseHandle(pi.hProcess);
+                    CloseHandle(pi.hThread);
+                    FreeConsole();
+                    return 0;
+                }
+                // If CreateProcess failed, fall through to the
+                // normal FreeConsole path — at least we won't
+                // block on console close.
+            }
+        }
         // Detach from the parent console now that startup output is done.
         // The GUI process must not stay attached or closing the parent
         // shell will kill it.  Short-lived commands (--list-fonts, -h)
