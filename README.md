@@ -110,6 +110,7 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 - `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
+- `make gen-ico` — (Windows/MSYS2 UCRT64 only) regenerate `data/icons/bloom-terminal.ico` from the source SVG via ImageMagick (auto-installs `imagemagick` + `librsvg` via pacman if missing)
 
 ### Helper Scripts
 
@@ -125,6 +126,7 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 | `scripts/pty_record.py`       | Record PTY traffic from a child process (debug feature-detect probes)                      |
 | `scripts/build-macos-deps.sh` | Cross-compile all macOS dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) via osxcross |
 | `scripts/setup-osxcross.sh`   | One-time osxcross toolchain setup (used by `build-osxcross.sh`)                            |
+| `scripts/build-ucrt64.sh`     | Build natively on Windows (MSYS2 UCRT64); `--gen-ico` regenerates the .ico from SVG        |
 
 ## Usage
 
@@ -327,7 +329,7 @@ bloom-terminal builds natively on Windows using MSYS2 with the UCRT64 environmen
 
 ### Prerequisites
 
-Install MSYS2, then in a UCRT64 shell:
+Install [MSYS2](https://www.msys2.org/), then in a UCRT64 shell (`msys2_shell.cmd -ucrt64`):
 
 ```bash
 pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
@@ -335,7 +337,19 @@ pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
       mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-autotools
 ```
 
+bloom-vt is not in the official pacman repo — build and install it separately (`make install` in the bloom-vt repo, or ensure `PKG_CONFIG_PATH` points at its build output).
+
 ### Building
+
+The easiest way is the helper script, which can be run from any shell (git-bash, cmd, PowerShell, or an MSYS2 shell). It re-execs into a real MSYS2 UCRT64 shell, installs deps via pacman, applies the `sh` workaround (see below), and runs the full build:
+
+```bash
+./scripts/build-ucrt64.sh            # autoreconf + configure + make + check
+./scripts/build-ucrt64.sh --install  # build, then make install
+./scripts/build-ucrt64.sh --enable-release  # extra args forwarded to configure
+```
+
+Or build manually from a UCRT64 shell:
 
 ```bash
 ./autogen.sh   # or: aclocal && autoheader && automake && autoconf
@@ -346,6 +360,36 @@ make check
 ```
 
 The default build mode skips ASan/UBSan (not available on MinGW) and uses unsanitized debug flags automatically.
+
+### Regenerating the Windows icon
+
+The committed `data/icons/bloom-terminal.ico` is a multi-resolution icon (256/128/64/48/32/16) generated from the source SVG. To regenerate it after changing the SVG:
+
+```bash
+./scripts/build-ucrt64.sh --gen-ico   # from any shell
+# or, from a UCRT64 build dir:
+make -C build/data gen-ico
+```
+
+The `make gen-ico` target uses ImageMagick (with librsvg for SVG input). If `magick` is not on `PATH`, it auto-installs `mingw-w64-ucrt-x86_64-imagemagick` and `mingw-w64-ucrt-x86_64-librsvg` via `/usr/bin/pacman`.
+
+### `autoreconf` fails on scoop-installed MSYS2 (sh workaround)
+
+On some MSYS2 installs (notably scoop-managed), `/usr/bin/sh` and `/usr/bin/bash` are the same binary. When bash is invoked as `sh` — as `libtoolize` does via `#!/usr/bin/env sh` — its POSIX-mode `test -d` builtin intermittently fails to see `/ucrt64` paths (a mount-table visibility race), aborting `autoreconf` with:
+
+```
+libtoolize: error: $pkgauxdir is not a directory: '/ucrt64/share/libtool/build-aux'
+```
+
+`build-ucrt64.sh` applies the workaround automatically. To do it manually, shadow `sh` with a bash copy earlier on `PATH` before running `autoreconf`:
+
+```bash
+FIXSH=$(mktemp -d /tmp/bloom-fixsh.XXXXXX)
+cp /usr/bin/bash "$FIXSH/sh"
+export PATH="$FIXSH:$PATH"
+./autogen.sh          # now succeeds
+rm -rf "$FIXSH"
+```
 
 ### Windows Details
 
