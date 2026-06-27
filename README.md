@@ -282,7 +282,7 @@ infocmp bloom-terminal-vty-256color | ssh remote-host 'tic -x -'
 
 All platforms:
 
-- bloom-vt (VT engine, consumed via `pkg-config bloom-vt`; source at `/home/thomasc/git/bloom-vt`)
+- bloom-vt (VT engine, consumed via `pkg-config bloom-vt`; source at https://codeberg.org/thomasc/bloom-vt)
 - SDL3
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
