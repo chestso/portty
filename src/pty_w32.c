@@ -84,13 +84,27 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         goto fail;
     }
 
-    /* Create the pseudo-console */
+    /* Create the pseudo-console with passthrough mode if available.
+     * ConPTY normally intercepts and re-serialises VT output via VtEngine,
+     * which silently drops escape sequences it doesn't understand (e.g.
+     * APC / ESC _ used for Lottie and other extensions).  Passthrough mode
+     * (flag 0x8, Windows 11 22H2+) relays the raw VT stream from the child
+     * process directly, preserving unknown sequences. */
     COORD size;
     size.X = (SHORT)cols;
     size.Y = (SHORT)rows;
-
+    DWORD pty_flags = 0;
+#ifndef PSEUDOCONSOLE_PASSTHROUGH_MODE
+#define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
+#endif
+    pty_flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
     HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
-                                     0, &ctx->hpc);
+                                     pty_flags, &ctx->hpc);
+    if (FAILED(hr)) {
+        /* Passthrough may not be supported on older Windows; retry without */
+        hr = CreatePseudoConsole(size, input_read, output_write,
+                                 0, &ctx->hpc);
+    }
     if (FAILED(hr)) {
         fprintf(stderr, "ERROR: CreatePseudoConsole failed: 0x%lx\n",
                 (unsigned long)hr);

@@ -122,7 +122,9 @@ static size_t base64_encode(const uint8_t *src, size_t len, char *out)
 /*  APC emission                                                      */
 /* ------------------------------------------------------------------ */
 
-/* Emit an APC sequence: ESC _ <base64-json> ESC \ */
+/* Emit an APC sequence: ESC _ <base64-json> ESC \
+ * On Windows, ConPTY strips APC sequences, so we use OSC 5555 instead:
+ * ESC ] 5 5 5 5 ; <base64-json> BEL                                        */
 static void apc(const char *json, size_t json_len)
 {
     size_t b64_size = ((json_len + 2) / 3) * 4 + 1;
@@ -132,11 +134,19 @@ static void apc(const char *json, size_t json_len)
     base64_encode((const uint8_t *)json, json_len, b64);
 
     /* Use write() to avoid stdio buffering issues with escape sequences */
-    char header[] = "\x1b_";
-    char trailer[] = "\x1b\\";
-    write(STDOUT_FILENO, header, sizeof(header) - 1);
+#ifdef _WIN32
+    /* ConPTY strips APC (ESC _) even with passthrough mode on some builds.
+     * Use OSC 5555 which ConPTY does pass through.  The payload after the
+     * semicolon is the same base64-encoded JSON that the APC body would
+     * carry; bloom-vt routes OSC 5555 to bvt_lottie_apc_dispatch(). */
+    write(STDOUT_FILENO, "\x1b]5555;", 7);
     write(STDOUT_FILENO, b64, strlen(b64));
-    write(STDOUT_FILENO, trailer, sizeof(trailer) - 1);
+    write(STDOUT_FILENO, "\x07", 1);
+#else
+    write(STDOUT_FILENO, "\x1b_", 2);
+    write(STDOUT_FILENO, b64, strlen(b64));
+    write(STDOUT_FILENO, "\x1b\\", 2);
+#endif
 
     free(b64);
 }
