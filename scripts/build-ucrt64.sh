@@ -102,8 +102,8 @@ fi
 # Always regenerate the autotools files. The ACLOCAL_PATH sanitization
 # above is what makes this reliable (without it, aclocal scans mangled
 # Windows paths and autoreconf dies).
-echo "==> autoreconf -fi"
-autoreconf -fi
+echo "==> autogen.sh"
+./autogen.sh
 
 echo "==> configure"
 rm -rf build
