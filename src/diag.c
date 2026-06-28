@@ -19,6 +19,8 @@
 
 #ifndef _WIN32
 #include <sys/utsname.h>
+#else
+#include <windows.h>
 #endif
 
 #define DW 64 // content width for rules
@@ -319,7 +321,56 @@ char *diag_build_report(const DiagSources *s)
         kv(&sb, "os", NULL);
     }
 #else
-    kv(&sb, "os", "Windows");
+    {
+        // RtlGetVersion (ntdll) reports the true OS version without lying,
+        // unlike the compatibility-shimmed GetVersionEx.
+        typedef LONG(WINAPI * RtlGetVersion_t)(RTL_OSVERSIONINFOW *);
+        RTL_OSVERSIONINFOW vi = { .dwOSVersionInfoSize = sizeof(vi) };
+        HMODULE ntdll = GetModuleHandleA("ntdll.dll");
+        RtlGetVersion_t fn = ntdll
+                                 ? (RtlGetVersion_t)(void *)GetProcAddress(ntdll, "RtlGetVersion")
+                                 : NULL;
+        if (fn && fn(&vi) == 0) {
+            // Windows 11 is NT 10.0 internally; build >= 22000 distinguishes it.
+            const char *marketing = vi.dwBuildNumber >= 22000 ? "11" : "10";
+            kvf(&sb, "os", "Windows %s  (NT %lu.%lu, Build %lu)", marketing,
+                (unsigned long)vi.dwMajorVersion,
+                (unsigned long)vi.dwMinorVersion,
+                (unsigned long)vi.dwBuildNumber);
+        } else {
+            kv(&sb, "os", "Windows");
+        }
+        // Architecture from the processor, not the OS (matches uname -m intent).
+        SYSTEM_INFO si;
+        GetNativeSystemInfo(&si);
+        const char *arch;
+        switch (si.wProcessorArchitecture) {
+        case PROCESSOR_ARCHITECTURE_AMD64:
+            arch = "x86_64";
+            break;
+        case PROCESSOR_ARCHITECTURE_ARM64:
+            arch = "aarch64";
+            break;
+        case PROCESSOR_ARCHITECTURE_INTEL:
+            arch = "i686";
+            break;
+        case PROCESSOR_ARCHITECTURE_ARM:
+            arch = "arm";
+            break;
+        default:
+            arch = NULL;
+            break;
+        }
+        if (arch)
+            kv(&sb, "arch", arch);
+        // Detect which C runtime the process is linked against.
+        // UCRT (ucrtbase.dll) is the modern CRT shipping with Windows 10+;
+        // MSVCRT (msvcrt.dll) is the legacy CRT from the Visual Studio 6 era.
+        if (GetModuleHandleA("ucrtbase.dll"))
+            kv(&sb, "crt", "UCRT");
+        else if (GetModuleHandleA("msvcrt.dll"))
+            kv(&sb, "crt", "MSVCRT (legacy)");
+    }
 #endif
 
     // Footer
