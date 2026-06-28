@@ -22,7 +22,6 @@ from .protocol import (
     tty_write,
 )
 
-
 # ---------------------------------------------------------------------------
 # Custom widgets
 # ---------------------------------------------------------------------------
@@ -536,9 +535,7 @@ class LottiePlayerApp(App):
         progress.current_frame = self.current_frame
 
     def action_seek_forward(self) -> None:
-        self.current_frame = min(
-            self.total_frames - 1, self.current_frame + 5
-        )
+        self.current_frame = min(self.total_frames - 1, self.current_frame + 5)
         apc_seek(self.current_frame)
         info = self.query_one("#info-bar", InfoBar)
         frame_ctr = info.query_one(FrameCounter)

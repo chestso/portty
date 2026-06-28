@@ -13,7 +13,7 @@ EXTRA_DIST = \
     scripts \
     examples
 
-# Format target — runs clang-format on C/C++, shfmt on shell, prettier on Markdown.
+# Format target — runs clang-format on C/C++, shfmt on shell, black on Python, prettier on Markdown.
 .PHONY: format
 format:
 	@if command -v clang-format >/dev/null 2>&1; then \
@@ -31,6 +31,14 @@ format:
 	        | xargs -0 -r shfmt -w; \
 	else \
 	    echo "shfmt not found - skipping shell script formatting." >&2; \
+	fi
+	@if command -v black >/dev/null 2>&1; then \
+	    echo "Formatting Python with black..."; \
+	    find $(top_srcdir)/contrib \
+	        \( -name '*.py' \) -not -path '*/.*' -print0 \
+	        | xargs -0 -r black --quiet; \
+	else \
+	    echo "black not found - skipping Python formatting." >&2; \
 	fi
 	@if command -v prettier >/dev/null 2>&1; then \
 	    echo "Formatting Markdown with prettier..."; \

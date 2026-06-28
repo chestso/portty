@@ -12,7 +12,6 @@ import os
 
 import plotty.protocol as proto
 
-
 DEMO_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "..", "demo-lottie.json"
 )
@@ -146,13 +145,11 @@ def test_apc_delete():
 
 
 def test_apc_load_small():
-    small_lottie = json.dumps({
-        "v": "5.6.0", "fr": 30, "ip": 0, "op": 60,
-        "w": 40, "h": 24, "layers": []
-    })
+    small_lottie = json.dumps(
+        {"v": "5.6.0", "fr": 30, "ip": 0, "op": 60, "w": 40, "h": 24, "layers": []}
+    )
     data = _with_fake_stdout(
-        proto.apc_load, small_lottie, 5, 10, 4, 8,
-        "foreground", 0.85, 1.0, True
+        proto.apc_load, small_lottie, 5, 10, 4, 8, "foreground", 0.85, 1.0, True
     )
     cmds = extract_apc_sequences(data)
     load_cmd = next((c for c in cmds if c.get("cmd") == "load"), None)
@@ -172,24 +169,34 @@ def test_apc_load_small():
 
 
 def test_apc_load_chunked():
-    big_lottie = json.dumps({
-        "v": "5.6.0", "fr": 30, "ip": 0, "op": 60,
-        "w": 400, "h": 400, "layers": [],
-        "padding": "x" * 50000
-    })
+    big_lottie = json.dumps(
+        {
+            "v": "5.6.0",
+            "fr": 30,
+            "ip": 0,
+            "op": 60,
+            "w": 400,
+            "h": 400,
+            "layers": [],
+            "padding": "x" * 50000,
+        }
+    )
     data = _with_fake_stdout(
-        proto.apc_load, big_lottie, 1, 1, 10, 10,
-        "background", 0.5, 2.0, False
+        proto.apc_load, big_lottie, 1, 1, 10, 10, "background", 0.5, 2.0, False
     )
     cmds = extract_apc_sequences(data)
     chunk_cmds = [c for c in cmds if c.get("cmd") == "load-chunk"]
     place_cmds = [c for c in cmds if c.get("cmd") == "place"]
     play_cmds = [c for c in cmds if c.get("cmd") == "play"]
 
-    assert len(chunk_cmds) > 1, f"Expected multiple load-chunk commands, got {len(chunk_cmds)}"
+    assert (
+        len(chunk_cmds) > 1
+    ), f"Expected multiple load-chunk commands, got {len(chunk_cmds)}"
     assert all(c["id"] == 1 for c in chunk_cmds), "All chunks should have id=1"
     assert chunk_cmds[0]["seq"] == 0, "First chunk should have seq=0"
-    assert chunk_cmds[-1]["seq"] == chunk_cmds[-1]["total"] - 1, "Last chunk seq should be total-1"
+    assert (
+        chunk_cmds[-1]["seq"] == chunk_cmds[-1]["total"] - 1
+    ), "Last chunk seq should be total-1"
     assert len(place_cmds) >= 1, "Expected at least one place command"
     assert len(play_cmds) >= 1, "Expected at least one play command"
     print(f"  ✓ apc_load (chunked) emits {len(chunk_cmds)} chunks + place + play")
@@ -212,9 +219,15 @@ def test_apc_place():
 
 def test_placement_computation():
     row, col, rows, cols = proto.compute_placement(200, 200, 24, 80)
-    assert rows > 0 and cols > 0, f"Expected positive placement, got rows={rows}, cols={cols}"
-    assert row >= 1 and col >= 1, f"Expected positive position, got row={row}, col={col}"
-    print(f"  ✓ compute_placement(200,200,24,80) → row={row}, col={col}, rows={rows}, cols={cols}")
+    assert (
+        rows > 0 and cols > 0
+    ), f"Expected positive placement, got rows={rows}, cols={cols}"
+    assert (
+        row >= 1 and col >= 1
+    ), f"Expected positive position, got row={row}, col={col}"
+    print(
+        f"  ✓ compute_placement(200,200,24,80) → row={row}, col={col}, rows={rows}, cols={cols}"
+    )
 
 
 def test_parse_lottie_meta():
@@ -272,6 +285,7 @@ def main():
         except Exception as e:
             print(f"  ✗ {name}: {e}")
             import traceback
+
             traceback.print_exc()
             failed += 1
 
