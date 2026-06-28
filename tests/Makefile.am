@@ -66,6 +66,7 @@ test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
 test_lottie_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
 test_lottie_LDADD = $(BLOOM_VT_LIBS)
 
+
 # test_pty_pause depends on POSIX PTY APIs
 if !HOST_WINDOWS
 check_PROGRAMS += test_pty_pause

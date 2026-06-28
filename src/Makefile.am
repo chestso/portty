@@ -94,16 +94,6 @@ endif
 
 AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'
 
-# bloom-lottie-player: standalone TUI Lottie player
-bin_PROGRAMS += bloom-lottie-player
-bloom_lottie_player_SOURCES = bloom_lottie_player.c
-bloom_lottie_player_LDADD =
-bloom_lottie_player_LDFLAGS =
-if HOST_WINDOWS
-bloom_lottie_player_LDADD += -ladvapi32
-bloom_lottie_player_LDFLAGS += -mconsole
-endif
-
 # Optional GTK4/libadwaita platform backend (built as dlopen plugin)
 if HAVE_GTK4
 pkglib_LTLIBRARIES = bloom-terminal-gtk4.la

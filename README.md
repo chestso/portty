@@ -19,7 +19,7 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Support for Unicode characters and emoji (COLR v1 color fonts)
 - Emoji width paradigm: coverage-aware routing (color emoji font used when VS16 forces emoji presentation, the codepoint is a regional indicator, or the emoji font actually carries the glyph; VS15 forces text); ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells; symbol-class glyphs from a text font keep their natural design width and sit on the typographic baseline. Widths are computed at insertion time (UAX #11 + #29) and stored on the cell, so the renderer walks rows in plain column order.
 - Sixel graphics — DCS sixel images are decoded and stored inside bloom-vt and anchored to the grid, so they scroll, enter scrollback, and clear with the text they sit on. Spec coverage includes RLE, RGB and DEC HLS color (correct blue-origin hue), transparency, and raster attributes. Capability is advertised so sixel-aware tools (`img2sixel`, `lsix`, `chafa`) actually emit graphics: the DA1 reply reports `4`, plus DECSET 80/1070/8452 and XTSMGRAPHICS. Animated/in-place updates (DECSDM mode 80) swap frames in place — the renderer re-uploads a cached texture by the engine's image id + version, and the engine recycles pixel buffers from a pool so streaming same-size frames doesn't churn the heap
-- Lottie animations — APC sequences (`ESC _ … ST`) with base64-encoded JSON payloads load, place, and control Lottie animations on the grid. Eight commands (load, load-chunk, place, play, pause, stop, seek, delete) manage animation state and placement tracking. Placements carry per-instance opacity and layer (foreground or background). Animations scroll with the text, enter scrollback, and are cleared with the rows they sit on — the same ownership model as sixel. ThorVG rasterizes each frame; the host fetches RGBA pixels via the bloom-vt API (`bvt_get_lotties()`, `bvt_get_lottie_placements()`, `bvt_lottie_tick()`) and composites them as foreground and background layers. A standalone player (`bloom-lottie-player`) provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling. On Windows, ConPTY strips APC sequences (`ESC _`) — the same limitation that prevents the kitty image protocol from working (Windows Terminal issue #8389). `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8) is enabled with fallback, but on some builds it is accepted yet unknown sequences are still dropped. As a workaround, `bloom-lottie-player` on Windows carries the Lottie payload inside **OSC 5555** (`ESC ] 5555 ; <base64> BEL`), which ConPTY does pass through; bloom-vt routes OSC 5555 to the same APC dispatch, so the payload is processed identically regardless of carrier
+- Lottie animations — APC sequences (`ESC _ … ST`) with base64-encoded JSON payloads load, place, and control Lottie animations on the grid. Eight commands (load, load-chunk, place, play, pause, stop, seek, delete) manage animation state and placement tracking. Placements carry per-instance opacity and layer (foreground or background). Animations scroll with the text, enter scrollback, and are cleared with the rows they sit on — the same ownership model as sixel. ThorVG rasterizes each frame; the host fetches RGBA pixels via the bloom-vt API (`bvt_get_lotties()`, `bvt_get_lottie_placements()`, `bvt_lottie_tick()`) and composites them as foreground and background layers. A Python TUI player ([plotty](contrib/plotty)) provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling. On Windows, ConPTY strips APC sequences (`ESC _`) — the same limitation that prevents the kitty image protocol from working (Windows Terminal issue #8389). `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8) is enabled with fallback, but on some builds it is accepted yet unknown sequences are still dropped. As a workaround, plotty on Windows carries the Lottie payload inside **OSC 5555** (`ESC ] 5555 ; <base64> BEL`), which ConPTY does pass through; bloom-vt routes OSC 5555 to the same APC dispatch, so the payload is processed identically regardless of carrier
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard set — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy text to the system clipboard via escape sequence. Read queries (`OSC 52 ; c ; ?`) are silently refused so any program running in the terminal — including processes on the remote end of an SSH session — can't ask the terminal to hand it the contents of your clipboard (passwords, tokens, etc.).
@@ -475,6 +475,48 @@ cd build && make check
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
 The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `BLOOM_GTK4_SELFTEST=1 bloom-terminal --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
+
+## plotty — Lottie Player
+
+[plotty](contrib/plotty) is a Python TUI application that plays Lottie animations in bloom-terminal using the APC protocol. It provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling.
+
+### Install
+
+```bash
+pip install contrib/plotty
+```
+
+Requires Python ≥ 3.10 and [Textual](https://textual.textualize.io/) (installed automatically as a dependency).
+
+### Usage
+
+```bash
+# Play an animation (loops by default)
+plotty animation.json
+
+# Play once
+plotty -L animation.json
+
+# Start at 2× speed
+plotty -s 2 animation.json
+
+# Run inside bloom-terminal
+bloom-terminal -- plotty animation.json
+```
+
+### Controls
+
+| Key     | Action              |
+| ------- | ------------------- |
+| `space` | Pause / resume      |
+| `←`/`→` | Seek -5 / +5 frames |
+| `+`/`-` | Speed up / down     |
+| `r`     | Restart             |
+| `L`     | Toggle loop         |
+| `b`     | Toggle bg/fg layer  |
+| `[`/`]` | Opacity -/+ 10%     |
+| `?`     | Toggle help panel   |
+| `q`     | Quit                |
 
 ## Development
 
