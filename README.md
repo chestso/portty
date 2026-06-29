@@ -181,6 +181,7 @@ build/src/portty -P "" --exec ls --wait 500 output.png
 | Right-click          | Copy selection if active, otherwise paste (works in altscreen too)           |
 | `Ctrl+click` on link | Open OSC-8 URL via the system handler                                        |
 | `Ctrl+Shift+F6`      | Open the diagnostics report (built-in pager)                                 |
+| `Ctrl+Shift+N`       | Spawn a new terminal window in the shell's CWD                               |
 
 ### Diagnostics Report
 
