@@ -492,7 +492,7 @@ Thomas Christensen
 
 ## Acknowledgments
 
-A tip of the hat to [Charmbracelet](https://charm.sh) and [charm.land](https://charm.land): portty's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via coffer), the cream foreground (`#fffdf5`) is charm.land's own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
+A tip of the hat to [Charm](https://charm.sh): portty's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via coffer), the cream foreground (`#fffdf5`) is [charm.land](https://charm.land)'s own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
 
 ## License
 
