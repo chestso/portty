@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <bloom-vt/bloom_vt.h> // BvtSixel — sixel images are owned by the VT engine
+#include <coffer/coffer.h> // CfrSixel — sixel images are owned by the VT engine
 
 // Forward declarations
 struct TerminalBackend;
@@ -87,7 +87,7 @@ typedef struct
     TerminalColor fg;
     TerminalColor bg;
     TerminalColor ul_color; // per-cell underline color (is_default=true → use theme default)
-    // OSC-8 hyperlink id (interned per-page in bloom-vt). 0 = no link.
+    // OSC-8 hyperlink id (interned per-page in coffer). 0 = no link.
     // Adjacent cells of the same link share an id, enabling run coalescing.
     // Fetch the URI bytes with terminal_cell_get_hyperlink().
     uint16_t hyperlink_id;
@@ -117,7 +117,7 @@ struct TerminalBackend
     uint16_t hovered_hyperlink_id;
 
     // Backend function pointers
-    bool (*init)(TerminalBackend *term, const BvtConfig *cfg);
+    bool (*init)(TerminalBackend *term, const CfrConfig *cfg);
     void (*destroy)(TerminalBackend *term);
     void (*resize)(TerminalBackend *term, int width, int height);
     int (*process_input)(TerminalBackend *term, const char *input, size_t len);
@@ -188,22 +188,22 @@ struct TerminalBackend
     // Sixel graphics (owned by the VT engine). get_sixels returns the live
     // images for this frame (NULL/0 if none); set_cell_px tells the engine
     // the pixel size of a character cell so it can place images in rows.
-    const BvtSixel *(*get_sixels)(TerminalBackend *term, int *count);
+    const CfrSixel *(*get_sixels)(TerminalBackend *term, int *count);
     void (*set_cell_px)(TerminalBackend *term, int cell_w, int cell_h);
 
     // Lottie animations (owned by the VT engine). Same ownership model as
     // sixel: engine owns pixel data, host owns GPU texture cache.
-    const BvtLottie *(*get_lotties)(TerminalBackend *term, int *count);
-    const BvtLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
+    const CfrLottie *(*get_lotties)(TerminalBackend *term, int *count);
+    const CfrLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
                                                        uint64_t id, int *count);
     bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
 
-    // Query a bloom-vt mode (BvtMode). Returns false if the backend or mode
+    // Query a coffer mode (CfrMode). Returns false if the backend or mode
     // is unavailable.
-    bool (*get_mode)(TerminalBackend *term, BvtMode mode);
+    bool (*get_mode)(TerminalBackend *term, CfrMode mode);
 };
 
-TerminalBackend *terminal_init(TerminalBackend *term, const BvtConfig *cfg);
+TerminalBackend *terminal_init(TerminalBackend *term, const CfrConfig *cfg);
 void terminal_destroy(TerminalBackend *term);
 void terminal_resize(TerminalBackend *term, int width, int height);
 void terminal_set_scrollback_size(TerminalBackend *term, int lines);
@@ -350,7 +350,7 @@ void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionCha
 void terminal_set_clipboard_set_callback(TerminalBackend *term, TerminalClipboardSetFn cb,
                                          void *user_data);
 
-// Row iterator over a terminal row. bloom-vt stores UAX #11 + #29
+// Row iterator over a terminal row. coffer stores UAX #11 + #29
 // cluster widths on the cell, so the iterator is now a plain
 // `vt_col += cell.width` walk. `vis_col` is kept identical to `vt_col`
 // for source-compatibility with renderer code that still passes both.
@@ -382,19 +382,19 @@ int terminal_vt_col_to_vis_col(TerminalBackend *term, int unified_row, int vt_co
 int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_col);
 
 // Sixel image API. Images are decoded, stored, scrolled, and cleared by
-// the VT engine (bloom-vt); the host just queries them each frame and
+// the VT engine (coffer); the host just queries them each frame and
 // tells the engine the cell pixel size for row placement.
-const BvtSixel *terminal_get_sixels(TerminalBackend *term, int *count);
+const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count);
 void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h);
 
 // Lottie animation API. Same ownership model as sixel.
-const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count);
-const BvtLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
+const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count);
+const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
                                                          uint64_t id, int *count);
 bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
 
-// Query a bloom-vt mode (BvtMode). Returns false if the backend or mode
+// Query a coffer mode (CfrMode). Returns false if the backend or mode
 // is unavailable.
-bool terminal_get_mode(TerminalBackend *term, BvtMode mode);
+bool terminal_get_mode(TerminalBackend *term, CfrMode mode);
 
 #endif /* TERM_H */

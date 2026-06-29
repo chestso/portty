@@ -1,11 +1,11 @@
 TEST_COMMON = test_common.c
 SDL_STUBS   = sdl_stubs.c
 TERM_STUBS  = term_stubs.c
-# term.h now includes <bloom-vt/bloom_vt.h>, so every test that pulls it
-# in (directly or via term.c) needs the bloom-vt include path.
-TEST_CFLAGS = -I$(top_srcdir)/src $(BLOOM_VT_CFLAGS) -Wall -Wextra
+# term.h now includes <coffer/coffer.h>, so every test that pulls it
+# in (directly or via term.c) needs the coffer include path.
+TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_bvt test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -22,7 +22,7 @@ test_conf_CFLAGS = $(TEST_CFLAGS)
 test_diag_SOURCES = test_diag.c $(TEST_COMMON) ../src/diag.c
 test_diag_CFLAGS = $(TEST_CFLAGS) -I$(top_builddir)/src
 
-# Deferred-clipboard-free linked list logic. Pure C, no SDL/bloom-vt
+# Deferred-clipboard-free linked list logic. Pure C, no SDL/coffer
 # dependency — the list logic is replicated inline to test the invariant
 # that entries survive CLIPBOARD_DEFERRED_MIN_AGE advances.
 test_clipboard_deferred_SOURCES = test_clipboard_deferred.c $(TEST_COMMON)
@@ -30,41 +30,41 @@ test_clipboard_deferred_CFLAGS = $(TEST_CFLAGS)
 
 # Clipboard line-ending normalization (the fix for blank lines after
 # every pasted line on Windows CRLF clipboards). Pure byte transform —
-# the logic is replicated inline, no SDL/bloom-vt dependency.
+# the logic is replicated inline, no SDL/coffer dependency.
 test_paste_normalize_SOURCES = test_paste_normalize.c $(TEST_COMMON)
 test_paste_normalize_CFLAGS = $(TEST_CFLAGS)
 
-# Altscreen + mouse-tracking mode state through the bloom-vt bridge.
+# Altscreen + mouse-tracking mode state through the coffer bridge.
 # Regression test for the on_mouse guard: altscreen without mouse_mode
 # must not allow terminal-level selection without Shift.
 test_altscreen_mouse_SOURCES = test_altscreen_mouse.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
-test_altscreen_mouse_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
-test_altscreen_mouse_LDADD = $(BLOOM_VT_LIBS)
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+test_altscreen_mouse_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_altscreen_mouse_LDADD = $(COFFER_LIBS)
 
-test_term_bvt_SOURCES = test_term_bvt.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
-test_term_bvt_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
-test_term_bvt_LDADD = $(BLOOM_VT_LIBS)
+test_term_cfr_SOURCES = test_term_cfr.c $(TEST_COMMON) $(TERM_STUBS) \
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+test_term_cfr_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_term_cfr_LDADD = $(COFFER_LIBS)
 
 test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
-test_osc52_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
-test_osc52_LDADD = $(BLOOM_VT_LIBS)
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+test_osc52_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_osc52_LDADD = $(COFFER_LIBS)
 
 # Sixel end-to-end through the host bridge: feed a DCS sequence via
 # terminal_process_input and read images back via terminal_get_sixels.
 test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
-test_sixel_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
-test_sixel_LDADD = $(BLOOM_VT_LIBS)
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+test_sixel_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_sixel_LDADD = $(COFFER_LIBS)
 
 # Lottie end-to-end through the host bridge: feed an APC sequence via
 # terminal_process_input and read animations back via terminal_get_lotties.
 test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_bvt.c ../src/base64.c ../src/unicode.c
-test_lottie_CFLAGS = $(TEST_CFLAGS) $(BLOOM_VT_CFLAGS)
-test_lottie_LDADD = $(BLOOM_VT_LIBS)
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_lottie_LDADD = $(COFFER_LIBS)
 
 
 # test_pty_pause depends on POSIX PTY APIs

@@ -38,7 +38,7 @@ static DiagSources sample(void)
         .title = "bash",
         .altscreen = false,
         .mouse_mode = 0,
-        .vt_backend = "bloom-vt",
+        .vt_backend = "coffer",
         .lottie_rasterizer = true,
         .osc52 = true,
         .bracketed_paste = false,
@@ -237,7 +237,7 @@ static void test_vt_features_section(void)
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
     ASSERT_TRUE(strstr(r, "engine") != NULL);
-    ASSERT_TRUE(strstr(r, "bloom-vt") != NULL);
+    ASSERT_TRUE(strstr(r, "coffer") != NULL);
     // sixel, OSC 8 appear in the static capabilities line; lottie in the boolean
     ASSERT_TRUE(strstr(r, "sixel") != NULL);
     ASSERT_TRUE(strstr(r, "lottie rasterizer") != NULL);

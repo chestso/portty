@@ -1,7 +1,7 @@
 /*
  * test_lottie — Lottie animation end-to-end through the host bridge.
  *
- * The protocol/state logic is unit-tested in bloom-vt itself.
+ * The protocol/state logic is unit-tested in coffer itself.
  * This file checks the portty side: that an APC Lottie sequence
  * fed through terminal_process_input() reaches the engine and comes back
  * out through terminal_get_lotties() / terminal_get_lottie_placements()
@@ -12,12 +12,12 @@
 #include "test_helpers.h"
 
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-extern TerminalBackend terminal_backend_bvt;
+extern TerminalBackend terminal_backend_cfr;
 
 static void feed(TerminalBackend *t, const char *s)
 {
@@ -74,8 +74,8 @@ static TerminalBackend *make_term(int cols, int rows)
     TerminalBackend *t = calloc(1, sizeof(*t));
     if (!t)
         return NULL;
-    *t = terminal_backend_bvt;
-    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    *t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.cols = cols;
     cfg.rows = rows;
     cfg.cell_w_px = 10;
@@ -108,7 +108,7 @@ static void test_load_basic(void)
            "\"layer\":\"foreground\"}");
 
     int n = -1;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_NOT_NULL(l);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].id, 1);
@@ -122,7 +122,7 @@ static void test_load_basic(void)
     ASSERT_EQ(l[0].placement_count, 1);
 
     int pn = -1;
-    const BvtLottiePlacement *pl =
+    const CfrLottiePlacement *pl =
         terminal_get_lottie_placements(t, l[0].id, &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);
@@ -146,7 +146,7 @@ static void test_play_pause(void)
            "\"w\":20,\"h\":20,\"layers\":[]}}");
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_TRUE(l[0].playing);
 
@@ -178,7 +178,7 @@ static void test_stop(void)
 
     apc(t, "{\"cmd\":\"stop\",\"id\":1}");
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_FALSE(l[0].playing);
     ASSERT_EQ(l[0].current_frame, 5);
@@ -200,7 +200,7 @@ static void test_seek(void)
 
     apc(t, "{\"cmd\":\"seek\",\"id\":1,\"frame\":15}");
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].current_frame, 15);
 
@@ -232,7 +232,7 @@ static void test_delete(void)
     ASSERT_EQ(n, 1);
 
     apc(t, "{\"cmd\":\"delete\",\"id\":1}");
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_NULL(l);
     ASSERT_EQ(n, 0);
 
@@ -251,11 +251,11 @@ static void test_background_layer(void)
            "\"layer\":\"background\",\"opacity\":0.3}");
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
 
     int pn;
-    const BvtLottiePlacement *pl =
+    const CfrLottiePlacement *pl =
         terminal_get_lottie_placements(t, l[0].id, &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);
@@ -280,12 +280,12 @@ static void test_place(void)
            "\"layer\":\"background\",\"opacity\":0.5}");
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].placement_count, 2);
 
     int pn;
-    const BvtLottiePlacement *pl =
+    const CfrLottiePlacement *pl =
         terminal_get_lottie_placements(t, l[0].id, &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 2);
@@ -309,7 +309,7 @@ static void test_version_bump(void)
            "\"w\":20,\"h\":20,\"layers\":[]}}");
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     uint32_t v0 = l[0].version;
     ASSERT_TRUE(v0 > 0);
 
@@ -340,7 +340,7 @@ static void test_load_replace(void)
            "\"w\":80,\"h\":80,\"layers\":[]}}");
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].id, 1);
     ASSERT_EQ(l[0].canvas_w, 80);
@@ -370,7 +370,7 @@ static void test_tick_advance(void)
     ASSERT_TRUE(advanced);
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_TRUE(l[0].current_frame > 0);
 
@@ -393,7 +393,7 @@ static void test_tick_paused(void)
     ASSERT_FALSE(advanced);
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(l[0].current_frame, 0);
 
     destroy_term(t);
@@ -406,7 +406,7 @@ static void test_no_animations(void)
     ASSERT_TRUE(t != NULL);
 
     int n = -1;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_NULL(l);
     ASSERT_EQ(n, 0);
 
@@ -429,7 +429,7 @@ static void test_clear(void)
     ASSERT_EQ(n, 1);
 
     feed(t, "\x1b[2J");
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_NULL(l);
     ASSERT_EQ(n, 0);
 
@@ -447,11 +447,11 @@ static void test_load_default_placement(void)
            "\"w\":40,\"h\":40,\"layers\":[]}}");
 
     int n;
-    const BvtLottie *l = terminal_get_lotties(t, &n);
+    const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
 
     int pn;
-    const BvtLottiePlacement *pl =
+    const CfrLottiePlacement *pl =
         terminal_get_lottie_placements(t, l[0].id, &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);

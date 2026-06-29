@@ -36,7 +36,7 @@ FONT_RESOLVE_SOURCE = font_resolve_fc.c
 endif
 endif
 
-portty_SOURCES = main.c portty_conf.c diag.c pager.c base64.c term.c term_bvt.c \
+portty_SOURCES = main.c portty_conf.c diag.c pager.c base64.c term.c term_cfr.c \
     rend.c rend_sdl3.c rend_sdl3_shader.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
@@ -65,12 +65,12 @@ endif
 
 # Compiler flags
 AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
-    $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) $(BLOOM_VT_CFLAGS) \
+    $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) $(COFFER_CFLAGS) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
 
 # Linker flags
 portty_LDADD = $(SDL3_LIBS) \
-    $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) $(BLOOM_VT_LIBS) -lm
+    $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) $(COFFER_LIBS) -lm
 
 if HAVE_WINDRES
 portty_SOURCES += portty.rc
@@ -100,7 +100,7 @@ pkglib_LTLIBRARIES = portty-gtk4.la
 portty_gtk4_la_SOURCES = platform_gtk4.c gtk4_vulkan.c gtk4_vulkan.h
 portty_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) \
     $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
-    $(LIBDRM_CFLAGS) $(VULKAN_CFLAGS) $(BLOOM_VT_CFLAGS) \
+    $(LIBDRM_CFLAGS) $(VULKAN_CFLAGS) $(COFFER_CFLAGS) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
 portty_gtk4_la_LDFLAGS = -module -avoid-version
 portty_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS) $(VULKAN_LIBS)

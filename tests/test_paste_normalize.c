@@ -11,7 +11,7 @@
  * The logic under test lives in terminal_paste_normalize() in term.c.
  * It is a pure byte transform with no terminal/PTY dependencies, so we
  * replicate it inline here (same approach as test_clipboard_deferred)
- * to keep this test link-light and free of a bloom-vt dependency.
+ * to keep this test link-light and free of a coffer dependency.
  */
 
 #include "test_helpers.h"

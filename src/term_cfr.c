@@ -1,16 +1,16 @@
 /*
- * term_bvt.c — TerminalBackend bridge to bloom-vt.
+ * term_cfr.c — TerminalBackend bridge to coffer.
  *
- * Mirrors term_vt.c but routes everything through bloom_vt instead of
- * libvterm. Cell conversion translates BvtCell + BvtStyle into the
+ * Mirrors term_vt.c but routes everything through coffer instead of
+ * libvterm. Cell conversion translates CfrCell + CfrStyle into the
  * legacy TerminalCell shape so the renderer is unchanged. Selected at
- * startup via PORTTY_VT=bloomvt; libvterm remains the default
+ * startup via PORTTY_VT=coffer; libvterm remains the default
  * during the parallel-development window.
  */
 
-#include "term_bvt.h"
+#include "term_cfr.h"
 #include "base64.h"
-#include <bloom-vt/bloom_vt.h>
+#include <coffer/coffer.h>
 
 #ifdef PORTTY_HARDEN_HEAP
 #include "heap_harden.h"
@@ -23,14 +23,14 @@
 
 typedef struct
 {
-    BvtTerm *vt;
+    CfrTerm *vt;
 
     /* Back-pointer for callbacks that need to reach application-level
      * state stored on TerminalBackend (e.g. the OSC 52 clipboard hook). */
     TerminalBackend *term;
 
     /* Damage tracking — accumulated rectangle since last clear_redraw.
-     * bloom-vt provides its own damage callback; we union into this. */
+     * coffer provides its own damage callback; we union into this. */
     bool needs_redraw;
     int damage_top, damage_bottom, damage_left, damage_right;
 
@@ -49,14 +49,14 @@ typedef struct
      * sb_lines saturates at sb_capacity so it can't be inferred from a
      * before/after diff once the ring is full. */
     int pushed_rows;
-} BvtBackendData;
+} CfrBackendData;
 
 /* ------------------------------------------------------------------ */
 /* Color conversion                                                    */
 /* ------------------------------------------------------------------ */
 
 /* Default foreground is charm.land's body-text cream (#fffdf5), a nod to
- * Charmbracelet — whose CharmTone palette also seeds bloom-vt's ANSI 0-15. 🌸 */
+ * Charmbracelet — whose CharmTone palette also seeds coffer's ANSI 0-15. 🌸 */
 static const uint8_t default_fg[3] = { 0xff, 0xfd, 0xf5 };
 static const uint8_t default_bg[3] = { 0x00, 0x00, 0x00 };
 
@@ -82,13 +82,13 @@ static TerminalColor unpack_rgb(uint32_t rgb, bool is_default,
 /* Damage                                                              */
 /* ------------------------------------------------------------------ */
 
-static void damage_init(BvtBackendData *d)
+static void damage_init(CfrBackendData *d)
 {
     d->needs_redraw = false;
     d->damage_top = d->damage_bottom = d->damage_left = d->damage_right = 0;
 }
 
-static void damage_union(BvtBackendData *d, int t, int l, int b, int r)
+static void damage_union(CfrBackendData *d, int t, int l, int b, int r)
 {
     if (!d->needs_redraw) {
         d->damage_top = t;
@@ -109,25 +109,25 @@ static void damage_union(BvtBackendData *d, int t, int l, int b, int r)
 }
 
 /* ------------------------------------------------------------------ */
-/* bloom-vt callbacks                                                  */
+/* coffer callbacks                                                  */
 /* ------------------------------------------------------------------ */
 
-static void cb_damage(BvtRect rect, void *user)
+static void cb_damage(CfrRect rect, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     damage_union(d, rect.start_row, rect.start_col, rect.end_row, rect.end_col);
 }
 
-static void cb_moverect(BvtRect dst, BvtRect src, void *user)
+static void cb_moverect(CfrRect dst, CfrRect src, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     damage_union(d, dst.start_row, dst.start_col, dst.end_row, dst.end_col);
     damage_union(d, src.start_row, src.start_col, src.end_row, src.end_col);
 }
 
-static void cb_movecursor(BvtCursor cur, void *user)
+static void cb_movecursor(CfrCursor cur, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     d->cursor_visible = cur.visible;
     d->cursor_blink = cur.blink;
     /* Cursor position is queried lazily via get_cursor_pos. */
@@ -135,7 +135,7 @@ static void cb_movecursor(BvtCursor cur, void *user)
 
 static void cb_set_title(const char *utf8, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     if (!utf8) {
         d->title[0] = '\0';
         return;
@@ -164,29 +164,29 @@ static void cb_set_title(const char *utf8, void *user)
     d->title[n] = '\0';
 }
 
-static void cb_set_mode(BvtMode mode, bool on, void *user)
+static void cb_set_mode(CfrMode mode, bool on, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     switch (mode) {
-    case BVT_MODE_CURSOR_VISIBLE:
+    case CFR_MODE_CURSOR_VISIBLE:
         d->cursor_visible = on;
         break;
-    case BVT_MODE_CURSOR_BLINK:
+    case CFR_MODE_CURSOR_BLINK:
         d->cursor_blink = on;
         break;
-    case BVT_MODE_ALTSCREEN:
+    case CFR_MODE_ALTSCREEN:
         d->altscreen = on;
         break;
-    case BVT_MODE_MOUSE_X10:
+    case CFR_MODE_MOUSE_X10:
         d->mouse_mode = on ? 1 : 0;
         break;
-    case BVT_MODE_MOUSE_BTN_EVENT:
+    case CFR_MODE_MOUSE_BTN_EVENT:
         d->mouse_mode = on ? 1 : 0;
         break;
-    case BVT_MODE_MOUSE_DRAG:
+    case CFR_MODE_MOUSE_DRAG:
         d->mouse_mode = on ? 2 : 0;
         break;
-    case BVT_MODE_MOUSE_ANY_EVENT:
+    case CFR_MODE_MOUSE_ANY_EVENT:
         d->mouse_mode = on ? 3 : 0;
         break;
     default:
@@ -196,22 +196,22 @@ static void cb_set_mode(BvtMode mode, bool on, void *user)
 
 static void cb_output(const uint8_t *bytes, size_t len, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     if (d->output_cb)
         d->output_cb((const char *)bytes, len, d->output_user);
 }
 
 static void cb_bell(void *user) { (void)user; /* TODO: visual bell hook */ }
 
-static void cb_sb_push(const BvtCell *c, int n, bool w, void *u)
+static void cb_sb_push(const CfrCell *c, int n, bool w, void *u)
 {
     (void)c;
     (void)n;
     (void)w;
-    BvtBackendData *d = u;
+    CfrBackendData *d = u;
     d->pushed_rows++;
 }
-static void cb_sb_pop(BvtCell *o, int n, void *u)
+static void cb_sb_pop(CfrCell *o, int n, void *u)
 {
     (void)o;
     (void)n;
@@ -221,12 +221,12 @@ static void cb_sb_pop(BvtCell *o, int n, void *u)
 /* OSC 52 (set clipboard). Body format: <selection-chars> ';' <base64 | '?'>.
  * We accept any selection (c/p/s/...) and route to one OS clipboard. The
  * '?' query form is silently refused — see the rationale in term.h next to
- * TerminalClipboardSetFn. bloom-vt only forwards non-special OSC codes here
+ * TerminalClipboardSetFn. coffer only forwards non-special OSC codes here
  * (0/1/2 go through set_title; 8 is handled inside the engine), so the
  * code==52 guard is strictly a defense against future engine changes. */
 static void cb_osc(int code, const char *data, size_t len, void *user)
 {
-    BvtBackendData *d = user;
+    CfrBackendData *d = user;
     if (code != 52 || !d || !d->term || !d->term->clipboard_set_cb)
         return;
     if (!data || len == 0)
@@ -264,16 +264,16 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
 /* Lifecycle                                                           */
 /* ------------------------------------------------------------------ */
 
-static bool bvt_back_init(TerminalBackend *term, const BvtConfig *cfg)
+static bool cfr_back_init(TerminalBackend *term, const CfrConfig *cfg)
 {
-    BvtBackendData *d = calloc(1, sizeof(*d));
+    CfrBackendData *d = calloc(1, sizeof(*d));
     if (!d)
         return false;
 #ifdef PORTTY_HARDEN_HEAP
     heap_harden_init();
-    d->vt = bvt_new_with_allocator(cfg, &bvt_hardened_allocator);
+    d->vt = cfr_new_with_allocator(cfg, &cfr_hardened_allocator);
 #else
-    d->vt = bvt_new(cfg);
+    d->vt = cfr_new(cfg);
 #endif
     if (!d->vt) {
         free(d);
@@ -282,7 +282,7 @@ static bool bvt_back_init(TerminalBackend *term, const BvtConfig *cfg)
     d->cursor_visible = true;
     d->cursor_blink = true;
 
-    BvtCallbacks cb = {
+    CfrCallbacks cb = {
         .damage = cb_damage,
         .moverect = cb_moverect,
         .movecursor = cb_movecursor,
@@ -294,53 +294,53 @@ static bool bvt_back_init(TerminalBackend *term, const BvtConfig *cfg)
         .sb_popline = cb_sb_pop,
         .osc = cb_osc,
     };
-    bvt_set_callbacks(d->vt, &cb, d);
+    cfr_set_callbacks(d->vt, &cb, d);
 
     d->term = term;
     term->backend_data = d;
     return true;
 }
 
-static void bvt_back_destroy(TerminalBackend *term)
+static void cfr_back_destroy(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
-    bvt_free(d->vt);
+    cfr_free(d->vt);
     free(d);
     term->backend_data = NULL;
 }
 
-static void bvt_back_resize(TerminalBackend *term, int width, int height)
+static void cfr_back_resize(TerminalBackend *term, int width, int height)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
-    bvt_resize(d->vt, height, width);
+    cfr_resize(d->vt, height, width);
     damage_init(d);
     d->needs_redraw = true;
     int rows, cols;
-    bvt_get_dimensions(d->vt, &rows, &cols);
+    cfr_get_dimensions(d->vt, &rows, &cols);
     if (rows && cols)
         damage_union(d, 0, 0, rows - 1, cols - 1);
 }
 
-static int bvt_back_process_input(TerminalBackend *term, const char *input,
+static int cfr_back_process_input(TerminalBackend *term, const char *input,
                                   size_t len)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return 0;
-    /* Damage accumulates inside bloom-vt; needs_redraw becomes true when the
+    /* Damage accumulates inside coffer; needs_redraw becomes true when the
      * caller drains it via terminal_flush_damage() (once per frame). */
-    return (int)bvt_input_write(d->vt, (const uint8_t *)input, len);
+    return (int)cfr_input_write(d->vt, (const uint8_t *)input, len);
 }
 
 /* ------------------------------------------------------------------ */
 /* Cell conversion                                                     */
 /* ------------------------------------------------------------------ */
 
-static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst)
+static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
 {
     (void)vt;
     memset(dst, 0, sizeof(*dst));
@@ -351,41 +351,41 @@ static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst)
     dst->width = src->width;
     /* Primary codepoint + opaque cluster handle. The renderer fetches the
      * full multi-codepoint sequence (if any) via terminal_cell_get_grapheme,
-     * which routes back through bvt_cell_get_grapheme — no truncation at
+     * which routes back through cfr_cell_get_grapheme — no truncation at
      * the renderer boundary. */
     dst->cp = src->cp;
     dst->grapheme_id = src->grapheme_id;
     dst->hyperlink_id = src->hyperlink_id;
 
     /* Style. */
-    const BvtStyle *st = bvt_cell_style(vt, src);
+    const CfrStyle *st = cfr_cell_style(vt, src);
     if (!st) {
         dst->fg = unpack_rgb(0, true, default_fg);
         dst->bg = unpack_rgb(0, true, default_bg);
         dst->ul_color = unpack_rgb(0, true, default_fg);
         return;
     }
-    dst->attrs.bold = (st->attrs & BVT_ATTR_BOLD) ? 1 : 0;
-    dst->attrs.italic = (st->attrs & BVT_ATTR_ITALIC) ? 1 : 0;
-    dst->attrs.blink = (st->attrs & BVT_ATTR_BLINK) ? 1 : 0;
-    dst->attrs.reverse = (st->attrs & BVT_ATTR_REVERSE) ? 1 : 0;
-    dst->attrs.strikethrough = (st->attrs & BVT_ATTR_STRIKETHROUGH) ? 1 : 0;
-    dst->attrs.dwl = (st->attrs & BVT_ATTR_DWL) ? 1 : 0;
-    if (st->attrs & BVT_ATTR_DHL_TOP)
+    dst->attrs.bold = (st->attrs & CFR_ATTR_BOLD) ? 1 : 0;
+    dst->attrs.italic = (st->attrs & CFR_ATTR_ITALIC) ? 1 : 0;
+    dst->attrs.blink = (st->attrs & CFR_ATTR_BLINK) ? 1 : 0;
+    dst->attrs.reverse = (st->attrs & CFR_ATTR_REVERSE) ? 1 : 0;
+    dst->attrs.strikethrough = (st->attrs & CFR_ATTR_STRIKETHROUGH) ? 1 : 0;
+    dst->attrs.dwl = (st->attrs & CFR_ATTR_DWL) ? 1 : 0;
+    if (st->attrs & CFR_ATTR_DHL_TOP)
         dst->attrs.dhl = 1;
-    else if (st->attrs & BVT_ATTR_DHL_BOTTOM)
+    else if (st->attrs & CFR_ATTR_DHL_BOTTOM)
         dst->attrs.dhl = 2;
     dst->attrs.font = st->font & 0xF;
     dst->attrs.underline = st->underline & 0x7;
 
     dst->fg = unpack_rgb(st->fg_rgb,
-                         (st->color_flags & BVT_COLOR_DEFAULT_FG) != 0,
+                         (st->color_flags & CFR_COLOR_DEFAULT_FG) != 0,
                          default_fg);
     dst->bg = unpack_rgb(st->bg_rgb,
-                         (st->color_flags & BVT_COLOR_DEFAULT_BG) != 0,
+                         (st->color_flags & CFR_COLOR_DEFAULT_BG) != 0,
                          default_bg);
     dst->ul_color = unpack_rgb(st->ul_rgb,
-                               (st->color_flags & BVT_COLOR_DEFAULT_UL) != 0,
+                               (st->color_flags & CFR_COLOR_DEFAULT_UL) != 0,
                                default_fg);
 
     /* Match libvterm backend: pre-swap fg/bg for reverse video so the
@@ -398,71 +398,71 @@ static void convert_cell(BvtTerm *vt, const BvtCell *src, TerminalCell *dst)
     }
 }
 
-static int bvt_back_get_cell(TerminalBackend *term, int row, int col,
+static int cfr_back_get_cell(TerminalBackend *term, int row, int col,
                              TerminalCell *cell)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d || !cell)
         return -1;
-    const BvtCell *src = bvt_get_cell(d->vt, row, col);
+    const CfrCell *src = cfr_get_cell(d->vt, row, col);
     convert_cell(d->vt, src, cell);
     return 0;
 }
 
-static int bvt_back_get_dimensions(TerminalBackend *term, int *rows, int *cols)
+static int cfr_back_get_dimensions(TerminalBackend *term, int *rows, int *cols)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return -1;
-    bvt_get_dimensions(d->vt, rows, cols);
+    cfr_get_dimensions(d->vt, rows, cols);
     return 0;
 }
 
-static TerminalPos bvt_back_get_cursor_pos(TerminalBackend *term)
+static TerminalPos cfr_back_get_cursor_pos(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
-    BvtCursor c = bvt_get_cursor(d->vt);
+    CfrBackendData *d = term->backend_data;
+    CfrCursor c = cfr_get_cursor(d->vt);
     return (TerminalPos){ .row = c.row, .col = c.col };
 }
-static bool bvt_back_get_cursor_visible(TerminalBackend *term)
+static bool cfr_back_get_cursor_visible(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
-    return bvt_get_cursor(d->vt).visible;
+    CfrBackendData *d = term->backend_data;
+    return cfr_get_cursor(d->vt).visible;
 }
-static const BvtSixel *bvt_back_get_sixels(TerminalBackend *term, int *count)
+static const CfrSixel *cfr_back_get_sixels(TerminalBackend *term, int *count)
 {
-    BvtBackendData *d = term->backend_data;
-    return bvt_get_sixels(d->vt, count);
+    CfrBackendData *d = term->backend_data;
+    return cfr_get_sixels(d->vt, count);
 }
-static const BvtLottie *bvt_back_get_lotties(TerminalBackend *term, int *count)
+static const CfrLottie *cfr_back_get_lotties(TerminalBackend *term, int *count)
 {
-    BvtBackendData *d = term->backend_data;
-    return bvt_get_lotties(d->vt, count);
+    CfrBackendData *d = term->backend_data;
+    return cfr_get_lotties(d->vt, count);
 }
-static const BvtLottiePlacement *bvt_back_get_lottie_placements(
+static const CfrLottiePlacement *cfr_back_get_lottie_placements(
     TerminalBackend *term, uint64_t id, int *count)
 {
-    BvtBackendData *d = term->backend_data;
-    return bvt_get_lottie_placements(d->vt, id, count);
+    CfrBackendData *d = term->backend_data;
+    return cfr_get_lottie_placements(d->vt, id, count);
 }
-static bool bvt_back_lottie_tick(TerminalBackend *term, uint64_t now_us)
+static bool cfr_back_lottie_tick(TerminalBackend *term, uint64_t now_us)
 {
-    BvtBackendData *d = term->backend_data;
-    return bvt_lottie_tick(d->vt, now_us);
+    CfrBackendData *d = term->backend_data;
+    return cfr_lottie_tick(d->vt, now_us);
 }
-static void bvt_back_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
+static void cfr_back_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
 {
-    BvtBackendData *d = term->backend_data;
-    bvt_set_cell_pixels(d->vt, cell_w, cell_h);
+    CfrBackendData *d = term->backend_data;
+    cfr_set_cell_pixels(d->vt, cell_w, cell_h);
 }
-static bool bvt_back_get_cursor_blink(TerminalBackend *term)
+static bool cfr_back_get_cursor_blink(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
-    return bvt_get_cursor(d->vt).blink;
+    CfrBackendData *d = term->backend_data;
+    return cfr_get_cursor(d->vt).blink;
 }
-static const char *bvt_back_get_title(TerminalBackend *term)
+static const char *cfr_back_get_title(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     return d->title;
 }
 
@@ -470,38 +470,38 @@ static const char *bvt_back_get_title(TerminalBackend *term)
 /* Damage                                                              */
 /* ------------------------------------------------------------------ */
 
-static bool bvt_back_needs_redraw(TerminalBackend *term)
+static bool cfr_back_needs_redraw(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     return d ? d->needs_redraw : false;
 }
-static void bvt_back_clear_redraw(TerminalBackend *term)
+static void cfr_back_clear_redraw(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (d)
         damage_init(d);
 }
-/* Drain bloom-vt's accumulated damage: bvt_damage_flush fires cb_damage (which
+/* Drain coffer's accumulated damage: cfr_damage_flush fires cb_damage (which
  * unions into our rect and sets needs_redraw) only when the grid actually
  * changed, and folds in cursor-only moves. Called once per frame. */
-static void bvt_back_flush_damage(TerminalBackend *term)
+static void cfr_back_flush_damage(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (d)
-        bvt_damage_flush(d->vt);
+        cfr_damage_flush(d->vt);
 }
-/* Flag a redraw for a change bloom-vt can't see (cursor blink, selection,
+/* Flag a redraw for a change coffer can't see (cursor blink, selection,
  * scroll view, focus, resize). Full-grid repaint, so no precise rect needed. */
-static void bvt_back_mark_dirty(TerminalBackend *term)
+static void cfr_back_mark_dirty(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (d)
         d->needs_redraw = true;
 }
-static bool bvt_back_get_damage_rect(TerminalBackend *term,
+static bool cfr_back_get_damage_rect(TerminalBackend *term,
                                      TerminalDamageRect *rect)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d || !d->needs_redraw || !rect)
         return false;
     rect->start_row = d->damage_top;
@@ -515,64 +515,64 @@ static bool bvt_back_get_damage_rect(TerminalBackend *term,
 /* Scrollback                                                          */
 /* ------------------------------------------------------------------ */
 
-static int bvt_back_get_scrollback_lines(TerminalBackend *term)
+static int cfr_back_get_scrollback_lines(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
-    return d ? bvt_get_scrollback_lines(d->vt) : 0;
+    CfrBackendData *d = term->backend_data;
+    return d ? cfr_get_scrollback_lines(d->vt) : 0;
 }
-static int bvt_back_get_scrollback_capacity(TerminalBackend *term)
+static int cfr_back_get_scrollback_capacity(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
-    return d ? bvt_get_scrollback_capacity(d->vt) : 0;
+    CfrBackendData *d = term->backend_data;
+    return d ? cfr_get_scrollback_capacity(d->vt) : 0;
 }
-static int bvt_back_consume_pushed_rows(TerminalBackend *term)
+static int cfr_back_consume_pushed_rows(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return 0;
     int n = d->pushed_rows;
     d->pushed_rows = 0;
     return n;
 }
-static int bvt_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
+static int cfr_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
                                         int col, TerminalCell *cell)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d || !cell)
         return -1;
-    const BvtCell *src = bvt_get_scrollback_cell(d->vt, sb_row, col);
+    const CfrCell *src = cfr_get_scrollback_cell(d->vt, sb_row, col);
     convert_cell(d->vt, src, cell);
     return 0;
 }
 
-static size_t bvt_back_get_grapheme(TerminalBackend *term, int unified_row,
+static size_t cfr_back_get_grapheme(TerminalBackend *term, int unified_row,
                                     int col, uint32_t *out, size_t cap)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d || !out || cap == 0)
         return 0;
-    const BvtCell *src = (unified_row >= 0)
-                             ? bvt_get_cell(d->vt, unified_row, col)
-                             : bvt_get_scrollback_cell(d->vt, -(unified_row + 1), col);
+    const CfrCell *src = (unified_row >= 0)
+                             ? cfr_get_cell(d->vt, unified_row, col)
+                             : cfr_get_scrollback_cell(d->vt, -(unified_row + 1), col);
     if (!src)
         return 0;
-    return bvt_cell_get_grapheme(d->vt, src, out, cap);
+    return cfr_cell_get_grapheme(d->vt, src, out, cap);
 }
 
-static size_t bvt_back_get_hyperlink(TerminalBackend *term, int unified_row,
+static size_t cfr_back_get_hyperlink(TerminalBackend *term, int unified_row,
                                      int col, char *out, size_t cap)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d || !out || cap == 0)
         return 0;
-    const BvtCell *src = (unified_row >= 0)
-                             ? bvt_get_cell(d->vt, unified_row, col)
-                             : bvt_get_scrollback_cell(d->vt, -(unified_row + 1), col);
+    const CfrCell *src = (unified_row >= 0)
+                             ? cfr_get_cell(d->vt, unified_row, col)
+                             : cfr_get_scrollback_cell(d->vt, -(unified_row + 1), col);
     if (!src || src->hyperlink_id == 0)
         return 0;
     /* Reserve one byte for the trailing NUL. bvt returns raw bytes, so
      * we cap the write at cap-1 and add the terminator ourselves. */
-    size_t n = bvt_cell_get_hyperlink(d->vt, src, (uint8_t *)out, cap - 1);
+    size_t n = cfr_cell_get_hyperlink(d->vt, src, (uint8_t *)out, cap - 1);
     if (n >= cap)
         n = cap - 1;
     out[n] = '\0';
@@ -583,149 +583,149 @@ static size_t bvt_back_get_hyperlink(TerminalBackend *term, int unified_row,
 /* Modes / I/O                                                         */
 /* ------------------------------------------------------------------ */
 
-static bool bvt_back_is_altscreen(TerminalBackend *term)
+static bool cfr_back_is_altscreen(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     return d ? d->altscreen : false;
 }
-static int bvt_back_get_mouse_mode(TerminalBackend *term)
+static int cfr_back_get_mouse_mode(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     return d ? d->mouse_mode : 0;
 }
-static void bvt_back_send_mouse_event(TerminalBackend *term, int row, int col,
+static void cfr_back_send_mouse_event(TerminalBackend *term, int row, int col,
                                       int button, bool pressed, int mod)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
-    BvtMods mods = 0;
+    CfrMods mods = 0;
     if (mod & TERM_MOD_SHIFT)
-        mods |= BVT_MOD_SHIFT;
+        mods |= CFR_MOD_SHIFT;
     if (mod & TERM_MOD_ALT)
-        mods |= BVT_MOD_ALT;
+        mods |= CFR_MOD_ALT;
     if (mod & TERM_MOD_CTRL)
-        mods |= BVT_MOD_CTRL;
-    BvtMouseButton b = BVT_MOUSE_NONE;
+        mods |= CFR_MOD_CTRL;
+    CfrMouseButton b = CFR_MOUSE_NONE;
     switch (button) {
     case 1:
-        b = BVT_MOUSE_LEFT;
+        b = CFR_MOUSE_LEFT;
         break;
     case 2:
-        b = BVT_MOUSE_MIDDLE;
+        b = CFR_MOUSE_MIDDLE;
         break;
     case 3:
-        b = BVT_MOUSE_RIGHT;
+        b = CFR_MOUSE_RIGHT;
         break;
     case 4:
-        b = BVT_MOUSE_WHEEL_UP;
+        b = CFR_MOUSE_WHEEL_UP;
         break;
     case 5:
-        b = BVT_MOUSE_WHEEL_DOWN;
+        b = CFR_MOUSE_WHEEL_DOWN;
         break;
     default:
         break;
     }
-    bvt_send_mouse(d->vt, row, col, b, pressed, mods);
+    cfr_send_mouse(d->vt, row, col, b, pressed, mods);
 }
-static void bvt_back_set_output_callback(TerminalBackend *term,
+static void cfr_back_set_output_callback(TerminalBackend *term,
                                          TerminalOutputCallback cb,
                                          void *user)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
     d->output_cb = cb;
     d->output_user = user;
 }
 
-static BvtKey map_key(int key)
+static CfrKey map_key(int key)
 {
     switch (key) {
     case TERM_KEY_ENTER:
-        return BVT_KEY_ENTER;
+        return CFR_KEY_ENTER;
     case TERM_KEY_TAB:
-        return BVT_KEY_TAB;
+        return CFR_KEY_TAB;
     case TERM_KEY_BACKSPACE:
-        return BVT_KEY_BACKSPACE;
+        return CFR_KEY_BACKSPACE;
     case TERM_KEY_ESCAPE:
-        return BVT_KEY_ESCAPE;
+        return CFR_KEY_ESCAPE;
     case TERM_KEY_UP:
-        return BVT_KEY_UP;
+        return CFR_KEY_UP;
     case TERM_KEY_DOWN:
-        return BVT_KEY_DOWN;
+        return CFR_KEY_DOWN;
     case TERM_KEY_LEFT:
-        return BVT_KEY_LEFT;
+        return CFR_KEY_LEFT;
     case TERM_KEY_RIGHT:
-        return BVT_KEY_RIGHT;
+        return CFR_KEY_RIGHT;
     case TERM_KEY_INS:
-        return BVT_KEY_INS;
+        return CFR_KEY_INS;
     case TERM_KEY_DEL:
-        return BVT_KEY_DEL;
+        return CFR_KEY_DEL;
     case TERM_KEY_HOME:
-        return BVT_KEY_HOME;
+        return CFR_KEY_HOME;
     case TERM_KEY_END:
-        return BVT_KEY_END;
+        return CFR_KEY_END;
     case TERM_KEY_PAGEUP:
-        return BVT_KEY_PAGEUP;
+        return CFR_KEY_PAGEUP;
     case TERM_KEY_PAGEDOWN:
-        return BVT_KEY_PAGEDOWN;
+        return CFR_KEY_PAGEDOWN;
     case TERM_KEY_F1:
-        return BVT_KEY_F1;
+        return CFR_KEY_F1;
     case TERM_KEY_F2:
-        return BVT_KEY_F2;
+        return CFR_KEY_F2;
     case TERM_KEY_F3:
-        return BVT_KEY_F3;
+        return CFR_KEY_F3;
     case TERM_KEY_F4:
-        return BVT_KEY_F4;
+        return CFR_KEY_F4;
     case TERM_KEY_F5:
-        return BVT_KEY_F5;
+        return CFR_KEY_F5;
     case TERM_KEY_F6:
-        return BVT_KEY_F6;
+        return CFR_KEY_F6;
     case TERM_KEY_F7:
-        return BVT_KEY_F7;
+        return CFR_KEY_F7;
     case TERM_KEY_F8:
-        return BVT_KEY_F8;
+        return CFR_KEY_F8;
     case TERM_KEY_F9:
-        return BVT_KEY_F9;
+        return CFR_KEY_F9;
     case TERM_KEY_F10:
-        return BVT_KEY_F10;
+        return CFR_KEY_F10;
     case TERM_KEY_F11:
-        return BVT_KEY_F11;
+        return CFR_KEY_F11;
     case TERM_KEY_F12:
-        return BVT_KEY_F12;
+        return CFR_KEY_F12;
     default:
-        return BVT_KEY_NONE;
+        return CFR_KEY_NONE;
     }
 }
 
-static void bvt_back_send_key(TerminalBackend *term, int key, int mod)
+static void cfr_back_send_key(TerminalBackend *term, int key, int mod)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
-    BvtMods mods = 0;
+    CfrMods mods = 0;
     if (mod & TERM_MOD_SHIFT)
-        mods |= BVT_MOD_SHIFT;
+        mods |= CFR_MOD_SHIFT;
     if (mod & TERM_MOD_ALT)
-        mods |= BVT_MOD_ALT;
+        mods |= CFR_MOD_ALT;
     if (mod & TERM_MOD_CTRL)
-        mods |= BVT_MOD_CTRL;
-    bvt_send_key(d->vt, map_key(key), mods);
+        mods |= CFR_MOD_CTRL;
+    cfr_send_key(d->vt, map_key(key), mods);
 }
 
-static void bvt_back_send_char(TerminalBackend *term, uint32_t cp, int mod)
+static void cfr_back_send_char(TerminalBackend *term, uint32_t cp, int mod)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
-    BvtMods mods = 0;
+    CfrMods mods = 0;
     if (mod & TERM_MOD_SHIFT)
-        mods |= BVT_MOD_SHIFT;
+        mods |= CFR_MOD_SHIFT;
     if (mod & TERM_MOD_ALT)
-        mods |= BVT_MOD_ALT;
+        mods |= CFR_MOD_ALT;
     if (mod & TERM_MOD_CTRL)
-        mods |= BVT_MOD_CTRL;
+        mods |= CFR_MOD_CTRL;
 
     /* Encode the codepoint as UTF-8 and send as text. */
     char buf[4];
@@ -745,24 +745,24 @@ static void bvt_back_send_char(TerminalBackend *term, uint32_t cp, int mod)
         buf[n++] = (char)(0x80 | ((cp >> 6) & 0x3F));
         buf[n++] = (char)(0x80 | (cp & 0x3F));
     }
-    bvt_send_text(d->vt, buf, n, mods);
+    cfr_send_text(d->vt, buf, n, mods);
 }
 
-static void bvt_back_start_paste(TerminalBackend *term)
+static void cfr_back_start_paste(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (d)
-        bvt_paste_begin(d->vt);
+        cfr_paste_begin(d->vt);
 }
-static void bvt_back_end_paste(TerminalBackend *term)
+static void cfr_back_end_paste(TerminalBackend *term)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (d)
-        bvt_paste_end(d->vt);
+        cfr_paste_end(d->vt);
 }
-static bool bvt_back_get_line_continuation(TerminalBackend *term, int row)
+static bool cfr_back_get_line_continuation(TerminalBackend *term, int row)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return false;
     /* Unified coordinate space: visible rows are >= 0, scrollback rows are
@@ -775,75 +775,75 @@ static bool bvt_back_get_line_continuation(TerminalBackend *term, int row)
      * We have to walk across the visible/scrollback boundary too. */
     int prev = row - 1;
     if (prev >= 0) {
-        return bvt_get_line_continuation(d->vt, prev);
+        return cfr_get_line_continuation(d->vt, prev);
     }
     int sb_row = -(prev + 1);
-    return bvt_get_scrollback_wrapline(d->vt, sb_row);
+    return cfr_get_scrollback_wrapline(d->vt, sb_row);
 }
 
-static void bvt_back_set_scrollback_size(TerminalBackend *term, int lines)
+static void cfr_back_set_scrollback_size(TerminalBackend *term, int lines)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return;
-    bvt_set_scrollback_size(d->vt, lines);
+    cfr_set_scrollback_size(d->vt, lines);
 }
 
-static bool bvt_back_get_mode(TerminalBackend *term, BvtMode mode)
+static bool cfr_back_get_mode(TerminalBackend *term, CfrMode mode)
 {
-    BvtBackendData *d = term->backend_data;
+    CfrBackendData *d = term->backend_data;
     if (!d)
         return false;
-    return bvt_get_mode(d->vt, mode);
+    return cfr_get_mode(d->vt, mode);
 }
 
 /* ------------------------------------------------------------------ */
 /* vtable                                                              */
 /* ------------------------------------------------------------------ */
 
-TerminalBackend terminal_backend_bvt = {
-    .name = "bloom-vt",
+TerminalBackend terminal_backend_cfr = {
+    .name = "coffer",
     .backend_data = NULL,
-    .init = bvt_back_init,
-    .destroy = bvt_back_destroy,
-    .resize = bvt_back_resize,
-    .process_input = bvt_back_process_input,
-    .get_cell = bvt_back_get_cell,
-    .get_dimensions = bvt_back_get_dimensions,
-    .get_cursor_pos = bvt_back_get_cursor_pos,
-    .get_cursor_visible = bvt_back_get_cursor_visible,
-    .get_cursor_blink = bvt_back_get_cursor_blink,
-    .get_title = bvt_back_get_title,
-    .needs_redraw = bvt_back_needs_redraw,
-    .clear_redraw = bvt_back_clear_redraw,
-    .flush_damage = bvt_back_flush_damage,
-    .mark_dirty = bvt_back_mark_dirty,
-    .get_damage_rect = bvt_back_get_damage_rect,
-    .get_scrollback_lines = bvt_back_get_scrollback_lines,
-    .get_scrollback_capacity = bvt_back_get_scrollback_capacity,
-    .consume_pushed_rows = bvt_back_consume_pushed_rows,
-    .get_scrollback_cell = bvt_back_get_scrollback_cell,
-    .get_grapheme = bvt_back_get_grapheme,
-    .get_hyperlink = bvt_back_get_hyperlink,
-    .is_altscreen = bvt_back_is_altscreen,
-    .get_mouse_mode = bvt_back_get_mouse_mode,
-    .send_mouse_event = bvt_back_send_mouse_event,
-    .set_output_callback = bvt_back_set_output_callback,
-    .send_key = bvt_back_send_key,
-    .send_char = bvt_back_send_char,
-    .start_paste = bvt_back_start_paste,
-    .end_paste = bvt_back_end_paste,
-    .get_line_continuation = bvt_back_get_line_continuation,
-    .set_scrollback_size = bvt_back_set_scrollback_size,
-    .get_sixels = bvt_back_get_sixels,
-    .set_cell_px = bvt_back_set_cell_px,
-    .get_lotties = bvt_back_get_lotties,
-    .get_lottie_placements = bvt_back_get_lottie_placements,
-    .lottie_tick = bvt_back_lottie_tick,
-    .get_mode = bvt_back_get_mode,
+    .init = cfr_back_init,
+    .destroy = cfr_back_destroy,
+    .resize = cfr_back_resize,
+    .process_input = cfr_back_process_input,
+    .get_cell = cfr_back_get_cell,
+    .get_dimensions = cfr_back_get_dimensions,
+    .get_cursor_pos = cfr_back_get_cursor_pos,
+    .get_cursor_visible = cfr_back_get_cursor_visible,
+    .get_cursor_blink = cfr_back_get_cursor_blink,
+    .get_title = cfr_back_get_title,
+    .needs_redraw = cfr_back_needs_redraw,
+    .clear_redraw = cfr_back_clear_redraw,
+    .flush_damage = cfr_back_flush_damage,
+    .mark_dirty = cfr_back_mark_dirty,
+    .get_damage_rect = cfr_back_get_damage_rect,
+    .get_scrollback_lines = cfr_back_get_scrollback_lines,
+    .get_scrollback_capacity = cfr_back_get_scrollback_capacity,
+    .consume_pushed_rows = cfr_back_consume_pushed_rows,
+    .get_scrollback_cell = cfr_back_get_scrollback_cell,
+    .get_grapheme = cfr_back_get_grapheme,
+    .get_hyperlink = cfr_back_get_hyperlink,
+    .is_altscreen = cfr_back_is_altscreen,
+    .get_mouse_mode = cfr_back_get_mouse_mode,
+    .send_mouse_event = cfr_back_send_mouse_event,
+    .set_output_callback = cfr_back_set_output_callback,
+    .send_key = cfr_back_send_key,
+    .send_char = cfr_back_send_char,
+    .start_paste = cfr_back_start_paste,
+    .end_paste = cfr_back_end_paste,
+    .get_line_continuation = cfr_back_get_line_continuation,
+    .set_scrollback_size = cfr_back_set_scrollback_size,
+    .get_sixels = cfr_back_get_sixels,
+    .set_cell_px = cfr_back_set_cell_px,
+    .get_lotties = cfr_back_get_lotties,
+    .get_lottie_placements = cfr_back_get_lottie_placements,
+    .lottie_tick = cfr_back_lottie_tick,
+    .get_mode = cfr_back_get_mode,
 };
 
-TerminalBackend *term_bvt_new(const BvtConfig *cfg)
+TerminalBackend *term_cfr_new(const CfrConfig *cfg)
 {
     TerminalBackend *t = malloc(sizeof(*t));
     if (!t)
@@ -851,7 +851,7 @@ TerminalBackend *term_bvt_new(const BvtConfig *cfg)
     /* Copy the vtable/template, then clear all per-instance state so this is a
      * clean terminal independent of the shared global (whose backend_data,
      * selection, callbacks, etc. belong to the host terminal once it is up). */
-    *t = terminal_backend_bvt;
+    *t = terminal_backend_cfr;
     t->backend_data = NULL;
     memset(&t->selection, 0, sizeof(t->selection));
     t->selection_change_cb = NULL;

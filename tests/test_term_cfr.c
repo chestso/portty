@@ -1,5 +1,5 @@
 /*
- * test_term_bvt — covers the TerminalBackend bridge for bloom-vt.
+ * test_term_cfr — covers the TerminalBackend bridge for coffer.
  *
  * Two regressions motivated this file:
  *   1. Wrap-aware selection (double-click on a soft-wrapped word) reads
@@ -13,12 +13,12 @@
 #include "test_helpers.h"
 
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-extern TerminalBackend terminal_backend_bvt;
+extern TerminalBackend terminal_backend_cfr;
 
 static void feed(TerminalBackend *t, const char *s)
 {
@@ -31,9 +31,9 @@ static void feed(TerminalBackend *t, const char *s)
  * return true (libvterm semantics: "row 1 continues from row 0"). */
 static void test_visible_wrap_continuation(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 5;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -55,9 +55,9 @@ static void test_visible_wrap_continuation(void)
  * into the next row must still be reachable. */
 static void test_scrollback_wrap_continuation(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 5;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -87,9 +87,9 @@ static void test_scrollback_wrap_continuation(void)
 /* Resize wider → bvt should re-wrap "abcdef" from two rows into one. */
 static void test_resize_grows_and_reflows(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 5;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -117,9 +117,9 @@ static void test_resize_grows_and_reflows(void)
 /* Resize narrower → a single-row "abcdefghij" wraps into two rows. */
 static void test_resize_shrinks_and_reflows(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 10;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -146,9 +146,9 @@ static void test_resize_shrinks_and_reflows(void)
  * full sequence via terminal_cell_get_grapheme. Verify all 7 cps survive. */
 static void test_long_cluster_survives_accessor(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -186,9 +186,9 @@ static void test_long_cluster_survives_accessor(void)
  * the simple case while the harder cases (TAB, CUF) sit below. */
 static void test_selection_preserves_spaces(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -210,9 +210,9 @@ static void test_selection_preserves_spaces(void)
 
 static void test_selection_across_rows(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;
@@ -236,9 +236,9 @@ static void test_selection_across_rows(void)
  * The selection-extraction logic must treat those as spaces, not skip them. */
 static void test_selection_with_tab(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 40;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -262,9 +262,9 @@ static void test_selection_with_tab(void)
  * content with gaps; the gap cells must round-trip as spaces. */
 static void test_selection_after_cursor_movement(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -288,9 +288,9 @@ static void test_selection_after_cursor_movement(void)
  * the URI bytes round-trip through terminal_cell_get_hyperlink. */
 static void test_hyperlink_basic(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 40;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -345,9 +345,9 @@ static void test_hyperlink_safety(void)
  * and resize must clear it (next mouse motion re-resolves). */
 static void test_hyperlink_hover_state(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -369,17 +369,17 @@ static void test_hyperlink_hover_state(void)
     terminal_destroy(&t);
 }
 
-/* term_bvt_new yields a heap-allocated, independent (PTY-less) terminal that
+/* term_cfr_new yields a heap-allocated, independent (PTY-less) terminal that
  * parses content — including OSC 8 hyperlinks — exactly like the shared global.
  * This is what the internal pager builds its overlay from. */
-static void test_bvt_new_independent(void)
+static void test_cfr_new_independent(void)
 {
-    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.cols = 40;
     cfg.rows = 4;
     cfg.cell_w_px = 10;
     cfg.cell_h_px = 20;
-    TerminalBackend *t = term_bvt_new(&cfg);
+    TerminalBackend *t = term_cfr_new(&cfg);
     ASSERT_NOT_NULL(t);
 
     int rows = 0, cols = 0;
@@ -407,9 +407,9 @@ static void test_bvt_new_independent(void)
  * trailing run rather than padding the clipboard with spaces. */
 static void test_selection_strips_trailing_null_cells(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -433,9 +433,9 @@ static void test_selection_strips_trailing_null_cells(void)
  * stripped on copy at hard line boundaries, the same way trailing NULLs are. */
 static void test_selection_strips_trailing_real_spaces(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -459,9 +459,9 @@ static void test_selection_strips_trailing_real_spaces(void)
  * drops only the run past "bar". */
 static void test_selection_keeps_interior_spaces_on_full_row(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 40;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -484,9 +484,9 @@ static void test_selection_keeps_interior_spaces_on_full_row(void)
  * a space — the width-2 advance should skip past it. */
 static void test_selection_skips_wide_continuation(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 2;
         cfg.cell_w_px = 10;
@@ -513,8 +513,8 @@ static void test_selection_skips_wide_continuation(void)
 /*                                                                    */
 /* Motivating crash: leaving alt screen after a resize restored a grid */
 /* allocated at the old (smaller) dimensions while vt->cols reflected */
-/* the new (larger) size.  bvt_get_cell overflowed the page's cells   */
-/* array → heap-buffer-overflow (ASan).  The bloom-vt fix reflows   */
+/* the new (larger) size.  cfr_get_cell overflowed the page's cells   */
+/* array → heap-buffer-overflow (ASan).  The coffer fix reflows   */
 /* the restored grid to match current dimensions.                    */
 /* ------------------------------------------------------------------ */
 
@@ -522,9 +522,9 @@ static void test_selection_skips_wide_continuation(void)
 /* Before the fix, reading cells at col >= old_cols overflowed.       */
 static void test_altscreen_resize_wider_readable(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 10;
         cfg.rows = 24;
         cfg.cell_w_px = 10;
@@ -569,9 +569,9 @@ static void test_altscreen_resize_wider_readable(void)
 /* grid or recent scrollback — not silently dropped by truncation.     */
 static void test_altscreen_resize_narrower_reflows(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 5;
         cfg.cell_w_px = 10;
@@ -627,7 +627,7 @@ static void test_altscreen_resize_narrower_reflows(void)
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
-    printf("Running term_bvt tests:\n");
+    printf("Running term_cfr tests:\n");
     RUN_TEST(test_visible_wrap_continuation);
     RUN_TEST(test_scrollback_wrap_continuation);
     RUN_TEST(test_resize_grows_and_reflows);
@@ -644,7 +644,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_hyperlink_basic);
     RUN_TEST(test_hyperlink_safety);
     RUN_TEST(test_hyperlink_hover_state);
-    RUN_TEST(test_bvt_new_independent);
+    RUN_TEST(test_cfr_new_independent);
     RUN_TEST(test_altscreen_resize_wider_readable);
     RUN_TEST(test_altscreen_resize_narrower_reflows);
     TEST_SUMMARY();

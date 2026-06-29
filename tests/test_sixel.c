@@ -1,8 +1,8 @@
 /*
  * test_sixel — sixel end-to-end through the host bridge.
  *
- * The decode/store/placement logic is unit-tested in bloom-vt itself
- * (tests/test_bvt_sixel.c). This file checks the portty side:
+ * The decode/store/placement logic is unit-tested in coffer itself
+ * (tests/test_cfr_sixel.c). This file checks the portty side:
  * that a DCS sixel sequence fed through terminal_process_input() reaches
  * the engine and comes back out through terminal_get_sixels() with the
  * right pixels, that the cell-pixel size plumbing drives row placement,
@@ -12,19 +12,19 @@
 #include "test_helpers.h"
 
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 
 #include <stdlib.h>
 #include <string.h>
 
-extern TerminalBackend terminal_backend_bvt;
+extern TerminalBackend terminal_backend_cfr;
 
 static void feed(TerminalBackend *t, const char *s)
 {
     terminal_process_input(t, s, strlen(s));
 }
 
-static const uint8_t *px(const BvtSixel *s, int x, int y)
+static const uint8_t *px(const CfrSixel *s, int x, int y)
 {
     return s->rgba + ((size_t)y * s->width_px + x) * 4;
 }
@@ -32,9 +32,9 @@ static const uint8_t *px(const BvtSixel *s, int x, int y)
 /* A DCS red square reaches the host as a decoded image. */
 static void test_bridge_decode(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 10;
         cfg.cell_w_px = 10;
@@ -46,7 +46,7 @@ static void test_bridge_decode(void)
     feed(&t, "\x1bPq#1;2;100;0;0#1BB\x1b\\");
 
     int n = -1;
-    const BvtSixel *s = terminal_get_sixels(&t, &n);
+    const CfrSixel *s = terminal_get_sixels(&t, &n);
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].width_px, 2);
@@ -67,9 +67,9 @@ static void test_bridge_decode(void)
 /* Without a cell size the engine still decodes but can't advance rows. */
 static void test_bridge_no_cell_size(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 10;
         cfg.cell_w_px = 10;
@@ -80,7 +80,7 @@ static void test_bridge_no_cell_size(void)
     feed(&t, "\x1bPq#1;2;0;100;0#1~\x1b\\");
 
     int n = -1;
-    const BvtSixel *s = terminal_get_sixels(&t, &n);
+    const CfrSixel *s = terminal_get_sixels(&t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].width_px, 1);
     terminal_destroy(&t);
@@ -89,9 +89,9 @@ static void test_bridge_no_cell_size(void)
 /* Animation: in-place frames coalesce into one image, version bumps. */
 static void test_bridge_animation(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 10;
         cfg.cell_w_px = 10;
@@ -103,7 +103,7 @@ static void test_bridge_animation(void)
 
     feed(&t, "\x1bPq#1;2;100;0;0#1~\x1b\\");
     int n = -1;
-    const BvtSixel *s = terminal_get_sixels(&t, &n);
+    const CfrSixel *s = terminal_get_sixels(&t, &n);
     ASSERT_EQ(n, 1);
     uint64_t id0 = s[0].id;
     uint32_t v0 = s[0].version;
@@ -120,9 +120,9 @@ static void test_bridge_animation(void)
 /* Clearing the screen removes images. */
 static void test_bridge_clear(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 10;
         cfg.cell_w_px = 10;

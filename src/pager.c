@@ -1,13 +1,13 @@
 // General-purpose in-process pager — see pager.h.
 //
-// The document is fed into a dedicated, PTY-less bloom-vt terminal (the
+// The document is fed into a dedicated, PTY-less coffer terminal (the
 // "overlay"); the shared renderer draws that terminal full-screen when set, and
 // its scrollback provides paging. Hyperlink hover/open reuse the same cell
 // lookups as the main view, but target the overlay terminal.
 
 #include "pager.h"
 #include "common.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -81,12 +81,12 @@ static bool overlay_build(Pager *p, const char *text, int cols, int rows)
 {
     int cell_w = 10, cell_h = 20;
     renderer_get_cell_size(p->rend, &cell_w, &cell_h);
-    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.cols = cols;
     cfg.rows = rows;
     cfg.cell_w_px = cell_w;
     cfg.cell_h_px = cell_h;
-    TerminalBackend *t = term_bvt_new(&cfg);
+    TerminalBackend *t = term_cfr_new(&cfg);
     if (!t)
         return false;
 
@@ -113,7 +113,7 @@ static void overlay_teardown(Pager *p)
         return;
     renderer_clear_overlay(p->rend); // restore host scroll view, stop drawing overlay
     terminal_destroy(p->term);
-    free(p->term); // heap instance from term_bvt_new
+    free(p->term); // heap instance from term_cfr_new
     p->term = NULL;
 }
 

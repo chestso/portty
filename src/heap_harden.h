@@ -1,10 +1,10 @@
 #ifndef HEAP_HARDEN_H
 #define HEAP_HARDEN_H
 
-#include <bloom-vt/bloom_vt.h>
+#include <coffer/coffer.h>
 
 /*
- * Hardened BvtAllocator. Wraps stdlib malloc/realloc/free with:
+ * Hardened CfrAllocator. Wraps stdlib malloc/realloc/free with:
  *
  *   - 16-byte header before each chunk: 8-byte magic ('BLM-VT  ') +
  *     8-byte logical size.
@@ -26,11 +26,11 @@
  * chunk (within the wrapper's headroom). On a hit, both produce a
  * report and a core.
  *
- * Install once from term_bvt.c via bvt_new_with_allocator(...,
- * &bvt_hardened_allocator). Pair with heap_harden_init() at process
+ * Install once from term_cfr.c via cfr_new_with_allocator(...,
+ * &cfr_hardened_allocator). Pair with heap_harden_init() at process
  * start so the dump hook is registered with portty_bug.
  */
-extern const BvtAllocator bvt_hardened_allocator;
+extern const CfrAllocator cfr_hardened_allocator;
 
 /* Register heap_stats dump with portty_bug. Idempotent. */
 void heap_harden_init(void);

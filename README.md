@@ -2,13 +2,13 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Features
 
-- Full terminal emulation using bloom-vt — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
+- Full terminal emulation using coffer — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
 - Rendering with SDL3
-- Damage-driven rendering — bloom-vt's accumulated damage is flushed once per frame into a single dirty signal, so the frame is repainted only when terminal content, the cursor, selection, or the scrollback view actually changes; an idle terminal does no rendering work
+- Damage-driven rendering — coffer's accumulated damage is flushed once per frame into a single dirty signal, so the frame is repainted only when terminal content, the cursor, selection, or the scrollback view actually changes; an idle terminal does no rendering work
 - Gamma-correct text rendering — antialiased glyph coverage is composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), so text gets its physically-correct, heavier/softer weight like kitty rather than the thin look of sRGB-space blending. Tunable with the kitty-style `text_composition_strategy` config key, which on the GPU renderer runs as a luminance-aware fragment shader — thickening dark-on-light text (reverse video) without bolding normal light-on-dark text.
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
@@ -18,8 +18,8 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Support for Unicode characters and emoji (COLR v1 color fonts)
 - Emoji width paradigm: coverage-aware routing (color emoji font used when VS16 forces emoji presentation, the codepoint is a regional indicator, or the emoji font actually carries the glyph; VS15 forces text); ambiguous-width symbols default to 1 cell; VS16 (U+FE0F) forces 2 cells; symbol-class glyphs from a text font keep their natural design width and sit on the typographic baseline. Widths are computed at insertion time (UAX #11 + #29) and stored on the cell, so the renderer walks rows in plain column order.
-- Sixel graphics — DCS sixel images are decoded and stored inside bloom-vt and anchored to the grid, so they scroll, enter scrollback, and clear with the text they sit on. Spec coverage includes RLE, RGB and DEC HLS color (correct blue-origin hue), transparency, and raster attributes. Capability is advertised so sixel-aware tools (`img2sixel`, `lsix`, `chafa`) actually emit graphics: the DA1 reply reports `4`, plus DECSET 80/1070/8452 and XTSMGRAPHICS. Animated/in-place updates (DECSDM mode 80) swap frames in place — the renderer re-uploads a cached texture by the engine's image id + version, and the engine recycles pixel buffers from a pool so streaming same-size frames doesn't churn the heap
-- Lottie animations — APC sequences (`ESC _ … ST`) with base64-encoded JSON payloads load, place, and control Lottie animations on the grid. Eight commands (load, load-chunk, place, play, pause, stop, seek, delete) manage animation state and placement tracking. Placements carry per-instance opacity and layer (foreground or background). Animations scroll with the text, enter scrollback, and are cleared with the rows they sit on — the same ownership model as sixel. ThorVG rasterizes each frame; the host fetches RGBA pixels via the bloom-vt API (`bvt_get_lotties()`, `bvt_get_lottie_placements()`, `bvt_lottie_tick()`) and composites them as foreground and background layers. A Python TUI player ([plotty](contrib/plotty)) provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling. On Windows, ConPTY strips APC sequences (`ESC _`) — the same limitation that prevents the kitty image protocol from working (Windows Terminal issue #8389). `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8) is enabled with fallback, but on some builds it is accepted yet unknown sequences are still dropped. As a workaround, plotty on Windows carries the Lottie payload inside **OSC 5555** (`ESC ] 5555 ; <base64> BEL`), which ConPTY does pass through; bloom-vt routes OSC 5555 to the same APC dispatch, so the payload is processed identically regardless of carrier
+- Sixel graphics — DCS sixel images are decoded and stored inside coffer and anchored to the grid, so they scroll, enter scrollback, and clear with the text they sit on. Spec coverage includes RLE, RGB and DEC HLS color (correct blue-origin hue), transparency, and raster attributes. Capability is advertised so sixel-aware tools (`img2sixel`, `lsix`, `chafa`) actually emit graphics: the DA1 reply reports `4`, plus DECSET 80/1070/8452 and XTSMGRAPHICS. Animated/in-place updates (DECSDM mode 80) swap frames in place — the renderer re-uploads a cached texture by the engine's image id + version, and the engine recycles pixel buffers from a pool so streaming same-size frames doesn't churn the heap
+- Lottie animations — APC sequences (`ESC _ … ST`) with base64-encoded JSON payloads load, place, and control Lottie animations on the grid. Eight commands (load, load-chunk, place, play, pause, stop, seek, delete) manage animation state and placement tracking. Placements carry per-instance opacity and layer (foreground or background). Animations scroll with the text, enter scrollback, and are cleared with the rows they sit on — the same ownership model as sixel. ThorVG rasterizes each frame; the host fetches RGBA pixels via the coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_tick()`) and composites them as foreground and background layers. A Python TUI player ([plotty](contrib/plotty)) provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling. On Windows, ConPTY strips APC sequences (`ESC _`) — the same limitation that prevents the kitty image protocol from working (Windows Terminal issue #8389). `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8) is enabled with fallback, but on some builds it is accepted yet unknown sequences are still dropped. As a workaround, plotty on Windows carries the Lottie payload inside **OSC 5555** (`ESC ] 5555 ; <base64> BEL`), which ConPTY does pass through; coffer routes OSC 5555 to the same APC dispatch, so the payload is processed identically regardless of carrier
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard set — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy text to the system clipboard via escape sequence. Read queries (`OSC 52 ; c ; ?`) are silently refused so any program running in the terminal — including processes on the remote end of an SSH session — can't ask the terminal to hand it the contents of your clipboard (passwords, tokens, etc.).
@@ -48,7 +48,7 @@ portty uses a modular backend abstraction design:
   - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Renders with SDL's Vulkan renderer into a **triple-buffered ring** of exportable DRM-modifier `VkImage`s (each wrapped as an SDL render target) and presents each frame as a **zero-copy DMA-BUF** (`vkGetMemoryFdKHR` → `GdkDmabufTexture` with `GtkGraphicsOffload`). bloom owns Vulkan instance/device creation because SDL's own device does not enable the external-memory extensions. Because GTK imports the buffer on a _separate_ `VkDevice`, each frame is handed off with an explicit cross-device sync step: the render is flushed coherent (a 1×1 readback while the target is bound, which forces SDL's batch flush + device sync) and the image's queue-family ownership is released to `VK_QUEUE_FAMILY_FOREIGN_EXT` in `VK_IMAGE_LAYOUT_GENERAL` (and reacquired before the slot is reused). The ring avoids overwriting a buffer the compositor is still scanning out. Set `BLOOM_GTK4_READBACK=1` to force the CPU-readback path (`SDL_RenderReadPixels` → `GdkMemoryTexture`) instead; it is also the automatic fallback when Vulkan/DMA-BUF is unavailable.
 
 - **Terminal Backend**: Handles terminal emulation and screen state
-  - Current implementation: bloom-vt (`terminal_backend_bvt`) — external VT engine consumed via `pkg-config bloom-vt`, bridged through `term_bvt.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
+  - Current implementation: coffer (`terminal_backend_cfr`) — external VT engine consumed via `pkg-config coffer`, bridged through `term_cfr.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
 
 - **Renderer Backend**: Handles graphics output
   - Current implementation: SDL3 (`renderer_backend_sdl3`)
@@ -254,7 +254,7 @@ portty enforces four rules for how emoji and symbols are rendered:
 3. **VS16 forces 2 cells.** When U+FE0F follows an emoji-presentation base codepoint, the cell width is 2 — e.g. `⚠` is 1 cell but `⚠️` is 2 cells.
 4. **Symbol-class glyphs preserve font design.** Dingbats, Misc Symbols, Misc Technical, Geometric Shapes, Supplemental Arrows-B, and Misc Symbols & Arrows rendered through a text font keep their natural design width, sit on the typographic baseline vertically, and are centered horizontally in the cell (FreeType's left bearing is intentionally discarded because mono fonts often calibrate it to an oversized advance — e.g. Noto Sans Mono ✶ has advance 1.2×em with the ink centered in that wider advance). Only vertical overflow triggers a downscale; horizontal overhang into neighbor cells is allowed and handled cleanly by the two-pass row draw (backgrounds first, then glyphs).
 
-bloom-vt computes UAX #11 + UAX #29 cluster widths at insertion time and stores them on the cell, so VS16 emoji come through with `cell.width == 2` and the cell immediately to its right is a continuation cell with `cell.width == 0`. The renderer walks rows in plain column order via `TerminalRowIter` and increments by `cell.width` — no peek-ahead, no shift-vs-absorb decision, no separate "visual" column space. Mouse, cursor, and selection coordinates all share the same single column space.
+coffer computes UAX #11 + UAX #29 cluster widths at insertion time and stores them on the cell, so VS16 emoji come through with `cell.width == 2` and the cell immediately to its right is a continuation cell with `cell.width == 0`. The renderer walks rows in plain column order via `TerminalRowIter` and increments by `cell.width` — no peek-ahead, no shift-vs-absorb decision, no separate "visual" column space. Mouse, cursor, and selection coordinates all share the same single column space.
 
 Multi-codepoint clusters (ZWJ family chains, flag sequences, long combining-mark runs) are stored in a per-page grapheme arena and accessed via `terminal_cell_get_grapheme()` — there is no per-cell codepoint cap, so 7-codepoint sequences like 👨‍👩‍👧‍👦 round-trip through the renderer without truncation.
 
@@ -278,7 +278,7 @@ infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 
 All platforms:
 
-- bloom-vt (VT engine, consumed via `pkg-config bloom-vt`; source at https://codeberg.org/thomasc/bloom-vt)
+- coffer (VT engine, consumed via `pkg-config coffer`; source at https://codeberg.org/thomasc/coffer)
 - SDL3
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
@@ -336,7 +336,7 @@ pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
 pacman -S mingw-w64-ucrt-x86_64-imagemagick mingw-w64-ucrt-x86_64-librsvg
 ```
 
-bloom-vt is not in the official pacman repo — build and install it separately (`make install` in the bloom-vt repo, or ensure `PKG_CONFIG_PATH` points at its build output).
+coffer is not in the official pacman repo — build and install it separately (`make install` in the coffer repo, or ensure `PKG_CONFIG_PATH` points at its build output).
 
 ### Building
 
@@ -409,12 +409,12 @@ cd build && make check
 | `test_atlas`              | Texture atlas: insert/lookup, shelf packing, eviction                 |
 | `test_unicode`            | Emoji detection, ZWJ, skin tones, UTF-8 decoding                      |
 | `test_conf`               | Config parser: fonts, geometry, hinting, booleans                     |
-| `test_term_bvt`           | Terminal backend bridging to bloom-vt                                 |
+| `test_term_cfr`           | Terminal backend bridging to coffer                                   |
 | `test_osc52`              | OSC 52 clipboard set sequences                                        |
 | `test_clipboard_deferred` | Wayland clipboard deferred-free invariant (use-after-free regression) |
 | `test_altscreen_mouse`    | Altscreen/mouse-mode state and dispatch logic                         |
 | `test_sixel`              | Sixel image end-to-end through host bridge                            |
-| `test_lottie`             | Lottie animation bridge to bloom-vt                                   |
+| `test_lottie`             | Lottie animation bridge to coffer                                     |
 | `test_diag`               | Diagnostics report generation                                         |
 | `test_pty_pause`          | PTY pause/resume during selection (POSIX only)                        |
 
@@ -492,7 +492,7 @@ Thomas Christensen
 
 ## Acknowledgments
 
-A tip of the hat to [Charmbracelet](https://charm.sh) and [charm.land](https://charm.land): portty's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via bloom-vt), the cream foreground (`#fffdf5`) is charm.land's own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
+A tip of the hat to [Charmbracelet](https://charm.sh) and [charm.land](https://charm.land): portty's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via coffer), the cream foreground (`#fffdf5`) is charm.land's own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
 
 ## License
 

@@ -1,7 +1,7 @@
 """Tests for plotty.protocol — validates APC protocol output.
 
 Captures the APC escape sequences that plotty would emit and verifies
-they follow the bloom-vt Lottie protocol spec.
+they follow the coffer Lottie protocol spec.
 """
 
 from __future__ import annotations
@@ -242,7 +242,7 @@ def test_parse_lottie_meta():
 
 
 def test_apc_wire_format():
-    """Verify the raw wire format matches the bloom-vt spec."""
+    """Verify the raw wire format matches the coffer spec."""
     data = _with_fake_stdout(proto.apc_pause)
     # Should start with ESC _
     assert data[0:2] == b"\x1b_", f"APC should start with ESC _, got {data[0:2]!r}"

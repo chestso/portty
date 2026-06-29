@@ -8,7 +8,7 @@
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 #include <SDL3/SDL.h>
 #ifdef _WIN32
 #include <windows.h>
@@ -20,7 +20,7 @@
 #include <string.h>
 #include <time.h>
 
-static TerminalBackend *select_backend(void) { return &terminal_backend_bvt; }
+static TerminalBackend *select_backend(void) { return &terminal_backend_cfr; }
 
 /* Common SDL + renderer setup. Caller must free the resources via
  * cleanup_render_context() in reverse order. */
@@ -60,7 +60,7 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
         fprintf(stderr, "ERROR: Failed to create GPU renderer: %s\n", SDL_GetError());
         return -1;
     }
-    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.rows = rows;
     cfg.cols = cols;
     cfg.cell_w_px = 10;

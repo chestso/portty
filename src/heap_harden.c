@@ -41,7 +41,7 @@ static struct
 /* Capture the caller-of-our-caller of the allocator hop:
  *   frames[0] = capture_site
  *   frames[1] = hardened_alloc (us)
- *   frames[2] = bvt_alloc/realloc (in libbloom-vt.a)
+ *   frames[2] = cfr_alloc/realloc (in libcoffer.a)
  *   frames[3] = the actual user (style.c, grapheme.c, ...)
  * frames[3] is what we want — the bvt internal site that asked for
  * memory. backtrace() can return fewer frames on a shallow stack; use
@@ -206,7 +206,7 @@ static void *hardened_realloc(void *p, size_t size, void *user)
     return new_p;
 }
 
-const BvtAllocator bvt_hardened_allocator = {
+const CfrAllocator cfr_hardened_allocator = {
     .alloc = hardened_alloc,
     .realloc = hardened_realloc,
     .free = hardened_free,

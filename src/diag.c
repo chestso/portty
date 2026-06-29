@@ -213,7 +213,7 @@ char *diag_build_report(const DiagSources *s)
     section(&sb, "VERSION & BUILD");
     kv(&sb, "portty", PORTTY_VERSION);
     kv(&sb, "built with", BUILD_CC);
-    kv(&sb, "bloom-vt", DEP_BLOOM_VT_VERSION);
+    kv(&sb, "coffer", DEP_COFFER_VERSION);
     kv(&sb, "SDL3", DEP_SDL3_VERSION);
     kv(&sb, "FreeType", DEP_FREETYPE_VERSION);
     kv(&sb, "HarfBuzz", DEP_HARFBUZZ_VERSION);

@@ -74,7 +74,7 @@ static int codepoint_to_utf8(uint32_t cp, char *buf)
     return 0;
 }
 
-TerminalBackend *terminal_init(TerminalBackend *backend, const BvtConfig *cfg)
+TerminalBackend *terminal_init(TerminalBackend *backend, const CfrConfig *cfg)
 {
     if (!backend || !backend->init)
         return NULL;
@@ -398,7 +398,7 @@ bool terminal_get_line_continuation(TerminalBackend *term, int row)
     return term->get_line_continuation(term, row);
 }
 
-bool terminal_get_mode(TerminalBackend *term, BvtMode mode)
+bool terminal_get_mode(TerminalBackend *term, CfrMode mode)
 {
     if (!term || !term->get_mode)
         return false;
@@ -709,9 +709,9 @@ char *terminal_selection_get_text(TerminalBackend *term)
 // --- Sixel Image API ---
 //
 // Decode, storage, scrolling, and clearing all live in the VT engine
-// (bloom-vt); these are thin pass-throughs to the backend.
+// (coffer); these are thin pass-throughs to the backend.
 
-const BvtSixel *terminal_get_sixels(TerminalBackend *term, int *count)
+const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count)
 {
     if (count)
         *count = 0;
@@ -726,7 +726,7 @@ void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
         term->set_cell_px(term, cell_w, cell_h);
 }
 
-const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count)
+const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count)
 {
     if (count)
         *count = 0;
@@ -735,7 +735,7 @@ const BvtLottie *terminal_get_lotties(TerminalBackend *term, int *count)
     return term->get_lotties(term, count);
 }
 
-const BvtLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
+const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
                                                          uint64_t id, int *count)
 {
     if (count)
@@ -754,7 +754,7 @@ bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us)
 
 // Emoji width paradigm.
 //
-// bloom-vt computes UAX #11 + #29 cluster widths at insertion time and
+// coffer computes UAX #11 + #29 cluster widths at insertion time and
 // stores them on the cell, so VS16 emoji come through with width=2 and
 // continuation cells with width=0. The renderer walks the row in plain
 // vt-column order and increments by `cell.width` — no peek-ahead, no

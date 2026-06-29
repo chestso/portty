@@ -82,7 +82,7 @@ elif test "x$user_cflags" = "x"; then
   fi
 fi
 
-# PORTTY_HARDEN_HEAP — install the hardened BvtAllocator wrapper that
+# PORTTY_HARDEN_HEAP — install the hardened CfrAllocator wrapper that
 # catches heap corruption at the corrupting allocation rather than at
 # the next unrelated calloc. Auto-on under --enable-debug or when the
 # user has passed -fsanitize=address (the wrapper layers usefully with
@@ -96,7 +96,7 @@ case "$CFLAGS" in
 esac
 if test "x$have_hardened_heap" = "xyes"; then
   AC_DEFINE([PORTTY_HARDEN_HEAP], [1],
-            [Wrap the bvt allocator with magic + canary + poison-on-free])
+            [Wrap the cfr allocator with magic + canary + poison-on-free])
   AC_MSG_NOTICE([Hardened heap allocator enabled (catches UAF / overflow at the source)])
 fi
 
@@ -108,10 +108,10 @@ fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
-PKG_CHECK_MODULES([BLOOM_VT], [bloom-vt])
+PKG_CHECK_MODULES([COFFER], [coffer])
 
 # Lottie rasterization support is determined at runtime by querying
-# bvt_have_lottie(), which reflects whether bloom-vt was built with
+# cfr_have_lottie(), which reflects whether coffer was built with
 # ThorVG. No need to check for ThorVG here.
 
 # Capture dependency versions and build info for --help output
@@ -125,8 +125,8 @@ DEP_HARFBUZZ_VER=$($PKG_CONFIG --modversion harfbuzz 2>/dev/null || echo "unknow
 AC_DEFINE_UNQUOTED([DEP_HARFBUZZ_VERSION], ["$DEP_HARFBUZZ_VER"], [HarfBuzz version])
 DEP_LIBPNG_VER=$($PKG_CONFIG --modversion libpng 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_LIBPNG_VERSION], ["$DEP_LIBPNG_VER"], [libpng version])
-DEP_BLOOM_VT_VER=$($PKG_CONFIG --modversion bloom-vt 2>/dev/null || echo "unknown")
-AC_DEFINE_UNQUOTED([DEP_BLOOM_VT_VERSION], ["$DEP_BLOOM_VT_VER"], [bloom-vt version])
+DEP_COFFER_VER=$($PKG_CONFIG --modversion coffer 2>/dev/null || echo "unknown")
+AC_DEFINE_UNQUOTED([DEP_COFFER_VERSION], ["$DEP_COFFER_VER"], [coffer version])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   DEP_FONTCONFIG_VER=$($PKG_CONFIG --modversion fontconfig 2>/dev/null || echo "unknown")
   AC_DEFINE_UNQUOTED([DEP_FONTCONFIG_VERSION], ["$DEP_FONTCONFIG_VER"], [Fontconfig version])
@@ -168,7 +168,7 @@ if test "x$have_gtk4" = "xyes"; then
 
   # Vulkan: the GTK4 backend renders with SDL's Vulkan renderer (gamma-correct
   # linear-light blending) and exports the render target as a DMA-BUF via
-  # Vulkan external memory for zero-copy display. bloom owns Vulkan device
+  # Vulkan external memory for zero-copy display. coffer owns Vulkan device
   # creation (SDL's own device does not enable the external-memory extensions).
   PKG_CHECK_MODULES([VULKAN], [vulkan], [have_vulkan=yes], [have_vulkan=no])
   if test "x$have_vulkan" = "xyes" && test "x$have_libdrm" = "xyes"; then

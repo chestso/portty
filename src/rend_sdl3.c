@@ -1735,7 +1735,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     // Multi-codepoint clusters (emoji ZWJ chains, flags, long combining
     // runs) come through `terminal_cell_get_grapheme` which routes to
     // bvt's grapheme arena and returns the full sequence regardless of
-    // length. The 32-element local cap matches BVT_CLUSTER_MAX*2 — well
+    // length. The 32-element local cap matches CFR_CLUSTER_MAX*2 — well
     // above any cluster the parser will commit.
     uint32_t cps[32];
     int cp_count;
@@ -2268,7 +2268,7 @@ static void sixel_cache_clear(RendererSdl3Data *data)
 // Drop cached textures whose image id is no longer live, so the cache
 // tracks the engine's current image set (and frees textures for evicted /
 // scrolled-off / cleared images). O(cache * live) but both are small.
-static void sixel_cache_reconcile(RendererSdl3Data *data, const BvtSixel *imgs, int count)
+static void sixel_cache_reconcile(RendererSdl3Data *data, const CfrSixel *imgs, int count)
 {
     for (int i = 0; i < data->sixel_cache_count;) {
         bool live = false;
@@ -2291,7 +2291,7 @@ static void sixel_cache_reconcile(RendererSdl3Data *data, const BvtSixel *imgs, 
 // Find or create an SDL_Texture for a sixel image, keyed by its stable id.
 // On a version change (animation) the texture is re-uploaded in place; a
 // dimension change forces a recreate.
-static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const BvtSixel *img)
+static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const CfrSixel *img)
 {
     for (int i = 0; i < data->sixel_cache_count; i++) {
         if (data->sixel_cache[i].id != img->id)
@@ -2356,13 +2356,13 @@ static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const BvtSixel *im
 static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
 {
     int count = 0;
-    const BvtSixel *imgs = terminal_get_sixels(term, &count);
+    const CfrSixel *imgs = terminal_get_sixels(term, &count);
     sixel_cache_reconcile(data, imgs, count);
     if (count == 0)
         return;
 
     for (int i = 0; i < count; i++) {
-        const BvtSixel *img = &imgs[i];
+        const CfrSixel *img = &imgs[i];
 
         int screen_row = img->row + data->scroll_offset;
         int px = img->col * data->cell_width;
@@ -2398,7 +2398,7 @@ static void lottie_cache_clear(RendererSdl3Data *data)
 }
 
 static void lottie_cache_reconcile(RendererSdl3Data *data,
-                                   const BvtLottie *anims, int count)
+                                   const CfrLottie *anims, int count)
 {
     for (int i = 0; i < data->lottie_cache_count;) {
         bool live = false;
@@ -2420,7 +2420,7 @@ static void lottie_cache_reconcile(RendererSdl3Data *data,
 }
 
 static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
-                                       const BvtLottie *anim)
+                                       const CfrLottie *anim)
 {
     for (int i = 0; i < data->lottie_cache_count; i++) {
         if (data->lottie_cache[i].id != anim->id)
@@ -2476,10 +2476,10 @@ static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
 static bool cell_under_bg_lottie(TerminalBackend *term, int row, int col)
 {
     int count = 0;
-    const BvtLottie *anims = terminal_get_lotties(term, &count);
+    const CfrLottie *anims = terminal_get_lotties(term, &count);
     for (int i = 0; i < count; i++) {
         int pl_count = 0;
-        const BvtLottiePlacement *pls =
+        const CfrLottiePlacement *pls =
             terminal_get_lottie_placements(term, anims[i].id, &pl_count);
         for (int j = 0; j < pl_count; j++) {
             if (pls[j].layer != 1)
@@ -2497,15 +2497,15 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
                                 uint8_t target_layer)
 {
     int count = 0;
-    const BvtLottie *anims = terminal_get_lotties(term, &count);
+    const CfrLottie *anims = terminal_get_lotties(term, &count);
     lottie_cache_reconcile(data, anims, count);
     if (count == 0)
         return;
 
     for (int i = 0; i < count; i++) {
-        const BvtLottie *anim = &anims[i];
+        const CfrLottie *anim = &anims[i];
         int pl_count = 0;
-        const BvtLottiePlacement *pls =
+        const CfrLottiePlacement *pls =
             terminal_get_lottie_placements(term, anim->id, &pl_count);
 
         SDL_Texture *tex = lottie_get_texture(data, anim);
@@ -2513,7 +2513,7 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
             continue;
 
         for (int j = 0; j < pl_count; j++) {
-            const BvtLottiePlacement *pl = &pls[j];
+            const CfrLottiePlacement *pl = &pls[j];
             if (pl->layer != target_layer)
                 continue;
 
@@ -3546,7 +3546,7 @@ static int sdl3_render_to_png(RendererBackend *backend, TerminalBackend *term,
     // text to size from).
     {
         int sc = 0;
-        const BvtSixel *si = terminal_get_sixels(term, &sc);
+        const CfrSixel *si = terminal_get_sixels(term, &sc);
         for (int i = 0; i < sc; i++) {
             if (si[i].row < 0)
                 continue; // anchored in scrollback, above the snapshot

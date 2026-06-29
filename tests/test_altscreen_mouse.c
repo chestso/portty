@@ -1,6 +1,6 @@
 /*
  * test_altscreen_mouse — regression tests for altscreen and mouse-tracking
- * mode state through the bloom-vt backend.
+ * mode state through the coffer backend.
  *
  * The on_mouse handler in main.c dispatches mouse events based on
  * terminal_is_altscreen() and terminal_get_mouse_mode(). These tests
@@ -17,16 +17,16 @@
 #include "test_helpers.h"
 
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 
 #include <string.h>
 
-extern TerminalBackend terminal_backend_bvt;
+extern TerminalBackend terminal_backend_cfr;
 
 static void init_term(TerminalBackend *t, int cols, int rows)
 {
-    *t = terminal_backend_bvt;
-    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    *t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.cols = cols;
     cfg.rows = rows;
     cfg.cell_w_px = 10;

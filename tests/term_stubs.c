@@ -2,7 +2,7 @@
  * Placeholder translation unit.
  *
  * term.c used to call sixel_image_free(), which this file stubbed for
- * unit tests. Sixel decoding now lives entirely in bloom-vt, so term.c
+ * unit tests. Sixel decoding now lives entirely in coffer, so term.c
  * has no such dependency and no stub is needed. Kept (with additions)
  * so existing test targets that list it keep building without a
  * Makefile change.

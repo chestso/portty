@@ -1,5 +1,5 @@
 /*
- * test_osc52 — covers the OSC 52 (clipboard set) wiring through bloom-vt
+ * test_osc52 — covers the OSC 52 (clipboard set) wiring through coffer
  * into TerminalBackend.clipboard_set_cb, plus the base64 decoder it sits
  * on top of. Query form ('?') must be silently refused; malformed payloads
  * must not crash or fire the callback.
@@ -9,13 +9,13 @@
 
 #include "base64.h"
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
-extern TerminalBackend terminal_backend_bvt;
+extern TerminalBackend terminal_backend_cfr;
 
 typedef struct
 {
@@ -109,9 +109,9 @@ static void install(TerminalBackend *t, ClipboardCapture *c)
 /* "Hello" base64-encoded, BEL-terminated. */
 static void test_osc52_set_clipboard_bel(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;
@@ -134,9 +134,9 @@ static void test_osc52_set_clipboard_bel(void)
 /* ESC \ (ST) terminator should work the same as BEL. */
 static void test_osc52_set_clipboard_st(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;
@@ -160,9 +160,9 @@ static void test_osc52_selection_variants(void)
 {
     const char *prefixes[] = { "c", "p", "s", "cs", "" };
     for (size_t i = 0; i < sizeof(prefixes) / sizeof(prefixes[0]); ++i) {
-        TerminalBackend t = terminal_backend_bvt;
+        TerminalBackend t = terminal_backend_cfr;
         {
-            BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+            CfrConfig cfg = CFR_CONFIG_DEFAULTS;
             cfg.cols = 20;
             cfg.rows = 4;
             cfg.cell_w_px = 10;
@@ -186,9 +186,9 @@ static void test_osc52_selection_variants(void)
 /* '?' query form must NOT fire the callback (privacy default). */
 static void test_osc52_query_refused(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;
@@ -209,9 +209,9 @@ static void test_osc52_query_refused(void)
 /* Malformed base64: callback must not fire and we must not crash. */
 static void test_osc52_malformed_b64(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;
@@ -234,9 +234,9 @@ static void test_osc52_malformed_b64(void)
  * body to us; the dispatcher must skip it without firing the callback. */
 static void test_osc52_no_semicolon(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;
@@ -257,9 +257,9 @@ static void test_osc52_no_semicolon(void)
 /* Empty payload after the selection-list semicolon: clear clipboard. */
 static void test_osc52_empty_payload_clears(void)
 {
-    TerminalBackend t = terminal_backend_bvt;
+    TerminalBackend t = terminal_backend_cfr;
     {
-        BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = 20;
         cfg.rows = 4;
         cfg.cell_w_px = 10;

@@ -28,7 +28,7 @@
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
-#include "term_bvt.h"
+#include "term_cfr.h"
 #include <SDL3/SDL.h>
 #include <getopt.h>
 #include <limits.h>
@@ -293,16 +293,16 @@ static void show_diagnostics_report(MainContext *ctx)
         .title = terminal_get_title(ctx->term),
         .altscreen = terminal_is_altscreen(ctx->term),
         .mouse_mode = terminal_get_mouse_mode(ctx->term),
-        // VT engine features — runtime modes are queried from bloom-vt so
+        // VT engine features — runtime modes are queried from coffer so
         // the report reflects live state. Always-on capabilities (sixel,
         // OSC 8, grapheme clusters, reflow) are listed by diag.c.
         .vt_backend = ctx->term->name,
-        .lottie_rasterizer = bvt_have_lottie(),
+        .lottie_rasterizer = cfr_have_lottie(),
         .osc52 = ctx->term->clipboard_set_cb != NULL,
-        .bracketed_paste = terminal_get_mode(ctx->term, BVT_MODE_BRACKETED_PASTE),
-        .sync_output = terminal_get_mode(ctx->term, BVT_MODE_SYNC_OUTPUT),
-        .focus_reporting = terminal_get_mode(ctx->term, BVT_MODE_FOCUS_REPORTING),
-        .sixel_scrolling = terminal_get_mode(ctx->term, BVT_MODE_SIXEL_SCROLLING),
+        .bracketed_paste = terminal_get_mode(ctx->term, CFR_MODE_BRACKETED_PASTE),
+        .sync_output = terminal_get_mode(ctx->term, CFR_MODE_SYNC_OUTPUT),
+        .focus_reporting = terminal_get_mode(ctx->term, CFR_MODE_FOCUS_REPORTING),
+        .sixel_scrolling = terminal_get_mode(ctx->term, CFR_MODE_SIXEL_SCROLLING),
 #ifdef PORTTY_HARDEN_HEAP
         .hardened_heap = true,
 #else
@@ -1174,8 +1174,8 @@ int main(int argc, char *argv[])
 
     // Initialize terminal. Cell pixel size defaults to 10x20; updated
     // once font loading completes.  Reflow is enabled by default.
-    TerminalBackend *vt_backend = &terminal_backend_bvt;
-    BvtConfig cfg = BVT_CONFIG_DEFAULTS;
+    TerminalBackend *vt_backend = &terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.rows = init_rows;
     cfg.cols = init_cols;
     cfg.cell_w_px = 10;
@@ -1490,7 +1490,7 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
 static void print_usage(const char *progname)
 {
     printf("Usage: %s [OPTIONS] [-- COMMAND [ARGS...]]\n", progname);
-    printf("Terminal emulator using bloom-vt and SDL3\n\n");
+    printf("Terminal emulator using coffer and SDL3\n\n");
     printf("Options:\n");
     printf("  -h, --help          Show this help message and exit\n");
     printf("  -V, --version       Show version and build info and exit\n");
@@ -1532,8 +1532,8 @@ static void print_version(void)
     printf("There is NO WARRANTY, to the extent permitted by law.\n");
     printf("\n");
     printf("Built with: %s\n", BUILD_CC);
-    printf("bloom-vt %s, SDL3 %s, FreeType %s\n",
-           DEP_BLOOM_VT_VERSION, DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
+    printf("coffer %s, SDL3 %s, FreeType %s\n",
+           DEP_COFFER_VERSION, DEP_SDL3_VERSION, DEP_FREETYPE_VERSION);
     printf("HarfBuzz %s, libpng %s\n",
            DEP_HARFBUZZ_VERSION, DEP_LIBPNG_VERSION);
 #ifdef DEP_FONTCONFIG_VERSION

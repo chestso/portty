@@ -10,8 +10,8 @@
 // General-purpose in-process pager. It displays a styled ANSI document
 // (SGR/truecolor, attributes, and OSC 8 hyperlinks are all honoured) full-screen
 // as a scrollable overlay, rendered by portty itself rather than an
-// external pager. Content is parsed by a dedicated, PTY-less bloom-vt terminal,
-// so links become clickable cells and history pages through bloom-vt scrollback.
+// external pager. Content is parsed by a dedicated, PTY-less coffer terminal,
+// so links become clickable cells and history pages through coffer scrollback.
 //
 // The host wires platform input to the pager_* handlers while it is active and
 // must NOT forward consumed events to the shell. The pager pauses/resumes the
