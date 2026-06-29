@@ -1,6 +1,6 @@
 # plotty
 
-A Python TUI application that plays Lottie animations in [bloom-terminal](https://github.com/nicm/bloom-terminal),
+A Python TUI application that plays Lottie animations in [portty](https://github.com/nicm/portty),
 using the bloom-vt Lottie APC protocol.
 
 ## Installation

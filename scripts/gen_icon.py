@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate bloom-terminal app icons (>_ prompt, Charm/Bubbletea colors).
+"""Generate portty app icons (>_ prompt, Charm/Bubbletea colors).
 
 Requires: pip install Pillow
 
@@ -7,10 +7,10 @@ Usage:
     python3 scripts/gen_icon.py
 
 Outputs:
-    data/icons/hicolor/scalable/apps/bloom-terminal.svg
-    data/icons/hicolor/symbolic/apps/bloom-terminal-symbolic.svg
-    data/icons/hicolor/256x256/apps/bloom-terminal.png
-    data/icons/bloom-terminal.ico
+    data/icons/hicolor/scalable/apps/portty.svg
+    data/icons/hicolor/symbolic/apps/portty-symbolic.svg
+    data/icons/hicolor/256x256/apps/portty.png
+    data/icons/portty.ico
 """
 
 import os
@@ -180,17 +180,17 @@ def write_svg(path, content):
 
 def main():
     # Scalable SVG
-    path = os.path.join(DATA_DIR, "scalable", "apps", "bloom-terminal.svg")
+    path = os.path.join(DATA_DIR, "scalable", "apps", "portty.svg")
     write_svg(path, generate_scalable_svg())
 
     # Symbolic SVG
-    path = os.path.join(DATA_DIR, "symbolic", "apps", "bloom-terminal-symbolic.svg")
+    path = os.path.join(DATA_DIR, "symbolic", "apps", "portty-symbolic.svg")
     write_svg(path, generate_symbolic_svg())
 
     # 256x256 PNG (for SDL_SetWindowIcon fallback — SDL can't load SVG)
     out_dir = os.path.join(DATA_DIR, "256x256", "apps")
     os.makedirs(out_dir, exist_ok=True)
-    out_path = os.path.join(out_dir, "bloom-terminal.png")
+    out_path = os.path.join(out_dir, "portty.png")
     img = generate_png(512, 256)
     img.save(out_path, "PNG")
     print(f"Generated {out_path} (256x256)")
@@ -198,7 +198,7 @@ def main():
     # Windows ICO (256x256 PNG wrapped in ICO container — no Pillow needed)
     ico_dir = os.path.join(PROJECT_DIR, "data", "icons")
     os.makedirs(ico_dir, exist_ok=True)
-    ico_path = os.path.join(ico_dir, "bloom-terminal.ico")
+    ico_path = os.path.join(ico_dir, "portty.ico")
     import struct
     with open(out_path, "rb") as f:
         png_data = f.read()

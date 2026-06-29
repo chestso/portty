@@ -17,9 +17,9 @@
 // VK_FORMAT_R8G8B8A8_UNORM is memory order R,G,B,A, which is DRM_FORMAT_ABGR8888
 // (DRM names channels MSB->LSB of the LE word: A<<24|B<<16|G<<8|R) and
 // SDL_PIXELFORMAT_RGBA32. GTK advertises ABGR8888 + LINEAR on this display.
-#define BLOOM_VK_IMAGE_FORMAT    VK_FORMAT_R8G8B8A8_UNORM
-#define BLOOM_SDL_TEXTURE_FORMAT SDL_PIXELFORMAT_RGBA32
-#define BLOOM_DRM_FOURCC         DRM_FORMAT_ABGR8888
+#define PORTTY_VK_IMAGE_FORMAT    VK_FORMAT_R8G8B8A8_UNORM
+#define PORTTY_SDL_TEXTURE_FORMAT SDL_PIXELFORMAT_RGBA32
+#define PORTTY_DRM_FOURCC         DRM_FORMAT_ABGR8888
 
 static const char *const REQUIRED_DEVICE_EXTS[] = {
     VK_KHR_SWAPCHAIN_EXTENSION_NAME,
@@ -114,7 +114,7 @@ static VkPhysicalDevice pick_physical(VkInstance inst, VkSurfaceKHR surface,
     return chosen;
 }
 
-bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
+bool portty_vk_init(PorttyVk *vk, SDL_Window *win, SDL_PropertiesID props)
 {
     memset(vk, 0, sizeof(*vk));
     vk->surface = VK_NULL_HANDLE;
@@ -133,7 +133,7 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
     }
 
     VkApplicationInfo app = { .sType = VK_STRUCTURE_TYPE_APPLICATION_INFO,
-                              .pApplicationName = "bloom-terminal",
+                              .pApplicationName = "portty",
                               .apiVersion = VK_API_VERSION_1_2 };
     VkInstanceCreateInfo ici = { .sType =
                                      VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO,
@@ -147,7 +147,7 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
 
     if (!SDL_Vulkan_CreateSurface(win, vk->instance, NULL, &vk->surface)) {
         vlog("Vulkan: SDL_Vulkan_CreateSurface failed: %s\n", SDL_GetError());
-        bloom_vk_shutdown(vk);
+        portty_vk_shutdown(vk);
         return false;
     }
 
@@ -155,7 +155,7 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
                              &vk->present_qf);
     if (vk->phys == VK_NULL_HANDLE) {
         vlog("Vulkan: no physical device with required dmabuf extensions\n");
-        bloom_vk_shutdown(vk);
+        portty_vk_shutdown(vk);
         return false;
     }
     VkPhysicalDeviceProperties pprops;
@@ -218,7 +218,7 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
     };
     if (vkCreateDevice(vk->phys, &dci, NULL, &vk->device) != VK_SUCCESS) {
         vlog("Vulkan: vkCreateDevice failed\n");
-        bloom_vk_shutdown(vk);
+        portty_vk_shutdown(vk);
         return false;
     }
 
@@ -230,7 +230,7 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
     if (!vk->vkGetMemoryFdKHR ||
         !vk->vkGetImageDrmFormatModifierPropertiesEXT) {
         vlog("Vulkan: dmabuf export function pointers unresolved\n");
-        bloom_vk_shutdown(vk);
+        portty_vk_shutdown(vk);
         return false;
     }
 
@@ -256,7 +256,7 @@ bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props)
             VK_SUCCESS ||
         vkCreateFence(vk->device, &fci, NULL, &vk->release_fence) != VK_SUCCESS) {
         vlog("Vulkan: failed to create export-release command resources\n");
-        bloom_vk_shutdown(vk);
+        portty_vk_shutdown(vk);
         return false;
     }
 
@@ -296,10 +296,10 @@ static uint32_t find_memory_type(VkPhysicalDevice pd, uint32_t type_bits,
     return 0;
 }
 
-bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
-                            BloomVkTarget *t)
+bool portty_vk_target_create(PorttyVk *vk, SDL_Renderer *r, int w, int h,
+                             PorttyVkTarget *t)
 {
-    bloom_vk_target_destroy(vk, t);
+    portty_vk_target_destroy(vk, t);
     memset(t, 0, sizeof(*t));
     t->dmabuf_fd = -1;
     t->width = w;
@@ -320,7 +320,7 @@ bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
         .pNext = &extimg,
         .imageType = VK_IMAGE_TYPE_2D,
-        .format = BLOOM_VK_IMAGE_FORMAT,
+        .format = PORTTY_VK_IMAGE_FORMAT,
         .extent = { (uint32_t)w, (uint32_t)h, 1 },
         .mipLevels = 1,
         .arrayLayers = 1,
@@ -357,7 +357,7 @@ bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
     };
     if (vkAllocateMemory(vk->device, &mai, NULL, &t->memory) != VK_SUCCESS) {
         vlog("Vulkan: vkAllocateMemory failed\n");
-        bloom_vk_target_destroy(vk, t);
+        portty_vk_target_destroy(vk, t);
         return false;
     }
     vkBindImageMemory(vk->device, t->image, t->memory, 0);
@@ -371,7 +371,7 @@ bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
     if (vk->vkGetMemoryFdKHR(vk->device, &gfi, &t->dmabuf_fd) != VK_SUCCESS ||
         t->dmabuf_fd < 0) {
         vlog("Vulkan: vkGetMemoryFdKHR failed\n");
-        bloom_vk_target_destroy(vk, t);
+        portty_vk_target_destroy(vk, t);
         return false;
     }
 
@@ -380,7 +380,7 @@ bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
     };
     vk->vkGetImageDrmFormatModifierPropertiesEXT(vk->device, t->image, &dmprops);
     t->modifier = dmprops.drmFormatModifier;
-    t->fourcc = BLOOM_DRM_FOURCC;
+    t->fourcc = PORTTY_DRM_FOURCC;
 
     VkImageSubresource sub = { .aspectMask =
                                    VK_IMAGE_ASPECT_MEMORY_PLANE_0_BIT_EXT };
@@ -398,14 +398,14 @@ bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
     SDL_SetNumberProperty(tp, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER,
                           SDL_TEXTUREACCESS_TARGET);
     SDL_SetNumberProperty(tp, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER,
-                          BLOOM_SDL_TEXTURE_FORMAT);
+                          PORTTY_SDL_TEXTURE_FORMAT);
     SDL_SetNumberProperty(tp, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, w);
     SDL_SetNumberProperty(tp, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, h);
     t->texture = SDL_CreateTextureWithProperties(r, tp);
     SDL_DestroyProperties(tp);
     if (!t->texture) {
         vlog("Vulkan: wrap VkImage as SDL target failed: %s\n", SDL_GetError());
-        bloom_vk_target_destroy(vk, t);
+        portty_vk_target_destroy(vk, t);
         return false;
     }
 
@@ -416,7 +416,7 @@ bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
     return true;
 }
 
-void bloom_vk_target_destroy(BloomVk *vk, BloomVkTarget *t)
+void portty_vk_target_destroy(PorttyVk *vk, PorttyVkTarget *t)
 {
     if (t->texture) {
         SDL_DestroyTexture(t->texture);
@@ -438,7 +438,7 @@ void bloom_vk_target_destroy(BloomVk *vk, BloomVkTarget *t)
     }
 }
 
-void bloom_vk_finish(BloomVk *vk)
+void portty_vk_finish(PorttyVk *vk)
 {
     if (vk->device)
         vkDeviceWaitIdle(vk->device);
@@ -446,7 +446,7 @@ void bloom_vk_finish(BloomVk *vk)
 
 // Submit a single queue-family-ownership image barrier on the graphics queue
 // and fence-wait for it.
-static void submit_ownership_barrier(BloomVk *vk, VkImage image,
+static void submit_ownership_barrier(PorttyVk *vk, VkImage image,
                                      VkImageLayout old_layout,
                                      VkImageLayout new_layout, uint32_t src_qf,
                                      uint32_t dst_qf,
@@ -486,7 +486,7 @@ static void submit_ownership_barrier(BloomVk *vk, VkImage image,
     vkWaitForFences(vk->device, 1, &vk->release_fence, VK_TRUE, UINT64_MAX);
 }
 
-void bloom_vk_export_release(BloomVk *vk, BloomVkTarget *t)
+void portty_vk_export_release(PorttyVk *vk, PorttyVkTarget *t)
 {
     // Release ownership to the foreign (compositor/GTK importer) queue family
     // and move to GENERAL (the layout GTK imports dma-bufs as). SDL leaves the
@@ -500,7 +500,7 @@ void bloom_vk_export_release(BloomVk *vk, BloomVkTarget *t)
                              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, 0);
 }
 
-void bloom_vk_export_acquire(BloomVk *vk, BloomVkTarget *t)
+void portty_vk_export_acquire(PorttyVk *vk, PorttyVkTarget *t)
 {
     // Reclaim from the foreign importer and restore the layout SDL still tracks
     // (SHADER_READ_ONLY_OPTIMAL) so SDL can render into it again.
@@ -510,7 +510,7 @@ void bloom_vk_export_acquire(BloomVk *vk, BloomVkTarget *t)
                              VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
 }
 
-void bloom_vk_shutdown(BloomVk *vk)
+void portty_vk_shutdown(PorttyVk *vk)
 {
     if (vk->device) {
         vkDeviceWaitIdle(vk->device);

@@ -8,7 +8,7 @@
  * Makefile change.
  */
 
-#include "bloom_pty.h"
+#include "portty_pty.h"
 #include <stddef.h>
 
 ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)

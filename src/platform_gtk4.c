@@ -2,12 +2,12 @@
 #include "config.h"
 #endif
 
-#include "bloom_version.h"
+#include "portty_version.h"
 
-#include "bloom_bug.h"
 #include "common.h"
 #include "gtk4_vulkan.h"
 #include "platform_gtk4.h"
+#include "portty_bug.h"
 #include <SDL3/SDL.h>
 #include <adwaita.h>
 #ifdef GDK_WINDOWING_WAYLAND
@@ -81,7 +81,7 @@ static const struct
 // Number of exportable dmabuf render targets to round-robin through. Triple
 // buffering: a fresh buffer each frame so the compositor never re-receives a
 // buffer it has cached, and we never overwrite one it is still scanning out.
-#define BLOOM_VK_RING 3
+#define PORTTY_VK_RING 3
 #endif
 
 // Backend-specific context
@@ -109,12 +109,12 @@ typedef struct
     // texture (an exportable VkImage wrapped as an SDL render target). A ring of
     // buffers is essential: reusing a single dmabuf every frame leaves the
     // compositor scanning out a buffer it has cached by identity, so it never
-    // re-presents (frozen display). Round-robin over BLOOM_VK_RING buffers hands
+    // re-presents (frozen display). Round-robin over PORTTY_VK_RING buffers hands
     // a fresh buffer each frame; 3 covers a compositor holding up to 2 frames.
     bool vulkan_dmabuf; // bloom owns the VkDevice + 'vulkan' SDL renderer
     bool dmabuf_export; // export the render target as a dmabuf (vs. readback)
-    BloomVk vk;
-    BloomVkTarget vk_targets[BLOOM_VK_RING];
+    PorttyVk vk;
+    PorttyVkTarget vk_targets[PORTTY_VK_RING];
     int vk_ring_idx;
 #endif
 
@@ -179,7 +179,7 @@ typedef struct
 
     /* Detection counters. Split into "lifecycle" (just count) and
      * "bug indicators" (the corresponding code path also calls
-     * BLOOM_BUG_ABORT). Dumped via bloom_bug on any abort and on
+     * PORTTY_BUG_ABORT). Dumped via portty_bug on any abort and on
      * clean shutdown. */
     struct
     {
@@ -187,7 +187,7 @@ typedef struct
         uint64_t frame_count;
         uint32_t readback_path_taken;
 
-        /* Bug indicators — incremented just before BLOOM_BUG_ABORT
+        /* Bug indicators — incremented just before PORTTY_BUG_ABORT
          * so the post-mortem dump shows which slot was hit. */
         uint32_t dup_dmabuf_failures;
         uint32_t gdk_builder_failures;
@@ -195,12 +195,12 @@ typedef struct
     } gl_stats;
 } GTK4PlatformData;
 
-/* Singleton pointer so the bloom_bug dump hook (no user argument) can
+/* Singleton pointer so the portty_bug dump hook (no user argument) can
  * reach the live ctx. There is only ever one GTK4 backend per
  * process. */
 static GTK4PlatformData *gtk4_singleton = NULL;
 
-/* bloom_bug post-mortem hook — dumps the gl_stats counters so an abort
+/* portty_bug post-mortem hook — dumps the gl_stats counters so an abort
  * anywhere in the binary leaves a trail of what the GTK4 GL/DMA-BUF
  * lifecycle did in the run-up. Registered from gtk4_plat_init. */
 static void gtk4_dump_gl_stats(void)
@@ -277,24 +277,24 @@ static void close_dmabuf_fd(gpointer data)
         close(fd);
 }
 
-// BloomTerminalArea — GtkDrawingArea subclass with snapshot override
+// PorttyArea — GtkDrawingArea subclass with snapshot override
 
-#define BLOOM_TYPE_TERMINAL_AREA (bloom_terminal_area_get_type())
-G_DECLARE_FINAL_TYPE(BloomTerminalArea, bloom_terminal_area, BLOOM,
-                     TERMINAL_AREA, GtkDrawingArea)
+#define PORTTY_TYPE_AREA (portty_area_get_type())
+G_DECLARE_FINAL_TYPE(PorttyArea, portty_area, PORTTY,
+                     AREA, GtkDrawingArea)
 
-struct _BloomTerminalArea
+struct _PorttyArea
 {
     GtkDrawingArea parent_instance;
     GTK4PlatformData *ctx;
 };
 
-G_DEFINE_TYPE(BloomTerminalArea, bloom_terminal_area, GTK_TYPE_DRAWING_AREA)
+G_DEFINE_TYPE(PorttyArea, portty_area, GTK_TYPE_DRAWING_AREA)
 
-static void bloom_terminal_area_snapshot(GtkWidget *widget,
-                                         GtkSnapshot *snapshot)
+static void portty_area_snapshot(GtkWidget *widget,
+                                 GtkSnapshot *snapshot)
 {
-    BloomTerminalArea *self = BLOOM_TERMINAL_AREA(widget);
+    PorttyArea *self = PORTTY_AREA(widget);
     GTK4PlatformData *ctx = self->ctx;
 
     if (!ctx || !ctx->rend || !ctx->term || !ctx->sdl_renderer)
@@ -342,14 +342,14 @@ static void bloom_terminal_area_snapshot(GtkWidget *widget,
 #ifdef HAVE_VULKAN_DMABUF
         if (ctx->dmabuf_export) {
             // Each ring slot is an exportable VkImage wrapped as an SDL texture;
-            // bloom_vk_target_create destroys the previous one in that slot, so
+            // portty_vk_target_create destroys the previous one in that slot, so
             // we must not SDL_DestroyTexture here (render_target aliases a slot).
             // The previously presented texture aliases an old-size buffer — drop
             // it before reallocating the ring.
             g_clear_object(&ctx->prev_texture);
-            for (int i = 0; i < BLOOM_VK_RING; i++) {
-                if (!bloom_vk_target_create(&ctx->vk, ctx->sdl_renderer, phys_w,
-                                            phys_h, &ctx->vk_targets[i])) {
+            for (int i = 0; i < PORTTY_VK_RING; i++) {
+                if (!portty_vk_target_create(&ctx->vk, ctx->sdl_renderer, phys_w,
+                                             phys_h, &ctx->vk_targets[i])) {
                     ctx->gl_stats.render_target_create_failures++;
                     vlog("Vulkan dmabuf target create failed at %dx%d (slot "
                          "%d)\n",
@@ -389,12 +389,12 @@ render_target_ready:;
     if (ctx->dmabuf_export) {
         // Round-robin to the next buffer so this frame is rendered into — and
         // exported from — one the compositor is not currently holding.
-        ctx->vk_ring_idx = (ctx->vk_ring_idx + 1) % BLOOM_VK_RING;
-        BloomVkTarget *slot = &ctx->vk_targets[ctx->vk_ring_idx];
+        ctx->vk_ring_idx = (ctx->vk_ring_idx + 1) % PORTTY_VK_RING;
+        PorttyVkTarget *slot = &ctx->vk_targets[ctx->vk_ring_idx];
         // If we handed this slot to the foreign importer last cycle, reclaim it
         // (and restore SDL's expected layout) before SDL renders into it.
         if (slot->released) {
-            bloom_vk_export_acquire(&ctx->vk, slot);
+            portty_vk_export_acquire(&ctx->vk, slot);
             slot->released = false;
         }
         ctx->render_target = slot->texture;
@@ -414,7 +414,7 @@ render_target_ready:;
 #ifdef HAVE_VULKAN_DMABUF
     if (ctx->dmabuf_export) {
         // The slot we just rendered into and now export to the compositor.
-        BloomVkTarget *t = &ctx->vk_targets[ctx->vk_ring_idx];
+        PorttyVkTarget *t = &ctx->vk_targets[ctx->vk_ring_idx];
 
         // Force the render to materialize into the slot AND become coherent in
         // the linear dma-buf for GTK's separate VkDevice. A 1x1 readback while
@@ -434,14 +434,14 @@ render_target_ready:;
         // Cross-device handoff: release ownership to the foreign importer and
         // transition to GENERAL so GTK's separate VkDevice sees our writes in
         // the linear dma-buf (a plain device-wait does not make them visible).
-        bloom_vk_export_release(&ctx->vk, t);
+        portty_vk_export_release(&ctx->vk, t);
         t->released = true; // foreign-owned until reacquired before reuse
 
         int fd = dup(t->dmabuf_fd);
         if (fd < 0) {
             ctx->gl_stats.dup_dmabuf_failures++;
-            BLOOM_BUG_ABORT("dup(vk dmabuf_fd=%d) failed: %s", t->dmabuf_fd,
-                            strerror(errno));
+            PORTTY_BUG_ABORT("dup(vk dmabuf_fd=%d) failed: %s", t->dmabuf_fd,
+                             strerror(errno));
         }
 
         GdkDmabufTextureBuilder *builder = gdk_dmabuf_texture_builder_new();
@@ -468,7 +468,7 @@ render_target_ready:;
         if (!texture) {
             ctx->gl_stats.gdk_builder_failures++;
             close(fd);
-            BLOOM_BUG_ABORT(
+            PORTTY_BUG_ABORT(
                 "gdk_dmabuf_texture_builder_build (vulkan) failed at %dx%d "
                 "(fourcc=0x%x modifier=0x%llx stride=%u offset=%u): %s",
                 phys_w, phys_h, t->fourcc, (unsigned long long)t->modifier,
@@ -528,19 +528,19 @@ render_target_ready:;
     terminal_clear_redraw(ctx->term);
 }
 
-static void bloom_terminal_area_init(BloomTerminalArea *self)
+static void portty_area_init(PorttyArea *self)
 {
     (void)self;
 }
 
-static void bloom_terminal_area_measure(GtkWidget *widget,
-                                        GtkOrientation orientation,
-                                        int for_size, int *minimum,
-                                        int *natural, int *minimum_baseline,
-                                        int *natural_baseline)
+static void portty_area_measure(GtkWidget *widget,
+                                GtkOrientation orientation,
+                                int for_size, int *minimum,
+                                int *natural, int *minimum_baseline,
+                                int *natural_baseline)
 {
     (void)for_size;
-    BloomTerminalArea *self = BLOOM_TERMINAL_AREA(widget);
+    PorttyArea *self = PORTTY_AREA(widget);
     GTK4PlatformData *ctx = self->ctx;
 
     *minimum = 1;
@@ -554,10 +554,10 @@ static void bloom_terminal_area_measure(GtkWidget *widget,
     *natural_baseline = -1;
 }
 
-static void bloom_terminal_area_class_init(BloomTerminalAreaClass *klass)
+static void portty_area_class_init(PorttyAreaClass *klass)
 {
-    GTK_WIDGET_CLASS(klass)->snapshot = bloom_terminal_area_snapshot;
-    GTK_WIDGET_CLASS(klass)->measure = bloom_terminal_area_measure;
+    GTK_WIDGET_CLASS(klass)->snapshot = portty_area_snapshot;
+    GTK_WIDGET_CLASS(klass)->measure = portty_area_measure;
 }
 
 // Key press handler
@@ -1079,7 +1079,7 @@ PlatformBackend platform_backend_gtk4 = {
 };
 
 #ifdef HAVE_VULKAN_DMABUF
-// Headless cross-device coherence test (BLOOM_GTK4_SELFTEST). Renders a unique
+// Headless cross-device coherence test (PORTTY_GTK4_SELFTEST). Renders a unique
 // solid color into each ring slot, exports it as a dma-buf, then reads it back
 // through GTK's own importer via gdk_texture_download() — the same GSK path that
 // composites for display. If the imported pixel doesn't match the just-rendered
@@ -1093,12 +1093,12 @@ static void gtk4_dmabuf_selftest(GTK4PlatformData *ctx)
     // cell lands at the right place after the dma-buf round-trip through GTK.
     const int W = 1080, H = 880, N = 12, GX = 8, GY = 8;
     GdkDisplay *display = gdk_display_get_default();
-    BloomVkTarget targets[BLOOM_VK_RING];
-    for (int i = 0; i < BLOOM_VK_RING; i++) {
+    PorttyVkTarget targets[PORTTY_VK_RING];
+    for (int i = 0; i < PORTTY_VK_RING; i++) {
         memset(&targets[i], 0, sizeof(targets[i]));
         targets[i].dmabuf_fd = -1; // -1 = "no fd"; 0 would make destroy close fd 0
-        if (!bloom_vk_target_create(&ctx->vk, ctx->sdl_renderer, W, H,
-                                    &targets[i])) {
+        if (!portty_vk_target_create(&ctx->vk, ctx->sdl_renderer, W, H,
+                                     &targets[i])) {
             fprintf(stderr, "SELFTEST: target_create %d failed\n", i);
             exit(2);
         }
@@ -1106,9 +1106,9 @@ static void gtk4_dmabuf_selftest(GTK4PlatformData *ctx)
     guchar *px = malloc((size_t)W * H * 4);
     int fails = 0;
     for (int k = 0; k < N; k++) {
-        BloomVkTarget *t = &targets[k % BLOOM_VK_RING];
+        PorttyVkTarget *t = &targets[k % PORTTY_VK_RING];
         if (t->released) {
-            bloom_vk_export_acquire(&ctx->vk, t);
+            portty_vk_export_acquire(&ctx->vk, t);
             t->released = false;
         }
         // expected color of grid cell (i,j) this frame: encodes position + frame
@@ -1134,7 +1134,7 @@ static void gtk4_dmabuf_selftest(GTK4PlatformData *ctx)
             SDL_DestroySurface(bs);
         SDL_SetRenderTarget(ctx->sdl_renderer, NULL);
         SDL_FlushRenderer(ctx->sdl_renderer);
-        bloom_vk_export_release(&ctx->vk, t);
+        portty_vk_export_release(&ctx->vk, t);
         t->released = true;
 
         int fd = dup(t->dmabuf_fd);
@@ -1188,8 +1188,8 @@ static void gtk4_dmabuf_selftest(GTK4PlatformData *ctx)
         g_object_unref(tex);
     }
     free(px);
-    for (int i = 0; i < BLOOM_VK_RING; i++)
-        bloom_vk_target_destroy(&ctx->vk, &targets[i]);
+    for (int i = 0; i < PORTTY_VK_RING; i++)
+        portty_vk_target_destroy(&ctx->vk, &targets[i]);
     fprintf(stderr, "SELFTEST: %d/%d frames FAILED\n", fails, N);
     exit(fails ? 1 : 0);
 }
@@ -1200,8 +1200,8 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     vlog("Initializing GTK4/libadwaita platform\n");
 
     // Set program name so GTK4 sets the correct Wayland app_id,
-    // allowing GNOME to match the window to bloom-terminal.desktop
-    g_set_prgname("bloom-terminal");
+    // allowing GNOME to match the window to portty.desktop
+    g_set_prgname("portty");
 
     // Initialize libadwaita (also initializes GTK4)
     adw_init();
@@ -1216,7 +1216,7 @@ static bool gtk4_plat_init(PlatformBackend *plat)
                                        ADW_COLOR_SCHEME_FORCE_DARK);
 
     // Initialize SDL video (needed for offscreen rendering)
-    if (!SDL_SetAppMetadata("bloom-terminal", BLOOM_TERMINAL_VERSION, "bloom-terminal")) {
+    if (!SDL_SetAppMetadata("portty", PORTTY_VERSION, "portty")) {
         fprintf(stderr, "WARNING: Failed to set SDL app metadata: %s\n",
                 SDL_GetError());
     }
@@ -1238,14 +1238,14 @@ static bool gtk4_plat_init(PlatformBackend *plat)
         return false;
     }
     gtk4_singleton = ctx;
-    bloom_bug_register_dump(gtk4_dump_gl_stats);
+    portty_bug_register_dump(gtk4_dump_gl_stats);
 
 #ifdef HAVE_VULKAN_DMABUF
     // calloc zeroes dmabuf_fd to 0, but 0 is a valid fd; the "no fd" sentinel is
-    // -1. Without this, the first bloom_vk_target_create -> bloom_vk_target_destroy
+    // -1. Without this, the first portty_vk_target_create -> portty_vk_target_destroy
     // closes fd 0 (and cascades across ring slots), collapsing every slot onto
     // one buffer.
-    for (int i = 0; i < BLOOM_VK_RING; i++)
+    for (int i = 0; i < PORTTY_VK_RING; i++)
         ctx->vk_targets[i].dmabuf_fd = -1;
 #endif
 
@@ -1266,7 +1266,7 @@ static bool gtk4_plat_init(PlatformBackend *plat)
     // for zero-copy DMA-BUF export. Create a hidden Vulkan window + 'vulkan'
     // renderer under the offscreen video driver (no conflict with GTK's
     // display).
-    ctx->sdl_window = SDL_CreateWindow("bloom-terminal-offscreen", 800, 600,
+    ctx->sdl_window = SDL_CreateWindow("portty-offscreen", 800, 600,
                                        SDL_WINDOW_HIDDEN | SDL_WINDOW_VULKAN);
     if (ctx->sdl_window) {
         SDL_PropertiesID vrp = SDL_CreateProperties();
@@ -1278,19 +1278,19 @@ static bool gtk4_plat_init(PlatformBackend *plat)
             // bloom owns Vulkan instance/device creation so the external-memory
             // extensions (needed for zero-copy DMA-BUF export) are enabled —
             // SDL's own vulkan device does not enable them.
-            if (bloom_vk_init(&ctx->vk, ctx->sdl_window, vrp)) {
+            if (portty_vk_init(&ctx->vk, ctx->sdl_window, vrp)) {
                 ctx->sdl_renderer = SDL_CreateRendererWithProperties(vrp);
                 if (ctx->sdl_renderer) {
                     ctx->vulkan_dmabuf = true;
                     // Zero-copy dmabuf export is the default: fast, and made
                     // coherent across bloom's and GTK's separate VkDevices by
-                    // the VK_QUEUE_FAMILY_FOREIGN release in bloom_vk_export_release.
-                    // BLOOM_GTK4_READBACK=1 forces the CPU-readback fallback
+                    // the VK_QUEUE_FAMILY_FOREIGN release in portty_vk_export_release.
+                    // PORTTY_GTK4_READBACK=1 forces the CPU-readback fallback
                     // (correct everywhere but ~170ms/frame on NVK, where
                     // SDL_RenderReadPixels reads write-combined memory).
-                    ctx->dmabuf_export = (getenv("BLOOM_GTK4_READBACK") == NULL);
+                    ctx->dmabuf_export = (getenv("PORTTY_GTK4_READBACK") == NULL);
                 } else {
-                    bloom_vk_shutdown(&ctx->vk);
+                    portty_vk_shutdown(&ctx->vk);
                 }
             }
 #else
@@ -1316,7 +1316,7 @@ static bool gtk4_plat_init(PlatformBackend *plat)
 
     // Fallback: offscreen + any renderer (software)
     if (!ctx->sdl_window) {
-        ctx->sdl_window = SDL_CreateWindow("bloom-terminal-offscreen", 800,
+        ctx->sdl_window = SDL_CreateWindow("portty-offscreen", 800,
                                            600, SDL_WINDOW_HIDDEN);
         if (!ctx->sdl_window) {
             fprintf(stderr,
@@ -1350,7 +1350,7 @@ static bool gtk4_plat_init(PlatformBackend *plat)
          zc_enabled ? "yes" : "no", SDL_GetRendererName(ctx->sdl_renderer));
 
 #ifdef HAVE_VULKAN_DMABUF
-    if (ctx->vulkan_dmabuf && getenv("BLOOM_GTK4_SELFTEST"))
+    if (ctx->vulkan_dmabuf && getenv("PORTTY_GTK4_SELFTEST"))
         gtk4_dmabuf_selftest(ctx); // renders, exports, reads back via GTK; exits
 #endif
 
@@ -1371,7 +1371,7 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     vlog("DMABUF_STATS frame=%" PRIu64 " readback=%u\n",
          ctx->gl_stats.frame_count, ctx->gl_stats.readback_path_taken);
 
-    /* Clear singleton so the bloom_bug dump hook doesn't dereference
+    /* Clear singleton so the portty_bug dump hook doesn't dereference
      * an about-to-be-freed ctx if anything aborts during teardown. */
     if (gtk4_singleton == ctx)
         gtk4_singleton = NULL;
@@ -1426,11 +1426,11 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     // Tear down the Vulkan export target before the SDL renderer (the renderer
     // runs on our VkDevice, so the device must outlive it — shut it down last).
     if (ctx->vulkan_dmabuf) {
-        bloom_vk_finish(&ctx->vk);
+        portty_vk_finish(&ctx->vk);
         g_clear_object(&ctx->prev_texture);
         if (ctx->dmabuf_export) {
-            for (int i = 0; i < BLOOM_VK_RING; i++)
-                bloom_vk_target_destroy(&ctx->vk, &ctx->vk_targets[i]);
+            for (int i = 0; i < PORTTY_VK_RING; i++)
+                portty_vk_target_destroy(&ctx->vk, &ctx->vk_targets[i]);
             ctx->render_target = NULL; // aliased a now-destroyed wrapped texture
         }
     }
@@ -1447,7 +1447,7 @@ static void gtk4_plat_destroy(PlatformBackend *plat)
     }
 #ifdef HAVE_VULKAN_DMABUF
     if (ctx->vulkan_dmabuf)
-        bloom_vk_shutdown(&ctx->vk);
+        portty_vk_shutdown(&ctx->vk);
 #endif
     if (ctx->sdl_window) {
         SDL_DestroyWindow(ctx->sdl_window);
@@ -1540,14 +1540,14 @@ static void gtk4_build_notification(GTK4PlatformData *ctx)
     gtk_widget_set_valign(revealer, GTK_ALIGN_START);
     gtk_revealer_set_reveal_child(GTK_REVEALER(revealer), FALSE);
 
-    // .card supplies the rounded corners + drop shadow; .bloom-notification
+    // .card supplies the rounded corners + drop shadow; .portty-notification
     // overrides the background to be opaque by default. Transparency is opt-in
-    // via the config-derived bloom_notification_transparent flag.
+    // via the config-derived portty_notification_transparent flag.
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
     gtk_widget_add_css_class(box, "card");
-    gtk_widget_add_css_class(box, "bloom-notification");
-    if (bloom_notification_transparent)
-        gtk_widget_add_css_class(box, "bloom-transparent");
+    gtk_widget_add_css_class(box, "portty-notification");
+    if (portty_notification_transparent)
+        gtk_widget_add_css_class(box, "portty-transparent");
     gtk_widget_set_margin_top(box, 6);
     gtk_widget_set_margin_start(box, 6);
     gtk_widget_set_margin_end(box, 6);
@@ -1616,7 +1616,7 @@ static void gtk4_build_link_hint(GTK4PlatformData *ctx)
 
     GtkWidget *label = gtk_label_new("");
     gtk_widget_add_css_class(label, "osd");
-    gtk_widget_add_css_class(label, "bloom-link-hint");
+    gtk_widget_add_css_class(label, "portty-link-hint");
     gtk_label_set_ellipsize(GTK_LABEL(label), PANGO_ELLIPSIZE_MIDDLE);
     gtk_label_set_max_width_chars(GTK_LABEL(label), 80);
     gtk_label_set_xalign(GTK_LABEL(label), 0.0f);
@@ -1658,15 +1658,15 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
         "toolbarview > .top-bar headerbar:backdrop {"
         "  background: @headerbar_backdrop_color;"
         "}"
-        /* Notification strip: opaque by default; the .bloom-transparent
+        /* Notification strip: opaque by default; the .portty-transparent
          * modifier (set from config) makes it translucent. Overrides the
          * .card/.osd background since this provider sits at USER priority. */
-        ".bloom-notification {"
+        ".portty-notification {"
         "  background-color: #303034;"
         "  border-radius: 12px;"
         "  padding: 10px 12px;"
         "}"
-        ".bloom-notification.bloom-transparent {"
+        ".portty-notification.portty-transparent {"
         "  background-color: alpha(#1c1c20, 0.80);"
         "}"
         /* OSC-8 link-hint pill: the .osd class supplies the translucent dark
@@ -1695,8 +1695,8 @@ static bool gtk4_create_window(PlatformBackend *plat, const char *title,
     adw_header_bar_pack_start(ADW_HEADER_BAR(ctx->header_bar), new_term_btn);
 
     // Create drawing area for terminal content (custom subclass for snapshot)
-    BloomTerminalArea *term_area =
-        g_object_new(BLOOM_TYPE_TERMINAL_AREA, NULL);
+    PorttyArea *term_area =
+        g_object_new(PORTTY_TYPE_AREA, NULL);
     term_area->ctx = ctx;
     ctx->drawing_area = GTK_WIDGET(term_area);
     gtk_widget_set_hexpand(ctx->drawing_area, TRUE);
@@ -1806,7 +1806,7 @@ static void gtk4_set_window_title(PlatformBackend *plat, const char *title)
 
     GTK4PlatformData *ctx = (GTK4PlatformData *)plat->backend_data;
     if (ctx->window) {
-        const char *t = title ? title : "bloom-terminal";
+        const char *t = title ? title : "portty";
         gtk_window_set_title(ctx->window, t);
         if (ctx->window_title)
             adw_window_title_set_title(ctx->window_title, t);
@@ -2280,7 +2280,7 @@ static bool gtk4_get_gpu_info(PlatformBackend *plat, const char **device,
 
 __attribute__((visibility("default")))
 PlatformBackend *
-bloom_platform_gtk4_get(void)
+portty_platform_gtk4_get(void)
 {
     return &platform_backend_gtk4;
 }

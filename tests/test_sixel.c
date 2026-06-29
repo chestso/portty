@@ -2,7 +2,7 @@
  * test_sixel — sixel end-to-end through the host bridge.
  *
  * The decode/store/placement logic is unit-tested in bloom-vt itself
- * (tests/test_bvt_sixel.c). This file checks the bloom-terminal side:
+ * (tests/test_bvt_sixel.c). This file checks the portty side:
  * that a DCS sixel sequence fed through terminal_process_input() reaches
  * the engine and comes back out through terminal_get_sixels() with the
  * right pixels, that the cell-pixel size plumbing drives row placement,

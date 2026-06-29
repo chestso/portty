@@ -1,9 +1,9 @@
 [Desktop Entry]
 Type=Application
-Name=Bloom Terminal
+Name=Portty
 Comment=Terminal emulator
-Exec=bloom-terminal
-Icon=bloom-terminal
+Exec=portty
+Icon=portty
 Terminal=false
-StartupWMClass=bloom-terminal
+StartupWMClass=portty
 Categories=System;TerminalEmulator;

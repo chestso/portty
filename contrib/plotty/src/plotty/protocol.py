@@ -1,6 +1,6 @@
-"""bloom_lottie_protocol — APC escape sequence protocol for bloom-terminal Lottie.
+"""bloom_lottie_protocol — APC escape sequence protocol for portty Lottie.
 
-Emits Lottie animation control sequences following the bloom-vt / bloom-terminal
+Emits Lottie animation control sequences following the bloom-vt / portty
 Lottie protocol spec. All payloads are JSON objects, base64-encoded, carried in
 APC (ESC _ ... ESC \\) sequences.
 

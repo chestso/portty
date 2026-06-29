@@ -566,7 +566,7 @@ void resolve_colorindex(FtFontData *ft_data, FT_ColorIndex ci, uint8_t fg_r, uin
 // grayscale glyph alpha on top of the renderer's linear-light blending.
 // gamma > 1 thickens strokes; contrast (0..100) adds contrast around the
 // midpoint. Neutral (gamma 1.0, contrast 0) is identity. Built once from the
-// global bloom_text_gamma / bloom_text_contrast.
+// global portty_text_gamma / portty_text_contrast.
 //
 // This is the FALLBACK path. When the GPU glyph shader is active (gpu/vulkan
 // renderer with SPIR-V), the renderer applies the same curve in a fragment
@@ -586,8 +586,8 @@ void font_ft_set_shader_curve_active(bool active)
 
 static void build_coverage_lut(void)
 {
-    float gamma = bloom_text_gamma > 0.0f ? bloom_text_gamma : 1.0f;
-    float contrast = bloom_text_contrast / 100.0f; // 0..1
+    float gamma = portty_text_gamma > 0.0f ? portty_text_gamma : 1.0f;
+    float contrast = portty_text_contrast / 100.0f; // 0..1
     for (int i = 0; i < 256; i++) {
         double a = i / 255.0;
         a = pow(a, 1.0 / gamma);

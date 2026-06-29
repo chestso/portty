@@ -6,7 +6,7 @@ what a TUI emits before any real terminal renders it — feature
 detection, capability probes, escape-sequence quirks.
 
 Originally written to track down why Claude Code did not push the
-kitty keyboard protocol stack on bloom-terminal: the answer turned out
+kitty keyboard protocol stack on portty: the answer turned out
 to be a hardcoded `TERM_PROGRAM` allowlist, and this script is what
 made it observable in minutes instead of guesswork.
 

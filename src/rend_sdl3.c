@@ -1184,7 +1184,7 @@ static bool sdl3_init(RendererBackend *backend, void *window_handle, void *rende
     data->glyph_shader = NULL;
     if (data->linear_ok)
         data->glyph_shader =
-            rend_shader_create(data->renderer, bloom_text_gamma, bloom_text_contrast);
+            rend_shader_create(data->renderer, portty_text_gamma, portty_text_contrast);
     font_ft_set_shader_curve_active(data->glyph_shader != NULL);
     vlog("Glyph curve: %s\n",
          data->glyph_shader ? "GPU shader (luminance-scaled)" : "baked LUT (uniform)");
@@ -3004,7 +3004,7 @@ static void build_notif_texture(RendererSdl3Data *data)
     // Background fill (dark panel) + left severity accent stripe. Opaque by
     // default; translucent when notification transparency is opted in (the
     // texture blends over the terminal). The accent stripe stays opaque.
-    uint8_t bg_a = bloom_notification_transparent ? 205 : 255;
+    uint8_t bg_a = portty_notification_transparent ? 205 : 255;
     for (int y = 0; y < panel_h; y++) {
         for (int x = 0; x < panel_w; x++) {
             uint8_t *d = bufp + ((size_t)y * panel_w + x) * 4;
@@ -3137,7 +3137,7 @@ static void build_hint_texture(RendererSdl3Data *data)
         return;
     // Dark neutral fill, opaque by default; translucent when notification
     // transparency is opted in (matches the panel).
-    uint8_t bg_a = bloom_notification_transparent ? 205 : 255;
+    uint8_t bg_a = portty_notification_transparent ? 205 : 255;
     for (int y = 0; y < panel_h; y++) {
         for (int x = 0; x < panel_w; x++) {
             uint8_t *d = bufp + ((size_t)y * panel_w + x) * 4;

@@ -15,10 +15,10 @@ test_atlas_LDADD = -lm
 test_unicode_SOURCES = test_unicode.c $(TEST_COMMON) ../src/unicode.c
 test_unicode_CFLAGS = $(TEST_CFLAGS)
 
-test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/bloom_conf.c
+test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/portty_conf.c
 test_conf_CFLAGS = $(TEST_CFLAGS)
 
-# diag.c includes the generated bloom_version.h (builddir/src), so add that path.
+# diag.c includes the generated portty_version.h (builddir/src), so add that path.
 test_diag_SOURCES = test_diag.c $(TEST_COMMON) ../src/diag.c
 test_diag_CFLAGS = $(TEST_CFLAGS) -I$(top_builddir)/src
 

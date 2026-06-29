@@ -1,4 +1,4 @@
-# bloom-terminal
+# portty
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
@@ -34,14 +34,14 @@ Currently ships with bloom-vt (terminal), SDL3 (renderer/platform), FreeType/Har
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
-- Custom terminfo entry (`TERM=bloom-terminal-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
+- Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
 - Kitty keyboard protocol (push/pop/set/query plus the Disambiguate and Report-all flags) — modern TUIs like Claude Code can tell Shift+Enter apart from plain Enter, and Ctrl+letter combos no longer collide with their literal control bytes
 - Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
 
 ## Architecture
 
-bloom-terminal uses a modular backend abstraction design:
+portty uses a modular backend abstraction design:
 
 - **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
   - Default: SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
@@ -73,18 +73,18 @@ Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`,
 
 ### GTK4 Plugin
 
-The GTK4 backend is compiled as a separate shared library (`bloom-terminal-gtk4.so`) and loaded via `dlopen` only when `--gtk4` is passed. This avoids symbol conflicts between GTK4 and libdecor's GTK3 plugin, which both export identically-named symbols (`gtk_init`, `gtk_widget_get_type`, etc.).
+The GTK4 backend is compiled as a separate shared library (`portty-gtk4.so`) and loaded via `dlopen` only when `--gtk4` is passed. This avoids symbol conflicts between GTK4 and libdecor's GTK3 plugin, which both export identically-named symbols (`gtk_init`, `gtk_widget_get_type`, etc.).
 
 The conflict chain: SDL3 on Wayland → dlopen's `libdecor-0.so` → dlopen's `libdecor-gtk.so` → loads `libgtk-3.so`. If GTK4 were linked directly into the binary, the dynamic linker would resolve libdecor's GTK3 calls to GTK4 symbols, causing crashes. GNOME/Mutter does not implement `xdg-decoration`, so libdecor cannot be disabled without losing window decorations on GNOME.
 
 This workaround will become unnecessary when libdecor ships its out-of-process GTK4 plugin ([libdecor MR !176](https://gitlab.freedesktop.org/libdecor/libdecor/-/merge_requests/176)), which runs GTK4 in a separate child process via Wayland IPC. At that point, GTK4 can be linked directly into the main binary.
 
 ```
-build/src/bloom-terminal                          # Main binary (no GTK4 symbols)
-build/src/.libs/bloom-terminal-gtk4.so            # Plugin (dev build)
+build/src/portty                          # Main binary (no GTK4 symbols)
+build/src/.libs/portty-gtk4.so            # Plugin (dev build)
 
-$PREFIX/bin/bloom-terminal                        # Installed binary
-$PREFIX/lib/bloom-terminal/bloom-terminal-gtk4.so # Installed plugin
+$PREFIX/bin/portty                        # Installed binary
+$PREFIX/lib/portty/portty-gtk4.so # Installed plugin
 ```
 
 ## Building
@@ -106,11 +106,11 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 
 - `make` — build everything
 - `make check` — run the test suite
-- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`, installs the GTK4 plugin to `$prefix/lib/bloom-terminal/`
+- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`, installs the GTK4 plugin to `$prefix/lib/portty/`
 - `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
-- `make gen-ico` — (Windows/MSYS2 UCRT64 only) regenerate `data/icons/bloom-terminal.ico` from the source SVG via ImageMagick (requires the `imagemagick` + `librsvg` prerequisites)
+- `make gen-ico` — (Windows/MSYS2 UCRT64 only) regenerate `data/icons/portty.ico` from the source SVG via ImageMagick (requires the `imagemagick` + `librsvg` prerequisites)
 
 ### Helper Scripts
 
@@ -128,25 +128,25 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 
 ```bash
 # Run the terminal emulator
-build/src/bloom-terminal
+build/src/portty
 
 # Run with verbose output (useful to debug font/COLR/emoji handling)
-build/src/bloom-terminal -v
+build/src/portty -v
 
 # Run with GTK4/libadwaita backend (native GNOME decorations)
-build/src/bloom-terminal --gtk4
+build/src/portty --gtk4
 
 # Run a specific command instead of the default shell
-build/src/bloom-terminal -- htop
+build/src/portty -- htop
 
 # Display text without spawning a shell (for testing)
-build/src/bloom-terminal --demo "Hello, world!"
+build/src/portty --demo "Hello, world!"
 
 # Render text to a PNG file
-build/src/bloom-terminal -P "😀" output.png
+build/src/portty -P "😀" output.png
 
 # Render a command's output to PNG
-build/src/bloom-terminal -P "" --exec ls --wait 500 output.png
+build/src/portty -P "" --exec ls --wait 500 output.png
 ```
 
 ### CLI Flags
@@ -201,7 +201,7 @@ While the pager is open:
 
 ## Configuration
 
-bloom-terminal can be configured with an INI-style config file called `bloom.conf`. CLI flags always take precedence over config file values.
+portty can be configured with an INI-style config file called `bloom.conf`. CLI flags always take precedence over config file values.
 
 ### File Locations
 
@@ -247,7 +247,7 @@ Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting wit
 
 ## Emoji Width Paradigm
 
-bloom-terminal enforces four rules for how emoji and symbols are rendered:
+portty enforces four rules for how emoji and symbols are rendered:
 
 1. **Coverage-aware emoji selection.** A codepoint routes to the color emoji font when (a) VS16 (U+FE0F) forces emoji presentation, (b) it is a regional indicator (always emoji), or (c) the codepoint has default emoji presentation (Unicode `Emoji_Presentation`, tracked to Emoji 17.0) and the emoji font carries the glyph. VS15 (U+FE0E) forces text presentation in all cases. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
 2. **Ambiguous width = 1 cell.** Ambiguous-width symbols (e.g. ⚠ U+26A0, ☀ U+2600) default to 1 cell. They stay 1 cell wide unless followed by VS16.
@@ -260,7 +260,7 @@ Multi-codepoint clusters (ZWJ family chains, flag sequences, long combining-mark
 
 ## Terminfo
 
-bloom-terminal ships a single terminfo entry (based on `xterm-256color`) under three aliases — `bloom-terminal-vty-256color`, `bloom-terminal-256color`, and `bloom-terminal`. The default `TERM` is `bloom-terminal-vty-256color`; the alternate names exist for users who prefer to set them.
+portty ships a single terminfo entry (based on `xterm-256color`) under three aliases — `portty-vty-256color`, `portty-256color`, and `portty`. The default `TERM` is `portty-vty-256color`; the alternate names exist for users who prefer to set them.
 
 `setaf`/`setab` are inherited unchanged from `xterm-256color`, so the entry's capability strings stay within the restricted operator subset that Haskell `vty-unix`'s terminfo parser accepts. Truecolor is signalled via the `Tc` flag (which emacs, tmux, vte, alacritty, kitty, ghostty, and most modern TUIs honor) and via `COLORTERM=truecolor` for apps that read the env var directly. Extension caps added on top of `xterm-256color`: `Smulx` (extended underline styles), `Setulc` (underline color), `Ss`/`Se` (cursor shape), `Ms` (OSC 52 set-clipboard), `BE`/`BD` (bracketed paste), `PS`/`PE` (paste delimiters), `hs`/`tsl`/`fsl`/`dsl` (status line / window title), `sitm`/`ritm` (italic), `smxx`/`rmxx` (strikethrough).
 
@@ -271,7 +271,7 @@ On Linux, the entry is compiled and installed automatically by `make install` vi
 If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
 
 ```bash
-infocmp bloom-terminal-vty-256color | ssh remote-host 'tic -x -'
+infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 ```
 
 ## Dependencies
@@ -321,7 +321,7 @@ sudo dnf install bear
 
 ## Windows Native Build
 
-bloom-terminal builds natively on Windows using MSYS2 with the UCRT64 environment. The Windows build uses ConPTY for terminal emulation.
+portty builds natively on Windows using MSYS2 with the UCRT64 environment. The Windows build uses ConPTY for terminal emulation.
 
 ### Prerequisites
 
@@ -362,7 +362,7 @@ The default build mode skips ASan/UBSan (not available on MinGW) and uses unsani
 
 ### Regenerating the Windows icon
 
-The committed `data/icons/bloom-terminal.ico` is a multi-resolution icon (256/128/64/48/32/16) generated from the source SVG. To regenerate it after changing the SVG:
+The committed `data/icons/portty.ico` is a multi-resolution icon (256/128/64/48/32/16) generated from the source SVG. To regenerate it after changing the SVG:
 
 ```bash
 ./scripts/build-ucrt64.sh --gen-ico   # from any shell
@@ -420,11 +420,11 @@ cd build && make check
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
-The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `BLOOM_GTK4_SELFTEST=1 bloom-terminal --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
+The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `BLOOM_GTK4_SELFTEST=1 portty --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
 
 ## plotty — Lottie Player
 
-[plotty](contrib/plotty) is a Python TUI application that plays Lottie animations in bloom-terminal using the APC protocol. It provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling.
+[plotty](contrib/plotty) is a Python TUI application that plays Lottie animations in portty using the APC protocol. It provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling.
 
 ### Install
 
@@ -446,8 +446,8 @@ plotty -L animation.json
 # Start at 2× speed
 plotty -s 2 animation.json
 
-# Run inside bloom-terminal
-bloom-terminal -- plotty animation.json
+# Run inside portty
+portty -- plotty animation.json
 ```
 
 ### Controls
@@ -492,7 +492,7 @@ Thomas Christensen
 
 ## Acknowledgments
 
-A tip of the hat to [Charmbracelet](https://charm.sh) and [charm.land](https://charm.land): bloom-terminal's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via bloom-vt), the cream foreground (`#fffdf5`) is charm.land's own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
+A tip of the hat to [Charmbracelet](https://charm.sh) and [charm.land](https://charm.land): portty's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via bloom-vt), the cream foreground (`#fffdf5`) is charm.land's own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
 
 ## License
 

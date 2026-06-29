@@ -8,7 +8,7 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
-#include "bloom_version.h"
+#include "portty_version.h"
 
 #include "diag.h"
 
@@ -27,7 +27,7 @@
 
 // ---- styling ---------------------------------------------------------------
 // Attributes plus 3/4-bit ANSI colour SGR. Colours resolve against the host
-// terminal's own palette (CharmTone inside bloom-terminal) — no hardcoded RGB,
+// terminal's own palette (CharmTone inside portty) — no hardcoded RGB,
 // so the report inherits whatever theme the viewing terminal uses.
 #define RST       "\x1b[0m"
 #define BOLD      "\x1b[1m"
@@ -42,13 +42,13 @@
 #define FG_LINK   "\x1b[36m" // cyan — hyperlinks
 
 // OSC 8 hyperlink wrappers. The visible text between OPEN and CLOSE is made
-// clickable by OSC-8-aware terminals (bloom-terminal's internal pager does
+// clickable by OSC-8-aware terminals (portty's internal pager does
 // this); others ignore the wrapper and just show the text. ST is ESC '\'.
 // The "\x1b]8" hex escape stops at ']' (not a hex digit), so concatenating a
 // URL literal right after is safe.
 #define OSC8_OPEN(url) "\x1b]8;;" url "\x1b\\"
 #define OSC8_CLOSE     "\x1b]8;;\x1b\\"
-#define ISSUES_URL     "https://codeberg.org/thomasc/bloom-terminal/issues"
+#define ISSUES_URL     "https://codeberg.org/thomasc/portty/issues"
 
 // ---- growable string buffer ------------------------------------------------
 typedef struct
@@ -203,15 +203,15 @@ char *diag_build_report(const DiagSources *s)
     sb_puts(&sb, "\n  ");
     rule(&sb, "━", DW);
     sb_puts(&sb, "  \U0001f338  "); // 🌸
-    sb_puts(&sb, BOLD "bloom-terminal" RST);
+    sb_puts(&sb, BOLD "portty" RST);
     sb_puts(&sb, DIM "  ·  diagnostics" RST "\n");
-    sb_printf(&sb, FG_ACCENT "  %s" RST "\n", BLOOM_TERMINAL_VERSION);
+    sb_printf(&sb, FG_ACCENT "  %s" RST "\n", PORTTY_VERSION);
     sb_puts(&sb, "  ");
     rule(&sb, "━", DW);
 
     // Version & build
     section(&sb, "VERSION & BUILD");
-    kv(&sb, "bloom-terminal", BLOOM_TERMINAL_VERSION);
+    kv(&sb, "portty", PORTTY_VERSION);
     kv(&sb, "built with", BUILD_CC);
     kv(&sb, "bloom-vt", DEP_BLOOM_VT_VERSION);
     kv(&sb, "SDL3", DEP_SDL3_VERSION);
@@ -378,7 +378,7 @@ char *diag_build_report(const DiagSources *s)
     rule(&sb, "─", DW);
     sb_puts(&sb, DIM "  Report issues at " RST);
     // Clickable OSC 8 hyperlink (cyan URL as the visible text). No explicit
-    // underline — bloom-terminal draws the hyperlink underline itself.
+    // underline — portty draws the hyperlink underline itself.
     sb_puts(&sb, FG_LINK OSC8_OPEN(ISSUES_URL) ISSUES_URL RST OSC8_CLOSE);
     sb_puts(&sb, "\n\n");
 

@@ -2,14 +2,14 @@
 #include "config.h"
 #endif
 
-#include "bloom_version.h"
+#include "portty_version.h"
 
-#include "bloom_conf.h"
-#include "bloom_pty.h"
 #include "common.h"
 #include "diag.h"
 #include "font_ft_internal.h"
 #include "font_resolve.h"
+#include "portty_conf.h"
+#include "portty_pty.h"
 #ifdef _WIN32
 #include "font_resolve_w32.h"
 #define FONT_RESOLVE_BACKEND font_resolve_backend_w32
@@ -50,26 +50,26 @@
 
 /* Global verbose flag - controls debug output */
 int verbose = 0;
-float bloom_text_gamma = 1.0f;               /* neutral (pure linear-correct) */
-float bloom_text_contrast = 0.0f;            /* neutral */
-bool bloom_notification_transparent = false; /* opaque notification panel by default */
+float portty_text_gamma = 1.0f;               /* neutral (pure linear-correct) */
+float portty_text_contrast = 0.0f;            /* neutral */
+bool portty_notification_transparent = false; /* opaque notification panel by default */
 
 /* ASan/UBSan runtime defaults. Only compiled in when the binary is
  * built with -fsanitize=address. detect_leaks=0 silences GTK/Mesa exit
  * leaks; abort_on_error=1 produces a core file via systemd-coredump so
  * the trace survives the GUI shutdown; log_path writes reports to
- * /tmp/bloom-asan.<pid> in case stderr is lost.
+ * /tmp/portty-asan.<pid> in case stderr is lost.
  */
 #if defined(__SANITIZE_ADDRESS__) || \
     (defined(__has_feature) && __has_feature(address_sanitizer))
 const char *__asan_default_options(void)
 {
     return "abort_on_error=1:disable_coredump=0:detect_leaks=0:"
-           "log_path=/tmp/bloom-asan:print_module_map=1";
+           "log_path=/tmp/portty-asan:print_module_map=1";
 }
 const char *__ubsan_default_options(void)
 {
-    return "abort_on_error=1:print_stacktrace=1:log_path=/tmp/bloom-ubsan";
+    return "abort_on_error=1:print_stacktrace=1:log_path=/tmp/portty-ubsan";
 }
 #endif
 
@@ -84,7 +84,7 @@ typedef struct
     RendererBackend *rend;
     PtyContext *pty;
     PlatformBackend *plat;
-    const BloomConf *conf;   // loaded config, for the diagnostics report
+    const PorttyConf *conf;  // loaded config, for the diagnostics report
     const char *font_source; // where the effective font came from (diagnostics)
     Pager *pager;            // internal pager overlay (diagnostics report, etc.)
     bool drag_pending;
@@ -235,11 +235,11 @@ static void on_clipboard_set(const char *text, size_t len, void *user_data)
 }
 
 // Build the diagnostics document and show it in the internal pager. Rendered by
-// bloom-terminal itself (not an external pager), so OSC 8 links stay clickable
+// portty itself (not an external pager), so OSC 8 links stay clickable
 // and nothing is injected into the shell.
 static void show_diagnostics_report(MainContext *ctx)
 {
-    const BloomConf *c = ctx->conf;
+    const PorttyConf *c = ctx->conf;
     RendererDiag rd = { 0 };
     renderer_get_diag(ctx->rend, &rd);
 
@@ -281,13 +281,13 @@ static void show_diagnostics_report(MainContext *ctx)
         // rather than "(default)".
         .hinting = rd.hinting,
         .scrollback = terminal_get_scrollback_capacity(ctx->term),
-        .text_gamma = bloom_text_gamma,
-        .text_contrast = bloom_text_contrast,
+        .text_gamma = portty_text_gamma,
+        .text_contrast = portty_text_contrast,
         .word_chars = c ? c->word_chars : NULL,
         .platform_name = platform_get_name(ctx->plat),
         // TERM/COLORTERM are what pty.c advertises to the shell (set post-fork,
         // so not visible via the host's getenv) — keep in sync with pty.c.
-        .term_env = "bloom-terminal-vty-256color",
+        .term_env = "portty-vty-256color",
         .colorterm_env = "truecolor",
         .lang_env = getenv("LANG"),
         .title = terminal_get_title(ctx->term),
@@ -303,7 +303,7 @@ static void show_diagnostics_report(MainContext *ctx)
         .sync_output = terminal_get_mode(ctx->term, BVT_MODE_SYNC_OUTPUT),
         .focus_reporting = terminal_get_mode(ctx->term, BVT_MODE_FOCUS_REPORTING),
         .sixel_scrolling = terminal_get_mode(ctx->term, BVT_MODE_SIXEL_SCROLLING),
-#ifdef BLOOM_HARDEN_HEAP
+#ifdef PORTTY_HARDEN_HEAP
         .hardened_heap = true,
 #else
         .hardened_heap = false,
@@ -904,9 +904,9 @@ int main(int argc, char *argv[])
     };
 
     /* Load config file (CLI flags below will override) */
-    BloomConf conf;
-    bloom_conf_init(&conf);
-    bloom_conf_load(&conf);
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    portty_conf_load(&conf);
 
     if (conf.verbose == 1)
         verbose = 1;
@@ -916,7 +916,7 @@ int main(int argc, char *argv[])
         init_cols = conf.cols;
     if (conf.rows > 0)
         init_rows = conf.rows;
-    if (conf.hinting != BLOOM_HINT_UNSET) {
+    if (conf.hinting != PORTTY_HINT_UNSET) {
         static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
                                         FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
         ft_hint_target = hint_map[conf.hinting];
@@ -927,11 +927,11 @@ int main(int argc, char *argv[])
         init_scrollback = conf.scrollback;
     /* kitty-style text_composition_strategy curve (unset = neutral). */
     if (conf.text_gamma > 0.0f)
-        bloom_text_gamma = conf.text_gamma;
+        portty_text_gamma = conf.text_gamma;
     if (conf.text_contrast >= 0.0f)
-        bloom_text_contrast = conf.text_contrast;
+        portty_text_contrast = conf.text_contrast;
     if (conf.notification_transparency == 1)
-        bloom_notification_transparent = true;
+        portty_notification_transparent = true;
 
     while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:", long_options, NULL)) != -1) {
         switch (opt) {
@@ -1104,23 +1104,23 @@ int main(int argc, char *argv[])
         return 1;
 #else
         // Probe for the GTK4 plugin shared object
-        static const char *plugin_name = "bloom-terminal-gtk4.so";
+        static const char *plugin_name = "portty-gtk4.so";
         char probe_path[PATH_MAX];
         const char *base = SDL_GetBasePath();
         const char *try_paths[] = { NULL, NULL, NULL };
         int n_paths = 0;
 
-        // Build tree: exe is build/src/bloom-terminal, plugin is build/src/.libs/
+        // Build tree: exe is build/src/portty, plugin is build/src/.libs/
         if (base) {
             snprintf(probe_path, sizeof(probe_path), "%s.libs/%s", base, plugin_name);
             try_paths[n_paths++] = probe_path;
         }
 
-        // Installed: $PREFIX/lib/bloom-terminal/
+        // Installed: $PREFIX/lib/portty/
         char installed_path[PATH_MAX];
         if (base) {
             snprintf(installed_path, sizeof(installed_path),
-                     "%s../lib/bloom-terminal/%s", base, plugin_name);
+                     "%s../lib/portty/%s", base, plugin_name);
             try_paths[n_paths++] = installed_path;
         }
 
@@ -1145,10 +1145,10 @@ int main(int argc, char *argv[])
             return 1;
         }
 
-        bloom_platform_gtk4_get_fn get_backend =
-            (bloom_platform_gtk4_get_fn)dlsym(gtk4_plugin_handle, "bloom_platform_gtk4_get");
+        portty_platform_gtk4_get_fn get_backend =
+            (portty_platform_gtk4_get_fn)dlsym(gtk4_plugin_handle, "portty_platform_gtk4_get");
         if (!get_backend) {
-            fprintf(stderr, "ERROR: GTK4 plugin missing bloom_platform_gtk4_get: %s\n",
+            fprintf(stderr, "ERROR: GTK4 plugin missing portty_platform_gtk4_get: %s\n",
                     dlerror());
             dlclose(gtk4_plugin_handle);
             return 1;
@@ -1204,7 +1204,7 @@ int main(int argc, char *argv[])
         // MSYS2 bash does not.  Re-exec ourselves with DETACHED_PROCESS
         // so the original process can exit and unblock the parent shell.
         // A sentinel env var prevents infinite re-exec.
-        if (console_attached && !getenv("_BLOOM_DETACHED")) {
+        if (console_attached && !getenv("_PORTTY_DETACHED")) {
             const char *msystem = getenv("MSYSTEM");
             const char *msys = getenv("MSYS");
             if (msystem || msys) {
@@ -1237,7 +1237,7 @@ int main(int argc, char *argv[])
                 }
                 *cp = '\0';
                 // Set sentinel so the re-exec'd child skips this block
-                SetEnvironmentVariableA("_BLOOM_DETACHED", "1");
+                SetEnvironmentVariableA("_PORTTY_DETACHED", "1");
                 STARTUPINFOA si;
                 ZeroMemory(&si, sizeof(si));
                 si.cb = sizeof(si);
@@ -1264,7 +1264,7 @@ int main(int argc, char *argv[])
             FreeConsole();
 #endif
         // Create window (placeholder size; will be resized after font loading)
-        if (!platform_create_window(plat, "bloom-terminal", 800, 600)) {
+        if (!platform_create_window(plat, "portty", 800, 600)) {
             terminal_destroy(term);
             platform_destroy(plat);
             return 1;
@@ -1440,7 +1440,7 @@ int main(int argc, char *argv[])
     if (rend)
         renderer_destroy(rend);
     terminal_destroy(term);
-    bloom_conf_free(&conf);
+    portty_conf_free(&conf);
     platform_destroy(plat);
 #ifndef _WIN32
     if (gtk4_plugin_handle)
@@ -1525,7 +1525,7 @@ static void print_usage(const char *progname)
 
 static void print_version(void)
 {
-    printf("bloom-terminal %s\n", BLOOM_TERMINAL_VERSION);
+    printf("portty %s\n", PORTTY_VERSION);
     printf("Copyright (C) 2026 Thomas Christensen\n");
     printf("License MIT: <https://opensource.org/licenses/MIT>\n");
     printf("This is free software: you are free to change and redistribute it.\n");

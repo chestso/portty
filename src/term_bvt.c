@@ -4,7 +4,7 @@
  * Mirrors term_vt.c but routes everything through bloom_vt instead of
  * libvterm. Cell conversion translates BvtCell + BvtStyle into the
  * legacy TerminalCell shape so the renderer is unchanged. Selected at
- * startup via BLOOM_TERMINAL_VT=bloomvt; libvterm remains the default
+ * startup via PORTTY_VT=bloomvt; libvterm remains the default
  * during the parallel-development window.
  */
 
@@ -12,7 +12,7 @@
 #include "base64.h"
 #include <bloom-vt/bloom_vt.h>
 
-#ifdef BLOOM_HARDEN_HEAP
+#ifdef PORTTY_HARDEN_HEAP
 #include "heap_harden.h"
 #endif
 
@@ -269,7 +269,7 @@ static bool bvt_back_init(TerminalBackend *term, const BvtConfig *cfg)
     BvtBackendData *d = calloc(1, sizeof(*d));
     if (!d)
         return false;
-#ifdef BLOOM_HARDEN_HEAP
+#ifdef PORTTY_HARDEN_HEAP
     heap_harden_init();
     d->vt = bvt_new_with_allocator(cfg, &bvt_hardened_allocator);
 #else

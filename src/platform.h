@@ -1,7 +1,7 @@
 #ifndef PLATFORM_H
 #define PLATFORM_H
 
-#include "bloom_pty.h"
+#include "portty_pty.h"
 #include "rend.h"
 #include "term.h"
 #include <stdbool.h>

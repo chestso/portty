@@ -1,5 +1,5 @@
 #!/bin/sh
-# git-version.sh - print the bloom-terminal version string.
+# git-version.sh - print the portty version string.
 #
 # Usage: git-version.sh [SRCDIR]
 #

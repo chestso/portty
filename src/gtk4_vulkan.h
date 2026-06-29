@@ -31,7 +31,7 @@ typedef struct
     uint32_t present_qf;
     PFN_vkGetMemoryFdKHR vkGetMemoryFdKHR;
     PFN_vkGetImageDrmFormatModifierPropertiesEXT vkGetImageDrmFormatModifierPropertiesEXT;
-    // For the post-render dma-buf ownership-release barrier (bloom_vk_export_release).
+    // For the post-render dma-buf ownership-release barrier (portty_vk_export_release).
     VkQueue gfx_queue;
     VkCommandPool cmd_pool;
     VkCommandBuffer release_cmd;
@@ -42,7 +42,7 @@ typedef struct
     char driver_desc[VK_MAX_DRIVER_NAME_SIZE + VK_MAX_DRIVER_INFO_SIZE + 32];
     bool driver_libre; // permissively-licensed open-source driver (Mesa = MIT)
     bool ok;
-} BloomVk;
+} PorttyVk;
 
 typedef struct
 {
@@ -57,25 +57,25 @@ typedef struct
     uint32_t stride;
     uint32_t offset;
     bool released; // ownership released to the foreign queue; reacquire before reuse
-} BloomVkTarget;
+} PorttyVkTarget;
 
 // Create our own VkInstance + VkDevice (external-memory extensions enabled) for
 // `win`, create the window surface, and populate `props` with the
 // SDL_PROP_RENDERER_CREATE_VULKAN_* handles. The caller then sets the renderer
 // name ("vulkan") + window pointer on `props` and calls
 // SDL_CreateRendererWithProperties. Returns false on any failure.
-bool bloom_vk_init(BloomVk *vk, SDL_Window *win, SDL_PropertiesID props);
+bool portty_vk_init(PorttyVk *vk, SDL_Window *win, SDL_PropertiesID props);
 
 // (Re)create the exportable render target at w x h: an exportable
 // DRM-modifier VkImage wrapped as an SDL render target, with its memory
 // exported as a DMA-BUF. Destroys any prior contents of `t` first.
-bool bloom_vk_target_create(BloomVk *vk, SDL_Renderer *r, int w, int h,
-                            BloomVkTarget *t);
-void bloom_vk_target_destroy(BloomVk *vk, BloomVkTarget *t);
+bool portty_vk_target_create(PorttyVk *vk, SDL_Renderer *r, int w, int h,
+                             PorttyVkTarget *t);
+void portty_vk_target_destroy(PorttyVk *vk, PorttyVkTarget *t);
 
 // Wait for all GPU work (SDL's render into the export image) to complete before
 // the compositor scans out the DMA-BUF.
-void bloom_vk_finish(BloomVk *vk);
+void portty_vk_finish(PorttyVk *vk);
 
 // Hand the just-rendered export image off to the external (compositor/GTK)
 // consumer: a queue-family-ownership release to VK_QUEUE_FAMILY_FOREIGN_EXT plus
@@ -84,16 +84,16 @@ void bloom_vk_finish(BloomVk *vk);
 // the linear DMA-BUF (a plain vkDeviceWaitIdle does not). Call after SDL has
 // finished rendering into `t->image` and left it in SHADER_READ_ONLY_OPTIMAL
 // (i.e. after SDL_SetRenderTarget(NULL) + SDL_FlushRenderer).
-void bloom_vk_export_release(BloomVk *vk, BloomVkTarget *t);
+void portty_vk_export_release(PorttyVk *vk, PorttyVkTarget *t);
 
 // Reclaim a previously-released target from the foreign importer before SDL
 // renders into it again: a queue-family ACQUIRE (FOREIGN -> graphics) plus a
 // transition back to SHADER_READ_ONLY_OPTIMAL (the layout SDL still tracks for
 // it). Must run before SDL touches the image. Submitted on the graphics queue
 // and fence-waited.
-void bloom_vk_export_acquire(BloomVk *vk, BloomVkTarget *t);
+void portty_vk_export_acquire(PorttyVk *vk, PorttyVkTarget *t);
 
-void bloom_vk_shutdown(BloomVk *vk);
+void portty_vk_shutdown(PorttyVk *vk);
 
 #endif // HAVE_VULKAN_DMABUF
 #endif // GTK4_VULKAN_H

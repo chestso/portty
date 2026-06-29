@@ -2,7 +2,7 @@
  * test_lottie — Lottie animation end-to-end through the host bridge.
  *
  * The protocol/state logic is unit-tested in bloom-vt itself.
- * This file checks the bloom-terminal side: that an APC Lottie sequence
+ * This file checks the portty side: that an APC Lottie sequence
  * fed through terminal_process_input() reaches the engine and comes back
  * out through terminal_get_lotties() / terminal_get_lottie_placements()
  * with the right metadata, that playback state changes work, and that

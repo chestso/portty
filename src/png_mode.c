@@ -2,9 +2,9 @@
 #include "config.h"
 #endif
 
-#include "bloom_pty.h"
 #include "common.h"
 #include "png_mode.h"
+#include "portty_pty.h"
 #include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
@@ -42,7 +42,7 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
         fprintf(stderr, "ERROR: Failed to initialize SDL: %s\n", SDL_GetError());
         return -1;
     }
-    ctx->window = SDL_CreateWindow("bloom-png", 1, 1, SDL_WINDOW_HIDDEN);
+    ctx->window = SDL_CreateWindow("portty-png", 1, 1, SDL_WINDOW_HIDDEN);
     if (!ctx->window) {
         fprintf(stderr, "ERROR: Failed to create hidden window: %s\n", SDL_GetError());
         return -1;

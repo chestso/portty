@@ -2,8 +2,8 @@
 #include "config.h"
 #endif
 
-#include "bloom_conf.h"
 #include "common.h"
+#include "portty_conf.h"
 #include <ctype.h>
 #include <limits.h>
 #include <stdio.h>
@@ -47,16 +47,16 @@ static int parse_bool(const char *s)
 static char *find_config_file(void)
 {
     /* 1. CWD */
-    if (access("bloom.conf", R_OK) == 0)
-        return strdup("bloom.conf");
+    if (access("portty.conf", R_OK) == 0)
+        return strdup("portty.conf");
 
     char path[MAX_LINE];
 
 #ifdef _WIN32
-    /* 2. %APPDATA%\bloom\bloom.conf */
+    /* 2. %APPDATA%\portty\portty.conf */
     const char *appdata = getenv("APPDATA");
     if (appdata && appdata[0] != '\0') {
-        snprintf(path, sizeof(path), "%s\\bloom\\bloom.conf", appdata);
+        snprintf(path, sizeof(path), "%s\\portty\\portty.conf", appdata);
         if (access(path, R_OK) == 0)
             return strdup(path);
     }
@@ -65,12 +65,12 @@ static char *find_config_file(void)
     const char *xdg = getenv("XDG_CONFIG_HOME");
 
     if (xdg && xdg[0] != '\0') {
-        snprintf(path, sizeof(path), "%s/bloom/bloom.conf", xdg);
+        snprintf(path, sizeof(path), "%s/portty/portty.conf", xdg);
     } else {
         const char *home = getenv("HOME");
         if (!home)
             return NULL;
-        snprintf(path, sizeof(path), "%s/.config/bloom/bloom.conf", home);
+        snprintf(path, sizeof(path), "%s/.config/portty/portty.conf", home);
     }
 
     if (access(path, R_OK) == 0)
@@ -80,12 +80,12 @@ static char *find_config_file(void)
     return NULL;
 }
 
-void bloom_conf_init(BloomConf *conf)
+void portty_conf_init(PorttyConf *conf)
 {
     conf->font = NULL;
     conf->cols = 0;
     conf->rows = 0;
-    conf->hinting = BLOOM_HINT_UNSET;
+    conf->hinting = PORTTY_HINT_UNSET;
     conf->verbose = -1;
     conf->word_chars = NULL;
     conf->platform = NULL;
@@ -97,7 +97,7 @@ void bloom_conf_init(BloomConf *conf)
     conf->source_path = NULL;
 }
 
-bool bloom_conf_load_path(BloomConf *conf, const char *path)
+bool portty_conf_load_path(PorttyConf *conf, const char *path)
 {
     FILE *fp = fopen(path, "r");
     if (!fp)
@@ -161,13 +161,13 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
             }
         } else if (strcmp(key, "hinting") == 0) {
             if (strcmp(val, "none") == 0) {
-                conf->hinting = BLOOM_HINT_NONE;
+                conf->hinting = PORTTY_HINT_NONE;
             } else if (strcmp(val, "light") == 0) {
-                conf->hinting = BLOOM_HINT_LIGHT;
+                conf->hinting = PORTTY_HINT_LIGHT;
             } else if (strcmp(val, "normal") == 0) {
-                conf->hinting = BLOOM_HINT_NORMAL;
+                conf->hinting = PORTTY_HINT_NORMAL;
             } else if (strcmp(val, "mono") == 0) {
-                conf->hinting = BLOOM_HINT_MONO;
+                conf->hinting = PORTTY_HINT_MONO;
             } else {
                 fprintf(stderr,
                         "WARNING: %s:%d: invalid hinting '%s' (use none, light, normal, mono)\n",
@@ -262,18 +262,18 @@ bool bloom_conf_load_path(BloomConf *conf, const char *path)
     return true;
 }
 
-bool bloom_conf_load(BloomConf *conf)
+bool portty_conf_load(PorttyConf *conf)
 {
     char *path = find_config_file();
     if (!path)
         return false;
 
-    bool result = bloom_conf_load_path(conf, path);
+    bool result = portty_conf_load_path(conf, path);
     free(path);
     return result;
 }
 
-void bloom_conf_free(BloomConf *conf)
+void portty_conf_free(PorttyConf *conf)
 {
     free(conf->font);
     conf->font = NULL;

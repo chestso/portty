@@ -1,5 +1,5 @@
-#include "bloom_version.h"
 #include "diag.h"
+#include "portty_version.h"
 #include "test_helpers.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +22,7 @@ static DiagSources sample(void)
         .cell_height = 22,
         .cols = 128,
         .rows = 32,
-        .config_path = "/tmp/test/bloom.conf",
+        .config_path = "/tmp/test/portty.conf",
         .font_pattern = "Cascadia Code-14",
         .font_path = "/usr/share/fonts/test.ttf",
         .font_source = "config file",
@@ -32,7 +32,7 @@ static DiagSources sample(void)
         .text_contrast = 30.0f,
         .word_chars = "A-Za-z0-9_",
         .platform_name = "sdl3",
-        .term_env = "bloom-terminal-vty-256color",
+        .term_env = "portty-vty-256color",
         .colorterm_env = "truecolor",
         .lang_env = "en_US.UTF-8",
         .title = "bash",
@@ -74,14 +74,14 @@ static void test_contains_values(void)
     DiagSources s = sample();
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
-    // Version string from the build (bloom_version.h).
-    ASSERT_TRUE(strstr(r, BLOOM_TERMINAL_VERSION) != NULL);
+    // Version string from the build (portty_version.h).
+    ASSERT_TRUE(strstr(r, PORTTY_VERSION) != NULL);
     // A few runtime values flow through verbatim.
     ASSERT_TRUE(strstr(r, "test-gpu") != NULL);
     ASSERT_TRUE(strstr(r, "Cascadia Code-14") != NULL);
     ASSERT_TRUE(strstr(r, "/usr/share/fonts/test.ttf") != NULL);
     ASSERT_TRUE(strstr(r, "128 cols x 32 rows") != NULL);
-    ASSERT_TRUE(strstr(r, "bloom-terminal-vty-256color") != NULL);
+    ASSERT_TRUE(strstr(r, "portty-vty-256color") != NULL);
     free(r);
 }
 
@@ -170,7 +170,7 @@ static void test_issues_hyperlink(void)
     DiagSources s = sample();
     char *r = diag_build_report(&s);
     ASSERT_NOT_NULL(r);
-    ASSERT_TRUE(strstr(r, "\x1b]8;;https://codeberg.org/thomasc/bloom-terminal/issues\x1b\\") !=
+    ASSERT_TRUE(strstr(r, "\x1b]8;;https://codeberg.org/thomasc/portty/issues\x1b\\") !=
                 NULL);
     ASSERT_TRUE(strstr(r, "\x1b]8;;\x1b\\") != NULL);
     free(r);

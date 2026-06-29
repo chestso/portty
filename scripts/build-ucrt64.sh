@@ -1,5 +1,5 @@
 #!/bin/bash
-# build-ucrt64.sh - build bloom-terminal natively on Windows (MSYS2 UCRT64).
+# build-ucrt64.sh - build portty natively on Windows (MSYS2 UCRT64).
 #
 # MSYS2's /usr/bin/sh and /usr/bin/bash are the same binary, but when bash is
 # invoked as "sh" (as libtoolize's #!/usr/bin/env sh does) its POSIX-mode
@@ -113,7 +113,7 @@ mkdir build
 if [ "$GEN_ICO" -eq 1 ]; then
 	echo "==> make gen-ico"
 	make -C build/data gen-ico
-	echo "==> Done: $(magick identify data/icons/bloom-terminal.ico | wc -l) ICO frames"
+	echo "==> Done: $(magick identify data/icons/portty.ico | wc -l) ICO frames"
 	exit 0
 fi
 
@@ -128,4 +128,4 @@ if [ "$DO_INSTALL" -eq 1 ]; then
 	make -C build install
 fi
 
-echo "==> Build complete: build/src/bloom-terminal.exe"
+echo "==> Build complete: build/src/portty.exe"

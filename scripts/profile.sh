@@ -41,7 +41,7 @@ chmod +x "$BENCH_SCRIPT"
 
 echo "Running benchmark..."
 rm -f gmon.out
-"./${BUILD_DIR}/src/bloom-terminal" -- bash "$BENCH_SCRIPT"
+"./${BUILD_DIR}/src/portty" -- bash "$BENCH_SCRIPT"
 
 if [ ! -f gmon.out ]; then
 	echo "ERROR: gmon.out not generated (profiling data missing)" >&2
@@ -49,7 +49,7 @@ if [ ! -f gmon.out ]; then
 fi
 
 REPORT="profile-report.txt"
-gprof "./${BUILD_DIR}/src/bloom-terminal" gmon.out >"$REPORT"
+gprof "./${BUILD_DIR}/src/portty" gmon.out >"$REPORT"
 
 echo
 echo "=== Top 20 Functions by Cumulative Time ==="

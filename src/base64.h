@@ -1,5 +1,5 @@
-#ifndef BLOOM_BASE64_H
-#define BLOOM_BASE64_H
+#ifndef PORTTY_BASE64_H
+#define PORTTY_BASE64_H
 
 #include <stddef.h>
 #include <stdint.h>
@@ -11,4 +11,4 @@
  * `*out_len` receives the decoded byte count. */
 uint8_t *base64_decode(const char *src, size_t len, size_t *out_len);
 
-#endif /* BLOOM_BASE64_H */
+#endif /* PORTTY_BASE64_H */

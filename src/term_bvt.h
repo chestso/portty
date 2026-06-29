@@ -3,7 +3,7 @@
 
 #include "term.h"
 
-/* bloom-vt terminal backend — selected via env var BLOOM_TERMINAL_VT=bloomvt. */
+/* bloom-vt terminal backend — selected via env var PORTTY_VT=bloomvt. */
 extern TerminalBackend terminal_backend_bvt;
 
 /* Allocate a fresh, independent bloom-vt-backed terminal on the heap and

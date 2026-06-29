@@ -1,6 +1,6 @@
 #include "heap_harden.h"
 
-#include "bloom_bug.h"
+#include "portty_bug.h"
 
 #ifndef _WIN32
 #include <execinfo.h>
@@ -119,17 +119,17 @@ static void check_chunk(const void *p, const char *op)
     const alloc_header *h =
         (const alloc_header *)((const uint8_t *)p - sizeof(alloc_header));
     if (h->magic != HEAP_MAGIC) {
-        BLOOM_BUG_ABORT("%s: bad magic on chunk %p (magic=%016" PRIx64
-                        " expected %016" PRIx64 ")",
-                        op, p, h->magic, (uint64_t)HEAP_MAGIC);
+        PORTTY_BUG_ABORT("%s: bad magic on chunk %p (magic=%016" PRIx64
+                         " expected %016" PRIx64 ")",
+                         op, p, h->magic, (uint64_t)HEAP_MAGIC);
     }
     const uint32_t *canary =
         (const uint32_t *)((const uint8_t *)p + h->size);
     if (*canary != HEAP_CANARY) {
-        BLOOM_BUG_ABORT("%s: canary scribbled on chunk %p (size=%zu canary=%08x"
-                        " expected %08x)",
-                        op, p, (size_t)h->size, *canary,
-                        (unsigned)HEAP_CANARY);
+        PORTTY_BUG_ABORT("%s: canary scribbled on chunk %p (size=%zu canary=%08x"
+                         " expected %08x)",
+                         op, p, (size_t)h->size, *canary,
+                         (unsigned)HEAP_CANARY);
     }
 }
 
@@ -173,9 +173,9 @@ static void hardened_free(void *p, void *user)
     heap_stats.free_count++;
     heap_stats.bytes_live -= (int64_t)size;
     if (heap_stats.bytes_live < 0) {
-        BLOOM_BUG_ABORT("unbalanced free: bytes_live=%" PRId64
-                        " went negative (last free ptr=%p size=%zu)",
-                        heap_stats.bytes_live, p, size);
+        PORTTY_BUG_ABORT("unbalanced free: bytes_live=%" PRId64
+                         " went negative (last free ptr=%p size=%zu)",
+                         heap_stats.bytes_live, p, size);
     }
     free(h);
 }
@@ -219,5 +219,5 @@ void heap_harden_init(void)
     if (registered)
         return;
     registered = 1;
-    bloom_bug_register_dump(heap_harden_dump);
+    portty_bug_register_dump(heap_harden_dump);
 }

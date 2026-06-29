@@ -19,10 +19,10 @@ typedef struct RendShaderState RendShaderState;
 
 // Create the glyph-coverage render state for this renderer, or return NULL to
 // signal the caller should fall back to the baked curve. Returns NULL when:
-// the curve is neutral (gamma 1, contrast 0); BLOOM_GLYPH_SHADER=0; the
+// the curve is neutral (gamma 1, contrast 0); PORTTY_GLYPH_SHADER=0; the
 // renderer has no GPU device (software/opengl); SPIR-V is unsupported; or
 // shader/render-state creation fails. gamma/contrast are the raw
-// bloom_text_gamma / bloom_text_contrast (contrast in 0..100).
+// portty_text_gamma / portty_text_contrast (contrast in 0..100).
 RendShaderState *rend_shader_create(SDL_Renderer *renderer, float gamma, float contrast);
 
 void rend_shader_destroy(RendShaderState *s);

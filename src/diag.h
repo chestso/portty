@@ -54,7 +54,7 @@ typedef struct
     bool sync_output;       // BVT_MODE_SYNC_OUTPUT active
     bool focus_reporting;   // BVT_MODE_FOCUS_REPORTING active
     bool sixel_scrolling;   // BVT_MODE_SIXEL_SCROLLING active
-    bool hardened_heap;     // BLOOM_HARDEN_HEAP compile-time guard
+    bool hardened_heap;     // PORTTY_HARDEN_HEAP compile-time guard
 } DiagSources;
 
 // Build the formatted, ANSI-styled UTF-8 diagnostics document (truecolor,

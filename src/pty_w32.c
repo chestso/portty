@@ -1,7 +1,7 @@
 #ifdef _WIN32
 
-#include "bloom_pty.h"
 #include "common.h"
+#include "portty_pty.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -160,7 +160,7 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         /* .cmd/.bat scripts cannot be executed directly by
          * CreateProcessW — they must be invoked through cmd.exe.
          * Detect the extension and prepend "cmd.exe /c " so that
-         * e.g. "bloom-terminal -- msys2_shell.cmd -ucrt64" works. */
+         * e.g. "portty -- msys2_shell.cmd -ucrt64" works. */
         const char *ext = strrchr(argv[0], '.');
         int is_cmd_script = ext &&
                             (_stricmp(ext, ".cmd") == 0 || _stricmp(ext, ".bat") == 0);
@@ -218,7 +218,7 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
     /* Prepend terminal-specific overrides (first occurrence wins) */
     {
         static const WCHAR *overrides[] = {
-            L"TERM=bloom-terminal-vty-256color",
+            L"TERM=portty-vty-256color",
             L"COLORTERM=truecolor",
             L"TERM_PROGRAM=ghostty",
         };
@@ -231,7 +231,7 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         }
     }
 
-#ifdef BLOOM_DATADIR
+#ifdef PORTTY_DATADIR
     /* Build TERMINFO_DIRS so MSYS2 programs can find our terminfo.
      * MSYS2's ncurses (msys-ncursesw6.dll) uses ':' as the path
      * separator and expects native Windows backslash paths.  An
@@ -242,10 +242,10 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         const char *home = getenv("HOME");
         const char *existing = getenv("TERMINFO_DIRS");
 
-        /* Convert forward slashes to backslashes in BLOOM_DATADIR
+        /* Convert forward slashes to backslashes in PORTTY_DATADIR
          * (configure emits MSYS2-style /c/... paths) */
         char datadir_bs[4096];
-        snprintf(datadir_bs, sizeof(datadir_bs), "%s", BLOOM_DATADIR);
+        snprintf(datadir_bs, sizeof(datadir_bs), "%s", PORTTY_DATADIR);
         for (char *p = datadir_bs; *p; p++)
             if (*p == '/')
                 *p = '\\';

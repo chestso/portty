@@ -1,4 +1,4 @@
-bloom-terminal-vty-256color|bloom-terminal-256color|bloom-terminal|Bloom Terminal Emulator,
+portty-vty-256color|portty-256color|portty|Portty Terminal Emulator,
     use=xterm-256color,
     Tc,
     hs,

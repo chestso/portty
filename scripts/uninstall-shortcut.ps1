@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-    Uninstall the Start Menu shortcut for Bloom Terminal.
+    Uninstall the Start Menu shortcut for Portty.
 
 .DESCRIPTION
     Removes the .lnk shortcut from the user's Start Menu Programs folder.
@@ -13,7 +13,7 @@
 $ErrorActionPreference = "Stop"
 
 $startMenu = [System.Environment]::GetFolderPath('Programs')
-$shortcutPath = Join-Path $startMenu "Bloom Terminal.lnk"
+$shortcutPath = Join-Path $startMenu "Portty.lnk"
 
 if (Test-Path $shortcutPath) {
     Remove-Item $shortcutPath

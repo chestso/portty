@@ -1,23 +1,23 @@
-#ifndef BLOOM_CONF_H
-#define BLOOM_CONF_H
+#ifndef PORTTY_CONF_H
+#define PORTTY_CONF_H
 
 #include <stdbool.h>
 
 typedef enum
 {
-    BLOOM_HINT_UNSET = -1,
-    BLOOM_HINT_NONE = 0,
-    BLOOM_HINT_LIGHT = 1,
-    BLOOM_HINT_NORMAL = 2,
-    BLOOM_HINT_MONO = 3,
-} BloomHintMode;
+    PORTTY_HINT_UNSET = -1,
+    PORTTY_HINT_NONE = 0,
+    PORTTY_HINT_LIGHT = 1,
+    PORTTY_HINT_NORMAL = 2,
+    PORTTY_HINT_MONO = 3,
+} PorttyHintMode;
 
 typedef struct
 {
     char *font;                    /* NULL = not set */
     int cols;                      /* 0 = not set */
     int rows;                      /* 0 = not set */
-    BloomHintMode hinting;         /* BLOOM_HINT_UNSET = not set */
+    PorttyHintMode hinting;        /* PORTTY_HINT_UNSET = not set */
     int verbose;                   /* -1 = not set, 0 = false, 1 = true */
     char *word_chars;              /* NULL = not set */
     char *platform;                /* NULL = not set; "sdl3" or "gtk4" */
@@ -27,11 +27,11 @@ typedef struct
     int notification_transparency; /* -1 = unset; 0 = opaque (default); 1 = translucent */
     char *shell;                   /* NULL = not set; overrides $SHELL/COMSPEC when no -- args */
     char *source_path;             /* path the config was loaded from, or NULL (defaults) */
-} BloomConf;
+} PorttyConf;
 
-void bloom_conf_init(BloomConf *conf);
-bool bloom_conf_load(BloomConf *conf);                        /* returns true if file found */
-bool bloom_conf_load_path(BloomConf *conf, const char *path); /* load from explicit path */
-void bloom_conf_free(BloomConf *conf);
+void portty_conf_init(PorttyConf *conf);
+bool portty_conf_load(PorttyConf *conf);                        /* returns true if file found */
+bool portty_conf_load_path(PorttyConf *conf, const char *path); /* load from explicit path */
+void portty_conf_free(PorttyConf *conf);
 
-#endif /* BLOOM_CONF_H */
+#endif /* PORTTY_CONF_H */

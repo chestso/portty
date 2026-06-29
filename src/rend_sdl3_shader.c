@@ -43,9 +43,9 @@ RendShaderState *rend_shader_create(SDL_Renderer *renderer, float gamma, float c
         return NULL;
     }
 
-    const char *env = SDL_getenv("BLOOM_GLYPH_SHADER");
+    const char *env = SDL_getenv("PORTTY_GLYPH_SHADER");
     if (env && strcmp(env, "0") == 0) {
-        vlog("Glyph shader: disabled via BLOOM_GLYPH_SHADER=0\n");
+        vlog("Glyph shader: disabled via PORTTY_GLYPH_SHADER=0\n");
         return NULL;
     }
 

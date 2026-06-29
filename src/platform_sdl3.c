@@ -2,7 +2,7 @@
 #include "config.h"
 #endif
 
-#include "bloom_version.h"
+#include "portty_version.h"
 
 #include "common.h"
 #include "platform_sdl3.h"
@@ -28,7 +28,7 @@
 #endif
 
 // Custom event codes for SDL_EVENT_USER
-enum BloomEventCode
+enum PorttyEventCode
 {
     EVENT_PTY_DATA = 1,
     EVENT_PTY_CLOSED,
@@ -176,13 +176,13 @@ static const char *find_icon_path(void)
 {
     static char path[PATH_MAX];
     const char *base = SDL_GetBasePath();
-    const char *icon_rel = "icons/hicolor/256x256/apps/bloom-terminal.png";
+    const char *icon_rel = "icons/hicolor/256x256/apps/portty.png";
 
     struct
     {
         const char *fmt;
     } probes[] = {
-        /* Dev build: exe is build/src/bloom-terminal, data is at project root */
+        /* Dev build: exe is build/src/portty, data is at project root */
         { "%s../../data/%s" },
         /* Installed: exe is $PREFIX/bin/, data is $PREFIX/share/ */
         { "%s../share/%s" },
@@ -198,11 +198,11 @@ static const char *find_icon_path(void)
         }
     }
 
-#ifdef BLOOM_DATADIR
+#ifdef PORTTY_DATADIR
     /* Autotools compile-time datadir */
-    snprintf(path, sizeof(path), "%s/%s", BLOOM_DATADIR, icon_rel);
+    snprintf(path, sizeof(path), "%s/%s", PORTTY_DATADIR, icon_rel);
     if (access(path, R_OK) == 0) {
-        vlog("Found icon at %s (BLOOM_DATADIR)\n", path);
+        vlog("Found icon at %s (PORTTY_DATADIR)\n", path);
         return path;
     }
 #endif
@@ -669,7 +669,7 @@ static bool sdl3_plat_init(PlatformBackend *plat)
     if (verbose) {
         fprintf(stderr, "DEBUG: Setting SDL app metadata\n");
     }
-    if (!SDL_SetAppMetadata("bloom-terminal", BLOOM_TERMINAL_VERSION, "bloom-terminal")) {
+    if (!SDL_SetAppMetadata("portty", PORTTY_VERSION, "portty")) {
         fprintf(stderr, "WARNING: Failed to set SDL app metadata: %s\n", SDL_GetError());
     }
 
@@ -980,7 +980,7 @@ static void sdl3_set_window_title(PlatformBackend *plat, const char *title)
 
     SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
     if (ctx->window) {
-        SDL_SetWindowTitle(ctx->window, title ? title : "bloom-terminal");
+        SDL_SetWindowTitle(ctx->window, title ? title : "portty");
         vlog("Window title set to: %s\n", title ? title : "(default)");
     }
 }

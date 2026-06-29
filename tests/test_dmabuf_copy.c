@@ -667,7 +667,7 @@ int main(int argc, char *argv[])
 
     printf("\n");
 
-    /* Formats to test — same set used by bloom-terminal and common compositors */
+    /* Formats to test — same set used by portty and common compositors */
     static const uint32_t formats[] = {
         GBM_FORMAT_ABGR8888,
         GBM_FORMAT_XBGR8888,

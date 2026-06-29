@@ -1,10 +1,10 @@
 # Event Loop Architecture
 
-This document describes bloom-terminal's event loop design, which efficiently handles both PTY (shell I/O) and display events using a thread-based architecture.
+This document describes portty's event loop design, which efficiently handles both PTY (shell I/O) and display events using a thread-based architecture.
 
 ## Overview
 
-bloom-terminal uses a single-threaded event loop that must handle two independent event sources:
+portty uses a single-threaded event loop that must handle two independent event sources:
 
 1. **PTY file descriptor** - Shell output (stdout/stderr from the child process)
 2. **SDL events** - User input events (keyboard, mouse, window resize)

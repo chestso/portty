@@ -13,7 +13,7 @@ from .tui import LottiePlayerApp
 def main() -> None:
     parser = argparse.ArgumentParser(
         prog="plotty",
-        description="Play Lottie animations in bloom-terminal",
+        description="Play Lottie animations in portty",
     )
     parser.add_argument(
         "file",

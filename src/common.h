@@ -10,14 +10,14 @@ extern int verbose;
 /* Notification panel transparency (defined in main.c, set from config). When
  * false (default) the top notification panel is fully opaque; when true it is
  * drawn translucent (SDL3: alpha background; GTK4: a translucent .osd surface). */
-extern bool bloom_notification_transparent;
+extern bool portty_notification_transparent;
 
 /* kitty-style text_composition_strategy knob (defined in main.c, set from
  * config). Applied as a uniform coverage curve to grayscale glyph alpha in
  * font_ft.c, on top of the renderer's linear-light blending. Neutral defaults
  * (gamma 1.0, contrast 0) leave coverage unchanged. */
-extern float bloom_text_gamma;
-extern float bloom_text_contrast;
+extern float portty_text_gamma;
+extern float portty_text_contrast;
 
 /* Verbose logging implementation - use vlog() macro instead */
 void vlog_impl(const char *file, const char *func, int line, const char *format, ...);

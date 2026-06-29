@@ -1,6 +1,6 @@
 #define _GNU_SOURCE
-#include "bloom_pty.h"
 #include "common.h"
+#include "portty_pty.h"
 #include <errno.h>
 #include <fcntl.h>
 #if defined(__APPLE__)
@@ -160,30 +160,30 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         }
 
         // Set TERM environment variable.
-        // The bloom-terminal entry is a single terminfo definition with
-        // three aliases (bloom-terminal-vty-256color, bloom-terminal-256color,
-        // bloom-terminal). It inherits xterm-256color and adds the Tc flag
+        // The portty entry is a single terminfo definition with
+        // three aliases (portty-vty-256color, portty-256color,
+        // portty). It inherits xterm-256color and adds the Tc flag
         // plus extension caps (Smulx, Setulc, Ss/Se, Ms, BE/BD, PS/PE).
         // Tc carries the truecolor signal: apps that respect it emit
         // \e[38;2;R;G;Bm directly. We default to the vty-named alias so
         // Haskell vty-unix TUIs (brick, matterhorn) see clean
         // xterm-256color inheritance. COLORTERM=truecolor below covers
         // apps that ignore terminfo and check the env var.
-        setenv("TERM", "bloom-terminal-vty-256color", 1);
+        setenv("TERM", "portty-vty-256color", 1);
 
         // Point to our installed terminfo database
-#ifdef BLOOM_DATADIR
+#ifdef PORTTY_DATADIR
         {
             char buf[4096];
             const char *home = getenv("HOME");
             const char *existing = getenv("TERMINFO_DIRS");
             if (existing) {
                 snprintf(buf, sizeof(buf),
-                         BLOOM_DATADIR "/terminfo:%s/.terminfo:%s",
+                         PORTTY_DATADIR "/terminfo:%s/.terminfo:%s",
                          home ? home : "", existing);
             } else {
                 snprintf(buf, sizeof(buf),
-                         BLOOM_DATADIR "/terminfo:%s/.terminfo:",
+                         PORTTY_DATADIR "/terminfo:%s/.terminfo:",
                          home ? home : "");
             }
             setenv("TERMINFO_DIRS", buf, 1);
@@ -191,16 +191,16 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
 #endif
 
         // Help emacs find our term/*.el file
-#ifdef BLOOM_DATADIR
+#ifdef PORTTY_DATADIR
         {
             char buf[4096];
             const char *existing = getenv("EMACSLOADPATH");
             if (existing) {
                 snprintf(buf, sizeof(buf),
-                         BLOOM_DATADIR "/emacs/site-lisp:%s", existing);
+                         PORTTY_DATADIR "/emacs/site-lisp:%s", existing);
             } else {
                 snprintf(buf, sizeof(buf),
-                         BLOOM_DATADIR "/emacs/site-lisp:");
+                         PORTTY_DATADIR "/emacs/site-lisp:");
             }
             setenv("EMACSLOADPATH", buf, 1);
         }
@@ -212,7 +212,7 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         // Advertise kitty keyboard protocol support to TUIs that
         // gate progressive enhancement on TERM_PROGRAM rather than
         // probing via XTVERSION. Claude Code, Helix, and Neovim all
-        // allowlist a small set of TERM_PROGRAM values; bloom-terminal
+        // allowlist a small set of TERM_PROGRAM values; portty
         // isn't in that list, so we identify as `ghostty` — the
         // architecturally closest peer (in-process VT engine, no
         // libvterm) — to opt into the kitty kb push that Shift+Enter,

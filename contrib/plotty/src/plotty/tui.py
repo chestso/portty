@@ -1,4 +1,4 @@
-"""plotty.tui — Textual TUI for playing Lottie animations in bloom-terminal."""
+"""plotty.tui — Textual TUI for playing Lottie animations in portty."""
 
 from __future__ import annotations
 
@@ -255,7 +255,7 @@ class HelpPanel(Vertical):
 
 
 class LottiePlayerApp(App):
-    """A TUI Lottie animation player for bloom-terminal."""
+    """A TUI Lottie animation player for portty."""
 
     CSS = """
     Screen {

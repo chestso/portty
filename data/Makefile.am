@@ -1,33 +1,33 @@
 iconscalabledir = $(datadir)/icons/hicolor/scalable/apps
-iconscalable_DATA = icons/hicolor/scalable/apps/bloom-terminal.svg
+iconscalable_DATA = icons/hicolor/scalable/apps/portty.svg
 
 iconsymbolicdir = $(datadir)/icons/hicolor/symbolic/apps
-iconsymbolic_DATA = icons/hicolor/symbolic/apps/bloom-terminal-symbolic.svg
+iconsymbolic_DATA = icons/hicolor/symbolic/apps/portty-symbolic.svg
 
 # PNG fallback for SDL_SetWindowIcon (SDL can't load SVG)
 icon256dir = $(datadir)/icons/hicolor/256x256/apps
-icon256_DATA = icons/hicolor/256x256/apps/bloom-terminal.png
+icon256_DATA = icons/hicolor/256x256/apps/portty.png
 
 desktopdir = $(datadir)/applications
-desktop_DATA = applications/bloom-terminal.desktop
+desktop_DATA = applications/portty.desktop
 
 emacsdir = $(datadir)/emacs/site-lisp/term
-emacs_DATA = bloom-terminal.el
+emacs_DATA = portty.el
 
-EXTRA_DIST = bloom-terminal.ti bloom-terminal.el
+EXTRA_DIST = portty.ti portty.el
 
 if HOST_WINDOWS
 iconwindowsdir = $(datadir)/icons
-iconwindows_DATA = icons/bloom-terminal.ico
+iconwindows_DATA = icons/portty.ico
 
 # --- gen-ico: regenerate the Windows .ico from the source SVG -----------------
 #
-# Renders data/icons/hicolor/scalable/apps/bloom-terminal.svg into a
+# Renders data/icons/hicolor/scalable/apps/portty.svg into a
 # multi-resolution Windows icon (256/128/64/48/32/16) using ImageMagick.
 # Requires the mingw-w64-ucrt-x86_64-imagemagick and librsvg packages
 # (see README prerequisites).
-ICON_SVG = $(srcdir)/icons/hicolor/scalable/apps/bloom-terminal.svg
-ICO_OUTPUT = $(srcdir)/icons/bloom-terminal.ico
+ICON_SVG = $(srcdir)/icons/hicolor/scalable/apps/portty.svg
+ICO_OUTPUT = $(srcdir)/icons/portty.ico
 ICO_SIZES = 256,128,64,48,32,16
 
 .PHONY: gen-ico
@@ -47,28 +47,28 @@ endif HOST_WINDOWS
 
 if !HOST_WINDOWS
 install-data-local:
-	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti
+	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti
 
 uninstall-local:
-	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-256color
-	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-vty-256color
-	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal
+	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty-vty-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty
 endif
 
 if HOST_WINDOWS
 install-data-local:
-	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/bloom-terminal.ti \
+	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti \
 	    || echo "  WARNING: Failed to install terminfo (is ncurses installed?)" >&2
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/install-shortcut.ps1" \
-	    -ExePath "$(DESTDIR)$(bindir)/bloom-terminal.exe" \
-	    -IconPath "$(DESTDIR)$(datadir)/icons/bloom-terminal.ico" \
+	    -ExePath "$(DESTDIR)$(bindir)/portty.exe" \
+	    -IconPath "$(DESTDIR)$(datadir)/icons/portty.ico" \
 	    || echo "  WARNING: Failed to create Start Menu shortcut" >&2
 
 uninstall-local:
-	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-256color
-	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal-vty-256color
-	rm -f $(DESTDIR)$(datadir)/terminfo/b/bloom-terminal
+	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty-vty-256color
+	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/uninstall-shortcut.ps1" \
 	    || echo "  WARNING: Failed to remove Start Menu shortcut" >&2

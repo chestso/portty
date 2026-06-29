@@ -1,4 +1,4 @@
-"""plotty — Play Lottie animations in bloom-terminal."""
+"""plotty — Play Lottie animations in portty."""
 
 from __future__ import annotations
 

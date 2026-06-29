@@ -1,4 +1,4 @@
-AC_INIT([bloom-terminal],
+AC_INIT([portty],
         m4_esyscmd_s([cat version 2>/dev/null || echo "0.0.0-unknown"]))
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_MACRO_DIRS([m4])
@@ -10,11 +10,11 @@ dnl Recompute the version at configure time so a rebuild after new commits
 dnl picks up the current version without needing to re-run autoreconf. Falls
 dnl back to PACKAGE_VERSION (set at autoreconf time via m4_esyscmd_s above)
 dnl for tarball builds where build-aux/git-version.sh has nothing to read.
-BLOOM_TERMINAL_VERSION=`"$srcdir/build-aux/git-version.sh" "$srcdir" 2>/dev/null`
-AS_IF([test -z "$BLOOM_TERMINAL_VERSION"],
-      [BLOOM_TERMINAL_VERSION="$PACKAGE_VERSION"])
-AC_SUBST([BLOOM_TERMINAL_VERSION])
-AC_MSG_NOTICE([bloom-terminal version: $BLOOM_TERMINAL_VERSION])
+PORTTY_VERSION=`"$srcdir/build-aux/git-version.sh" "$srcdir" 2>/dev/null`
+AS_IF([test -z "$PORTTY_VERSION"],
+      [PORTTY_VERSION="$PACKAGE_VERSION"])
+AC_SUBST([PORTTY_VERSION])
+AC_MSG_NOTICE([portty version: $PORTTY_VERSION])
 
 # Check for programs
 user_cflags="$CFLAGS"
@@ -82,7 +82,7 @@ elif test "x$user_cflags" = "x"; then
   fi
 fi
 
-# BLOOM_HARDEN_HEAP — install the hardened BvtAllocator wrapper that
+# PORTTY_HARDEN_HEAP — install the hardened BvtAllocator wrapper that
 # catches heap corruption at the corrupting allocation rather than at
 # the next unrelated calloc. Auto-on under --enable-debug or when the
 # user has passed -fsanitize=address (the wrapper layers usefully with
@@ -95,7 +95,7 @@ case "$CFLAGS" in
   *-fsanitize=address*) have_hardened_heap=yes ;;
 esac
 if test "x$have_hardened_heap" = "xyes"; then
-  AC_DEFINE([BLOOM_HARDEN_HEAP], [1],
+  AC_DEFINE([PORTTY_HARDEN_HEAP], [1],
             [Wrap the bvt allocator with magic + canary + poison-on-free])
   AC_MSG_NOTICE([Hardened heap allocator enabled (catches UAF / overflow at the source)])
 fi
@@ -181,8 +181,8 @@ fi
 
 # Generate config.h header
 AC_CONFIG_HEADERS([config.h])
-dnl BLOOM_TERMINAL_VERSION is intentionally NOT defined in config.h.
-dnl src/Makefile.am regenerates src/bloom_version.h on every `make` so the
+dnl PORTTY_VERSION is intentionally NOT defined in config.h.
+dnl src/Makefile.am regenerates src/portty_version.h on every `make` so the
 dnl version reflects the current git HEAD without needing reconfigure.
 
 # Check for header files
