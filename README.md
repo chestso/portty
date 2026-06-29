@@ -45,7 +45,7 @@ portty uses a modular backend abstraction design:
 
 - **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
   - Default: SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
-  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Renders with SDL's Vulkan renderer into a **triple-buffered ring** of exportable DRM-modifier `VkImage`s (each wrapped as an SDL render target) and presents each frame as a **zero-copy DMA-BUF** (`vkGetMemoryFdKHR` → `GdkDmabufTexture` with `GtkGraphicsOffload`). bloom owns Vulkan instance/device creation because SDL's own device does not enable the external-memory extensions. Because GTK imports the buffer on a _separate_ `VkDevice`, each frame is handed off with an explicit cross-device sync step: the render is flushed coherent (a 1×1 readback while the target is bound, which forces SDL's batch flush + device sync) and the image's queue-family ownership is released to `VK_QUEUE_FAMILY_FOREIGN_EXT` in `VK_IMAGE_LAYOUT_GENERAL` (and reacquired before the slot is reused). The ring avoids overwriting a buffer the compositor is still scanning out. Set `BLOOM_GTK4_READBACK=1` to force the CPU-readback path (`SDL_RenderReadPixels` → `GdkMemoryTexture`) instead; it is also the automatic fallback when Vulkan/DMA-BUF is unavailable.
+  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Renders with SDL's Vulkan renderer into a **triple-buffered ring** of exportable DRM-modifier `VkImage`s (each wrapped as an SDL render target) and presents each frame as a **zero-copy DMA-BUF** (`vkGetMemoryFdKHR` → `GdkDmabufTexture` with `GtkGraphicsOffload`). portty owns Vulkan instance/device creation because SDL's own device does not enable the external-memory extensions. Because GTK imports the buffer on a _separate_ `VkDevice`, each frame is handed off with an explicit cross-device sync step: the render is flushed coherent (a 1×1 readback while the target is bound, which forces SDL's batch flush + device sync) and the image's queue-family ownership is released to `VK_QUEUE_FAMILY_FOREIGN_EXT` in `VK_IMAGE_LAYOUT_GENERAL` (and reacquired before the slot is reused). The ring avoids overwriting a buffer the compositor is still scanning out. Set `PORTTY_GTK4_READBACK=1` to force the CPU-readback path (`SDL_RenderReadPixels` → `GdkMemoryTexture`) instead; it is also the automatic fallback when Vulkan/DMA-BUF is unavailable.
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: coffer (`terminal_backend_cfr`) — external VT engine consumed via `pkg-config coffer`, bridged through `term_cfr.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
@@ -159,11 +159,11 @@ build/src/portty -P "" --exec ls --wait 500 output.png
 | `-g COLSxROWS`            | Initial terminal size (default: 80x24)                                        |
 | `-P TEXT`                 | Render TEXT to PNG (output path as positional arg)                            |
 | `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc.               |
-| `-L` / `--list-fonts`     | List available monospace fonts and exit                                       |
-| `-H S` / `--ft-hinting S` | FreeType hinting: none/light/normal/mono (default: light)                     |
-| `-G` / `--gtk4`           | Use GTK4/libadwaita platform backend                                          |
-| `-S` / `--sdl3`           | Use SDL3 platform backend (overrides config file)                             |
-| `-d TEXT` / `--demo TEXT` | Display TEXT in terminal without spawning a shell (for testing)               |
+| `--list-fonts`            | List available monospace fonts and exit                                       |
+| `--ft-hinting S`          | FreeType hinting: none/light/normal/mono (default: light)                     |
+| `--gtk4`                  | Use GTK4/libadwaita platform backend                                          |
+| `--sdl3`                  | Use SDL3 platform backend (overrides config file)                             |
+| `--demo TEXT`              | Display TEXT in terminal without spawning a shell (for testing)               |
 | `-V` / `--version`        | Print version and dependency versions, then exit                              |
 | `--exec CMD`              | With `-P`, spawn CMD on a PTY and render its output to PNG                    |
 | `--wait MS`               | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
@@ -201,19 +201,19 @@ While the pager is open:
 
 ## Configuration
 
-portty can be configured with an INI-style config file called `bloom.conf`. CLI flags always take precedence over config file values.
+portty can be configured with an INI-style config file called `portty.conf`. CLI flags always take precedence over config file values.
 
 ### File Locations
 
 The first file found is used:
 
-1. `./bloom.conf` (project-level, current working directory)
-2. `$XDG_CONFIG_HOME/bloom/bloom.conf` (defaults to `~/.config/bloom/bloom.conf`)
+1. `./portty.conf` (project-level, current working directory)
+2. `$XDG_CONFIG_HOME/portty/portty.conf` (defaults to `~/.config/portty/portty.conf`)
 
 ### Example
 
 ```ini
-# bloom.conf
+# portty.conf
 [terminal]
 font = Cascadia Code-14
 geometry = 120x40
@@ -383,7 +383,7 @@ libtoolize: error: $pkgauxdir is not a directory: '/ucrt64/share/libtool/build-a
 `build-ucrt64.sh` applies the workaround automatically. To do it manually, shadow `sh` with a bash copy earlier on `PATH` before running `autoreconf`:
 
 ```bash
-FIXSH=$(mktemp -d /tmp/bloom-fixsh.XXXXXX)
+FIXSH=$(mktemp -d /tmp/portty-fixsh.XXXXXX)
 cp /usr/bin/bash "$FIXSH/sh"
 export PATH="$FIXSH:$PATH"
 ./autogen.sh          # now succeeds
@@ -415,12 +415,13 @@ cd build && make check
 | `test_altscreen_mouse`    | Altscreen/mouse-mode state and dispatch logic                         |
 | `test_sixel`              | Sixel image end-to-end through host bridge                            |
 | `test_lottie`             | Lottie animation bridge to coffer                                     |
+| `test_paste_normalize`    | Clipboard line-ending normalization (CRLF→LF fix for Windows paste)           |
 | `test_diag`               | Diagnostics report generation                                         |
 | `test_pty_pause`          | PTY pause/resume during selection (POSIX only)                        |
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
-The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `BLOOM_GTK4_SELFTEST=1 portty --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
+The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `PORTTY_GTK4_SELFTEST=1 portty --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
 
 ## plotty — Lottie Player
 
@@ -477,12 +478,13 @@ The project includes:
 Run `make format` (from `build/`) to format all source files. This requires:
 
 - **clang-format** — C source and headers (`src/`, `tests/`)
+- **black** — Python files (`contrib/`)
 - **shfmt** — shell scripts (`scripts/`)
 - **prettier** — Markdown files
 
 ```bash
 # Fedora 41+
-sudo dnf install clang-tools-extra shfmt
+sudo dnf install clang-tools-extra black shfmt
 npm install --prefix ~/.local prettier
 ```
 
