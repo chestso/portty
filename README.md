@@ -208,7 +208,8 @@ portty can be configured with an INI-style config file called `portty.conf`. CLI
 The first file found is used:
 
 1. `./portty.conf` (project-level, current working directory)
-2. `$XDG_CONFIG_HOME/portty/portty.conf` (defaults to `~/.config/portty/portty.conf`)
+2. `%APPDATA%\portty\portty.conf` (Windows only)
+3. `$XDG_CONFIG_HOME/portty/portty.conf` (defaults to `~/.config/portty/portty.conf`)
 
 ### Example
 
