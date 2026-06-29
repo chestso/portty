@@ -189,12 +189,12 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
             free(conf->word_chars);
             conf->word_chars = strdup(val);
         } else if (strcmp(key, "platform") == 0) {
-            if (strcmp(val, "sdl3") == 0 || strcmp(val, "gtk4") == 0) {
+            if (strcmp(val, "sdl3") == 0) {
                 free(conf->platform);
                 conf->platform = strdup(val);
             } else {
                 fprintf(stderr,
-                        "WARNING: %s:%d: invalid platform '%s' (use sdl3, gtk4)\n",
+                        "WARNING: %s:%d: invalid platform '%s' (use sdl3)\n",
                         path, lineno, val);
             }
         } else if (strcmp(key, "scrollback") == 0) {

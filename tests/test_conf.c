@@ -137,13 +137,13 @@ static void test_parse_word_chars(void)
 
 static void test_parse_platform(void)
 {
-    char *path = write_tmp_conf("[terminal]\nplatform = gtk4\n");
+    char *path = write_tmp_conf("[terminal]\nplatform = sdl3\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
     portty_conf_init(&conf);
     ASSERT_TRUE(portty_conf_load_path(&conf, path));
-    ASSERT_STR_EQ(conf.platform, "gtk4");
+    ASSERT_STR_EQ(conf.platform, "sdl3");
 
     portty_conf_free(&conf);
     cleanup_tmp(path);

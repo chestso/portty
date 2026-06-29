@@ -88,20 +88,8 @@ else
 AM_CFLAGS += $(FONTCONFIG_CFLAGS)
 portty_LDADD += $(FONTCONFIG_LIBS)
 portty_LDADD += -lutil
-portty_LDFLAGS = -rdynamic
+portty_LDFLAGS =
 endif
 endif
 
 AM_CFLAGS += -DPKGLIBDIR='"$(pkglibdir)"'
-
-# Optional GTK4/libadwaita platform backend (built as dlopen plugin)
-if HAVE_GTK4
-pkglib_LTLIBRARIES = portty-gtk4.la
-portty_gtk4_la_SOURCES = platform_gtk4.c gtk4_vulkan.c gtk4_vulkan.h
-portty_gtk4_la_CFLAGS = $(GTK4_CFLAGS) $(SDL3_CFLAGS) \
-    $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) $(LIBPNG_CFLAGS) \
-    $(LIBDRM_CFLAGS) $(VULKAN_CFLAGS) $(COFFER_CFLAGS) \
-    -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
-portty_gtk4_la_LDFLAGS = -module -avoid-version
-portty_gtk4_la_LIBADD = $(GTK4_LIBS) $(SDL3_LIBS) $(VULKAN_LIBS)
-endif

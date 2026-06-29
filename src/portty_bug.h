@@ -28,10 +28,6 @@
  * Register a dump function. Called in registration order from
  * portty_bug_dump_state(). Up to PORTTY_BUG_MAX_DUMPERS registrations
  * are supported; further calls are silently dropped.
- *
- * The plugin (portty-gtk4.so) registers via this symbol
- * exported from the main binary (-rdynamic), so both binary and
- * plugin can contribute dumps to the same post-mortem.
  */
 void portty_bug_register_dump(void (*fn)(void));
 

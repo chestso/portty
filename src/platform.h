@@ -21,8 +21,7 @@ typedef enum
     PLATFORM_CURSOR_POINTER,
 } PlatformCursor;
 
-// Severity of a notification panel message. Drives the SDL3 accent colour and
-// the GTK4 strip's icon + libadwaita colour class.
+// Severity of a notification panel message. Drives the SDL3 accent colour.
 typedef enum
 {
     PLATFORM_NOTIFY_INFO = 0,
@@ -144,9 +143,8 @@ struct PlatformBackend
     void (*set_cursor)(PlatformBackend *plat, PlatformCursor cursor);
 
     // Show a top notification panel with a title and optional multi-line body.
-    // SDL3 draws it via the renderer; GTK4 reveals a native libadwaita strip.
-    // The panel persists until dismissed (close button) or superseded by a
-    // newer notify() call.
+    // SDL3 draws it via the renderer. The panel persists until dismissed
+    // (close button) or superseded by a newer notify() call.
     void (*notify)(PlatformBackend *plat, const char *title, const char *body,
                    PlatformNotifyLevel level);
 

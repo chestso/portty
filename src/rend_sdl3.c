@@ -2782,9 +2782,8 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
 
 // --- Top notification panel (pure-SDL3 path) ---------------------------------
 //
-// The GTK4 platform shares this renderer but draws a native libadwaita strip
-// instead, so it never calls renderer_set_notification; notif_active defaults
-// false and the panel draw is a no-op there.
+// The renderer draws the panel; notif_active defaults false and the
+// panel draw is a no-op when inactive.
 
 // Alpha-composite a straight-alpha RGBA glyph bitmap (RGB already the fg
 // colour, coverage in alpha — see font_ft.c rasterize path) over the opaque
@@ -2797,8 +2796,7 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
 // here, unlike draw_scene_linear's grid path. The SDL3 platform forces the
 // "gpu" renderer and aborts startup if it is unavailable (platform_sdl3.c),
 // precisely so the grid never blends in sRGB space, so a linear-capable
-// renderer is guaranteed wherever these panels are drawn. (The panels are
-// SDL3-only; GTK4 uses a native libadwaita strip.) The grid's !linear_ok
+// renderer is guaranteed wherever these panels are drawn.
 // branch only survives as a guard for a runtime float-target allocation
 // failure, a degraded state not worth mirroring here.
 static void notif_blit_glyph(uint8_t *buf, int buf_w, int buf_h,
@@ -2939,7 +2937,7 @@ static void build_notif_texture(RendererSdl3Data *data)
     int gap = (int)(8.0f * scale + 0.5f);
     int line_h = data->cell_height;
 
-    // Severity accent colour (libadwaita-ish: blue / yellow / red).
+    // Severity accent colour (blue / yellow / red).
     uint8_t ar, ag, ab;
     switch (data->notif_level) {
     case 2:
@@ -3228,8 +3226,7 @@ static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
 
     // Top notification panel. Drawn after draw_scene_linear's encode-out blit
     // (which overwrites the backbuffer with BLENDMODE_NONE), so it composites as
-    // sRGB UI chrome over the finished terminal frame. SDL3 path only — the
-    // GTK4 platform uses a native libadwaita strip and never sets this.
+    // sRGB UI chrome over the finished terminal frame.
     if (data->notif_active && data->notif_texture) {
         SDL_FRect dst = { 0.0f, 0.0f, (float)data->width, (float)data->notif_h };
         SDL_RenderTexture(data->renderer, data->notif_texture, NULL, &dst);

@@ -57,8 +57,7 @@ struct RendererBackend
     void (*set_overlay)(RendererBackend *rend, TerminalBackend *overlay);
     void (*clear_overlay)(RendererBackend *rend);
     bool (*has_overlay)(RendererBackend *rend);
-    /* Top notification panel (pure-SDL3 path only — the GTK4 platform draws a
-     * native libadwaita strip instead and never calls these). When set, the
+    /* Top notification panel (SDL3-only). When set, the
      * renderer draws a dismissable message bar across the top of the window.
      * `level` is a PlatformNotifyLevel (0=info, 1=warning, 2=error). */
     void (*set_notification)(RendererBackend *rend, const char *title,

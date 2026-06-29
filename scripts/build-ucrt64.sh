@@ -108,7 +108,7 @@ echo "==> autogen.sh"
 echo "==> configure"
 rm -rf build
 mkdir build
-(cd build && sh ../configure --disable-gtk4 "${CONFIGURE_ARGS[@]}")
+(cd build && sh ../configure "${CONFIGURE_ARGS[@]}")
 
 if [ "$GEN_ICO" -eq 1 ]; then
 	echo "==> make gen-ico"

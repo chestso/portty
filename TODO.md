@@ -10,8 +10,7 @@ We render through SDL's **high-level** `SDL_Renderer`, created with the
 `"gpu"` driver name (`platform_sdl3.c:757`). On Linux that backend resolves
 to Vulkan — this is the "we went all Vulkan" change. It bought us
 **linear-light glyph blending** (the gpu/vulkan renderer honors SRGB_LINEAR
-float render targets; `rend_sdl3.c:950-956`) and, on the GTK4 path, a
-hand-written Vulkan device for zero-copy DMA-BUF export (`gtk4_vulkan.c`).
+float render targets; `rend_sdl3.c:950-956`).
 
 But the glyph draw loop is still one `SDL_RenderTexture` per cell plus
 `SDL_RenderFillRect` per background/underline/cursor/selection

@@ -228,14 +228,6 @@ char *diag_build_report(const DiagSources *s)
 #else
     kv(&sb, "font resolver", "Fontconfig");
 #endif
-#ifdef HAVE_GTK4
-    kvf(&sb, "GTK4", "%s  (libadwaita %s)", DEP_GTK4_VERSION, DEP_LIBADWAITA_VERSION);
-#ifdef HAVE_VULKAN_DMABUF
-    kv(&sb, "GTK4 present", "Vulkan zero-copy DMA-BUF");
-#else
-    kv(&sb, "GTK4 present", "readback");
-#endif
-#endif
 
     // Rendering
     section(&sb, "RENDERING");

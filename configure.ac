@@ -132,53 +132,6 @@ if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   AC_DEFINE_UNQUOTED([DEP_FONTCONFIG_VERSION], ["$DEP_FONTCONFIG_VER"], [Fontconfig version])
 fi
 
-# Optional GTK4/libadwaita support (not on Windows)
-AC_ARG_ENABLE([gtk4],
-  [AS_HELP_STRING([--enable-gtk4],
-    [enable GTK4/libadwaita platform backend (auto-detected)])],
-  [enable_gtk4=$enableval],
-  [enable_gtk4=auto])
-
-# Force-disable GTK4 on Windows and macOS
-if test "x$host_windows" = "xyes" || test "x$host_macos" = "xyes"; then
-  enable_gtk4=no
-fi
-
-have_gtk4=no
-if test "x$enable_gtk4" != "xno"; then
-  PKG_CHECK_MODULES([GTK4], [gtk4 libadwaita-1],
-    [have_gtk4=yes],
-    [have_gtk4=no])
-  if test "x$enable_gtk4" = "xyes" && test "x$have_gtk4" = "xno"; then
-    AC_MSG_ERROR([GTK4/libadwaita requested but not found])
-  fi
-fi
-AM_CONDITIONAL([HAVE_GTK4], [test "x$have_gtk4" = "xyes"])
-if test "x$have_gtk4" = "xyes"; then
-  AC_DEFINE([HAVE_GTK4], [1], [Define if GTK4/libadwaita is available])
-  DEP_GTK4_VER=$($PKG_CONFIG --modversion gtk4 2>/dev/null || echo "unknown")
-  AC_DEFINE_UNQUOTED([DEP_GTK4_VERSION], ["$DEP_GTK4_VER"], [GTK4 version])
-  DEP_LIBADWAITA_VER=$($PKG_CONFIG --modversion libadwaita-1 2>/dev/null || echo "unknown")
-  AC_DEFINE_UNQUOTED([DEP_LIBADWAITA_VERSION], ["$DEP_LIBADWAITA_VER"], [libadwaita version])
-  AC_MSG_NOTICE([GTK4/libadwaita platform backend enabled])
-
-  # libdrm provides <drm_fourcc.h> (DRM format constants used when describing
-  # the exported DMA-BUF to GTK). Header-only here; no extra link required.
-  PKG_CHECK_MODULES([LIBDRM], [libdrm], [have_libdrm=yes], [have_libdrm=no])
-
-  # Vulkan: the GTK4 backend renders with SDL's Vulkan renderer (gamma-correct
-  # linear-light blending) and exports the render target as a DMA-BUF via
-  # Vulkan external memory for zero-copy display. coffer owns Vulkan device
-  # creation (SDL's own device does not enable the external-memory extensions).
-  PKG_CHECK_MODULES([VULKAN], [vulkan], [have_vulkan=yes], [have_vulkan=no])
-  if test "x$have_vulkan" = "xyes" && test "x$have_libdrm" = "xyes"; then
-    AC_DEFINE([HAVE_VULKAN_DMABUF], [1], [Have Vulkan for zero-copy DMA-BUF export])
-    AC_MSG_NOTICE([Vulkan DMA-BUF zero-copy rendering enabled])
-  else
-    AC_MSG_NOTICE([Vulkan not available, GTK4 falls back to readback rendering])
-  fi
-fi
-
 # Generate config.h header
 AC_CONFIG_HEADERS([config.h])
 dnl PORTTY_VERSION is intentionally NOT defined in config.h.

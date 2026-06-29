@@ -22,7 +22,6 @@
 #endif
 #include "pager.h"
 #include "platform.h"
-#include "platform_gtk4.h"
 #include "platform_sdl3.h"
 #include "png_mode.h"
 #include "rend.h"
@@ -41,7 +40,7 @@
 #include <io.h>
 #include <windows.h>
 #else
-#include <dlfcn.h>
+
 #include <unistd.h>
 #endif
 
@@ -887,15 +886,11 @@ int main(int argc, char *argv[])
     int init_rows = DEFAULT_ROWS;
     int init_scrollback = -1;
 
-    int use_gtk4 = 0;
-
     static struct option long_options[] = {
         { "help", no_argument, NULL, 'h' },
         { "version", no_argument, NULL, 'V' },
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
-        { "gtk4", no_argument, NULL, 'G' },
-        { "sdl3", no_argument, NULL, 'S' },
         { "demo", required_argument, NULL, 'd' },
         { "exec", required_argument, NULL, 'X' },
         { "wait", required_argument, NULL, 'W' },
@@ -921,8 +916,8 @@ int main(int argc, char *argv[])
                                         FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
         ft_hint_target = hint_map[conf.hinting];
     }
-    if (conf.platform && strcmp(conf.platform, "gtk4") == 0)
-        use_gtk4 = 1;
+    if (conf.platform && strcmp(conf.platform, "sdl3") == 0)
+        ; /* sdl3 is the only platform now */
     if (conf.scrollback >= 0)
         init_scrollback = conf.scrollback;
     /* kitty-style text_composition_strategy curve (unset = neutral). */
@@ -996,11 +991,6 @@ int main(int argc, char *argv[])
         case 'D':
             colr_debug_path = optarg;
             break;
-        case 'G':
-            use_gtk4 = 1;
-            break;
-        case 'S':
-            use_gtk4 = 0;
             break;
         case 's':
         {
@@ -1094,78 +1084,9 @@ int main(int argc, char *argv[])
 
     // Select and initialize platform backend
     PlatformBackend *selected_backend = &platform_backend_sdl3;
-#ifndef _WIN32
-    void *gtk4_plugin_handle = NULL;
-#endif
-
-    if (use_gtk4) {
-#ifdef _WIN32
-        fprintf(stderr, "ERROR: GTK4 backend not available on Windows\n");
-        return 1;
-#else
-        // Probe for the GTK4 plugin shared object
-        static const char *plugin_name = "portty-gtk4.so";
-        char probe_path[PATH_MAX];
-        const char *base = SDL_GetBasePath();
-        const char *try_paths[] = { NULL, NULL, NULL };
-        int n_paths = 0;
-
-        // Build tree: exe is build/src/portty, plugin is build/src/.libs/
-        if (base) {
-            snprintf(probe_path, sizeof(probe_path), "%s.libs/%s", base, plugin_name);
-            try_paths[n_paths++] = probe_path;
-        }
-
-        // Installed: $PREFIX/lib/portty/
-        char installed_path[PATH_MAX];
-        if (base) {
-            snprintf(installed_path, sizeof(installed_path),
-                     "%s../lib/portty/%s", base, plugin_name);
-            try_paths[n_paths++] = installed_path;
-        }
-
-#ifdef PKGLIBDIR
-        // Compile-time pkglibdir fallback
-        char pkglib_path[PATH_MAX];
-        snprintf(pkglib_path, sizeof(pkglib_path), "%s/%s", PKGLIBDIR, plugin_name);
-        try_paths[n_paths++] = pkglib_path;
-#endif
-
-        const char *loaded_path = NULL;
-        for (int i = 0; i < n_paths && !gtk4_plugin_handle; i++) {
-            vlog("Probing GTK4 plugin: %s\n", try_paths[i]);
-            gtk4_plugin_handle = dlopen(try_paths[i], RTLD_NOW);
-            if (gtk4_plugin_handle)
-                loaded_path = try_paths[i];
-        }
-
-        if (!gtk4_plugin_handle) {
-            fprintf(stderr, "ERROR: --gtk4 requested but plugin not found\n");
-            fprintf(stderr, "  %s\n", dlerror());
-            return 1;
-        }
-
-        portty_platform_gtk4_get_fn get_backend =
-            (portty_platform_gtk4_get_fn)dlsym(gtk4_plugin_handle, "portty_platform_gtk4_get");
-        if (!get_backend) {
-            fprintf(stderr, "ERROR: GTK4 plugin missing portty_platform_gtk4_get: %s\n",
-                    dlerror());
-            dlclose(gtk4_plugin_handle);
-            return 1;
-        }
-
-        selected_backend = get_backend();
-        vlog("Loaded GTK4 plugin from %s\n", loaded_path);
-#endif /* _WIN32 */
-    }
-
     plat = platform_init(selected_backend);
     if (!plat) {
         fprintf(stderr, "ERROR: Failed to initialize platform\n");
-#ifndef _WIN32
-        if (gtk4_plugin_handle)
-            dlclose(gtk4_plugin_handle);
-#endif
         return 1;
     }
 
@@ -1442,10 +1363,6 @@ int main(int argc, char *argv[])
     terminal_destroy(term);
     portty_conf_free(&conf);
     platform_destroy(plat);
-#ifndef _WIN32
-    if (gtk4_plugin_handle)
-        dlclose(gtk4_plugin_handle);
-#endif
 
     return 0;
 }
@@ -1502,8 +1419,6 @@ static void print_usage(const char *progname)
     printf("  -s, --scrollback N  Scrollback history lines (default: 1000, 0 to disable)\n");
     printf("  --ft-hinting S      FreeType hinting: none, light, normal, mono (default: light)\n");
     printf("  --list-fonts        List available monospace fonts and exit\n");
-    printf("  --gtk4              Use GTK4/libadwaita platform backend (native CSD)\n");
-    printf("  --sdl3              Use SDL3 platform backend (overrides config file)\n");
     printf("  --demo TEXT         Display TEXT in terminal without spawning a shell (for testing)\n");
     printf("  -P TEXT             Render TEXT to a PNG file (output path as positional arg)\n");
     printf("  -D PREFIX           Debug COLR layers: save each layer as PREFIX_layer00.png, etc.\n");
@@ -1543,12 +1458,5 @@ static void print_version(void)
     printf("Font resolver: Core Text (system)\n");
 #elif defined(_WIN32)
     printf("Font resolver: W32 native\n");
-#endif
-#ifdef HAVE_GTK4
-    printf("GTK4 %s, libadwaita %s\n", DEP_GTK4_VERSION,
-           DEP_LIBADWAITA_VERSION);
-#ifdef HAVE_VULKAN_DMABUF
-    printf("DMA-BUF: Vulkan zero-copy\n");
-#endif
 #endif
 }

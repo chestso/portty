@@ -2,7 +2,7 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts), and an optional GTK4/libadwaita platform backend for native GNOME integration. Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Features
 
@@ -29,14 +29,13 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
-- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), rendered natively on GTK4 or by the SDL3 renderer; dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
+- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), rendered by the SDL3 renderer; dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title via OSC 2
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
 - Kitty keyboard protocol (push/pop/set/query plus the Disambiguate and Report-all flags) — modern TUIs like Claude Code can tell Shift+Enter apart from plain Enter, and Ctrl+letter combos no longer collide with their literal control bytes
-- Optional GTK4/libadwaita backend (`--gtk4`) for native client-side decorations on GNOME/Wayland
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
 
 ## Architecture
@@ -44,8 +43,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 portty uses a modular backend abstraction design:
 
 - **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
-  - Default: SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
-  - Optional: GTK4/libadwaita (`platform_backend_gtk4`) — built as a dlopen plugin, provides native CSD with AdwHeaderBar. Renders with SDL's Vulkan renderer into a **triple-buffered ring** of exportable DRM-modifier `VkImage`s (each wrapped as an SDL render target) and presents each frame as a **zero-copy DMA-BUF** (`vkGetMemoryFdKHR` → `GdkDmabufTexture` with `GtkGraphicsOffload`). portty owns Vulkan instance/device creation because SDL's own device does not enable the external-memory extensions. Because GTK imports the buffer on a _separate_ `VkDevice`, each frame is handed off with an explicit cross-device sync step: the render is flushed coherent (a 1×1 readback while the target is bound, which forces SDL's batch flush + device sync) and the image's queue-family ownership is released to `VK_QUEUE_FAMILY_FOREIGN_EXT` in `VK_IMAGE_LAYOUT_GENERAL` (and reacquired before the slot is reused). The ring avoids overwriting a buffer the compositor is still scanning out. Set `PORTTY_GTK4_READBACK=1` to force the CPU-readback path (`SDL_RenderReadPixels` → `GdkMemoryTexture`) instead; it is also the automatic fallback when Vulkan/DMA-BUF is unavailable.
+  - SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: coffer (`terminal_backend_cfr`) — external VT engine consumed via `pkg-config coffer`, bridged through `term_cfr.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
@@ -71,22 +69,6 @@ portty uses a modular backend abstraction design:
 
 Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`, `RendererBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
 
-### GTK4 Plugin
-
-The GTK4 backend is compiled as a separate shared library (`portty-gtk4.so`) and loaded via `dlopen` only when `--gtk4` is passed. This avoids symbol conflicts between GTK4 and libdecor's GTK3 plugin, which both export identically-named symbols (`gtk_init`, `gtk_widget_get_type`, etc.).
-
-The conflict chain: SDL3 on Wayland → dlopen's `libdecor-0.so` → dlopen's `libdecor-gtk.so` → loads `libgtk-3.so`. If GTK4 were linked directly into the binary, the dynamic linker would resolve libdecor's GTK3 calls to GTK4 symbols, causing crashes. GNOME/Mutter does not implement `xdg-decoration`, so libdecor cannot be disabled without losing window decorations on GNOME.
-
-This workaround will become unnecessary when libdecor ships its out-of-process GTK4 plugin ([libdecor MR !176](https://gitlab.freedesktop.org/libdecor/libdecor/-/merge_requests/176)), which runs GTK4 in a separate child process via Wayland IPC. At that point, GTK4 can be linked directly into the main binary.
-
-```
-build/src/portty                          # Main binary (no GTK4 symbols)
-build/src/.libs/portty-gtk4.so            # Plugin (dev build)
-
-$PREFIX/bin/portty                        # Installed binary
-$PREFIX/lib/portty/portty-gtk4.so # Installed plugin
-```
-
 ## Building
 
 The project uses GNU Autotools. From a fresh checkout:
@@ -100,13 +82,13 @@ make check
 make install
 ```
 
-If GTK4 and libadwaita are available, the plugin is built automatically. Pass `--disable-gtk4` to `configure` to skip it. Use `--enable-release` for an optimized build or `--enable-debug` for unsanitized debug.
+Use `--enable-release` for an optimized build or `--enable-debug` for unsanitized debug.
 
 ### Make Targets
 
 - `make` — build everything
 - `make check` — run the test suite
-- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`, installs the GTK4 plugin to `$prefix/lib/portty/`
+- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`
 - `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
@@ -133,9 +115,6 @@ build/src/portty
 # Run with verbose output (useful to debug font/COLR/emoji handling)
 build/src/portty -v
 
-# Run with GTK4/libadwaita backend (native GNOME decorations)
-build/src/portty --gtk4
-
 # Run a specific command instead of the default shell
 build/src/portty -- htop
 
@@ -161,9 +140,7 @@ build/src/portty -P "" --exec ls --wait 500 output.png
 | `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc.               |
 | `--list-fonts`            | List available monospace fonts and exit                                       |
 | `--ft-hinting S`          | FreeType hinting: none/light/normal/mono (default: light)                     |
-| `--gtk4`                  | Use GTK4/libadwaita platform backend                                          |
-| `--sdl3`                  | Use SDL3 platform backend (overrides config file)                             |
-| `--demo TEXT`              | Display TEXT in terminal without spawning a shell (for testing)               |
+| `--demo TEXT`             | Display TEXT in terminal without spawning a shell (for testing)               |
 | `-V` / `--version`        | Print version and dependency versions, then exit                              |
 | `--exec CMD`              | With `-P`, spawn CMD on a PTY and render its output to PNG                    |
 | `--wait MS`               | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
@@ -220,7 +197,6 @@ The first file found is used:
 font = Cascadia Code-14
 geometry = 120x40
 hinting = light
-platform = gtk4
 verbose = false
 word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/?#[]@!$&'()*+,;=%~
 scrollback = 1000
@@ -237,7 +213,6 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `font`                      | Fontconfig pattern                                    | `monospace`        | Font family and size (e.g. `monospace-16`)                                                                                                           |
 | `geometry`                  | `COLSxROWS`                                           | `80x24`            | Initial terminal dimensions                                                                                                                          |
 | `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`            | FreeType hinting mode                                                                                                                                |
-| `platform`                  | `sdl3`, `gtk4`                                        | `sdl3`             | Platform backend                                                                                                                                     |
 | `verbose`                   | `true`/`false`                                        | `false`            | Debug output                                                                                                                                         |
 | `word_chars`                | Character string                                      | `A-Za-z0-9_-/`     | Characters treated as word for double-click                                                                                                          |
 | `scrollback`                | Non-negative integer                                  | `1000`             | Scrollback history lines (0 disables)                                                                                                                |
@@ -297,11 +272,6 @@ macOS only:
 
 - Core Text + Core Foundation (system frameworks, always available)
 
-Optional (Linux):
-
-- gtk4 + libadwaita-1 (for `--gtk4` platform backend)
-- libdrm (DRM format constants for the GTK4 backend's Vulkan DMA-BUF export; the Vulkan runtime above is also required)
-
 ### Fedora 41+
 
 ```bash
@@ -313,9 +283,6 @@ sudo dnf install SDL3-devel fontconfig-devel freetype-devel harfbuzz-devel libpn
 
 # Runtime: a Vulkan driver for the GPU renderer (most systems have it)
 sudo dnf install mesa-vulkan-drivers vulkan-loader
-
-# Optional: GTK4 backend (vulkan-loader-devel + libdrm-devel for DMA-BUF export)
-sudo dnf install gtk4-devel libadwaita-devel vulkan-loader-devel libdrm-devel
 
 # Optional: compile_commands.json for editors
 sudo dnf install bear
@@ -355,7 +322,7 @@ Or build manually from a UCRT64 shell:
 ```bash
 ./autogen.sh   # or: aclocal && autoheader && automake && autoconf
 mkdir build && cd build
-../configure --disable-gtk4
+../configure
 make -j$(nproc)
 make check
 ```
@@ -398,7 +365,7 @@ rm -rf "$FIXSH"
 - **Font resolver**: Native Windows font discovery (`src/font_resolve_w32.c`) replaces Fontconfig. Uses `EnumFontFamiliesExW` (GDI) for accurate family/style/pitch enumeration, dual registry scan (HKLM + HKCU) for file path resolution of traditional installed fonts, and DirectWrite (`IDWriteLocalFontFileLoader::GetFilePathFromKey`) as a fallback for UWP/Store fonts (e.g. Cascadia Mono) that GDI can enumerate but the registry cannot resolve. The system default console font is read from `HKCU\Console\FaceName` (resolving the `__DefaultTTFont__` sentinel). Default monospace fallback chain: Cascadia Mono → Cascadia Code → Consolas → Courier New.
 - **DWM styling**: Dark title bar, Mica backdrop, custom caption color, rounded corners on Windows 11 (degrades gracefully on older versions)
 - **ConPTY passthrough**: `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8, Windows 11 22H2+) is enabled by default with fallback to standard mode on older builds. When effective, it relays the raw VT stream from the child process, preserving unknown sequences (e.g. APC for Lottie). On some builds the flag is accepted but does not actually pass unknown sequences through; the OSC 5555 workaround handles this transparently
-- **Platform**: SDL3 only (GTK4 backend is not available on Windows)
+- **Platform**: SDL3
 
 ## Testing
 
@@ -417,13 +384,11 @@ cd build && make check
 | `test_altscreen_mouse`    | Altscreen/mouse-mode state and dispatch logic                         |
 | `test_sixel`              | Sixel image end-to-end through host bridge                            |
 | `test_lottie`             | Lottie animation bridge to coffer                                     |
-| `test_paste_normalize`    | Clipboard line-ending normalization (CRLF→LF fix for Windows paste)           |
+| `test_paste_normalize`    | Clipboard line-ending normalization (CRLF→LF fix for Windows paste)   |
 | `test_diag`               | Diagnostics report generation                                         |
 | `test_pty_pause`          | PTY pause/resume during selection (POSIX only)                        |
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
-
-The GTK4 zero-copy DMA-BUF path also has a headless coherence self-test: `PORTTY_GTK4_SELFTEST=1 portty --gtk4 -- true` renders a distinct-colored grid into each ring buffer at a row-padded size, exports it, reads it back through GTK's own importer (`gdk_texture_download`), and checks every cell lands in place — catching cross-device staleness and stride/layout regressions without a display. It prints `SELFTEST: 0/N frames FAILED` and exits.
 
 ## plotty — Lottie Player
 
