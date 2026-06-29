@@ -114,19 +114,15 @@ If GTK4 and libadwaita are available, the plugin is built automatically. Pass `-
 
 ### Helper Scripts
 
-| Script                        | Purpose                                                                                    |
-| ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `scripts/build-osxcross.sh`   | Cross-compile for macOS using osxcross                                                     |
-| `scripts/profile.sh`          | Build with `-pg`, run a benchmark, write `profile-report.txt`                              |
-| `scripts/vm-mac.sh CMD`       | macOS VM lifecycle (`setup`/`install`/`run`/`deploy`)                                      |
-| `scripts/ref-png.sh T OUT`    | Generate reference PNG of TEXT using hb-view                                               |
-| `scripts/ref-layers.sh T P`   | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                                  |
-| `scripts/colr_layers.py`      | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer)           |
-| `scripts/gen_icon.py`         | Generate app icons (SVG + PNG)                                                             |
-| `scripts/pty_record.py`       | Record PTY traffic from a child process (debug feature-detect probes)                      |
-| `scripts/build-macos-deps.sh` | Cross-compile all macOS dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) via osxcross |
-| `scripts/setup-osxcross.sh`   | One-time osxcross toolchain setup (used by `build-osxcross.sh`)                            |
-| `scripts/build-ucrt64.sh`     | Build natively on Windows (MSYS2 UCRT64); `--gen-ico` regenerates the .ico from SVG        |
+| Script                      | Purpose                                                                             |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| `scripts/profile.sh`        | Build with `-pg`, run a benchmark, write `profile-report.txt`                       |
+| `scripts/ref-png.sh T OUT`  | Generate reference PNG of TEXT using hb-view                                        |
+| `scripts/ref-layers.sh T P` | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                           |
+| `scripts/colr_layers.py`    | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer)    |
+| `scripts/gen_icon.py`       | Generate app icons (SVG + PNG)                                                      |
+| `scripts/pty_record.py`     | Record PTY traffic from a child process (debug feature-detect probes)               |
+| `scripts/build-ucrt64.sh`   | Build natively on Windows (MSYS2 UCRT64); `--gen-ico` regenerates the .ico from SVG |
 
 ## Usage
 
@@ -401,56 +397,6 @@ rm -rf "$FIXSH"
 - **DWM styling**: Dark title bar, Mica backdrop, custom caption color, rounded corners on Windows 11 (degrades gracefully on older versions)
 - **ConPTY passthrough**: `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8, Windows 11 22H2+) is enabled by default with fallback to standard mode on older builds. When effective, it relays the raw VT stream from the child process, preserving unknown sequences (e.g. APC for Lottie). On some builds the flag is accepted but does not actually pass unknown sequences through; the OSC 5555 workaround handles this transparently
 - **Platform**: SDL3 only (GTK4 backend is not available on Windows)
-
-## macOS Cross-Compilation
-
-bloom-terminal can be cross-compiled for macOS using [osxcross](https://github.com/tpoechtrager/osxcross). The macOS build uses native Core Text font resolution — no Homebrew or external dependencies needed at runtime.
-
-### Prerequisites
-
-1. Set up the osxcross toolchain (downloads ~700 MB SDK from Apple, requires free Apple ID):
-
-```bash
-# Download "Command Line Tools for Xcode" .dmg from https://developer.apple.com/download/all/
-./scripts/setup-osxcross.sh ~/Downloads/Command_Line_Tools_for_Xcode_*.dmg
-```
-
-osxcross is installed into `./osxcross/` (gitignored). All dependencies (zlib, libpng, FreeType, HarfBuzz, SDL3) are cross-compiled automatically on first build. No sudo required.
-
-### Building
-
-```bash
-./scripts/build-osxcross.sh
-```
-
-This produces `build-osxcross/src/bloom-terminal` (Mach-O 64-bit x86_64). The osxcross build uses a separate directory so it doesn't conflict with the Linux `build/`.
-
-### Testing with QEMU/KVM
-
-For interactive testing, use a macOS VM with QEMU/KVM via [OSX-KVM](https://github.com/kholia/OSX-KVM):
-
-```bash
-./scripts/vm-mac.sh setup    # Download recovery image, create disk images (one-time)
-./scripts/vm-mac.sh install  # Boot from recovery to install macOS
-./scripts/vm-mac.sh deploy   # Cross-compile and write binary to VM transfer disk
-./scripts/vm-mac.sh run      # Boot the VM (transfer disk appears as USB drive)
-```
-
-The installer boots into OpenCore — select **"macOS Base System"**, then use **Disk Utility** to erase the SATA disk (APFS, GUID) before installing.
-
-The transfer disk mounts as a USB drive in Finder. On first use, install the terminfo entry (one-time):
-
-```bash
-sh /Volumes/NO\ NAME/install-terminfo.sh
-```
-
-Then run bloom-terminal from the USB drive or copy it locally.
-
-### macOS Details
-
-- **PTY**: Standard BSD `forkpty()` from `<util.h>` — same POSIX implementation as Linux (`src/pty.c`)
-- **Font resolver**: Native Core Text (`src/font_resolve_ct.c`). Default fallback chain: SF Mono → Menlo → Monaco → Courier. Emoji via Apple Color Emoji.
-- **Platform**: SDL3 only (GTK4 backend is not available on macOS)
 
 ## Testing
 

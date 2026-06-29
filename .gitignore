@@ -29,11 +29,6 @@ ltmain.sh
 build/
 build-release/
 build-mingw64/
-build-osxcross/
-osxcross/
-deps/
-vm-w32/
-vm-macos/
 _build/
 .deps/
 .dirstamp
