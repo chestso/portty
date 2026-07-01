@@ -152,6 +152,13 @@ typedef struct
     // Cached exe path (resolved once at startup via SDL_GetBasePath)
     char exe_path[PATH_MAX];
 
+    // Working directory reported by the shell via OSC 7 or OSC 9;9.
+    // Used by Ctrl+Shift+N to spawn a new terminal in the same directory.
+    // On Windows, the PEB-walk approach fails for ConPTY children
+    // (ReadProcessMemory returns ERROR_PARTIAL_COPY), so this is the
+    // primary CWD source. On Unix, /proc/PID/cwd is tried first.
+    char working_dir[PATH_MAX];
+
     // Stashed in sdl3_run so notify() can reach the renderer (which owns the
     // SDL-drawn panel) and mark the terminal dirty for a repaint.
     RendererBackend *rend;
@@ -285,6 +292,14 @@ static void sdl3_set_cursor(PlatformBackend *plat, PlatformCursor cursor);
 static void sdl3_set_autoscroll(PlatformBackend *plat, bool enabled);
 static bool sdl3_spawn_new_terminal(PlatformBackend *plat);
 
+static void sdl3_set_working_dir(PlatformBackend *plat, const char *dir)
+{
+    if (!plat || !plat->backend_data || !dir)
+        return;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    snprintf(ctx->working_dir, sizeof(ctx->working_dir), "%s", dir);
+}
+
 static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
 {
     if (!plat || !plat->backend_data)
@@ -294,11 +309,17 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
     if (!ctx->exe_path[0])
         return false;
 
-    /* Resolve the PTY child process's CWD so the new terminal opens in
-     * the same directory as the running shell. */
+    /* Resolve the shell's CWD so the new terminal opens in the same
+     * directory. On Windows, the OSC-reported CWD is preferred because
+     * the PEB-walk approach fails for ConPTY children (ReadProcessMemory
+     * returns ERROR_PARTIAL_COPY). On Unix, /proc/PID/cwd is reliable
+     * and always up-to-date, so it's tried first. */
     char cwd_path[PATH_MAX] = "";
-    if (ctx->pty)
+    if (ctx->working_dir[0]) {
+        snprintf(cwd_path, sizeof(cwd_path), "%s", ctx->working_dir);
+    } else if (ctx->pty) {
         pty_get_child_cwd(ctx->pty, cwd_path, sizeof(cwd_path));
+    }
 
 #ifdef _WIN32
     /* Use CreateProcessW so we can pass lpCurrentDirectory (the shell's
@@ -448,6 +469,7 @@ PlatformBackend platform_backend_sdl3 = {
     .set_cursor = sdl3_set_cursor,
     .set_autoscroll = sdl3_set_autoscroll,
     .spawn_new_terminal = sdl3_spawn_new_terminal,
+    .set_working_dir = sdl3_set_working_dir,
 #ifdef _WIN32
     .get_default_font = sdl3_get_default_font,
 #endif

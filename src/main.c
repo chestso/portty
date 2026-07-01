@@ -233,6 +233,15 @@ static void on_clipboard_set(const char *text, size_t len, void *user_data)
     free(buf);
 }
 
+// OSC 7 / OSC 9;9 working-directory callback. The shell emits these
+// sequences on every directory change so the terminal can track CWD
+// for Ctrl+Shift+N (spawn new terminal in same directory).
+static void on_cwd_change(const char *dir, void *user_data)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    platform_set_working_dir(ctx->plat, dir);
+}
+
 // Build the diagnostics document and show it in the internal pager. Rendered by
 // portty itself (not an external pager), so OSC 8 links stay clickable
 // and nothing is injected into the shell.
@@ -1345,6 +1354,9 @@ int main(int argc, char *argv[])
 
         // OSC 52: route application clipboard-set requests to the OS clipboard
         terminal_set_clipboard_set_callback(term, on_clipboard_set, &main_ctx);
+
+        // OSC 7 / OSC 9;9 CWD tracking for Ctrl+Shift+N
+        terminal_set_cwd_callback(term, on_cwd_change, &main_ctx);
 
         // Run the event loop (blocks)
         platform_run(plat, term, rend, &callbacks);

@@ -11,6 +11,7 @@
 #include "term.h"
 #include "term_cfr.h"
 
+#include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +25,12 @@ typedef struct
     size_t last_len;
 } ClipboardCapture;
 
+typedef struct
+{
+    int call_count;
+    char last[PATH_MAX];
+} CwdCapture;
+
 static void capture_set(const char *text, size_t len, void *user)
 {
     ClipboardCapture *c = user;
@@ -32,6 +39,13 @@ static void capture_set(const char *text, size_t len, void *user)
     if (c->last_len)
         memcpy(c->last, text, c->last_len);
     c->last[c->last_len] = '\0';
+}
+
+static void capture_cwd(const char *dir, void *user)
+{
+    CwdCapture *c = user;
+    c->call_count++;
+    snprintf(c->last, sizeof(c->last), "%s", dir);
 }
 
 static void feed(TerminalBackend *t, const void *bytes, size_t n)
@@ -278,6 +292,192 @@ static void test_osc52_empty_payload_clears(void)
     terminal_destroy(&t);
 }
 
+/* ------------------------------------------------------------------ */
+/* OSC 7 / OSC 9;9 CWD tracking                                        */
+/* ------------------------------------------------------------------ */
+
+static void install_cwd(TerminalBackend *t, CwdCapture *c)
+{
+    memset(c, 0, sizeof(*c));
+    terminal_set_cwd_callback(t, capture_cwd, c);
+}
+
+/* OSC 7 with a Unix file:// URI */
+static void test_osc7_unix_path(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    const char seq[] = "\x1b]7;file:///home/user/projects\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+    /* file:///home/... → /home/... (Unix-style absolute path kept) */
+    ASSERT_STR_EQ(cap.last, "/home/user/projects");
+
+    terminal_destroy(&t);
+}
+
+/* OSC 7 with a Windows file:/// URI */
+static void test_osc7_windows_path(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    /* On Windows, file:///C:/Users/foo → C:/Users/foo */
+    const char seq[] = "\x1b]7;file:///C:/Users/foo\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+#ifdef _WIN32
+    ASSERT_STR_EQ(cap.last, "C:/Users/foo");
+#else
+    ASSERT_STR_EQ(cap.last, "C:/Users/foo");
+#endif
+
+    terminal_destroy(&t);
+}
+
+/* OSC 7 with URL-encoded spaces (%20) */
+static void test_osc7_url_encoded(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    const char seq[] = "\x1b]7;file:///home/my%20dir\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+    ASSERT_STR_EQ(cap.last, "/home/my dir");
+
+    terminal_destroy(&t);
+}
+
+/* OSC 9;9 ConEmu CWD protocol */
+static void test_osc99_conemu_cwd(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    const char seq[] = "\x1b]9;9;\"C:\\Users\\foo\"\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+    ASSERT_STR_EQ(cap.last, "C:\\Users\\foo");
+
+    terminal_destroy(&t);
+}
+
+/* OSC 9;9 without quotes */
+static void test_osc99_no_quotes(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    const char seq[] = "\x1b]9;9;/home/user\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+    ASSERT_STR_EQ(cap.last, "/home/user");
+
+    terminal_destroy(&t);
+}
+
+/* OSC 9 with a non-9 sub-command must NOT fire the CWD callback */
+static void test_osc9_non9_subcmd(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    /* OSC 9;4;... is a notification (ConEmu), not CWD */
+    const char seq[] = "\x1b]9;4;some notification\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 0);
+
+    terminal_destroy(&t);
+}
+
+/* Multiple CWD updates: last one wins */
+static void test_osc7_multiple_updates(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    const char seq1[] = "\x1b]7;file:///home/user\x07";
+    const char seq2[] = "\x1b]7;file:///home/user/projects\x07";
+    feed(&t, seq1, sizeof(seq1) - 1);
+    feed(&t, seq2, sizeof(seq2) - 1);
+
+    ASSERT_EQ(cap.call_count, 2);
+    ASSERT_STR_EQ(cap.last, "/home/user/projects");
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -294,6 +494,14 @@ int main(int argc, char *argv[])
     RUN_TEST(test_osc52_malformed_b64);
     RUN_TEST(test_osc52_no_semicolon);
     RUN_TEST(test_osc52_empty_payload_clears);
+
+    RUN_TEST(test_osc7_unix_path);
+    RUN_TEST(test_osc7_windows_path);
+    RUN_TEST(test_osc7_url_encoded);
+    RUN_TEST(test_osc99_conemu_cwd);
+    RUN_TEST(test_osc99_no_quotes);
+    RUN_TEST(test_osc9_non9_subcmd);
+    RUN_TEST(test_osc7_multiple_updates);
 
     TEST_SUMMARY();
 }

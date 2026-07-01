@@ -477,6 +477,12 @@ int pty_get_child_pid(PtyContext *ctx)
  * Note: cross-bitness (WOW64) is not handled — if portty is 64-bit and
  * the child is a 32-bit process, the PEB layout differs and this will
  * fail gracefully (returning false).  This is the uncommon case.
+ *
+ * IMPORTANT: ReadProcessMemory fails with ERROR_PARTIAL_COPY for
+ * processes created via ConPTY (CreatePseudoConsole). This is a known
+ * Windows limitation.  When this function returns false, the caller
+ * falls back to the OSC-reported working directory (OSC 7 / OSC 9;9),
+ * which shells emit on every directory change.
  */
 bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)
 {
@@ -514,8 +520,10 @@ bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)
 
     LONG status = pNtQueryInfoProcess(ctx->process, 0, &pbi, sizeof(pbi),
                                       NULL);
-    if (status < 0 || !pbi.PebBaseAddress)
+    if (status < 0 || !pbi.PebBaseAddress) {
+        vlog("pty_get_child_cwd: NtQueryInformationProcess failed: %ld\n", status);
         return false;
+    }
 
 #ifdef _WIN64
     const SIZE_T pp_offset = 0x20;      /* PEB.ProcessParameters */
@@ -533,42 +541,56 @@ bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)
     if (!ReadProcessMemory(ctx->process,
                            (char *)pbi.PebBaseAddress + pp_offset,
                            &process_params, sizeof(process_params),
-                           &bytes_read))
+                           &bytes_read)) {
+        vlog("pty_get_child_cwd: ReadProcessMemory(PEB->ProcessParams) failed: %lu\n", GetLastError());
         return false;
-    if (!process_params)
+    }
+    if (!process_params) {
+        vlog("pty_get_child_cwd: ProcessParameters is NULL\n");
         return false;
+    }
 
     USHORT cwd_len = 0;
     if (!ReadProcessMemory(ctx->process,
                            (char *)process_params + cwd_len_offset,
-                           &cwd_len, sizeof(cwd_len), &bytes_read))
+                           &cwd_len, sizeof(cwd_len), &bytes_read)) {
+        vlog("pty_get_child_cwd: ReadProcessMemory(cwd_len) failed: %lu\n", GetLastError());
         return false;
+    }
 
     PWSTR cwd_remote_buf = NULL;
     if (!ReadProcessMemory(ctx->process,
                            (char *)process_params + cwd_buf_offset,
                            &cwd_remote_buf, sizeof(cwd_remote_buf),
-                           &bytes_read))
+                           &bytes_read)) {
+        vlog("pty_get_child_cwd: ReadProcessMemory(cwd_buf) failed: %lu\n", GetLastError());
         return false;
+    }
 
-    if (cwd_len == 0 || !cwd_remote_buf)
+    if (cwd_len == 0 || !cwd_remote_buf) {
+        vlog("pty_get_child_cwd: cwd_len=%hu, cwd_remote_buf=%p\n", cwd_len, cwd_remote_buf);
         return false;
+    }
 
     WCHAR wbuf[MAX_PATH];
     SIZE_T read_bytes = cwd_len;
     if (read_bytes > sizeof(wbuf) - sizeof(WCHAR))
         read_bytes = sizeof(wbuf) - sizeof(WCHAR);
     if (!ReadProcessMemory(ctx->process, cwd_remote_buf, wbuf, read_bytes,
-                           &bytes_read))
+                           &bytes_read)) {
+        vlog("pty_get_child_cwd: ReadProcessMemory(cwd string) failed: %lu\n", GetLastError());
         return false;
+    }
 
     SIZE_T wlen = bytes_read / sizeof(WCHAR);
     wbuf[wlen] = L'\0';
 
     int out_len = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, buf,
                                       (int)bufsize - 1, NULL, NULL);
-    if (out_len <= 0)
+    if (out_len <= 0) {
+        vlog("pty_get_child_cwd: WideCharToMultiByte failed: %lu\n", GetLastError());
         return false;
+    }
     buf[out_len] = '\0';
     return true;
 }

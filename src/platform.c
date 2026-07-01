@@ -147,6 +147,15 @@ bool platform_register_pty(PlatformBackend *plat, PtyContext *pty)
     return plat->register_pty(plat, pty);
 }
 
+void platform_set_working_dir(PlatformBackend *plat, const char *dir)
+{
+    if (!plat || !plat->backend_data || !dir)
+        return;
+    /* Delegate to the backend's set_working_dir vtable entry */
+    if (plat->set_working_dir)
+        plat->set_working_dir(plat, dir);
+}
+
 void platform_run(PlatformBackend *plat, TerminalBackend *term,
                   RendererBackend *rend, PlatformCallbacks *callbacks)
 {

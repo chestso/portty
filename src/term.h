@@ -17,6 +17,11 @@ typedef void (*TerminalOutputCallback)(const char *data, size_t len, void *user)
 // Callback fired when selection becomes active or inactive
 typedef void (*TerminalSelectionChangeFn)(bool active, void *user_data);
 
+// Callback fired when the application reports its working directory via
+// OSC 7 (file:// URI) or OSC 9;9 (ConEmu CWD). `utf8` is NUL-terminated
+// and valid only during the call.
+typedef void (*TerminalCwdFn)(const char *utf8, void *user_data);
+
 // Callback fired when the application asks the terminal to set the system
 // clipboard via OSC 52. `text` is the decoded payload (raw bytes; not
 // necessarily NUL-terminated, may contain interior NULs). `len` is the
@@ -110,6 +115,12 @@ struct TerminalBackend
     // sequences emitted by tmux/neovim/etc. can reach the OS clipboard.
     TerminalClipboardSetFn clipboard_set_cb;
     void *clipboard_set_data;
+
+    // OSC 7 / OSC 9;9 working-directory hook. Application installs this so
+    // that Ctrl+Shift+N spawns the new terminal in the shell's CWD even
+    // when the PEB walk is unavailable (ConPTY on Windows).
+    TerminalCwdFn cwd_cb;
+    void *cwd_cb_data;
 
     // Active OSC-8 hyperlink under the mouse (0 = none). Set by main.c on
     // mouse motion; consumed by the renderer to draw the run sharing this
@@ -349,6 +360,7 @@ void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionCha
                                      void *user_data);
 void terminal_set_clipboard_set_callback(TerminalBackend *term, TerminalClipboardSetFn cb,
                                          void *user_data);
+void terminal_set_cwd_callback(TerminalBackend *term, TerminalCwdFn cb, void *user_data);
 
 // Row iterator over a terminal row. coffer stores UAX #11 + #29
 // cluster widths on the cell, so the iterator is now a plain

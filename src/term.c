@@ -450,6 +450,15 @@ void terminal_set_clipboard_set_callback(TerminalBackend *term, TerminalClipboar
     term->clipboard_set_data = user_data;
 }
 
+void terminal_set_cwd_callback(TerminalBackend *term, TerminalCwdFn cb,
+                               void *user_data)
+{
+    if (!term)
+        return;
+    term->cwd_cb = cb;
+    term->cwd_cb_data = user_data;
+}
+
 // Expand start/end to cover the word at (row, col)
 static void expand_word(TerminalBackend *term, int row, int col, TerminalPos *out_start,
                         TerminalPos *out_end)

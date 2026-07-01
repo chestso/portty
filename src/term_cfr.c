@@ -223,41 +223,138 @@ static void cb_sb_pop(CfrCell *o, int n, void *u)
  * '?' query form is silently refused — see the rationale in term.h next to
  * TerminalClipboardSetFn. coffer only forwards non-special OSC codes here
  * (0/1/2 go through set_title; 8 is handled inside the engine), so the
- * code==52 guard is strictly a defense against future engine changes. */
+ * code==52 guard is strictly a defense against future engine changes.
+ *
+ * OSC 7 (set working directory): body is a file:// URI. Used by shells
+ * to inform the terminal of CWD changes so Ctrl+Shift+N can spawn a new
+ * terminal in the same directory. This is the same approach Windows
+ * Terminal uses — PEB-walking doesn't work for ConPTY child processes
+ * (ReadProcessMemory returns ERROR_PARTIAL_COPY).
+ *
+ * OSC 9;9 (ConEmu CWD): body is ';' 9 ';' <path>. Same purpose as OSC 7
+ * but using the ConEmu protocol variant. */
 static void cb_osc(int code, const char *data, size_t len, void *user)
 {
     CfrBackendData *d = user;
-    if (code != 52 || !d || !d->term || !d->term->clipboard_set_cb)
+    if (!d || !d->term)
         return;
     if (!data || len == 0)
         return;
 
-    const char *semi = memchr(data, ';', len);
-    if (!semi)
-        return;
-    const char *payload = semi + 1;
-    size_t payload_len = len - (size_t)(payload - data);
+    if (code == 52 && d->term->clipboard_set_cb) {
+        const char *semi = memchr(data, ';', len);
+        if (!semi)
+            return;
+        const char *payload = semi + 1;
+        size_t payload_len = len - (size_t)(payload - data);
 
-    if (payload_len == 1 && payload[0] == '?')
-        return; /* query refused */
+        if (payload_len == 1 && payload[0] == '?')
+            return; /* query refused */
 
-    if (payload_len == 0) {
-        d->term->clipboard_set_cb("", 0, d->term->clipboard_set_data);
-        return;
-    }
+        if (payload_len == 0) {
+            d->term->clipboard_set_cb("", 0, d->term->clipboard_set_data);
+            return;
+        }
 
-    size_t decoded_len = 0;
-    uint8_t *decoded = base64_decode(payload, payload_len, &decoded_len);
-    if (!decoded)
-        return;
-    /* 1 MiB cap mirrors xterm-style guard against runaway sequences. */
-    if (decoded_len > 1024u * 1024u) {
+        size_t decoded_len = 0;
+        uint8_t *decoded = base64_decode(payload, payload_len, &decoded_len);
+        if (!decoded)
+            return;
+        /* 1 MiB cap mirrors xterm-style guard against runaway sequences. */
+        if (decoded_len > 1024u * 1024u) {
+            free(decoded);
+            return;
+        }
+        d->term->clipboard_set_cb((const char *)decoded, decoded_len,
+                                  d->term->clipboard_set_data);
         free(decoded);
         return;
     }
-    d->term->clipboard_set_cb((const char *)decoded, decoded_len,
-                              d->term->clipboard_set_data);
-    free(decoded);
+
+    /* OSC 7: file:// URI → local path. Shells emit this on every cd
+     * (bash: PROMPT_COMMAND, fish: vcs_prompt, zsh: chpwd). */
+    if (code == 7 && d->term->cwd_cb) {
+        /* Make a NUL-terminated copy for parsing */
+        char *uri = malloc(len + 1);
+        if (!uri)
+            return;
+        memcpy(uri, data, len);
+        uri[len] = '\0';
+
+        /* Convert file:// URI to local path.
+         * file:///C:/Users/foo → C:/Users/foo (Windows)
+         * file:///home/foo    → /home/foo    (Unix)       */
+        char *path = uri;
+        if (strncmp(path, "file://", 7) == 0) {
+            path += 7;
+#ifdef _WIN32
+            /* Windows: file:///C:/... → strip the leading / to get C:/...
+             * file://host/share/...  → no leading /, keep as-is. */
+            if (*path == '/' && path[1] && path[2] == ':')
+                path++;
+#endif
+            /* Unix: file:///home/... → /home/... (path already
+             * starts with / after the file:// prefix, no adjustment
+             * needed). */
+        }
+
+        /* URL-decode %XX sequences in-place */
+        char *dst = path, *src = path;
+        while (*src) {
+            if (*src == '%' && src[1] && src[2]) {
+                char hex[3] = { src[1], src[2], '\0' };
+                *dst++ = (char)strtol(hex, NULL, 16);
+                src += 3;
+            } else {
+                *dst++ = *src++;
+            }
+        }
+        *dst = '\0';
+
+        d->term->cwd_cb(path, d->term->cwd_cb_data);
+        free(uri);
+        return;
+    }
+
+    /* OSC 9;9: ConEmu working-directory protocol.
+     * Body format: 9;"<path>" or 9;<path> (quotes optional per ConEmu). */
+    if (code == 9 && d->term->cwd_cb) {
+        const char *semi = memchr(data, ';', len);
+        if (!semi)
+            return;
+        /* Check the sub-command is 9 (OSC 9;9;<path>) */
+        int subcmd = 0;
+        const char *p = data;
+        while (p < semi) {
+            if (*p >= '0' && *p <= '9')
+                subcmd = subcmd * 10 + (*p - '0');
+            else
+                break;
+            p++;
+        }
+        if (subcmd != 9)
+            return;
+
+        const char *payload = semi + 1;
+        size_t payload_len = len - (size_t)(payload - data);
+
+        /* Strip optional surrounding quotes */
+        if (payload_len >= 2 && payload[0] == '"' && payload[payload_len - 1] == '"') {
+            payload++;
+            payload_len -= 2;
+        }
+
+        /* Make NUL-terminated copy */
+        char *path = malloc(payload_len + 1);
+        if (!path)
+            return;
+        memcpy(path, payload, payload_len);
+        path[payload_len] = '\0';
+
+        d->term->cwd_cb(path, d->term->cwd_cb_data);
+        free(path);
+        return;
+    }
 }
 
 /* ------------------------------------------------------------------ */

@@ -170,10 +170,14 @@ struct PlatformBackend
     bool (*get_gpu_info)(PlatformBackend *plat, const char **device,
                          const char **driver, bool *libre);
 
-    // Spawn a new terminal window. The platform resolves the child's CWD
-    // from the PTY child process and launches a new instance of the same
-    // binary. Returns true on success.
+    // Spawn a new terminal window in the shell's CWD. The CWD is
+    // resolved from the OSC-reported working directory (preferred) or
+    // the PTY child process (fallback on Unix). Returns true on success.
     bool (*spawn_new_terminal)(PlatformBackend *plat);
+
+    // Store the working directory reported by the shell via OSC 7/9;9.
+    // Used by spawn_new_terminal to open the new terminal in the same CWD.
+    void (*set_working_dir)(PlatformBackend *plat, const char *dir);
 
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
@@ -209,6 +213,7 @@ void platform_paste_text(TerminalBackend *term, PtyContext *pty,
                          const char *text, size_t len);
 
 bool platform_register_pty(PlatformBackend *plat, PtyContext *pty);
+void platform_set_working_dir(PlatformBackend *plat, const char *dir);
 void platform_run(PlatformBackend *plat, TerminalBackend *term,
                   RendererBackend *rend, PlatformCallbacks *callbacks);
 void platform_request_quit(PlatformBackend *plat);
