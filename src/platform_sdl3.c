@@ -309,7 +309,7 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
                         MAX_PATH);
 
     WCHAR wcmdline[MAX_PATH];
-    wcscpy(wcmdline, wexe);
+    swprintf(wcmdline, MAX_PATH, L"\"%s\"", wexe);
 
     WCHAR wcwd[MAX_PATH] = L"";
     LPWSTR lpcwd = NULL;
@@ -789,11 +789,17 @@ static bool sdl3_plat_init(PlatformBackend *plat)
 
     plat->backend_data = ctx;
 
-    // Cache exe path now while the binary still exists on disk.
-    // SDL_GetBasePath() caches internally and is platform-independent.
+    /* Cache exe path now while the binary still exists on disk.
+     * SDL_GetBasePath() caches internally and is platform-independent.
+     * On Windows, append .exe so CreateProcessW finds the binary. */
     const char *base = SDL_GetBasePath();
-    if (base)
+    if (base) {
+#ifdef _WIN32
+        snprintf(ctx->exe_path, sizeof(ctx->exe_path), "%s" PACKAGE ".exe", base);
+#else
         snprintf(ctx->exe_path, sizeof(ctx->exe_path), "%s" PACKAGE, base);
+#endif
+    }
 
     return true;
 }

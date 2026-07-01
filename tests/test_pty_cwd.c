@@ -156,6 +156,57 @@ static void test_get_cwd_matches_child(void)
     cleanup_temp_dir(temp_dir);
 }
 
+#ifdef _WIN32
+/* Regression test: CreateProcessW must be able to launch the current
+ * executable using the same path construction as sdl3_spawn_new_terminal.
+ * The previous commit switched from SDL_CreateProcess (which auto-appends
+ * .exe) to CreateProcessW (which doesn't), breaking Ctrl+Shift+N on
+ * Windows. This test would have caught that. */
+static void test_spawn_self_via_create_process(void)
+{
+    /* Build exe path: same logic as sdl3_plat_init uses on Windows */
+    WCHAR wexe[MAX_PATH];
+    DWORD len = GetModuleFileNameW(NULL, wexe, MAX_PATH);
+    ASSERT_TRUE(len > 0 && len < MAX_PATH);
+
+    /* Verify the path ends with .exe — the bug was that the path was
+     * constructed without .exe, causing CreateProcessW to fail. */
+    size_t wexe_len = wcslen(wexe);
+    ASSERT_TRUE(wexe_len > 4);
+    ASSERT_TRUE(_wcsicmp(wexe + wexe_len - 4, L".exe") == 0);
+
+    /* Build a quoted command line (same as sdl3_spawn_new_terminal) */
+    WCHAR wcmdline[MAX_PATH];
+    swprintf(wcmdline, MAX_PATH, L"\"%s\"", wexe);
+
+    /* Launch with --version so it exits immediately */
+    wcscat(wcmdline, L" --version");
+
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    /* Also test that lpCurrentDirectory works (the whole point of the
+     * CreateProcessW switch) */
+    WCHAR wcwd[MAX_PATH];
+    DWORD cwd_len = GetCurrentDirectoryW(MAX_PATH, wcwd);
+    ASSERT_TRUE(cwd_len > 0 && cwd_len < MAX_PATH);
+
+    BOOL ok = CreateProcessW(wexe, wcmdline, NULL, NULL, FALSE,
+                             CREATE_NO_WINDOW, NULL, wcwd, &si, &pi);
+    if (!ok) {
+        fprintf(stderr, "  CreateProcessW failed: %lu\n", GetLastError());
+        ASSERT_TRUE(ok);
+    }
+
+    WaitForSingleObject(pi.hProcess, 5000);
+    CloseHandle(pi.hProcess);
+    CloseHandle(pi.hThread);
+}
+#endif
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -165,6 +216,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_get_cwd_null_buf);
     RUN_TEST(test_get_cwd_zero_bufsize);
     RUN_TEST(test_get_cwd_matches_child);
+#ifdef _WIN32
+    RUN_TEST(test_spawn_self_via_create_process);
+#endif
 
     TEST_SUMMARY();
 }
