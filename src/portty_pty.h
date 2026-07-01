@@ -112,14 +112,6 @@ int pty_signal_get_fd(void);
  */
 void pty_signal_drain(void);
 
-/**
- * Get the child process PID (Unix only, for /proc queries).
- *
- * @param ctx PTY context
- * @return Child PID, or -1 if not running
- */
-int pty_get_child_pid(PtyContext *ctx);
-
 #ifndef _WIN32
 /**
  * Get the child process current working directory (Unix only).

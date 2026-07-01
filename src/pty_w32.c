@@ -473,13 +473,6 @@ int pty_get_master_fd(PtyContext *ctx)
     return -1;
 }
 
-int pty_get_child_pid(PtyContext *ctx)
-{
-    if (!ctx || ctx->process == INVALID_HANDLE_VALUE)
-        return -1;
-    return (int)GetProcessId(ctx->process);
-}
-
 void *pty_get_process_handle(PtyContext *ctx)
 {
     if (!ctx)

@@ -397,13 +397,6 @@ int pty_get_master_fd(PtyContext *ctx)
     return ctx->master_fd;
 }
 
-int pty_get_child_pid(PtyContext *ctx)
-{
-    if (!ctx)
-        return -1;
-    return (int)ctx->child_pid;
-}
-
 bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)
 {
     if (!ctx || !buf || bufsize == 0)
