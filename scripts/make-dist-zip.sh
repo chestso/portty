@@ -8,7 +8,6 @@
 #     portty.exe               — main binary
 #     portty.cmd               — launcher (sets TERMINFO_DIRS, then runs exe)
 #     README-PORTABLE.txt      — quick-start instructions
-#     bin/portty.exe           — symlink-free copy for shortcut targets
 #     share/
 #       icons/hicolor/256x256/apps/portty.png
 #       icons/hicolor/scalable/apps/portty.svg
@@ -56,13 +55,12 @@ echo "==> Packaging portty $VERSION"
 
 # Fresh staging directory
 rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR/bin" "$STAGE_DIR/share/icons/hicolor/256x256/apps" \
+mkdir -p "$STAGE_DIR/share/icons/hicolor/256x256/apps" \
 	"$STAGE_DIR/share/icons/hicolor/scalable/apps" \
 	"$STAGE_DIR/share/emacs/site-lisp"
 
 echo "==> Copying portty.exe (from $REAL_EXE)"
 cp "$REAL_EXE" "$STAGE_DIR/portty.exe"
-cp "$REAL_EXE" "$STAGE_DIR/bin/portty.exe"
 
 # --- Data files ------------------------------------------------------------
 echo "==> Copying data files (icons, emacs)"
