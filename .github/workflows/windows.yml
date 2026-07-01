@@ -10,14 +10,22 @@ on:
 permissions:
   contents: write
 
-env:
-  MSYSTEM: UCRT64
-  MSYS2_ARCH: ucrt-x86_64
-
 jobs:
   build-and-test:
-    name: Build & Test (UCRT64)
-    runs-on: windows-latest
+    name: Build & Test (${{ matrix.label }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: x86_64
+            runner: windows-latest
+            msystem: UCRT64
+            arch: ucrt-x86_64
+          - label: aarch64
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            arch: clang-aarch64
+    runs-on: ${{ matrix.runner }}
     defaults:
       run:
         shell: msys2 {0}
@@ -38,22 +46,22 @@ jobs:
       - name: Setup MSYS2
         uses: msys2/setup-msys2@v2
         with:
-          msystem: ${{ env.MSYSTEM }}
+          msystem: ${{ matrix.msystem }}
           update: true
           install: >-
             base-devel
             git
-            mingw-w64-${{ env.MSYS2_ARCH }}-toolchain
+            mingw-w64-${{ matrix.arch }}-toolchain
             autoconf
             automake
             libtool
             make
             pkg-config
-            mingw-w64-${{ env.MSYS2_ARCH }}-sdl3
-            mingw-w64-${{ env.MSYS2_ARCH }}-freetype
-            mingw-w64-${{ env.MSYS2_ARCH }}-harfbuzz
-            mingw-w64-${{ env.MSYS2_ARCH }}-libpng
-            mingw-w64-${{ env.MSYS2_ARCH }}-thorvg
+            mingw-w64-${{ matrix.arch }}-sdl3
+            mingw-w64-${{ matrix.arch }}-freetype
+            mingw-w64-${{ matrix.arch }}-harfbuzz
+            mingw-w64-${{ matrix.arch }}-libpng
+            mingw-w64-${{ matrix.arch }}-thorvg
             ncurses
             zip
             p7zip
@@ -89,8 +97,8 @@ jobs:
         if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
-          name: portty-windows-x86_64
-          path: portty-*-windows-x86_64.zip
+          name: portty-windows-${{ matrix.label }}
+          path: portty-*-windows-*.zip
           if-no-files-found: error
           retention-days: 30
 
@@ -98,6 +106,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: portty-*-windows-x86_64.zip
+          files: portty-*-windows-*.zip
           generate_release_notes: true
           fail_on_unmatched_files: true

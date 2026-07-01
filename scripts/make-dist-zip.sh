@@ -38,7 +38,9 @@ OUTPUT_DIR="${2:-$SRC_DIR}"
 
 # Get version from the same script configure uses
 VERSION="$("$SRC_DIR/build-aux/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0.0.0-unknown")"
-PKG_NAME="portty-${VERSION}-windows-x86_64"
+# Detect target architecture from the built binary
+ARCH=$(file "$REAL_EXE" 2>/dev/null | grep -oq 'ARM64\|aarch64' && echo "aarch64" || echo "x86_64")
+PKG_NAME="portty-${VERSION}-windows-${ARCH}"
 STAGE_DIR="$OUTPUT_DIR/$PKG_NAME"
 ZIP_FILE="$OUTPUT_DIR/${PKG_NAME}.zip"
 
