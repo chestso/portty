@@ -89,7 +89,7 @@ jobs:
         if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v4
         with:
-          name: portty-windows-x86_64-${{ github.sha }}
+          name: portty-windows-x86_64
           path: portty-*-windows-x86_64.zip
           if-no-files-found: error
           retention-days: 30
