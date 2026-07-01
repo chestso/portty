@@ -11,6 +11,7 @@
 #include "term_cfr.h"
 #include "base64.h"
 #include <coffer/coffer.h>
+#include <ctype.h>
 
 #ifdef PORTTY_HARDEN_HEAP
 #include "heap_harden.h"
@@ -289,9 +290,22 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
             path += 7;
 #ifdef _WIN32
             /* Windows: file:///C:/... → strip the leading / to get C:/...
+             * MSYS2 bash emits file:///c/Users/... (no colon after drive
+             * letter) — convert /c/Users/ → C:/Users/ by overwriting
+             * the leading / with the drive letter and the first character
+             * of the path with a colon.
              * file://host/share/...  → no leading /, keep as-is. */
             if (*path == '/' && path[1] && path[2] == ':')
-                path++;
+                path++; /* file:///C:/... → C:/... */
+            else if (*path == '/' && path[1] && path[2] == '/' &&
+                     ((path[1] >= 'a' && path[1] <= 'z') ||
+                      (path[1] >= 'A' && path[1] <= 'Z'))) {
+                /* MSYS2: /c/Users/... → C:/Users/...
+                 * Just overwrite: '/' → drive letter, next char → ':' */
+                path[0] = (char)toupper((unsigned char)path[1]);
+                path[1] = ':';
+                /* path is now C:/Users/... */
+            }
 #endif
             /* Unix: file:///home/... → /home/... (path already
              * starts with / after the file:// prefix, no adjustment

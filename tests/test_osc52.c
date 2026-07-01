@@ -380,6 +380,35 @@ static void test_osc7_url_encoded(void)
     terminal_destroy(&t);
 }
 
+/* OSC 7 with MSYS2-style path (lowercase drive letter, no colon) */
+static void test_osc7_msys2_path(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    /* MSYS2 bash emits file:///c/Users/foo (no colon after drive letter) */
+    const char seq[] = "\x1b]7;file:///c/Users/foo/projects\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+#ifdef _WIN32
+    ASSERT_STR_EQ(cap.last, "C:/Users/foo/projects");
+#else
+    ASSERT_STR_EQ(cap.last, "/c/Users/foo/projects");
+#endif
+
+    terminal_destroy(&t);
+}
+
 /* OSC 9;9 ConEmu CWD protocol */
 static void test_osc99_conemu_cwd(void)
 {
@@ -497,6 +526,7 @@ int main(int argc, char *argv[])
 
     RUN_TEST(test_osc7_unix_path);
     RUN_TEST(test_osc7_windows_path);
+    RUN_TEST(test_osc7_msys2_path);
     RUN_TEST(test_osc7_url_encoded);
     RUN_TEST(test_osc99_conemu_cwd);
     RUN_TEST(test_osc99_no_quotes);

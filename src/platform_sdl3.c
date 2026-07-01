@@ -9,6 +9,7 @@
 #include "png_reader.h"
 #include "timer.h"
 #include <SDL3/SDL.h>
+#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -338,7 +339,19 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
     WCHAR wcwd[MAX_PATH] = L"";
     LPWSTR lpcwd = NULL;
     if (cwd_path[0]) {
-        MultiByteToWideChar(CP_UTF8, 0, cwd_path, -1, wcwd, MAX_PATH);
+        /* Normalize CWD for Windows: convert MSYS2 /c/... to C:\...,
+         * forward slashes to backslashes so CreateProcessW can use it. */
+        char norm[PATH_MAX];
+        snprintf(norm, sizeof(norm), "%s", cwd_path);
+        /* MSYS2 /c/Users/... → C:\Users\... */
+        if (norm[0] == '/' && norm[1] >= 'a' && norm[1] <= 'z' && norm[2] == '/') {
+            norm[0] = (char)toupper((unsigned char)norm[1]);
+            norm[1] = ':';
+        }
+        for (char *p = norm; *p; p++)
+            if (*p == '/')
+                *p = '\\';
+        MultiByteToWideChar(CP_UTF8, 0, norm, -1, wcwd, MAX_PATH);
         lpcwd = wcwd;
     }
 
