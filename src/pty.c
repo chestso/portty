@@ -403,3 +403,21 @@ int pty_get_child_pid(PtyContext *ctx)
         return -1;
     return (int)ctx->child_pid;
 }
+
+bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)
+{
+    if (!ctx || !buf || bufsize == 0)
+        return false;
+    buf[0] = '\0';
+
+    if (ctx->child_pid <= 0)
+        return false;
+
+    char proc_cwd[64];
+    snprintf(proc_cwd, sizeof(proc_cwd), "/proc/%d/cwd", (int)ctx->child_pid);
+    ssize_t cwd_len = readlink(proc_cwd, buf, bufsize - 1);
+    if (cwd_len <= 0)
+        return false;
+    buf[cwd_len] = '\0';
+    return true;
+}

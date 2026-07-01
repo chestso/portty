@@ -74,4 +74,20 @@ test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/pl
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
 endif
 
+# pty_get_child_cwd() — verifies that the CWD of a spawned PTY child can
+# be resolved. Links against the platform-specific PTY implementation.
+# On Windows, pty_w32.c uses ConPTY + NtQueryInformationProcess; on
+# POSIX, pty.c uses /proc/<pid>/cwd.
+if HOST_WINDOWS
+PTY_CWD_SOURCE = ../src/pty_w32.c
+else
+PTY_CWD_SOURCE = ../src/pty.c
+endif
+check_PROGRAMS += test_pty_cwd
+test_pty_cwd_SOURCES = test_pty_cwd.c $(TEST_COMMON) $(PTY_CWD_SOURCE)
+test_pty_cwd_CFLAGS = $(TEST_CFLAGS)
+if HOST_WINDOWS
+test_pty_cwd_LDADD = -ladvapi32
+endif
+
 TESTS = $(check_PROGRAMS)

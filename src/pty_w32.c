@@ -464,6 +464,115 @@ int pty_get_child_pid(PtyContext *ctx)
     return (int)GetProcessId(ctx->process);
 }
 
+/* Read the child process's current working directory from its PEB.
+ *
+ * Windows has no /proc filesystem, so we use NtQueryInformationProcess
+ * to get the PEB address, then ReadProcessMemory to walk:
+ *   PEB → ProcessParameters → CurrentDirectory.DosPath (UNICODE_STRING)
+ *
+ * Offsets differ between 32-bit and 64-bit builds.  This function is
+ * called when spawning a new terminal window (Ctrl+Shift+N) so the new
+ * terminal opens in the same directory as the shell running in the PTY.
+ *
+ * Note: cross-bitness (WOW64) is not handled — if portty is 64-bit and
+ * the child is a 32-bit process, the PEB layout differs and this will
+ * fail gracefully (returning false).  This is the uncommon case.
+ */
+bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)
+{
+    if (!ctx || !buf || bufsize == 0)
+        return false;
+    buf[0] = '\0';
+
+    if (ctx->process == INVALID_HANDLE_VALUE)
+        return false;
+
+    typedef LONG(WINAPI * NtQueryInfoProcess_t)(HANDLE, ULONG, PVOID, ULONG,
+                                                PULONG);
+    static NtQueryInfoProcess_t pNtQueryInfoProcess;
+    if (!pNtQueryInfoProcess) {
+        HMODULE h = GetModuleHandleW(L"ntdll.dll");
+        if (!h)
+            return false;
+        pNtQueryInfoProcess = (NtQueryInfoProcess_t)(void (*)(void))GetProcAddress(
+            h, "NtQueryInformationProcess");
+        if (!pNtQueryInfoProcess)
+            return false;
+    }
+
+    /* PROCESS_BASIC_INFORMATION — only the fields we need */
+    struct
+    {
+        LONG ExitStatus;
+        PVOID PebBaseAddress;
+        ULONG_PTR AffinityMask;
+        LONG BasePriority;
+        ULONG_PTR UniqueProcessId;
+        ULONG_PTR InheritedFromUniqueProcessId;
+    } pbi;
+    ZeroMemory(&pbi, sizeof(pbi));
+
+    LONG status = pNtQueryInfoProcess(ctx->process, 0, &pbi, sizeof(pbi),
+                                      NULL);
+    if (status < 0 || !pbi.PebBaseAddress)
+        return false;
+
+#ifdef _WIN64
+    const SIZE_T pp_offset = 0x20;      /* PEB.ProcessParameters */
+    const SIZE_T cwd_len_offset = 0x38; /* RTL_USER_PROCESS_PARAMETERS.CurrentDirectory.DosPath.Length */
+    const SIZE_T cwd_buf_offset = 0x40; /* ...DosPath.Buffer */
+#else
+    const SIZE_T pp_offset = 0x10;
+    const SIZE_T cwd_len_offset = 0x24;
+    const SIZE_T cwd_buf_offset = 0x28;
+#endif
+
+    SIZE_T bytes_read = 0;
+
+    PVOID process_params = NULL;
+    if (!ReadProcessMemory(ctx->process,
+                           (char *)pbi.PebBaseAddress + pp_offset,
+                           &process_params, sizeof(process_params),
+                           &bytes_read))
+        return false;
+    if (!process_params)
+        return false;
+
+    USHORT cwd_len = 0;
+    if (!ReadProcessMemory(ctx->process,
+                           (char *)process_params + cwd_len_offset,
+                           &cwd_len, sizeof(cwd_len), &bytes_read))
+        return false;
+
+    PWSTR cwd_remote_buf = NULL;
+    if (!ReadProcessMemory(ctx->process,
+                           (char *)process_params + cwd_buf_offset,
+                           &cwd_remote_buf, sizeof(cwd_remote_buf),
+                           &bytes_read))
+        return false;
+
+    if (cwd_len == 0 || !cwd_remote_buf)
+        return false;
+
+    WCHAR wbuf[MAX_PATH];
+    SIZE_T read_bytes = cwd_len;
+    if (read_bytes > sizeof(wbuf) - sizeof(WCHAR))
+        read_bytes = sizeof(wbuf) - sizeof(WCHAR);
+    if (!ReadProcessMemory(ctx->process, cwd_remote_buf, wbuf, read_bytes,
+                           &bytes_read))
+        return false;
+
+    SIZE_T wlen = bytes_read / sizeof(WCHAR);
+    wbuf[wlen] = L'\0';
+
+    int out_len = WideCharToMultiByte(CP_UTF8, 0, wbuf, (int)wlen, buf,
+                                      (int)bufsize - 1, NULL, NULL);
+    if (out_len <= 0)
+        return false;
+    buf[out_len] = '\0';
+    return true;
+}
+
 void *pty_get_process_handle(PtyContext *ctx)
 {
     if (!ctx)

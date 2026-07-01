@@ -120,6 +120,19 @@ void pty_signal_drain(void);
  */
 int pty_get_child_pid(PtyContext *ctx);
 
+/**
+ * Get the child process current working directory.
+ *
+ * Resolves the CWD of the process running inside the PTY so that a new
+ * terminal window can be spawned in the same directory.
+ *
+ * @param ctx PTY context
+ * @param buf Output buffer
+ * @param bufsize Size of buffer
+ * @return true on success, false on failure or if CWD cannot be resolved
+ */
+bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize);
+
 #ifdef _WIN32
 /**
  * Get the child process handle for WaitForMultipleObjects.

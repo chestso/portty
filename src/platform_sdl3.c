@@ -294,29 +294,43 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
     if (!ctx->exe_path[0])
         return false;
 
-#ifndef _WIN32
+    /* Resolve the PTY child process's CWD so the new terminal opens in
+     * the same directory as the running shell. */
     char cwd_path[PATH_MAX] = "";
-    int pty_child_pid = ctx->pty ? pty_get_child_pid(ctx->pty) : -1;
-    if (pty_child_pid > 0) {
-        char proc_cwd[64];
-        snprintf(proc_cwd, sizeof(proc_cwd), "/proc/%d/cwd", pty_child_pid);
-        ssize_t cwd_len = readlink(proc_cwd, cwd_path, sizeof(cwd_path) - 1);
-        if (cwd_len > 0)
-            cwd_path[cwd_len] = '\0';
-        else
-            cwd_path[0] = '\0';
-    }
-#endif
+    if (ctx->pty)
+        pty_get_child_cwd(ctx->pty, cwd_path, sizeof(cwd_path));
 
 #ifdef _WIN32
-    // On Windows, use SDL_CreateProcess for simplicity
-    const char *const argv[] = { ctx->exe_path, NULL };
-    SDL_Process *proc = SDL_CreateProcess(argv, 0);
-    if (proc) {
-        SDL_DestroyProcess(proc);
+    /* Use CreateProcessW so we can pass lpCurrentDirectory (the shell's
+     * CWD). SDL_CreateProcess has no cwd parameter, so it would inherit
+     * the parent's CWD instead. */
+    WCHAR wexe[MAX_PATH];
+    MultiByteToWideChar(CP_UTF8, 0, ctx->exe_path, -1, wexe,
+                        MAX_PATH);
+
+    WCHAR wcmdline[MAX_PATH];
+    wcscpy(wcmdline, wexe);
+
+    WCHAR wcwd[MAX_PATH] = L"";
+    LPWSTR lpcwd = NULL;
+    if (cwd_path[0]) {
+        MultiByteToWideChar(CP_UTF8, 0, cwd_path, -1, wcwd, MAX_PATH);
+        lpcwd = wcwd;
+    }
+
+    STARTUPINFOW si;
+    ZeroMemory(&si, sizeof(si));
+    si.cb = sizeof(si);
+    PROCESS_INFORMATION pi;
+    ZeroMemory(&pi, sizeof(pi));
+
+    if (CreateProcessW(wexe, wcmdline, NULL, NULL, FALSE, 0, NULL,
+                       lpcwd, &si, &pi)) {
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
         return true;
     }
-    vlog("Failed to spawn terminal: %s\n", SDL_GetError());
+    vlog("Failed to spawn terminal: %lu\n", GetLastError());
     return false;
 #else
     pid_t pid = fork();
