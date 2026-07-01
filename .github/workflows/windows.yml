@@ -42,6 +42,7 @@ jobs:
           update: true
           install: >-
             base-devel
+            git
             mingw-w64-${{ env.MSYS2_ARCH }}-toolchain
             autoconf
             automake
