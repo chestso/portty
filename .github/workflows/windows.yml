@@ -1,0 +1,102 @@
+name: Windows
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+env:
+  MSYSTEM: UCRT64
+  MSYS2_ARCH: ucrt-x86_64
+
+jobs:
+  build-and-test:
+    name: Build & Test (UCRT64)
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout portty
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Checkout coffer (dependency)
+        uses: actions/checkout@v4
+        with:
+          repository: chestso/coffer
+          path: coffer
+          fetch-depth: 0
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: ${{ env.MSYSTEM }}
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-${{ env.MSYS2_ARCH }}-toolchain
+            autoconf
+            automake
+            libtool
+            make
+            pkg-config
+            mingw-w64-${{ env.MSYS2_ARCH }}-sdl3
+            mingw-w64-${{ env.MSYS2_ARCH }}-freetype
+            mingw-w64-${{ env.MSYS2_ARCH }}-harfbuzz
+            mingw-w64-${{ env.MSYS2_ARCH }}-libpng
+            mingw-w64-${{ env.MSYS2_ARCH }}-thorvg
+            ncurses
+            zip
+            p7zip
+
+      - name: Build & install coffer
+        working-directory: coffer
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          sh ../configure --prefix="$MINGW_PREFIX"
+          make -j"$(nproc)"
+          make check
+          make install
+
+      - name: Build portty
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            sh ../configure --enable-release
+          else
+            sh ../configure
+          fi
+          make -j"$(nproc)"
+
+      - name: Run tests
+        run: make -C build check
+
+      - name: Build portable ZIP
+        run: make -C build dist-portable
+
+      - name: Upload build artifact
+        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: portty-windows-x86_64-${{ github.sha }}
+          path: portty-*-windows-x86_64.zip
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: portty-*-windows-x86_64.zip
+          generate_release_notes: true
+          fail_on_unmatched_files: true
