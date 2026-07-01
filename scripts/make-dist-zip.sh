@@ -38,6 +38,14 @@ OUTPUT_DIR="${2:-$SRC_DIR}"
 
 # Get version from the same script configure uses
 VERSION="$("$SRC_DIR/build-aux/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0.0.0-unknown")"
+
+# --- Binary ----------------------------------------------------------------
+# libtool wraps the real binary in .libs/ — use that if it exists.
+REAL_EXE="$BUILD_DIR/src/portty.exe"
+if [ -f "$BUILD_DIR/src/.libs/portty.exe" ]; then
+	REAL_EXE="$BUILD_DIR/src/.libs/portty.exe"
+fi
+
 # Detect target architecture from the built binary
 ARCH=$(file "$REAL_EXE" 2>/dev/null | grep -oq 'ARM64\|aarch64' && echo "aarch64" || echo "x86_64")
 PKG_NAME="portty-${VERSION}-windows-${ARCH}"
@@ -51,13 +59,6 @@ rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR/bin" "$STAGE_DIR/share/icons/hicolor/256x256/apps" \
 	"$STAGE_DIR/share/icons/hicolor/scalable/apps" \
 	"$STAGE_DIR/share/emacs/site-lisp"
-
-# --- Binary ----------------------------------------------------------------
-# libtool wraps the real binary in .libs/ — use that if it exists.
-REAL_EXE="$BUILD_DIR/src/portty.exe"
-if [ -f "$BUILD_DIR/src/.libs/portty.exe" ]; then
-	REAL_EXE="$BUILD_DIR/src/.libs/portty.exe"
-fi
 
 echo "==> Copying portty.exe (from $REAL_EXE)"
 cp "$REAL_EXE" "$STAGE_DIR/portty.exe"
