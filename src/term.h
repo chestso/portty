@@ -117,8 +117,7 @@ struct TerminalBackend
     void *clipboard_set_data;
 
     // OSC 7 / OSC 9;9 working-directory hook. Application installs this so
-    // that Ctrl+Shift+N spawns the new terminal in the shell's CWD even
-    // when the PEB walk is unavailable (ConPTY on Windows).
+    // that Ctrl+Shift+N spawns the new terminal in the shell's CWD.
     TerminalCwdFn cwd_cb;
     void *cwd_cb_data;
 

@@ -154,9 +154,9 @@ typedef struct
 
     // Working directory reported by the shell via OSC 7 or OSC 9;9.
     // Used by Ctrl+Shift+N to spawn a new terminal in the same directory.
-    // On Windows, the PEB-walk approach fails for ConPTY children
-    // (ReadProcessMemory returns ERROR_PARTIAL_COPY), so this is the
-    // primary CWD source. On Unix, /proc/PID/cwd is tried first.
+    // On Windows, this is the only CWD source (the PEB-walk approach was
+    // removed because ReadProcessMemory fails with ERROR_PARTIAL_COPY
+    // for ConPTY children). On Unix, /proc/PID/cwd is tried first.
     char working_dir[PATH_MAX];
 
     // Stashed in sdl3_run so notify() can reach the renderer (which owns the
@@ -310,16 +310,19 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
         return false;
 
     /* Resolve the shell's CWD so the new terminal opens in the same
-     * directory. On Windows, the OSC-reported CWD is preferred because
-     * the PEB-walk approach fails for ConPTY children (ReadProcessMemory
-     * returns ERROR_PARTIAL_COPY). On Unix, /proc/PID/cwd is reliable
-     * and always up-to-date, so it's tried first. */
+     * directory. On Windows, the OSC-reported CWD is the only source
+     * (the PEB-walk approach via ReadProcessMemory fails with
+     * ERROR_PARTIAL_COPY for ConPTY children). On Unix, /proc/PID/cwd
+     * is reliable and always up-to-date, so it's tried as a fallback. */
     char cwd_path[PATH_MAX] = "";
     if (ctx->working_dir[0]) {
         snprintf(cwd_path, sizeof(cwd_path), "%s", ctx->working_dir);
-    } else if (ctx->pty) {
+    }
+#ifndef _WIN32
+    else if (ctx->pty) {
         pty_get_child_cwd(ctx->pty, cwd_path, sizeof(cwd_path));
     }
+#endif
 
 #ifdef _WIN32
     /* Use CreateProcessW so we can pass lpCurrentDirectory (the shell's

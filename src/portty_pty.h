@@ -120,11 +120,14 @@ void pty_signal_drain(void);
  */
 int pty_get_child_pid(PtyContext *ctx);
 
+#ifndef _WIN32
 /**
- * Get the child process current working directory.
+ * Get the child process current working directory (Unix only).
  *
- * Resolves the CWD of the process running inside the PTY so that a new
- * terminal window can be spawned in the same directory.
+ * Uses /proc/<pid>/cwd to resolve the CWD so that a new terminal window
+ * can be spawned in the same directory. On Windows, the CWD is tracked
+ * via OSC 7/OSC 9;9 escape sequences instead (ReadProcessMemory fails
+ * with ERROR_PARTIAL_COPY for ConPTY children).
  *
  * @param ctx PTY context
  * @param buf Output buffer
@@ -132,6 +135,7 @@ int pty_get_child_pid(PtyContext *ctx);
  * @return true on success, false on failure or if CWD cannot be resolved
  */
 bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize);
+#endif
 
 #ifdef _WIN32
 /**
