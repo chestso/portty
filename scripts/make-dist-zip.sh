@@ -109,8 +109,15 @@ while [ -s "$QUEUE" ]; do
 	[ ! -f "$current" ] && continue
 
 	# Process all DLL dependencies of the current binary
-	# timeout prevents ldd from hanging on emulation-layer DLLs (ARM64)
-	for dll in $(timeout 10 ldd "$current" 2>/dev/null |
+	# timeout prevents ldd from hanging on certain DLLs (ARM64)
+	echo "  ldd: $(basename "$current")"
+	LDD_OUT="$(timeout 10 ldd "$current" 2>&1)"
+	LDD_RC=$?
+	if [ "$LDD_RC" -ne 0 ]; then
+		echo "  WARNING: ldd timed out or failed (rc=$LDD_RC) on: $current"
+		continue
+	fi
+	for dll in $(echo "$LDD_OUT" |
 		grep -i '\.dll' | awk '{print $3}'); do
 		[ -z "$dll" ] && continue
 		[ ! -f "$dll" ] && continue
