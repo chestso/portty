@@ -32,12 +32,12 @@ jobs:
 
     steps:
       - name: Checkout portty
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Checkout coffer (dependency)
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: chestso/coffer
           path: coffer
@@ -95,7 +95,7 @@ jobs:
 
       - name: Upload build artifact
         if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: portty-windows-${{ matrix.label }}
           path: portty-*-windows-*.zip
