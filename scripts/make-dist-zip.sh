@@ -37,7 +37,7 @@ BUILD_DIR="${1:-$SRC_DIR/build}"
 OUTPUT_DIR="${2:-$SRC_DIR}"
 
 # Get version from the same script configure uses
-VERSION="$("$SCRIPT_DIR/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0.0.0-unknown")"
+VERSION="$("$SRC_DIR/build-aux/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0.0.0-unknown")"
 PKG_NAME="portty-${VERSION}-windows-x86_64"
 STAGE_DIR="$OUTPUT_DIR/$PKG_NAME"
 ZIP_FILE="$OUTPUT_DIR/${PKG_NAME}.zip"
