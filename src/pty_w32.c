@@ -221,8 +221,22 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
             L"TERM=portty-vty-256color",
             L"COLORTERM=truecolor",
             L"TERM_PROGRAM=ghostty",
+            /* Inject PROMPT_COMMAND so bash/zsh emit OSC 7 on every
+             * directory change. This allows Ctrl+Shift+N to open the
+             * new terminal in the shell's CWD even though the PEB-walk
+             * approach fails for ConPTY children (ERROR_PARTIAL_COPY).
+             * First-occurrence wins in the env block, so our override
+             * shadows any parent value. */
+            L"PROMPT_COMMAND=printf \"\\033]7;file://%s\\007\" \"$PWD\"",
+            /* Inject PROMPT for cmd.exe so it emits OSC 9;9 on every
+             * prompt. The sequence \x1b]9;9;"<path>"\x1b\\ is the
+             * ConEmu CWD protocol. $P expands to the current path,
+             * $e is ESC, and the trailing $S$P$G restores the default
+             * path+> prompt after the OSC. Non-cmd shells ignore the
+             * PROMPT variable. */
+            L"PROMPT=$e]9;9;\"$P\"$e\\$S$P$G",
         };
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 5; i++) {
             size_t len = wcslen(overrides[i]);
             if (ep + len + 1 >= envBlock + 65536)
                 break;
@@ -276,14 +290,16 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
     }
 #endif
 
-    /* Copy parent environment, skipping TERMINFO_DIRS since we set it above */
+    /* Copy parent environment, skipping overrides we already set */
     if (parent_env) {
         LPWCH p = parent_env;
         while (*p) {
             size_t len = wcslen(p);
             if (ep + len + 1 >= envBlock + 65536)
                 break;
-            if (wcsncmp(p, L"TERMINFO_DIRS=", 14) == 0) {
+            if (wcsncmp(p, L"TERMINFO_DIRS=", 14) == 0 ||
+                wcsncmp(p, L"PROMPT_COMMAND=", 15) == 0 ||
+                wcsncmp(p, L"PROMPT=", 7) == 0) {
                 p += len + 1;
                 continue;
             }
