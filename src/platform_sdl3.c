@@ -194,6 +194,8 @@ static const char *find_icon_path(void)
         { "%s../../data/%s" },
         /* Installed: exe is $PREFIX/bin/, data is $PREFIX/share/ */
         { "%s../share/%s" },
+        /* Portable: exe is at root, share/ is alongside it */
+        { "%sshare/%s" },
     };
 
     if (base) {
