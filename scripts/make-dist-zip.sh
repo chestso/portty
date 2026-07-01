@@ -109,7 +109,8 @@ while [ -s "$QUEUE" ]; do
 	[ ! -f "$current" ] && continue
 
 	# Process all DLL dependencies of the current binary
-	for dll in $(ldd "$current" 2>/dev/null |
+	# timeout prevents ldd from hanging on emulation-layer DLLs (ARM64)
+	for dll in $(timeout 10 ldd "$current" 2>/dev/null |
 		grep -i '\.dll' | awk '{print $3}'); do
 		[ -z "$dll" ] && continue
 		[ ! -f "$dll" ] && continue
