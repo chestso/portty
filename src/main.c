@@ -916,8 +916,6 @@ int main(int argc, char *argv[])
                                         FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
         ft_hint_target = hint_map[conf.hinting];
     }
-    if (conf.platform && strcmp(conf.platform, "sdl3") == 0)
-        ; /* sdl3 is the only platform now */
     if (conf.scrollback >= 0)
         init_scrollback = conf.scrollback;
     /* kitty-style text_composition_strategy curve (unset = neutral). */
