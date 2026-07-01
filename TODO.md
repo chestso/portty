@@ -219,8 +219,8 @@ bool ft_set_custom_axis(FtFontData *ft_data, uint32_t tag, float value) {
 
 ### Configuration Interface
 
-Font axis settings would extend the existing `bloom.conf` config file (parsed by
-`bloom_conf.h/c`). Example additions to the `[terminal]` section:
+Font axis settings would extend the existing `portty.conf` config file (parsed by
+`portty_conf.h/c`). Example additions to the `[terminal]` section:
 
 ```ini
 [terminal]
