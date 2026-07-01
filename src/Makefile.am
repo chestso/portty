@@ -77,7 +77,7 @@ portty_SOURCES += portty.rc
 endif HAVE_WINDRES
 
 if HOST_WINDOWS
-portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite
+portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite -lwinpthread
 portty_LDFLAGS = -mwindows
 else !HOST_WINDOWS
 if HOST_MACOS
