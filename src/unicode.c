@@ -6,7 +6,7 @@ bool is_emoji_presentation(uint32_t cp)
 {
     // Codepoints that should prefer the color-emoji font. This is the union of
     // Unicode's Emoji_Presentation=Yes set (default emoji — color without VS16)
-    // and the text-default symbol band bloom also colors by default ("color
+    // and the text-default symbol band portty also colors by default ("color
     // preferred, independent of VS16"). The color decision is still guarded by
     // whether the emoji font actually carries the glyph (see render_cell), so
     // the broad SMP blocks below are intentional supersets — they have no

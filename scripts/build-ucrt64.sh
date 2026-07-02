@@ -61,7 +61,7 @@ fi
 echo "==> MSYS2 UCRT64 shell (MSYSTEM=$MSYSTEM)"
 
 # Workaround for the /usr/bin/sh test -d mount race (see header comment).
-FIXSH_DIR="$(mktemp -d /tmp/bloom-fixsh.XXXXXX)"
+FIXSH_DIR="$(mktemp -d /tmp/portty-fixsh.XXXXXX)"
 cp /usr/bin/bash "$FIXSH_DIR/sh"
 export PATH="$FIXSH_DIR:$PATH"
 trap 'rm -rf "$FIXSH_DIR"' EXIT

@@ -1042,7 +1042,7 @@ static void notif_free(RendererSdl3Data *data)
 // Capture the GPU model + driver from SDL's GPU renderer device for the
 // diagnostics report. Pure SDL (portable across Vulkan/D3D12/Metal). Present
 // only for the "gpu" render driver, where SDL owns the device; the GTK4
-// "vulkan" renderer uses bloom's own VkDevice (no SDL_GPUDevice), so the
+// "vulkan" renderer uses portty's own VkDevice (no SDL_GPUDevice), so the
 // platform reports GPU info there instead.
 static void capture_sdl_gpu_info(RendererSdl3Data *data)
 {
@@ -2545,7 +2545,7 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
 // Linear-light compositing
 // ---------------------------------------------------------------------------
 //
-// bloom blends antialiased glyph coverage in *linear* light (like kitty),
+// portty blends antialiased glyph coverage in *linear* light (like kitty),
 // rather than gamma-incorrectly in sRGB space. We do this by drawing the whole
 // frame into an RGBA64_FLOAT render target tagged SDL_COLORSPACE_SRGB_LINEAR:
 // SDL linearizes sRGB *draw/vertex colors* (FillRect colors, colormod fg) on

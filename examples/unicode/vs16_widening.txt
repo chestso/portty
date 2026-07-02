@@ -1,6 +1,6 @@
 VS16 widening regression test.
 
-Per bloom's emoji width paradigm (README.md "Emoji Width Paradigm"):
+Per portty's emoji width paradigm (README.md "Emoji Width Paradigm"):
   - bare symbol  -> 1 cell (text presentation)
   - symbol+VS16  -> 2 cells (emoji presentation)
 

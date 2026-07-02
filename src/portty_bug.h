@@ -16,7 +16,7 @@
  *   - Bug indicator (e.g. eglMakeCurrent fails mid-session, allocator
  *     canary mismatch, invariant violation) -- PORTTY_BUG_ABORT.
  *
- * PORTTY_BUG_ABORT writes a one-line "BLOOM BUG: <reason> at <file:line>"
+ * PORTTY_BUG_ABORT writes a one-line "PORTTY BUG: <reason> at <file:line>"
  * to stderr, calls every registered dump function (gl_stats, heap_stats,
  * etc.), then abort()s. The abort triggers systemd-coredump (and the
  * ASan/UBSan log_path under sanitised builds), so the bug surfaces at
@@ -42,7 +42,7 @@ void portty_bug_dump_state(void);
 
 #define PORTTY_BUG_ABORT(...)                               \
     do {                                                    \
-        fprintf(stderr, "BLOOM BUG: " __VA_ARGS__);         \
+        fprintf(stderr, "PORTTY BUG: " __VA_ARGS__);        \
         fprintf(stderr, " at %s:%d\n", __FILE__, __LINE__); \
         portty_bug_dump_state();                            \
         fflush(stderr);                                     \

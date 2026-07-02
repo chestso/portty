@@ -5,12 +5,12 @@ Two distinct Unicode groups, often confused:
   Group A — Emoji_Presentation=No (text-default, ambiguous width)
     Bare base: 1 cell, monochrome.
     With VS16 (U+FE0F): 2 cells, emoji presentation.
-    This is the "ambiguous" case bloom's emoji width paradigm covers.
+    This is the "ambiguous" case portty's emoji width paradigm covers.
 
   Group B — Emoji_Presentation=Yes (emoji-default, already wide)
     Bare base: 2 cells, emoji presentation.
     With VS16: still 2 cells. VS16 is a no-op here.
-    Listed in bloom-vt's UAX #11 WIDE table; not ambiguous.
+    Listed in coffer's UAX #11 WIDE table; not ambiguous.
 
 See README.md "Emoji Width Paradigm".
 

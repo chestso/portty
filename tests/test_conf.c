@@ -16,11 +16,11 @@ static char *write_tmp_conf(const char *content)
     if (GetTempPathA(MAX_PATH, tmpdir) == 0)
         return NULL;
     char path[MAX_PATH];
-    if (GetTempFileNameA(tmpdir, "bloom", 0, path) == 0)
+    if (GetTempFileNameA(tmpdir, "portty", 0, path) == 0)
         return NULL;
     FILE *fp = fopen(path, "w");
 #else
-    char path[] = "/tmp/bloom_test_conf_XXXXXX";
+    char path[] = "/tmp/portty_test_conf_XXXXXX";
     int fd = mkstemp(path);
     if (fd < 0)
         return NULL;
@@ -260,7 +260,7 @@ static void test_nonexistent_file(void)
 {
     PorttyConf conf;
     portty_conf_init(&conf);
-    ASSERT_FALSE(portty_conf_load_path(&conf, "/tmp/bloom_nonexistent_12345.conf"));
+    ASSERT_FALSE(portty_conf_load_path(&conf, "/tmp/portty_nonexistent_12345.conf"));
     portty_conf_free(&conf);
 }
 

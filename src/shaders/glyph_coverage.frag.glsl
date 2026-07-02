@@ -1,6 +1,6 @@
 #version 450
 
-// bloom-terminal glyph coverage shader for SDL3's GPU 2D renderer.
+// portty glyph coverage shader for SDL3's GPU 2D renderer.
 //
 // Bound (via SDL_GPURenderState) only for the non-color glyph blit, replacing
 // SDL's default textured fragment shader. It reproduces the default behavior

@@ -984,7 +984,7 @@ static bool sdl3_create_window(PlatformBackend *plat, const char *title,
     }
 #endif
 
-    // Create renderer. bloom requires SDL's GPU renderer (Vulkan / D3D12 /
+    // Create renderer. portty requires SDL's GPU renderer (Vulkan / D3D12 /
     // Metal): only it performs gamma-correct (linear-light) glyph blending,
     // via SRGB_LINEAR float render targets. The OpenGL renderer blends in sRGB
     // space (thin, gamma-incorrect text) and is intentionally not used.
