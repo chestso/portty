@@ -365,3 +365,27 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 3. Modify renderer to handle multiple runs per line
 4. Add cursor movement logic
 5. Test with Arabic/Hebrew test files
+
+---
+
+## 4. VS15 Blank-Glyph Bug
+
+### Problem
+
+When VS15 (U+FE0E, text presentation selector) follows an emoji-default codepoint,
+the cell width is correctly set to 1 by coffer (`width.c:572`: VS15 → 1 cell), but
+the glyph is blank — nothing is rendered.
+
+### Root Cause
+
+`rend_sdl3.c:1809`: `if (!has_vs15 && ...)` completely blocks emoji font routing when
+VS15 is present. The code then falls through to `FONT_STYLE_NORMAL`, but the
+monospace/text font typically has no glyph for emoji-default codepoints (e.g. ⚡ U+26A1,
+⚽ U+26BD). The shaped rendering path and single-glyph fallback both fail to find a
+glyph, and fontconfig fallback may not cover these codepoints either. Result: blank cell.
+
+### Fix
+
+After VS15 routes to text font and the text font lacks the glyph, fall back to the
+emoji font with text semantics (1-cell width, monochrome if possible). VS15 should
+control presentation style, not make the glyph unreachable.

@@ -1,0 +1,17 @@
+Variation selectors — VS16 widens to 2 cells, VS15 narrows to 1 cell:
+
+Group A — text-default (bare=1 cell, VS16=2 cells):
+  bare:  |⚠|☀|☁|☘|⛏|
+  ref:   |A|B|C|D|E|
+  VS16:  |⚠️|☀️|☁️|☘️|⛏️|
+  ref:   |AB|CD|EF|GH|IJ|
+
+Group B — emoji-default (bare=2 cells); VS15 should narrow to 1 cell but glyph may be blank (VS15 blocks emoji font, text font lacks glyph):
+  bare:  |⚡|⚽|⛄|⛔|⛽|
+  ref:   |AB|CD|EF|GH|IJ|
+  VS15:  |⚡︎|⚽︎|⛄︎|⛔︎|⛽︎|
+  ref:   |A|B|C|D|E|
+
+Symbol font fallback — bare symbols may render as color emoji when the emoji font carries the glyph, but keep symbol semantics (1-cell width):
+  |✓|✗|♥|♦|♣|♠|☀|☁|☎|✿|
+  |A|B|C|D|E|F|G|H|I|J|

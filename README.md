@@ -438,7 +438,7 @@ The project includes:
 
 - `.clang-format` for code formatting
 - `autogen.sh` + autotools (`configure.ac`, `Makefile.am`) for the build
-- Example files demonstrating terminal features under `examples/` — plain `cat`-able demos (e.g. `cat examples/unicode/emoji.txt` exercises COLR/emoji paths)
+- Example files under `examples/` — plain `cat`-able demos (colors, attributes, unicode, emoji-width)
 
 ### Code Formatting
 
