@@ -17,7 +17,6 @@ from .protocol import (
     apc_play,
     apc_seek,
     apc_stop,
-    compute_scale,
     parse_lottie_meta,
     tty_write,
 )
@@ -347,7 +346,8 @@ class LottiePlayerApp(App):
         # Placement (computed on mount when we know terminal size)
         self.place_row = 0
         self.place_col = 0
-        self.place_scale = 1.0
+        self.place_cols = 0
+        self.place_rows = 0
 
         # Frame counter timer
         self._frame_timer = None
@@ -394,22 +394,12 @@ class LottiePlayerApp(App):
         accounting for whether the help panel is visible."""
         panel_cols = self.HELP_PANEL_WIDTH if self.help_visible else 0
         avail_cols = term_cols - panel_cols
-        # chrome_rows: 3 (title bar) + 2 (anim-area border) + 3 (info bar) = 8
-        # border_cols: 2 (anim-area left+right border)
         chrome_rows = 8
         border_cols = 2
-        avail_rows = term_rows - chrome_rows
-        avail_cols = avail_cols - border_cols
         self.place_row = chrome_rows // 2 + 1
         self.place_col = border_cols // 2 + 1
-        # Default scale — will be refined after report gives us cell px
-        # Use conservative defaults (10x20) until we get the real values
-        self.place_scale = compute_scale(
-            self.meta["w"],
-            self.meta["h"],
-            avail_rows,
-            avail_cols,
-        )
+        self.place_cols = avail_cols - border_cols
+        self.place_rows = term_rows - chrome_rows
 
     def action_toggle_help(self) -> None:
         self.help_visible = not self.help_visible
@@ -434,7 +424,8 @@ class LottiePlayerApp(App):
             self.loop,
             autostart=True,
             fit="none",
-            scale=self.place_scale,
+            cols=self.place_cols,
+            rows=self.place_rows,
         )
         if not self.playing:
             apc_pause()
@@ -447,7 +438,8 @@ class LottiePlayerApp(App):
             self.layer_str,
             self.opacity,
             fit="none",
-            scale=self.place_scale,
+            cols=self.place_cols,
+            rows=self.place_rows,
         )
 
     def on_mount(self) -> None:
@@ -471,7 +463,8 @@ class LottiePlayerApp(App):
             self.loop,
             autostart=True,
             fit="none",
-            scale=self.place_scale,
+            cols=self.place_cols,
+            rows=self.place_rows,
         )
 
         # Update info bar widgets

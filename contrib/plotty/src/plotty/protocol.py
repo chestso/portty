@@ -80,10 +80,10 @@ def apc_load(
     speed: float = 1.0,
     loop: bool = True,
     autostart: bool = True,
-    max_cols: int = 0,
-    max_rows: int = 0,
-    max_width: int = 0,
-    max_height: int = 0,
+    cols: int = 0,
+    rows: int = 0,
+    width: int = 0,
+    height: int = 0,
     fit: str = "",
     scale: float = 0.0,
 ) -> None:
@@ -91,16 +91,16 @@ def apc_load(
     b64_len = len(base64.b64encode(lottie_json.encode()))
 
     placement: dict = {"row": row, "col": col}
+    if cols > 0:
+        placement["cols"] = cols
+    if rows > 0:
+        placement["rows"] = rows
+    if width > 0:
+        placement["width"] = width
+    if height > 0:
+        placement["height"] = height
 
     extra: dict = {}
-    if max_cols > 0:
-        extra["max_cols"] = max_cols
-    if max_rows > 0:
-        extra["max_rows"] = max_rows
-    if max_width > 0:
-        extra["max_width"] = max_width
-    if max_height > 0:
-        extra["max_height"] = max_height
     if fit:
         extra["fit"] = fit
     if scale > 0.0:
@@ -152,10 +152,10 @@ def apc_load(
         col,
         layer=layer,
         opacity=opacity,
-        max_cols=max_cols,
-        max_rows=max_rows,
-        max_width=max_width,
-        max_height=max_height,
+        cols=cols,
+        rows=rows,
+        width=width,
+        height=height,
         fit=fit,
         scale=scale,
     )
@@ -199,24 +199,24 @@ def apc_place(
     col: int,
     layer: str = "foreground",
     opacity: float = 1.0,
-    max_cols: int = 0,
-    max_rows: int = 0,
-    max_width: int = 0,
-    max_height: int = 0,
+    cols: int = 0,
+    rows: int = 0,
+    width: int = 0,
+    height: int = 0,
     fit: str = "",
     scale: float = 0.0,
 ) -> None:
     placement: dict = {"row": row, "col": col}
+    if cols > 0:
+        placement["cols"] = cols
+    if rows > 0:
+        placement["rows"] = rows
+    if width > 0:
+        placement["width"] = width
+    if height > 0:
+        placement["height"] = height
 
     extra: dict = {}
-    if max_cols > 0:
-        extra["max_cols"] = max_cols
-    if max_rows > 0:
-        extra["max_rows"] = max_rows
-    if max_width > 0:
-        extra["max_width"] = max_width
-    if max_height > 0:
-        extra["max_height"] = max_height
     if fit:
         extra["fit"] = fit
     if scale > 0.0:
@@ -245,25 +245,3 @@ def parse_lottie_meta(lottie: dict) -> dict:
         "ip": lottie.get("ip", 0),
         "op": lottie.get("op", 60),
     }
-
-
-def compute_scale(
-    design_w: int,
-    design_h: int,
-    avail_rows: int,
-    avail_cols: int,
-    cell_w_px: int = 10,
-    cell_h_px: int = 20,
-) -> float:
-    """Compute the scale that fits the animation within the available area.
-
-    Uses cell pixel dimensions to convert cell area to pixel area,
-    then computes the largest aspect-correct scale that fits.
-    """
-    avail_w_px = avail_cols * cell_w_px
-    avail_h_px = avail_rows * cell_h_px
-    if design_w <= 0 or design_h <= 0:
-        return 1.0
-    scale_w = avail_w_px / design_w
-    scale_h = avail_h_px / design_h
-    return min(scale_w, scale_h)

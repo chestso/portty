@@ -158,7 +158,8 @@ def test_apc_load_small():
         1.0,
         True,
         fit="none",
-        scale=1.5,
+        cols=20,
+        rows=10,
     )
     cmds = extract_apc_sequences(data)
     load_cmd = next((c for c in cmds if c.get("cmd") == "load"), None)
@@ -166,8 +167,9 @@ def test_apc_load_small():
     assert load_cmd["id"] == 1
     assert load_cmd["placement"]["row"] == 5
     assert load_cmd["placement"]["col"] == 10
+    assert load_cmd["placement"]["cols"] == 20
+    assert load_cmd["placement"]["rows"] == 10
     assert load_cmd["fit"] == "none"
-    assert load_cmd["scale"] == 1.5
     assert load_cmd["layer"] == "foreground"
     assert load_cmd["opacity"] == 0.85
     assert load_cmd["play"]["speed"] == 1.0
@@ -199,8 +201,8 @@ def test_apc_load_chunked():
         0.5,
         2.0,
         False,
-        max_cols=10,
-        max_rows=10,
+        cols=10,
+        rows=10,
     )
     cmds = extract_apc_sequences(data)
     chunk_cmds = [c for c in cmds if c.get("cmd") == "load-chunk"]
@@ -222,7 +224,7 @@ def test_apc_load_chunked():
 
 def test_apc_place():
     data = _with_fake_stdout(
-        proto.apc_place, 3, 5, "background", 0.7, fit="none", scale=2.0
+        proto.apc_place, 3, 5, "background", 0.7, fit="none", cols=40, rows=20
     )
     cmds = extract_apc_sequences(data)
     place_cmd = next((c for c in cmds if c.get("cmd") == "place"), None)
@@ -230,20 +232,12 @@ def test_apc_place():
     assert place_cmd["id"] == 1
     assert place_cmd["placement"]["row"] == 3
     assert place_cmd["placement"]["col"] == 5
+    assert place_cmd["placement"]["cols"] == 40
+    assert place_cmd["placement"]["rows"] == 20
     assert place_cmd["fit"] == "none"
-    assert place_cmd["scale"] == 2.0
     assert place_cmd["layer"] == "background"
     assert place_cmd["opacity"] == 0.7
     print("  ✓ apc_place emits correct APC sequence")
-
-
-def test_compute_scale():
-    # 200x200 design, 10x20 cells, 18 avail rows, 78 avail cols
-    # avail_w_px = 780, avail_h_px = 360
-    # scale = min(780/200, 360/200) = min(3.9, 1.8) = 1.8
-    scale = proto.compute_scale(200, 200, 18, 78, cell_w_px=10, cell_h_px=20)
-    assert abs(scale - 1.8) < 0.01, f"Expected ~1.8, got {scale}"
-    print(f"  ✓ compute_scale(200,200,18,78,10x20) → {scale:.2f}")
 
 
 def test_parse_lottie_meta():
@@ -285,7 +279,6 @@ def main():
         test_apc_load_small,
         test_apc_load_chunked,
         test_apc_place,
-        test_compute_scale,
         test_parse_lottie_meta,
         test_apc_wire_format,
     ]

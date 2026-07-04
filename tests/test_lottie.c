@@ -104,7 +104,7 @@ static void test_load_basic(void)
     apc(t, "{\"cmd\":\"load\",\"id\":1,"
            "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":90,"
            "\"w\":40,\"h\":40,\"layers\":[]},"
-           "\"placement\":{\"row\":5,\"col\":10,\"rows\":4,\"cols\":8},"
+           "\"placement\":{\"row\":5,\"col\":10},"
            "\"layer\":\"foreground\"}");
 
     int n = -1;
@@ -479,7 +479,7 @@ static void test_contain_cell_constraints(void)
     apc(t, "{\"cmd\":\"load\",\"id\":1,"
            "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
            "\"w\":40,\"h\":40,\"layers\":[]},"
-           "\"max_cols\":10,\"max_rows\":5}");
+           "\"placement\":{\"cols\":10,\"rows\":5}}");
 
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
@@ -508,7 +508,7 @@ static void test_contain_pixel_constraints(void)
     apc(t, "{\"cmd\":\"load\",\"id\":1,"
            "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
            "\"w\":40,\"h\":40,\"layers\":[]},"
-           "\"max_width\":60,\"max_height\":100}");
+           "\"placement\":{\"width\":60,\"height\":100}}");
 
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
@@ -540,8 +540,7 @@ static void test_region_fit(void)
     apc(t, "{\"cmd\":\"load\",\"id\":1,"
            "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
            "\"w\":40,\"h\":40,\"layers\":[]},"
-           "\"max_cols\":20,\"max_rows\":10,"
-           "\"placement\":{\"row\":0,\"col\":0}}");
+           "\"placement\":{\"row\":0,\"col\":0,\"cols\":20,\"rows\":10}}");
 
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
@@ -582,8 +581,7 @@ static void test_place_rescale_seamless(void)
 
     /* Place with max_width=80, max_height=80 → scale=2.0, raster=80x80 */
     apc(t, "{\"cmd\":\"place\",\"id\":1,"
-           "\"max_width\":80,\"max_height\":80,"
-           "\"placement\":{\"row\":0,\"col\":0}}");
+           "\"placement\":{\"row\":0,\"col\":0,\"width\":80,\"height\":80}}");
 
     l = terminal_get_lotties(t, &n);
     ASSERT_EQ(l[0].canvas_w, 80);
