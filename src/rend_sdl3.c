@@ -2125,8 +2125,6 @@ static void flush_strike_run(RendererSdl3Data *data, int row, int vis_start,
     draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
 }
 
-static bool cell_under_bg_lottie(TerminalBackend *term, int row, int col);
-
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
                                  bool cursor_visible, bool populate_only)
@@ -2144,13 +2142,10 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
         TerminalRowIter it;
 
         // Pass 1: draw all cell backgrounds for this row.
-        // Skip cells covered by a background-layer Lottie placement — the
-        // animation pixels will replace the cell bg anyway, avoiding overdraw.
         if (!populate_only) {
             terminal_row_iter_init(&it, term, unified_row, display_cols);
             while (terminal_row_iter_next(&it)) {
-                if (!cell_under_bg_lottie(term, row, it.vis_col))
-                    render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
+                render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
             }
         }
         // Pass 2: draw glyphs, cursors, and selection overlays
@@ -2471,26 +2466,6 @@ static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
     data->lottie_cache[n].w = anim->canvas_w;
     data->lottie_cache[n].h = anim->canvas_h;
     return tex;
-}
-
-static bool cell_under_bg_lottie(TerminalBackend *term, int row, int col)
-{
-    int count = 0;
-    const CfrLottie *anims = terminal_get_lotties(term, &count);
-    for (int i = 0; i < count; i++) {
-        int pl_count = 0;
-        const CfrLottiePlacement *pls =
-            terminal_get_lottie_placements(term, anims[i].id, &pl_count);
-        for (int j = 0; j < pl_count; j++) {
-            if (pls[j].layer != 1)
-                continue;
-            int sr = pls[j].row;
-            if (row >= sr && row < sr + pls[j].rows &&
-                col >= pls[j].col && col < pls[j].col + pls[j].cols)
-                return true;
-        }
-    }
-    return false;
 }
 
 static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
