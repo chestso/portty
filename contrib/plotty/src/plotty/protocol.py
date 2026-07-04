@@ -84,6 +84,8 @@ def apc_load(
     max_rows: int = 0,
     max_width: int = 0,
     max_height: int = 0,
+    fit: str = "",
+    scale: float = 0.0,
 ) -> None:
     """Load a Lottie animation via APC. Uses chunked upload for large payloads."""
     b64_len = len(base64.b64encode(lottie_json.encode()))
@@ -99,6 +101,10 @@ def apc_load(
         extra["max_width"] = max_width
     if max_height > 0:
         extra["max_height"] = max_height
+    if fit:
+        extra["fit"] = fit
+    if scale > 0.0:
+        extra["scale"] = round(scale, 4)
 
     if b64_len < MAX_APC_PAYLOAD:
         cmd = json.dumps(
@@ -150,6 +156,8 @@ def apc_load(
         max_rows=max_rows,
         max_width=max_width,
         max_height=max_height,
+        fit=fit,
+        scale=scale,
     )
 
     # Start playback
@@ -195,6 +203,8 @@ def apc_place(
     max_rows: int = 0,
     max_width: int = 0,
     max_height: int = 0,
+    fit: str = "",
+    scale: float = 0.0,
 ) -> None:
     placement: dict = {"row": row, "col": col}
 
@@ -207,6 +217,10 @@ def apc_place(
         extra["max_width"] = max_width
     if max_height > 0:
         extra["max_height"] = max_height
+    if fit:
+        extra["fit"] = fit
+    if scale > 0.0:
+        extra["scale"] = round(scale, 4)
 
     cmd = json.dumps(
         {
@@ -233,24 +247,23 @@ def parse_lottie_meta(lottie: dict) -> dict:
     }
 
 
-def compute_placement(
-    canvas_w: int,
-    canvas_h: int,
-    term_rows: int,
-    term_cols: int,
-    *,
-    chrome_rows: int = 6,
-    border_cols: int = 2,
-) -> tuple[int, int, int, int]:
-    """Compute (row, col, max_rows, max_cols) for the animation placement.
+def compute_scale(
+    design_w: int,
+    design_h: int,
+    avail_rows: int,
+    avail_cols: int,
+    cell_w_px: int = 10,
+    cell_h_px: int = 20,
+) -> float:
+    """Compute the scale that fits the animation within the available area.
 
-    Returns the available area for the animation, not the final cell count —
-    the engine computes cells from the rasterization size.
+    Uses cell pixel dimensions to convert cell area to pixel area,
+    then computes the largest aspect-correct scale that fits.
     """
-    avail_rows = term_rows - chrome_rows
-    avail_cols = term_cols - border_cols
-
-    start_row = chrome_rows // 2 + 1
-    start_col = border_cols // 2 + 1
-
-    return max(1, start_row), max(1, start_col), avail_rows, avail_cols
+    avail_w_px = avail_cols * cell_w_px
+    avail_h_px = avail_rows * cell_h_px
+    if design_w <= 0 or design_h <= 0:
+        return 1.0
+    scale_w = avail_w_px / design_w
+    scale_h = avail_h_px / design_h
+    return min(scale_w, scale_h)
