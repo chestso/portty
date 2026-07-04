@@ -71,6 +71,17 @@ struct PlatformCallbacks
     // user drags past the top/bottom edges of the window.
     void (*on_autoscroll_tick)(void *user_data);
 
+    // The pointer left the window while a left-button drag (selection) is
+    // active. The platform passes the last known in-window pixel position so
+    // main can determine the autoscroll direction (up vs down) and start the
+    // autoscroll timer — needed on Wayland where SDL_CaptureMouse is a no-op
+    // and no further MOUSE_MOTION events arrive after the pointer exits.
+    void (*on_mouse_leave)(void *user_data, int pixel_x, int pixel_y);
+
+    // The pointer re-entered the window. Main stops drag-autoscroll if it was
+    // active, since motion events will resume driving selection updates.
+    void (*on_mouse_enter)(void *user_data);
+
     // Re-resolve OSC 8 hover at the current pointer after content changed
     // (e.g. an app redrew the screen) without a fresh motion event. px,py are
     // in the same pixel space as on_mouse; (-1,-1) means the pointer is not

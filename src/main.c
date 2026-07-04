@@ -95,6 +95,17 @@ typedef struct
     int drag_last_pixel_x;
     int drag_last_pixel_y;
     bool autoscroll_active;
+    // +1 = scroll down (pointer above the top edge), -1 = scroll up
+    // (pointer below the bottom edge), 0 = inactive. Stored explicitly so
+    // the autoscroll tick doesn't need to re-derive it from pixel coords
+    // that may be clamped to the viewport boundary (e.g. on Wayland where
+    // SDL_CaptureMouse is a no-op and the last motion event's coords are
+    // at the edge but still inside the viewport).
+    int autoscroll_direction;
+    // True while the pointer is outside the window (between MOUSE_LEAVE and
+    // MOUSE_ENTER). When set, the motion handler skips autoscroll updates
+    // because no motion events arrive — the autoscroll timer owns scrolling.
+    bool pointer_outside;
 } MainContext;
 
 // Convert pixel coordinates to display row/col
@@ -131,11 +142,15 @@ static void on_selection_change(bool active, void *user_data)
 }
 
 // Enable / disable the platform drag-autoscroll tick, mirroring local state.
+// When disabling, clears the scroll direction. When enabling, the caller must
+// set ctx->autoscroll_direction beforehand.
 static void set_autoscroll(MainContext *ctx, bool enabled)
 {
     if (ctx->autoscroll_active == enabled)
         return;
     ctx->autoscroll_active = enabled;
+    if (!enabled)
+        ctx->autoscroll_direction = 0;
     platform_set_autoscroll(ctx->plat, enabled);
 }
 
@@ -179,10 +194,19 @@ static void extend_selection_from_pixel(MainContext *ctx, int pixel_x, int pixel
 
 // Drag-autoscroll tick — invoked by the platform timer while the user is
 // holding a selection drag past the top/bottom edge of the viewport.
+// Uses the stored autoscroll_direction (set when autoscroll was started)
+// rather than re-deriving from drag_last_pixel_y, which may be clamped to
+// the viewport boundary on platforms where SDL_CaptureMouse is a no-op.
 static void on_autoscroll_tick(void *user_data)
 {
     MainContext *ctx = (MainContext *)user_data;
     if (!terminal_selection_active(ctx->term)) {
+        set_autoscroll(ctx, false);
+        return;
+    }
+
+    int dir = ctx->autoscroll_direction;
+    if (dir == 0) {
         set_autoscroll(ctx, false);
         return;
     }
@@ -197,24 +221,67 @@ static void on_autoscroll_tick(void *user_data)
     int py = ctx->drag_last_pixel_y;
 
     int delta;
-    if (py < 0) {
-        int overshoot = -py;
+    if (dir > 0) {
+        // Scroll down (pointer above the top edge)
+        int overshoot = (py < 0) ? -py : 0;
         delta = 1 + overshoot / cell_h;
         if (delta > 5)
             delta = 5;
-    } else if (py >= viewport_h) {
-        int overshoot = py - (viewport_h - 1);
+    } else {
+        // Scroll up (pointer below the bottom edge)
+        int overshoot = (py >= viewport_h) ? (py - (viewport_h - 1)) : 0;
         delta = -(1 + overshoot / cell_h);
         if (delta < -5)
             delta = -5;
-    } else {
-        // Pointer back inside viewport — autoscroll no longer needed.
-        set_autoscroll(ctx, false);
-        return;
     }
 
     renderer_scroll(ctx->rend, ctx->term, delta);
     extend_selection_from_pixel(ctx, ctx->drag_last_pixel_x, ctx->drag_last_pixel_y);
+}
+
+// Mouse left the window during a drag — start autoscroll if a selection is
+// active and the pointer exited through the top or bottom edge. On Wayland,
+// SDL_CaptureMouse is a no-op, so this is the only signal we get that the
+// pointer has exited while the user is dragging.
+static void on_mouse_leave(void *user_data, int pixel_x, int pixel_y)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    ctx->pointer_outside = true;
+
+    if (!terminal_selection_active(ctx->term))
+        return;
+
+    ctx->drag_last_pixel_x = pixel_x;
+    ctx->drag_last_pixel_y = pixel_y;
+
+    int term_rows, term_cols;
+    terminal_get_dimensions(ctx->term, &term_rows, &term_cols);
+    int cell_w, cell_h;
+    if (!renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) || cell_h <= 0)
+        return;
+    (void)term_cols;
+    int viewport_h = term_rows * cell_h;
+
+    // The last in-window position tells us which edge the pointer crossed.
+    // If it was near the top, the user is dragging upward → scroll down.
+    // If near the bottom, dragging downward → scroll up. If the pointer
+    // exited through the left/right edges, no vertical autoscroll is needed.
+    if (pixel_y < cell_h) {
+        ctx->autoscroll_direction = 1;
+        set_autoscroll(ctx, true);
+    } else if (pixel_y >= viewport_h - cell_h) {
+        ctx->autoscroll_direction = -1;
+        set_autoscroll(ctx, true);
+    }
+}
+
+// Mouse re-entered the window — stop autoscroll. Motion events will resume
+// driving selection updates normally.
+static void on_mouse_enter(void *user_data)
+{
+    MainContext *ctx = (MainContext *)user_data;
+    ctx->pointer_outside = false;
+    set_autoscroll(ctx, false);
 }
 
 // OSC 52 set-clipboard callback. SDL/GDK clipboard APIs take a NUL-
@@ -774,6 +841,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     // Left button release — cancel pending drag if no motion occurred
     if (button == 1 && !pressed) {
         ctx->drag_pending = false;
+        ctx->pointer_outside = false;
         set_autoscroll(ctx, false);
         return false;
     }
@@ -799,8 +867,16 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
         int cell_w, cell_h;
         if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h) && cell_h > 0) {
             int viewport_h = term_rows * cell_h;
-            bool past_edge = (pixel_y < 0 || pixel_y >= viewport_h);
-            set_autoscroll(ctx, past_edge);
+            if (pixel_y < 0) {
+                ctx->autoscroll_direction = 1;
+                set_autoscroll(ctx, true);
+            } else if (pixel_y >= viewport_h) {
+                ctx->autoscroll_direction = -1;
+                set_autoscroll(ctx, true);
+            } else {
+                // Pointer inside viewport — autoscroll no longer needed.
+                set_autoscroll(ctx, false);
+            }
         }
         return true;
     }
@@ -1342,6 +1418,8 @@ int main(int argc, char *argv[])
             .on_scroll = on_scroll,
             .on_mouse = on_mouse,
             .on_autoscroll_tick = on_autoscroll_tick,
+            .on_mouse_leave = on_mouse_leave,
+            .on_mouse_enter = on_mouse_enter,
             .on_revalidate_hover = on_revalidate_hover,
             .user_data = &main_ctx,
         };

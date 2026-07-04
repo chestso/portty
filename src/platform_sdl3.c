@@ -1398,7 +1398,24 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 renderer_set_link_hint(ctx->rend, NULL, 0);
                 if (term)
                     terminal_set_hovered_hyperlink(term, 0);
+                // If a left-button drag (selection) is in progress, notify
+                // main so it can start drag-autoscroll. On Wayland,
+                // SDL_CaptureMouse is a no-op, so no further MOUSE_MOTION
+                // events will arrive — the autoscroll timer is the only way
+                // to keep scrolling while the pointer is outside the window.
+                if (callbacks && callbacks->on_mouse_leave) {
+                    float mx, my;
+                    SDL_GetMouseState(&mx, &my);
+                    callbacks->on_mouse_leave(callbacks->user_data, (int)mx, (int)my);
+                }
                 terminal_mark_dirty(term);
+                break;
+
+            case SDL_EVENT_WINDOW_MOUSE_ENTER:
+                // Pointer re-entered the window — stop drag-autoscroll if it
+                // was active. Motion events will resume driving selection.
+                if (callbacks && callbacks->on_mouse_enter)
+                    callbacks->on_mouse_enter(callbacks->user_data);
                 break;
 
             case SDL_EVENT_MOUSE_WHEEL:
