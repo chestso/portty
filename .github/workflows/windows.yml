@@ -94,18 +94,36 @@ jobs:
         run: make -C build dist-portable
 
       - name: Upload build artifact
-        if: github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/v')
         uses: actions/upload-artifact@v5
         with:
           name: portty-windows-${{ matrix.label }}
           path: portty-*-windows-*.zip
           if-no-files-found: error
-          retention-days: 30
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 1 || 30 }}
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download x86_64 artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: portty-windows-x86_64
+          path: artifacts/x86_64
+
+      - name: Download aarch64 artifact
+        uses: actions/download-artifact@v5
+        with:
+          name: portty-windows-aarch64
+          path: artifacts/aarch64
 
       - name: Create GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: portty-*-windows-*.zip
-          generate_release_notes: true
+          files: |
+            artifacts/x86_64/portty-*-windows-*.zip
+            artifacts/aarch64/portty-*-windows-*.zip
+          generate_release_notes: false
           fail_on_unmatched_files: true
