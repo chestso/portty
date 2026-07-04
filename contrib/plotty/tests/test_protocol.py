@@ -159,7 +159,6 @@ def test_apc_load_small():
         True,
         max_cols=8,
         max_rows=4,
-        center=True,
     )
     cmds = extract_apc_sequences(data)
     load_cmd = next((c for c in cmds if c.get("cmd") == "load"), None)
@@ -167,7 +166,6 @@ def test_apc_load_small():
     assert load_cmd["id"] == 1
     assert load_cmd["placement"]["row"] == 5
     assert load_cmd["placement"]["col"] == 10
-    assert load_cmd["placement"]["center"] is True
     assert load_cmd["max_cols"] == 8
     assert load_cmd["max_rows"] == 4
     assert load_cmd["layer"] == "foreground"
@@ -224,7 +222,7 @@ def test_apc_load_chunked():
 
 def test_apc_place():
     data = _with_fake_stdout(
-        proto.apc_place, 3, 5, "background", 0.7, max_cols=12, max_rows=8, center=True
+        proto.apc_place, 3, 5, "background", 0.7, max_cols=12, max_rows=8
     )
     cmds = extract_apc_sequences(data)
     place_cmd = next((c for c in cmds if c.get("cmd") == "place"), None)
@@ -232,7 +230,6 @@ def test_apc_place():
     assert place_cmd["id"] == 1
     assert place_cmd["placement"]["row"] == 3
     assert place_cmd["placement"]["col"] == 5
-    assert place_cmd["placement"]["center"] is True
     assert place_cmd["max_cols"] == 12
     assert place_cmd["max_rows"] == 8
     assert place_cmd["layer"] == "background"

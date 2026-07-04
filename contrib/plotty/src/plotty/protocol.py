@@ -84,14 +84,11 @@ def apc_load(
     max_rows: int = 0,
     max_width: int = 0,
     max_height: int = 0,
-    center: bool = False,
 ) -> None:
     """Load a Lottie animation via APC. Uses chunked upload for large payloads."""
     b64_len = len(base64.b64encode(lottie_json.encode()))
 
     placement: dict = {"row": row, "col": col}
-    if center:
-        placement["center"] = True
 
     extra: dict = {}
     if max_cols > 0:
@@ -153,7 +150,6 @@ def apc_load(
         max_rows=max_rows,
         max_width=max_width,
         max_height=max_height,
-        center=center,
     )
 
     # Start playback
@@ -199,11 +195,8 @@ def apc_place(
     max_rows: int = 0,
     max_width: int = 0,
     max_height: int = 0,
-    center: bool = False,
 ) -> None:
     placement: dict = {"row": row, "col": col}
-    if center:
-        placement["center"] = True
 
     extra: dict = {}
     if max_cols > 0:

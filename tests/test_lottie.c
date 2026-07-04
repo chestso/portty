@@ -525,8 +525,9 @@ static void test_contain_pixel_constraints(void)
     destroy_term(t);
 }
 
-/* center:true centers the placement within the available area. */
-static void test_center_placement(void)
+/* max_cols/max_rows define a region — animation fits and the renderer
+ * always centers the texture within the cell box. */
+static void test_region_fit(void)
 {
     TerminalBackend *t = make_term(80, 24);
     ASSERT_TRUE(t != NULL);
@@ -535,12 +536,12 @@ static void test_center_placement(void)
      * px_max_w = 200, px_max_h = 200
      * scale = min(200/40, 200/40) = 5.0
      * raster = 200x200, cells = ceil(200/10)=20, ceil(200/20)=10
-     * area = 20x10, centered: row (10-10)/2=0, col (20-20)/2=0 */
+     * placement at row=0, col=0 (top-left of region) */
     apc(t, "{\"cmd\":\"load\",\"id\":1,"
            "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
            "\"w\":40,\"h\":40,\"layers\":[]},"
            "\"max_cols\":20,\"max_rows\":10,"
-           "\"placement\":{\"row\":0,\"col\":0,\"center\":true}}");
+           "\"placement\":{\"row\":0,\"col\":0}}");
 
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
@@ -614,7 +615,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_load_default_placement);
     RUN_TEST(test_contain_cell_constraints);
     RUN_TEST(test_contain_pixel_constraints);
-    RUN_TEST(test_center_placement);
+    RUN_TEST(test_region_fit);
     RUN_TEST(test_place_rescale_seamless);
     TEST_SUMMARY();
 }

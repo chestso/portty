@@ -433,7 +433,6 @@ class LottiePlayerApp(App):
             autostart=True,
             max_cols=self.place_cols,
             max_rows=self.place_rows,
-            center=True,
         )
         if not self.playing:
             apc_pause()
@@ -447,7 +446,6 @@ class LottiePlayerApp(App):
             self.opacity,
             max_cols=self.place_cols,
             max_rows=self.place_rows,
-            center=True,
         )
 
     def on_mount(self) -> None:
@@ -472,7 +470,6 @@ class LottiePlayerApp(App):
             autostart=True,
             max_cols=self.place_cols,
             max_rows=self.place_rows,
-            center=True,
         )
 
         # Update info bar widgets
