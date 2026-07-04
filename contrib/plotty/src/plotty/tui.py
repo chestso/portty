@@ -9,6 +9,7 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Label, Static
 
+from .palette import charm
 from .protocol import (
     apc_delete,
     apc_load,
@@ -43,11 +44,12 @@ class FrameCounter(Static):
     current_frame: reactive[int] = reactive(0, always_update=True)
 
     def __init__(self, total_frames: int = 60, **kwargs) -> None:
-        super().__init__("0/60", **kwargs)
+        super().__init__(f"0/{total_frames}", **kwargs)
         self.total_frames = total_frames
 
     def watch_current_frame(self, frame: int) -> None:
-        self.update(f"{frame}/{self.total_frames}")
+        width = len(str(self.total_frames))
+        self.update(f"{frame:>{width}}/{self.total_frames}")
 
 
 class ProgressBar(Static):
@@ -107,12 +109,12 @@ class OpacityDisplay(Static):
 class InfoBar(Horizontal):
     """Bottom info bar — Charm-style with progress bar inline."""
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = charm("""
     InfoBar {
         dock: bottom;
         height: 3;
         width: 100%;
-        background: #1a1a2e;
+        background: {{BBQ}};
         padding: 1 3;
         align: left middle;
     }
@@ -128,45 +130,45 @@ class InfoBar(Horizontal):
     }
 
     InfoBar PlayIndicator {
-        color: #04b575;
+        color: {{Guac}};
         text-style: bold;
     }
 
     InfoBar PlayIndicator.is-paused {
-        color: #ecfd65;
+        color: {{Zest}};
     }
 
     InfoBar ProgressBar {
-        color: #7d56f4;
+        color: {{Larple}};
         width: 22;
         padding: 0 1 0 0;
     }
 
     InfoBar FrameCounter {
-        color: #999;
+        color: {{Squid}};
     }
 
     InfoBar SpeedDisplay {
-        color: #ee6ff8;
+        color: {{Lilac}};
         text-style: bold;
     }
 
     InfoBar LoopIndicator.is-loop {
-        color: #04b575;
+        color: {{Guac}};
     }
 
     InfoBar LoopIndicator.is-once {
-        color: #ecfd65;
+        color: {{Zest}};
     }
 
     InfoBar LayerIndicator {
-        color: #999;
+        color: {{Squid}};
     }
 
     InfoBar OpacityDisplay {
-        color: #999;
+        color: {{Squid}};
     }
-    """
+    """)
 
     def __init__(
         self,
@@ -192,12 +194,12 @@ class InfoBar(Horizontal):
 class HelpPanel(Vertical):
     """Right-aligned help panel showing keyboard shortcuts."""
 
-    DEFAULT_CSS = """
+    DEFAULT_CSS = charm("""
     HelpPanel {
         dock: right;
         width: 30;
         height: 100%;
-        background: #1a1a2e;
+        background: {{BBQ}};
         padding: 1 2;
         display: none;
     }
@@ -207,7 +209,7 @@ class HelpPanel(Vertical):
     }
 
     HelpPanel .help-title {
-        color: #ee6ff8;
+        color: {{Lilac}};
         text-style: bold;
         height: 1;
         width: 100%;
@@ -220,21 +222,21 @@ class HelpPanel(Vertical):
     }
 
     HelpPanel .key {
-        color: #7d56f4;
+        color: {{Larple}};
         text-style: bold;
     }
 
     HelpPanel .desc {
-        color: #999;
+        color: {{Squid}};
     }
 
     HelpPanel .help-footer {
-        color: #555;
+        color: {{Iron}};
         height: 1;
         width: 100%;
         margin: 1 0 0 0;
     }
-    """
+    """)
 
     def compose(self) -> ComposeResult:
         yield Label("Shortcuts", classes="help-title")
@@ -246,6 +248,7 @@ class HelpPanel(Vertical):
             ("L", "toggle loop"),
             ("b", "toggle bg / fg"),
             ("[ ]", "opacity - / +"),
+            ("g", "toggle bg color"),
             ("q", "quit"),
         ]:
             yield Label(f"  {key:7s} {desc}", classes="shortcut-row")
@@ -256,34 +259,39 @@ class HelpPanel(Vertical):
 class LottiePlayerApp(App):
     """A TUI Lottie animation player for portty."""
 
-    CSS = """
+    CSS = charm("""
     Screen {
-        background: #0e0e18;
+        background: {{Pepper}};
     }
 
     #anim-area {
         height: 1fr;
         width: 100%;
         align: center middle;
-        border: round #7d56f4 40%;
+        border: round {{Larple}} 40%;
+        background: #000000;
+    }
+
+    #anim-area.soft-bg {
+        background: {{BBQ}};
     }
 
     #title-bar {
         dock: top;
         height: 3;
         width: 100%;
-        background: #1a1a2e;
+        background: {{BBQ}};
         padding: 0 4;
         align: left middle;
     }
 
     #title-bar .app-name {
-        color: #ee6ff8;
+        color: {{Lilac}};
         text-style: bold;
     }
 
     #title-bar .filename {
-        color: #ad58b4;
+        color: {{Orchid}};
         text-style: italic;
     }
 
@@ -292,13 +300,13 @@ class LottiePlayerApp(App):
     }
 
     #title-bar .anim-info {
-        color: #555;
+        color: {{Iron}};
     }
 
     #title-bar .version {
-        color: #3c3c3c;
+        color: {{Char}};
     }
-    """
+    """)
 
     BINDINGS = [
         ("space", "toggle_play", "Pause/Play"),
@@ -313,6 +321,7 @@ class LottiePlayerApp(App):
         ("b", "toggle_layer", "Toggle bg/fg"),
         ("bracketleft", "opacity_down", "Opacity -10%"),
         ("bracketright", "opacity_up", "Opacity +10%"),
+        ("g", "toggle_bg_color", "Toggle bg"),
         ("question_mark", "toggle_help", "Help"),
     ]
 
@@ -361,7 +370,7 @@ class LottiePlayerApp(App):
                 f"{self.meta['w']}×{self.meta['h']}  {self.meta['fr']}fps",
                 classes="anim-info",
             )
-            yield Label("  v0.1", classes="version")
+            yield Label("  v0.2", classes="version")
         with Container(id="anim-area"):
             yield Label("")
         yield HelpPanel(id="help-panel")
@@ -590,6 +599,10 @@ class LottiePlayerApp(App):
         info = self.query_one("#info-bar", InfoBar)
         opacity_disp = info.query_one(OpacityDisplay)
         opacity_disp.opacity = self.opacity
+
+    def action_toggle_bg_color(self) -> None:
+        anim = self.query_one("#anim-area")
+        anim.toggle_class("soft-bg")
 
     def action_opacity_up(self) -> None:
         self.opacity = min(1.0, self.opacity + 0.1)
