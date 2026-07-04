@@ -407,6 +407,7 @@ class LottiePlayerApp(App):
                 border_cols=2,
             )
         )
+        # place_rows/cols now represent the available area (max_rows/max_cols)
 
     def action_toggle_help(self) -> None:
         self.help_visible = not self.help_visible
@@ -425,13 +426,14 @@ class LottiePlayerApp(App):
             self.lottie_json,
             self.place_row,
             self.place_col,
-            self.place_rows,
-            self.place_cols,
             self.layer_str,
             self.opacity,
             self.speed,
             self.loop,
             autostart=True,
+            max_cols=self.place_cols,
+            max_rows=self.place_rows,
+            center=True,
         )
         if not self.playing:
             apc_pause()
@@ -441,10 +443,11 @@ class LottiePlayerApp(App):
         apc_place(
             self.place_row,
             self.place_col,
-            self.place_rows,
-            self.place_cols,
             self.layer_str,
             self.opacity,
+            max_cols=self.place_cols,
+            max_rows=self.place_rows,
+            center=True,
         )
 
     def on_mount(self) -> None:
@@ -462,13 +465,14 @@ class LottiePlayerApp(App):
             self.lottie_json,
             self.place_row,
             self.place_col,
-            self.place_rows,
-            self.place_cols,
             self.layer_str,
             self.opacity,
             self.speed,
             self.loop,
             autostart=True,
+            max_cols=self.place_cols,
+            max_rows=self.place_rows,
+            center=True,
         )
 
         # Update info bar widgets

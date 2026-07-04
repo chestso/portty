@@ -149,7 +149,17 @@ def test_apc_load_small():
         {"v": "5.6.0", "fr": 30, "ip": 0, "op": 60, "w": 40, "h": 24, "layers": []}
     )
     data = _with_fake_stdout(
-        proto.apc_load, small_lottie, 5, 10, 4, 8, "foreground", 0.85, 1.0, True
+        proto.apc_load,
+        small_lottie,
+        5,
+        10,
+        "foreground",
+        0.85,
+        1.0,
+        True,
+        max_cols=8,
+        max_rows=4,
+        center=True,
     )
     cmds = extract_apc_sequences(data)
     load_cmd = next((c for c in cmds if c.get("cmd") == "load"), None)
@@ -157,8 +167,9 @@ def test_apc_load_small():
     assert load_cmd["id"] == 1
     assert load_cmd["placement"]["row"] == 5
     assert load_cmd["placement"]["col"] == 10
-    assert load_cmd["placement"]["rows"] == 4
-    assert load_cmd["placement"]["cols"] == 8
+    assert load_cmd["placement"]["center"] is True
+    assert load_cmd["max_cols"] == 8
+    assert load_cmd["max_rows"] == 4
     assert load_cmd["layer"] == "foreground"
     assert load_cmd["opacity"] == 0.85
     assert load_cmd["play"]["speed"] == 1.0
@@ -182,7 +193,16 @@ def test_apc_load_chunked():
         }
     )
     data = _with_fake_stdout(
-        proto.apc_load, big_lottie, 1, 1, 10, 10, "background", 0.5, 2.0, False
+        proto.apc_load,
+        big_lottie,
+        1,
+        1,
+        "background",
+        0.5,
+        2.0,
+        False,
+        max_cols=10,
+        max_rows=10,
     )
     cmds = extract_apc_sequences(data)
     chunk_cmds = [c for c in cmds if c.get("cmd") == "load-chunk"]
@@ -203,15 +223,18 @@ def test_apc_load_chunked():
 
 
 def test_apc_place():
-    data = _with_fake_stdout(proto.apc_place, 3, 5, 8, 12, "background", 0.7)
+    data = _with_fake_stdout(
+        proto.apc_place, 3, 5, "background", 0.7, max_cols=12, max_rows=8, center=True
+    )
     cmds = extract_apc_sequences(data)
     place_cmd = next((c for c in cmds if c.get("cmd") == "place"), None)
     assert place_cmd is not None, f"No place command found in: {cmds}"
     assert place_cmd["id"] == 1
     assert place_cmd["placement"]["row"] == 3
     assert place_cmd["placement"]["col"] == 5
-    assert place_cmd["placement"]["rows"] == 8
-    assert place_cmd["placement"]["cols"] == 12
+    assert place_cmd["placement"]["center"] is True
+    assert place_cmd["max_cols"] == 12
+    assert place_cmd["max_rows"] == 8
     assert place_cmd["layer"] == "background"
     assert place_cmd["opacity"] == 0.7
     print("  ✓ apc_place emits correct APC sequence")

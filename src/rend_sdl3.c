@@ -2520,19 +2520,25 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
             int screen_row = pl->row + data->scroll_offset;
             int px = pl->col * data->cell_width;
             int py = screen_row * data->cell_height;
-            int pw = pl->cols * data->cell_width;
-            int ph = pl->rows * data->cell_height;
+            int box_w = pl->cols * data->cell_width;
+            int box_h = pl->rows * data->cell_height;
 
-            if (py + ph <= 0 || py >= data->height)
+            if (py + box_h <= 0 || py >= data->height)
                 continue;
-            if (px + pw <= 0 || px >= data->width)
+            if (px + box_w <= 0 || px >= data->width)
                 continue;
 
             if (pl->opacity_x256 < 255)
                 SDL_SetTextureAlphaModFloat(tex,
                                             (float)pl->opacity_x256 / 255.0f);
 
-            SDL_FRect dst = { (float)px, (float)py, (float)pw, (float)ph };
+            /* Center the aspect-correct canvas within the cell box */
+            int off_x = (box_w - anim->canvas_w) / 2;
+            int off_y = (box_h - anim->canvas_h) / 2;
+            SDL_FRect dst = {
+                (float)(px + off_x), (float)(py + off_y),
+                (float)anim->canvas_w, (float)anim->canvas_h
+            };
             SDL_RenderTexture(data->renderer, tex, NULL, &dst);
 
             if (pl->opacity_x256 < 255)

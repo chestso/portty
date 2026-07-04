@@ -112,8 +112,8 @@ static void test_load_basic(void)
     ASSERT_NOT_NULL(l);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].id, 1);
-    ASSERT_EQ(l[0].canvas_w, 80);
-    ASSERT_EQ(l[0].canvas_h, 80);
+    ASSERT_EQ(l[0].canvas_w, 40);
+    ASSERT_EQ(l[0].canvas_h, 40);
     ASSERT_EQ(l[0].current_frame, 0);
     ASSERT_EQ(l[0].frame_count, 90);
     ASSERT_TRUE(l[0].playing);
@@ -127,8 +127,9 @@ static void test_load_basic(void)
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);
     ASSERT_EQ(pl[0].col, 10);
-    ASSERT_EQ(pl[0].rows, 4);
-    ASSERT_EQ(pl[0].cols, 8);
+    /* 40x40 design, 10x20 cells -> pcols=4, prows=2 */
+    ASSERT_EQ(pl[0].rows, 2);
+    ASSERT_EQ(pl[0].cols, 4);
     ASSERT_EQ(pl[0].layer, 0);
     ASSERT_EQ(pl[0].opacity_x256, 255);
 
@@ -276,7 +277,7 @@ static void test_place(void)
            "\"w\":20,\"h\":20,\"layers\":[]}}");
 
     apc(t, "{\"cmd\":\"place\",\"id\":1,"
-           "\"placement\":{\"row\":0,\"col\":78,\"rows\":2,\"cols\":2},"
+           "\"placement\":{\"row\":0,\"col\":78},"
            "\"layer\":\"background\",\"opacity\":0.5}");
 
     int n;
@@ -292,7 +293,8 @@ static void test_place(void)
     ASSERT_EQ(pl[0].layer, 0);
     ASSERT_EQ(pl[1].layer, 1);
     ASSERT_EQ(pl[1].col, 78);
-    ASSERT_EQ(pl[1].rows, 2);
+    /* 20x20 design, 10x20 cells -> pcols=2, prows=1 */
+    ASSERT_EQ(pl[1].rows, 1);
     ASSERT_EQ(pl[1].opacity_x256, 128);
 
     destroy_term(t);
@@ -464,6 +466,134 @@ static void test_load_default_placement(void)
     destroy_term(t);
 }
 
+/* max_cols/max_rows constrain rasterization to fit a cell area. */
+static void test_contain_cell_constraints(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+
+    /* 40x40 design, max_cols=10, max_rows=5, cell 10x20:
+     * px_max_w = 100, px_max_h = 100
+     * scale = min(100/40, 100/40) = 2.5
+     * raster = 100x100, cells = ceil(100/10)=10, ceil(100/20)=5 */
+    apc(t, "{\"cmd\":\"load\",\"id\":1,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
+           "\"w\":40,\"h\":40,\"layers\":[]},"
+           "\"max_cols\":10,\"max_rows\":5}");
+
+    int n;
+    const CfrLottie *l = terminal_get_lotties(t, &n);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(l[0].canvas_w, 100);
+    ASSERT_EQ(l[0].canvas_h, 100);
+
+    int pn;
+    const CfrLottiePlacement *pl =
+        terminal_get_lottie_placements(t, l[0].id, &pn);
+    ASSERT_EQ(pl[0].cols, 10);
+    ASSERT_EQ(pl[0].rows, 5);
+
+    destroy_term(t);
+}
+
+/* max_width/max_height constrain in pixels directly. */
+static void test_contain_pixel_constraints(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+
+    /* 40x40 design, max_width=60, max_height=100:
+     * scale = min(60/40, 100/40) = min(1.5, 2.5) = 1.5
+     * raster = 60x60, cells = ceil(60/10)=6, ceil(60/20)=3 */
+    apc(t, "{\"cmd\":\"load\",\"id\":1,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
+           "\"w\":40,\"h\":40,\"layers\":[]},"
+           "\"max_width\":60,\"max_height\":100}");
+
+    int n;
+    const CfrLottie *l = terminal_get_lotties(t, &n);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(l[0].canvas_w, 60);
+    ASSERT_EQ(l[0].canvas_h, 60);
+
+    int pn;
+    const CfrLottiePlacement *pl =
+        terminal_get_lottie_placements(t, l[0].id, &pn);
+    ASSERT_EQ(pl[0].cols, 6);
+    ASSERT_EQ(pl[0].rows, 3);
+
+    destroy_term(t);
+}
+
+/* center:true centers the placement within the available area. */
+static void test_center_placement(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+
+    /* 40x40 design, max_cols=20, max_rows=10, cell 10x20:
+     * px_max_w = 200, px_max_h = 200
+     * scale = min(200/40, 200/40) = 5.0
+     * raster = 200x200, cells = ceil(200/10)=20, ceil(200/20)=10
+     * area = 20x10, centered: row (10-10)/2=0, col (20-20)/2=0 */
+    apc(t, "{\"cmd\":\"load\",\"id\":1,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":30,"
+           "\"w\":40,\"h\":40,\"layers\":[]},"
+           "\"max_cols\":20,\"max_rows\":10,"
+           "\"placement\":{\"row\":0,\"col\":0,\"center\":true}}");
+
+    int n;
+    const CfrLottie *l = terminal_get_lotties(t, &n);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(l[0].canvas_w, 200);
+    ASSERT_EQ(l[0].canvas_h, 200);
+
+    int pn;
+    const CfrLottiePlacement *pl =
+        terminal_get_lottie_placements(t, l[0].id, &pn);
+    ASSERT_EQ(pl[0].cols, 20);
+    ASSERT_EQ(pl[0].rows, 10);
+    ASSERT_EQ(pl[0].row, 0);
+    ASSERT_EQ(pl[0].col, 0);
+
+    destroy_term(t);
+}
+
+/* place with new constraints re-rasterizes seamlessly (frame preserved). */
+static void test_place_rescale_seamless(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+
+    /* Load 40x40 design, autostart=false */
+    apc(t, "{\"cmd\":\"load\",\"id\":1,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":60,"
+           "\"w\":40,\"h\":40,\"layers\":[]},"
+           "\"play\":{\"autostart\":false}}");
+
+    /* Seek to frame 10 */
+    apc(t, "{\"cmd\":\"seek\",\"id\":1,\"frame\":10}");
+
+    int n;
+    const CfrLottie *l = terminal_get_lotties(t, &n);
+    ASSERT_EQ(l[0].current_frame, 10);
+    ASSERT_FALSE(l[0].playing);
+
+    /* Place with max_width=80, max_height=80 → scale=2.0, raster=80x80 */
+    apc(t, "{\"cmd\":\"place\",\"id\":1,"
+           "\"max_width\":80,\"max_height\":80,"
+           "\"placement\":{\"row\":0,\"col\":0}}");
+
+    l = terminal_get_lotties(t, &n);
+    ASSERT_EQ(l[0].canvas_w, 80);
+    ASSERT_EQ(l[0].canvas_h, 80);
+    /* Frame preserved across rescale */
+    ASSERT_EQ(l[0].current_frame, 10);
+    ASSERT_FALSE(l[0].playing);
+
+    destroy_term(t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -482,5 +612,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_no_animations);
     RUN_TEST(test_clear);
     RUN_TEST(test_load_default_placement);
+    RUN_TEST(test_contain_cell_constraints);
+    RUN_TEST(test_contain_pixel_constraints);
+    RUN_TEST(test_center_placement);
+    RUN_TEST(test_place_rescale_seamless);
     TEST_SUMMARY();
 }

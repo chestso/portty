@@ -15,8 +15,6 @@ import os
 import sys
 
 ANIM_ID = 1
-DEFAULT_CELL_W_PX = 10
-DEFAULT_CELL_H_PX = 20
 MAX_APC_PAYLOAD = 65536
 BASE64_CHUNK_SIZE = 4096
 
@@ -77,16 +75,33 @@ def apc_load(
     lottie_json: str,
     row: int,
     col: int,
-    rows: int,
-    cols: int,
     layer: str = "foreground",
     opacity: float = 1.0,
     speed: float = 1.0,
     loop: bool = True,
     autostart: bool = True,
+    max_cols: int = 0,
+    max_rows: int = 0,
+    max_width: int = 0,
+    max_height: int = 0,
+    center: bool = False,
 ) -> None:
     """Load a Lottie animation via APC. Uses chunked upload for large payloads."""
     b64_len = len(base64.b64encode(lottie_json.encode()))
+
+    placement: dict = {"row": row, "col": col}
+    if center:
+        placement["center"] = True
+
+    extra: dict = {}
+    if max_cols > 0:
+        extra["max_cols"] = max_cols
+    if max_rows > 0:
+        extra["max_rows"] = max_rows
+    if max_width > 0:
+        extra["max_width"] = max_width
+    if max_height > 0:
+        extra["max_height"] = max_height
 
     if b64_len < MAX_APC_PAYLOAD:
         cmd = json.dumps(
@@ -94,12 +109,7 @@ def apc_load(
                 "cmd": "load",
                 "id": ANIM_ID,
                 "lottie": json.loads(lottie_json),
-                "placement": {
-                    "row": row,
-                    "col": col,
-                    "rows": rows,
-                    "cols": cols,
-                },
+                "placement": placement,
                 "layer": layer,
                 "opacity": round(opacity, 2),
                 "play": {
@@ -107,6 +117,7 @@ def apc_load(
                     "loop": loop,
                     "autostart": autostart,
                 },
+                **extra,
             },
             separators=(",", ":"),
         )
@@ -133,7 +144,17 @@ def apc_load(
         apc(cmd)
 
     # Place the animation after chunks are sent
-    apc_place(row, col, rows, cols, layer, opacity)
+    apc_place(
+        row,
+        col,
+        layer=layer,
+        opacity=opacity,
+        max_cols=max_cols,
+        max_rows=max_rows,
+        max_width=max_width,
+        max_height=max_height,
+        center=center,
+    )
 
     # Start playback
     apc_play(speed, loop)
@@ -172,18 +193,36 @@ def apc_delete() -> None:
 def apc_place(
     row: int,
     col: int,
-    rows: int,
-    cols: int,
     layer: str = "foreground",
     opacity: float = 1.0,
+    max_cols: int = 0,
+    max_rows: int = 0,
+    max_width: int = 0,
+    max_height: int = 0,
+    center: bool = False,
 ) -> None:
+    placement: dict = {"row": row, "col": col}
+    if center:
+        placement["center"] = True
+
+    extra: dict = {}
+    if max_cols > 0:
+        extra["max_cols"] = max_cols
+    if max_rows > 0:
+        extra["max_rows"] = max_rows
+    if max_width > 0:
+        extra["max_width"] = max_width
+    if max_height > 0:
+        extra["max_height"] = max_height
+
     cmd = json.dumps(
         {
             "cmd": "place",
             "id": ANIM_ID,
-            "placement": {"row": row, "col": col, "rows": rows, "cols": cols},
+            "placement": placement,
             "layer": layer,
             "opacity": round(opacity, 2),
+            **extra,
         },
         separators=(",", ":"),
     )
@@ -210,27 +249,15 @@ def compute_placement(
     chrome_rows: int = 6,
     border_cols: int = 2,
 ) -> tuple[int, int, int, int]:
-    """Compute (row, col, rows, cols) for the animation placement, centered.
+    """Compute (row, col, max_rows, max_cols) for the animation placement.
 
-    chrome_rows: rows consumed by title bar + info bar + borders.
-    border_cols: columns consumed by left/right borders.
+    Returns the available area for the animation, not the final cell count —
+    the engine computes cells from the rasterization size.
     """
     avail_rows = term_rows - chrome_rows
     avail_cols = term_cols - border_cols
 
-    cols = (canvas_w + DEFAULT_CELL_W_PX - 1) // DEFAULT_CELL_W_PX
-    rows = (canvas_h + DEFAULT_CELL_H_PX - 1) // DEFAULT_CELL_H_PX
-
-    if cols > avail_cols or rows > avail_rows:
-        scale_w = avail_cols / cols
-        scale_h = avail_rows / rows
-        scale = min(scale_w, scale_h)
-        cols = max(1, int(cols * scale))
-        rows = max(1, int(rows * scale))
-
     start_row = chrome_rows // 2 + 1
     start_col = border_cols // 2 + 1
-    place_row = start_row + (avail_rows - rows) // 2
-    place_col = start_col + (avail_cols - cols) // 2
 
-    return max(1, place_row), max(1, place_col), rows, cols
+    return max(1, start_row), max(1, start_col), avail_rows, avail_cols
