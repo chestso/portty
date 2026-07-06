@@ -48,7 +48,7 @@ portty_SOURCES = main.c portty_conf.c diag.c pager.c base64.c term.c term_cfr.c 
 # glslang is NOT a build dependency — the normal build just compiles the header.
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
-EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h portty.rc portty_icon_png.h portty_icon_256.png
+EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h portty.rc portty_icon_png.h
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:
