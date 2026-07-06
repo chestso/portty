@@ -7,7 +7,7 @@
 BUILT_SOURCES = portty_version.h
 CLEANFILES = portty_version.h
 
-.PHONY: portty_version_force regen-shaders
+.PHONY: portty_version_force regen-shaders regen-icon
 portty_version.h: portty_version_force
 	@v=`"$(top_srcdir)/build-aux/git-version.sh" "$(top_srcdir)" 2>/dev/null`; \
 	test -n "$$v" || v="$(PORTTY_VERSION)"; \
@@ -48,7 +48,7 @@ portty_SOURCES = main.c portty_conf.c diag.c pager.c base64.c term.c term_cfr.c 
 # glslang is NOT a build dependency — the normal build just compiles the header.
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
-EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h portty.rc
+EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h portty.rc portty_icon_png.h portty_icon_256.png
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:
@@ -62,6 +62,18 @@ regen-shaders:
 	@echo "  GEN      shaders/glyph_coverage_frag_spv.h"
 CLEANFILES += shaders/glyph_coverage.frag.spv
 endif
+
+# Embedded window icon (256x256 PNG compiled into the binary as a C header
+# via build-aux/bin2c.sh). After changing the source SVG, run `make regen-icon`
+# (needs rsvg-convert) to refresh the committed header, then commit it.
+regen-icon:
+	rsvg-convert -w 256 -h 256 -f png \
+	    $(top_srcdir)/data/icons/hicolor/scalable/apps/portty.svg \
+	    -o $(srcdir)/portty_icon_256.png
+	$(SHELL) $(top_srcdir)/build-aux/bin2c.sh \
+	    $(srcdir)/portty_icon_256.png portty_icon_png \
+	    > $(srcdir)/portty_icon_png.h
+	@echo "  GEN      portty_icon_png.h"
 
 # Compiler flags
 AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \

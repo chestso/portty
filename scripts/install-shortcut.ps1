@@ -4,25 +4,20 @@
 
 .DESCRIPTION
     Creates a .lnk shortcut in the user's Start Menu Programs folder that
-    points to the portty executable. The shortcut icon is extracted
-    from the executable itself (which embeds the ICO via windres).
+    points to the portty executable. The shortcut icon is extracted from
+    the executable itself (the ICO embedded via windres).
 
     Called from `make install` on Windows (HOST_WINDOWS).
 
 .PARAMETER ExePath
     Full path to portty.exe (e.g. C:\Users\...\.local\bin\portty.exe)
 
-.PARAMETER IconPath
-    Full path to portty.ico (e.g. C:\Users\...\.local\share\icons\...\portty.ico)
-
 .EXAMPLE
     powershell -NoProfile -File install-shortcut.ps1 \
-        -ExePath "$HOME/.local/bin/portty.exe" \
-        -IconPath "$HOME/.local/share/icons/hicolor/256x256/apps/portty.png"
+        -ExePath "$HOME/.local/bin/portty.exe"
 #>
 param(
-    [Parameter(Mandatory=$true)][string]$ExePath,
-    [Parameter(Mandatory=$true)][string]$IconPath
+    [Parameter(Mandatory=$true)][string]$ExePath
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,7 +30,7 @@ $shortcutPath = Join-Path $startMenu "Portty.lnk"
 $shell = New-Object -ComObject WScript.Shell
 $lnk = $shell.CreateShortcut($shortcutPath)
 $lnk.TargetPath = $ExePath
-$lnk.IconLocation = "$IconPath,0"
+$lnk.IconLocation = "$ExePath,0"
 $lnk.Description = "Portty"
 $lnk.Save()
 

@@ -92,19 +92,17 @@ Use `--enable-release` for an optimized build or `--enable-debug` for unsanitize
 - `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
-- `make gen-ico` — (Windows/MSYS2 UCRT64 only) regenerate `data/icons/portty.ico` from the source SVG via ImageMagick (requires the `imagemagick` + `librsvg` prerequisites)
 
 ### Helper Scripts
 
-| Script                      | Purpose                                                                             |
-| --------------------------- | ----------------------------------------------------------------------------------- |
-| `scripts/profile.sh`        | Build with `-pg`, run a benchmark, write `profile-report.txt`                       |
-| `scripts/ref-png.sh T OUT`  | Generate reference PNG of TEXT using hb-view                                        |
-| `scripts/ref-layers.sh T P` | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                           |
-| `scripts/colr_layers.py`    | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer)    |
-| `scripts/gen_icon.py`       | Generate app icons (SVG + PNG)                                                      |
-| `scripts/pty_record.py`     | Record PTY traffic from a child process (debug feature-detect probes)               |
-| `scripts/build-ucrt64.sh`   | Build natively on Windows (MSYS2 UCRT64); `--gen-ico` regenerates the .ico from SVG |
+| Script                      | Purpose                                                                          |
+| --------------------------- | -------------------------------------------------------------------------------- |
+| `scripts/profile.sh`        | Build with `-pg`, run a benchmark, write `profile-report.txt`                    |
+| `scripts/ref-png.sh T OUT`  | Generate reference PNG of TEXT using hb-view                                     |
+| `scripts/ref-layers.sh T P` | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                        |
+| `scripts/colr_layers.py`    | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer) |
+| `scripts/pty_record.py`     | Record PTY traffic from a child process (debug feature-detect probes)            |
+| `scripts/build-ucrt64.sh`   | Build natively on Windows (MSYS2 UCRT64)                                         |
 
 ## Usage
 
@@ -331,15 +329,25 @@ The default build mode skips ASan/UBSan (not available on MinGW) and uses unsani
 
 ### Regenerating the Windows icon
 
-The committed `data/icons/portty.ico` is a multi-resolution icon (256/128/64/48/32/16) generated from the source SVG. To regenerate it after changing the SVG:
+The committed `data/icons/portty.ico` is a multi-resolution icon (256/128/64/48/32/16) generated from the source SVG via a 2-pass process: `rsvg-convert` renders each size individually, then `icotool` combines them. To regenerate after changing the SVG:
 
 ```bash
-./scripts/build-ucrt64.sh --gen-ico   # from any shell
-# or, from a UCRT64 build dir:
-make -C build/data gen-ico
+SVG=data/icons/hicolor/scalable/apps/portty.svg
+OUTDIR=data/icons
+for size in 16 32 48 64 128 256; do
+    rsvg-convert -w $size -h $size -f png "$SVG" -o "$OUTDIR/portty-$size.png"
+done
+icotool -c -o "$OUTDIR/portty.ico" "$OUTDIR"/portty-{16,32,48,64,128,256}.png
+rm "$OUTDIR"/portty-{16,32,48,64,128,256}.png
 ```
 
-The `make gen-ico` target uses ImageMagick (with librsvg for SVG input), which must be installed beforehand — see the [prerequisites](#prerequisites) `pacman` command.
+Requires `rsvg-convert` (librsvg) and `icotool` (icoutils).
+
+To regenerate the embedded window icon (used by `SDL_SetWindowIcon`):
+
+```bash
+make -C build/src regen-icon    # needs rsvg-convert
+```
 
 ### `autoreconf` fails on scoop-installed MSYS2 (sh workaround)
 

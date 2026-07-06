@@ -9,9 +9,7 @@
 #     portty.cmd               — launcher (sets TERMINFO_DIRS, then runs exe)
 #     README-PORTABLE.txt      — quick-start instructions
 #     share/
-#       icons/hicolor/256x256/apps/portty.png
 #       icons/hicolor/scalable/apps/portty.svg
-#       icons/portty.ico
 #       terminfo/70/portty-256color     (compiled by tic; 70 = hex 'p')
 #       terminfo/70/portty-vty-256color
 #       terminfo/70/portty
@@ -55,8 +53,7 @@ echo "==> Packaging portty $VERSION"
 
 # Fresh staging directory
 rm -rf "$STAGE_DIR"
-mkdir -p "$STAGE_DIR/share/icons/hicolor/256x256/apps" \
-	"$STAGE_DIR/share/icons/hicolor/scalable/apps" \
+mkdir -p "$STAGE_DIR/share/icons/hicolor/scalable/apps" \
 	"$STAGE_DIR/share/emacs/site-lisp"
 
 echo "==> Copying portty.exe (from $REAL_EXE)"
@@ -64,15 +61,8 @@ cp "$REAL_EXE" "$STAGE_DIR/portty.exe"
 
 # --- Data files ------------------------------------------------------------
 echo "==> Copying data files (icons, emacs)"
-cp "$SRC_DIR/data/icons/hicolor/256x256/apps/portty.png" \
-	"$STAGE_DIR/share/icons/hicolor/256x256/apps/portty.png"
 cp "$SRC_DIR/data/icons/hicolor/scalable/apps/portty.svg" \
 	"$STAGE_DIR/share/icons/hicolor/scalable/apps/portty.svg"
-# Copy .ico if it exists (may not if gen-ico wasn't run)
-if [ -f "$SRC_DIR/data/icons/portty.ico" ]; then
-	cp "$SRC_DIR/data/icons/portty.ico" \
-		"$STAGE_DIR/share/icons/portty.ico"
-fi
 # Emacs integration
 if [ -f "$SRC_DIR/data/portty.el" ]; then
 	cp "$SRC_DIR/data/portty.el" \

@@ -179,67 +179,16 @@ static int sdl_mod_to_term(int mod)
     return m;
 }
 
-// Find the icon file by probing several paths relative to the executable
-static const char *find_icon_path(void)
-{
-    static char path[PATH_MAX];
-    const char *base = SDL_GetBasePath();
-    const char *icon_rel = "icons/hicolor/256x256/apps/portty.png";
+#include "portty_icon_png.h"
 
-    struct
-    {
-        const char *fmt;
-    } probes[] = {
-        /* Dev build: exe is build/src/portty, data is at project root */
-        { "%s../../data/%s" },
-        /* Installed: exe is $PREFIX/bin/, data is $PREFIX/share/ */
-        { "%s../share/%s" },
-        /* Portable: exe is at root, share/ is alongside it */
-        { "%sshare/%s" },
-    };
-
-    if (base) {
-        for (int i = 0; i < (int)(sizeof(probes) / sizeof(probes[0])); i++) {
-            snprintf(path, sizeof(path), probes[i].fmt, base, icon_rel);
-            if (access(path, R_OK) == 0) {
-                vlog("Found icon at %s\n", path);
-                return path;
-            }
-        }
-    }
-
-#ifdef PORTTY_DATADIR
-    /* Autotools compile-time datadir */
-    snprintf(path, sizeof(path), "%s/%s", PORTTY_DATADIR, icon_rel);
-    if (access(path, R_OK) == 0) {
-        vlog("Found icon at %s (PORTTY_DATADIR)\n", path);
-        return path;
-    }
-#endif
-
-    /* CWD fallback */
-    snprintf(path, sizeof(path), "data/%s", icon_rel);
-    if (access(path, R_OK) == 0) {
-        vlog("Found icon at %s (CWD)\n", path);
-        return path;
-    }
-
-    return NULL;
-}
-
-// Load and set the window icon from a PNG file
+// Load and set the window icon from the embedded PNG
 static void set_window_icon(SDL_Window *win)
 {
-    const char *icon_path = find_icon_path();
-    if (!icon_path) {
-        vlog("No icon file found, skipping window icon\n");
-        return;
-    }
-
     uint8_t *pixels = NULL;
     int w = 0, h = 0;
-    if (png_read_rgba(icon_path, &pixels, &w, &h) != 0) {
-        fprintf(stderr, "WARNING: Failed to read icon %s\n", icon_path);
+    if (png_read_rgba_mem(portty_icon_png, portty_icon_png_len, &pixels, &w,
+                          &h) != 0) {
+        fprintf(stderr, "WARNING: Failed to decode embedded icon PNG\n");
         return;
     }
 
@@ -256,7 +205,7 @@ static void set_window_icon(SDL_Window *win)
         /* Expected on Wayland — icon comes from .desktop + hicolor theme */
         vlog("SDL_SetWindowIcon skipped: %s\n", SDL_GetError());
     } else {
-        vlog("Window icon set from %s (%dx%d)\n", icon_path, w, h);
+        vlog("Window icon set from embedded PNG (%dx%d)\n", w, h);
     }
 
     SDL_DestroySurface(surface);

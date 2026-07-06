@@ -4,10 +4,6 @@ iconscalable_DATA = icons/hicolor/scalable/apps/portty.svg
 iconsymbolicdir = $(datadir)/icons/hicolor/symbolic/apps
 iconsymbolic_DATA = icons/hicolor/symbolic/apps/portty-symbolic.svg
 
-# PNG fallback for SDL_SetWindowIcon (SDL can't load SVG)
-icon256dir = $(datadir)/icons/hicolor/256x256/apps
-icon256_DATA = icons/hicolor/256x256/apps/portty.png
-
 desktopdir = $(datadir)/applications
 desktop_DATA = applications/portty.desktop
 
@@ -15,35 +11,6 @@ emacsdir = $(datadir)/emacs/site-lisp/term
 emacs_DATA = portty.el
 
 EXTRA_DIST = portty.ti portty.el
-
-if HOST_WINDOWS
-iconwindowsdir = $(datadir)/icons
-iconwindows_DATA = icons/portty.ico
-
-# --- gen-ico: regenerate the Windows .ico from the source SVG -----------------
-#
-# Renders data/icons/hicolor/scalable/apps/portty.svg into a
-# multi-resolution Windows icon (256/128/64/48/32/16) using ImageMagick.
-# Requires the mingw-w64-ucrt-x86_64-imagemagick and librsvg packages
-# (see README prerequisites).
-ICON_SVG = $(srcdir)/icons/hicolor/scalable/apps/portty.svg
-ICO_OUTPUT = $(srcdir)/icons/portty.ico
-ICO_SIZES = 256,128,64,48,32,16
-
-.PHONY: gen-ico
-gen-ico:
-	@echo "  GEN      $(ICO_OUTPUT)"
-	@if ! command -v magick >/dev/null 2>&1; then \
-	    echo "  ERROR: magick not found. Install the ImageMagick + librsvg packages:" >&2; \
-	    echo "    pacman -S mingw-w64-ucrt-x86_64-imagemagick mingw-w64-ucrt-x86_64-librsvg" >&2; \
-	    exit 1; \
-	fi
-	@MAGICK=`command -v magick 2>/dev/null || echo /ucrt64/bin/magick`; \
-	    "$$MAGICK" -background none -density 256 "$(ICON_SVG)" \
-	    -define icon:auto-resize=$(ICO_SIZES) "$(ICO_OUTPUT)" \
-	    && echo "  OK       $(ICO_OUTPUT) ($(ICO_SIZES))" \
-	    || { echo "  ERROR: magick failed to render ICO from $(ICON_SVG)" >&2; exit 1; }
-endif HOST_WINDOWS
 
 if !HOST_WINDOWS
 install-data-local:
@@ -62,7 +29,6 @@ install-data-local:
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/install-shortcut.ps1" \
 	    -ExePath "$(DESTDIR)$(bindir)/portty.exe" \
-	    -IconPath "$(DESTDIR)$(datadir)/icons/portty.ico" \
 	    || echo "  WARNING: Failed to create Start Menu shortcut" >&2
 
 uninstall-local:

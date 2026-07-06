@@ -12,7 +12,6 @@
 #
 # Usage:
 #   ./scripts/build-ucrt64.sh            # autogen + configure + make + check
-#   ./scripts/build-ucrt64.sh --gen-ico  # regenerate the Windows .ico from SVG
 #   ./scripts/build-ucrt64.sh --install  # build, then make install
 #
 # Extra args are forwarded to configure, e.g.:
@@ -22,12 +21,10 @@ set -eu
 
 cd "$(dirname "$0")/.."
 
-GEN_ICO=0
 DO_INSTALL=0
 CONFIGURE_ARGS=()
 for arg in "$@"; do
 	case "$arg" in
-	--gen-ico) GEN_ICO=1 ;;
 	--install) DO_INSTALL=1 ;;
 	*) CONFIGURE_ARGS+=("$arg") ;;
 	esac
@@ -111,13 +108,6 @@ echo "==> configure"
 rm -rf build
 mkdir build
 (cd build && sh ../configure "${CONFIGURE_ARGS[@]}")
-
-if [ "$GEN_ICO" -eq 1 ]; then
-	echo "==> make gen-ico"
-	make -C build/data gen-ico
-	echo "==> Done: $(magick identify data/icons/portty.ico | wc -l) ICO frames"
-	exit 0
-fi
 
 echo "==> make -j$(nproc)"
 make -C build -j"$(nproc)"
