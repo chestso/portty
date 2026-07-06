@@ -53,7 +53,14 @@ static char *find_config_file(void)
     char path[MAX_LINE];
 
 #ifdef _WIN32
-    /* 2. %APPDATA%\portty\portty.conf */
+    /* 2. XDG_CONFIG_HOME (power user override) */
+    const char *xdg = getenv("XDG_CONFIG_HOME");
+    if (xdg && xdg[0] != '\0') {
+        snprintf(path, sizeof(path), "%s\\portty\\portty.conf", xdg);
+        if (access(path, R_OK) == 0)
+            return strdup(path);
+    }
+    /* 3. %APPDATA%\portty\portty.conf */
     const char *appdata = getenv("APPDATA");
     if (appdata && appdata[0] != '\0') {
         snprintf(path, sizeof(path), "%s\\portty\\portty.conf", appdata);
