@@ -156,6 +156,13 @@ void platform_set_working_dir(PlatformBackend *plat, const char *dir)
         plat->set_working_dir(plat, dir);
 }
 
+const char *platform_get_exe_path(PlatformBackend *plat)
+{
+    if (!plat || !plat->get_exe_path)
+        return NULL;
+    return plat->get_exe_path(plat);
+}
+
 void platform_run(PlatformBackend *plat, TerminalBackend *term,
                   RendererBackend *rend, PlatformCallbacks *callbacks)
 {

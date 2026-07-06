@@ -190,6 +190,10 @@ struct PlatformBackend
     // Used by spawn_new_terminal to open the new terminal in the same CWD.
     void (*set_working_dir)(PlatformBackend *plat, const char *dir);
 
+    // Return the cached executable path (UTF-8, owned by the platform).
+    // Returns NULL if unavailable.
+    const char *(*get_exe_path)(PlatformBackend *plat);
+
     // Window title dedup (managed by platform_set_window_title wrapper)
     char *last_title;
 };
@@ -225,6 +229,7 @@ void platform_paste_text(TerminalBackend *term, PtyContext *pty,
 
 bool platform_register_pty(PlatformBackend *plat, PtyContext *pty);
 void platform_set_working_dir(PlatformBackend *plat, const char *dir);
+const char *platform_get_exe_path(PlatformBackend *plat);
 void platform_run(PlatformBackend *plat, TerminalBackend *term,
                   RendererBackend *rend, PlatformCallbacks *callbacks);
 void platform_request_quit(PlatformBackend *plat);

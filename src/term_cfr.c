@@ -10,8 +10,10 @@
 
 #include "term_cfr.h"
 #include "base64.h"
+#include "path_compat.h"
 #include <coffer/coffer.h>
 #include <ctype.h>
+#include <limits.h>
 
 #ifdef PORTTY_HARDEN_HEAP
 #include "heap_harden.h"
@@ -51,6 +53,26 @@ typedef struct
      * before/after diff once the ring is full. */
     int pushed_rows;
 } CfrBackendData;
+
+/* Fire the CWD callback with the given path. On Windows, convert
+ * MSYS2/Unix paths to native Windows paths using the exe path stored
+ * on TerminalBackend. On failure (or non-Windows), pass the raw path. */
+static void fire_cwd_cb(CfrBackendData *d, const char *path)
+{
+    if (!d->term->cwd_cb)
+        return;
+#ifdef _WIN32
+    if (d->term->exe_path) {
+        char native[PATH_MAX];
+        if (path_compat_msys_to_win(path, d->term->exe_path, native,
+                                    sizeof(native))) {
+            d->term->cwd_cb(native, d->term->cwd_cb_data);
+            return;
+        }
+    }
+#endif
+    d->term->cwd_cb(path, d->term->cwd_cb_data);
+}
 
 /* ------------------------------------------------------------------ */
 /* Color conversion                                                    */
@@ -290,22 +312,9 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
             path += 7;
 #ifdef _WIN32
             /* Windows: file:///C:/... → strip the leading / to get C:/...
-             * MSYS2 bash emits file:///c/Users/... (no colon after drive
-             * letter) — convert /c/Users/ → C:/Users/ by overwriting
-             * the leading / with the drive letter and the first character
-             * of the path with a colon.
              * file://host/share/...  → no leading /, keep as-is. */
             if (*path == '/' && path[1] && path[2] == ':')
                 path++; /* file:///C:/... → C:/... */
-            else if (*path == '/' && path[1] && path[2] == '/' &&
-                     ((path[1] >= 'a' && path[1] <= 'z') ||
-                      (path[1] >= 'A' && path[1] <= 'Z'))) {
-                /* MSYS2: /c/Users/... → C:/Users/...
-                 * Just overwrite: '/' → drive letter, next char → ':' */
-                path[0] = (char)toupper((unsigned char)path[1]);
-                path[1] = ':';
-                /* path is now C:/Users/... */
-            }
 #endif
             /* Unix: file:///home/... → /home/... (path already
              * starts with / after the file:// prefix, no adjustment
@@ -325,7 +334,7 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
         }
         *dst = '\0';
 
-        d->term->cwd_cb(path, d->term->cwd_cb_data);
+        fire_cwd_cb(d, path);
         free(uri);
         return;
     }
@@ -365,7 +374,7 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
         memcpy(path, payload, payload_len);
         path[payload_len] = '\0';
 
-        d->term->cwd_cb(path, d->term->cwd_cb_data);
+        fire_cwd_cb(d, path);
         free(path);
         return;
     }

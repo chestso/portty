@@ -5,11 +5,11 @@
 #include "portty_version.h"
 
 #include "common.h"
+#include "path_compat.h"
 #include "platform_sdl3.h"
 #include "png_reader.h"
 #include "timer.h"
 #include <SDL3/SDL.h>
-#include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -303,6 +303,14 @@ static void sdl3_set_working_dir(PlatformBackend *plat, const char *dir)
     snprintf(ctx->working_dir, sizeof(ctx->working_dir), "%s", dir);
 }
 
+static const char *sdl3_get_exe_path(PlatformBackend *plat)
+{
+    if (!plat || !plat->backend_data)
+        return NULL;
+    SDL3PlatformData *ctx = (SDL3PlatformData *)plat->backend_data;
+    return ctx->exe_path[0] ? ctx->exe_path : NULL;
+}
+
 static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
 {
     if (!plat || !plat->backend_data)
@@ -341,15 +349,11 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
     WCHAR wcwd[MAX_PATH] = L"";
     LPWSTR lpcwd = NULL;
     if (cwd_path[0]) {
-        /* Normalize CWD for Windows: convert MSYS2 /c/... to C:\...,
-         * forward slashes to backslashes so CreateProcessW can use it. */
+        /* working_dir is already a native Windows path (converted in
+         * on_cwd_change via path_compat_msys_to_win). Just flip any
+         * remaining forward slashes to backslashes for CreateProcessW. */
         char norm[PATH_MAX];
         snprintf(norm, sizeof(norm), "%s", cwd_path);
-        /* MSYS2 /c/Users/... → C:\Users\... */
-        if (norm[0] == '/' && norm[1] >= 'a' && norm[1] <= 'z' && norm[2] == '/') {
-            norm[0] = (char)toupper((unsigned char)norm[1]);
-            norm[1] = ':';
-        }
         for (char *p = norm; *p; p++)
             if (*p == '/')
                 *p = '\\';
@@ -363,8 +367,9 @@ static bool sdl3_spawn_new_terminal(PlatformBackend *plat)
     PROCESS_INFORMATION pi;
     ZeroMemory(&pi, sizeof(pi));
 
-    if (CreateProcessW(wexe, wcmdline, NULL, NULL, FALSE, 0, NULL,
-                       lpcwd, &si, &pi)) {
+    if (CreateProcessW(wexe, wcmdline, NULL, NULL, FALSE,
+                       DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
+                       NULL, lpcwd, &si, &pi)) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         return true;
@@ -488,6 +493,7 @@ PlatformBackend platform_backend_sdl3 = {
     .set_autoscroll = sdl3_set_autoscroll,
     .spawn_new_terminal = sdl3_spawn_new_terminal,
     .set_working_dir = sdl3_set_working_dir,
+    .get_exe_path = sdl3_get_exe_path,
 #ifdef _WIN32
     .get_default_font = sdl3_get_default_font,
 #endif

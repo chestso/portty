@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -38,31 +38,31 @@ test_paste_normalize_CFLAGS = $(TEST_CFLAGS)
 # Regression test for the on_mouse guard: altscreen without mouse_mode
 # must not allow terminal-level selection without Shift.
 test_altscreen_mouse_SOURCES = test_altscreen_mouse.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_altscreen_mouse_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_altscreen_mouse_LDADD = $(COFFER_LIBS)
 
 test_term_cfr_SOURCES = test_term_cfr.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_term_cfr_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_term_cfr_LDADD = $(COFFER_LIBS)
 
 test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_osc52_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_osc52_LDADD = $(COFFER_LIBS)
 
 # Sixel end-to-end through the host bridge: feed a DCS sequence via
 # terminal_process_input and read images back via terminal_get_sixels.
 test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_sixel_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_sixel_LDADD = $(COFFER_LIBS)
 
 # Lottie end-to-end through the host bridge: feed an APC sequence via
 # terminal_process_input and read animations back via terminal_get_lotties.
 test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_lottie_LDADD = $(COFFER_LIBS)
 
@@ -73,5 +73,9 @@ check_PROGRAMS += test_pty_pause
 test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/platform.c ../src/term.c ../src/unicode.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
 endif
+
+# MSYS2/Unix → Windows path conversion. Pure C, no SDL/coffer dependency.
+test_path_compat_SOURCES = test_path_compat.c $(TEST_COMMON) ../src/path_compat.c
+test_path_compat_CFLAGS = $(TEST_CFLAGS)
 
 TESTS = $(check_PROGRAMS)

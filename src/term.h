@@ -121,6 +121,11 @@ struct TerminalBackend
     TerminalCwdFn cwd_cb;
     void *cwd_cb_data;
 
+    // Path to the running executable (set by main.c after init). Used by
+    // the OSC 7 / OSC 9;9 handlers on Windows to convert MSYS2/Unix paths
+    // to native Windows paths via path_compat_msys_to_win.
+    const char *exe_path;
+
     // Active OSC-8 hyperlink under the mouse (0 = none). Set by main.c on
     // mouse motion; consumed by the renderer to draw the run sharing this
     // id with a hover treatment. Cleared on PTY output / resize.

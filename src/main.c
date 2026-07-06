@@ -1198,6 +1198,10 @@ int main(int argc, char *argv[])
     if (init_scrollback >= 0)
         terminal_set_scrollback_size(term, init_scrollback);
 
+    // Provide the exe path to the terminal backend so that the OSC 7 / OSC
+    // 9;9 handlers can convert MSYS2/Unix paths to native Windows paths.
+    term->exe_path = platform_get_exe_path(plat);
+
     // Only create window and renderer if we're going to run the event loop
     if (running) {
 #ifdef _WIN32

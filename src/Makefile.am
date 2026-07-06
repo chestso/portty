@@ -40,7 +40,7 @@ portty_SOURCES = main.c portty_conf.c diag.c pager.c base64.c term.c term_cfr.c 
     rend.c rend_sdl3.c rend_sdl3_shader.c \
     rend_sdl3_atlas.c rend_sdl3_boxdraw.c font.c font_ft.c colr.c font_resolve.c \
     $(FONT_RESOLVE_SOURCE) png_writer.c png_reader.c unicode.c $(PTY_SOURCE) \
-    platform.c platform_sdl3.c png_mode.c timer.c \
+    platform.c platform_sdl3.c png_mode.c timer.c path_compat.c \
     portty_bug.c heap_harden.c
 
 # GPU glyph-coverage shader. The compiled SPIR-V is committed as a C header

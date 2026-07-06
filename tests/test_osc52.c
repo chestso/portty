@@ -395,19 +395,75 @@ static void test_osc7_msys2_path(void)
     CwdCapture cap;
     install_cwd(&t, &cap);
 
-    /* MSYS2 bash emits file:///c/Users/foo (no colon after drive letter) */
+    /* MSYS2 bash emits file:///c/Users/foo (no colon after drive letter).
+     * Without exe_path, the raw Unix-style path is passed through. */
     const char seq[] = "\x1b]7;file:///c/Users/foo/projects\x07";
     feed(&t, seq, sizeof(seq) - 1);
 
     ASSERT_EQ(cap.call_count, 1);
-#ifdef _WIN32
-    ASSERT_STR_EQ(cap.last, "C:/Users/foo/projects");
-#else
     ASSERT_STR_EQ(cap.last, "/c/Users/foo/projects");
-#endif
 
     terminal_destroy(&t);
 }
+
+#ifdef _WIN32
+/* OSC 7 with MSYS2 path and exe_path set — fire_cwd_cb converts it */
+static void test_osc7_msys2_path_with_exe(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    /* Simulate an MSYS2 UCRT64 install: exe in C:\msys64\ucrt64\bin\ */
+    static const char fake_exe[] = "C:\\msys64\\ucrt64\\bin\\portty.exe";
+    t.exe_path = fake_exe;
+
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    /* MSYS2 drive-letter shorthand /c/Users/foo → C:\Users\foo */
+    const char seq[] = "\x1b]7;file:///c/Users/foo/projects\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+    ASSERT_STR_EQ(cap.last, "C:\\Users\\foo\\projects");
+
+    terminal_destroy(&t);
+}
+
+/* OSC 7 bare Unix path with exe_path — prepends MSYS root */
+static void test_osc7_bare_unix_with_exe(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 4;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    static const char fake_exe[] = "C:\\msys64\\ucrt64\\bin\\portty.exe";
+    t.exe_path = fake_exe;
+
+    CwdCapture cap;
+    install_cwd(&t, &cap);
+
+    /* Bare Unix path /home/thomasc → C:\msys64\home\thomasc */
+    const char seq[] = "\x1b]7;file:///home/thomasc\x07";
+    feed(&t, seq, sizeof(seq) - 1);
+
+    ASSERT_EQ(cap.call_count, 1);
+    ASSERT_STR_EQ(cap.last, "C:\\msys64\\home\\thomasc");
+
+    terminal_destroy(&t);
+}
+#endif
 
 /* OSC 9;9 ConEmu CWD protocol */
 static void test_osc99_conemu_cwd(void)
@@ -527,6 +583,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_osc7_unix_path);
     RUN_TEST(test_osc7_windows_path);
     RUN_TEST(test_osc7_msys2_path);
+#ifdef _WIN32
+    RUN_TEST(test_osc7_msys2_path_with_exe);
+    RUN_TEST(test_osc7_bare_unix_with_exe);
+#endif
     RUN_TEST(test_osc7_url_encoded);
     RUN_TEST(test_osc99_conemu_cwd);
     RUN_TEST(test_osc99_no_quotes);

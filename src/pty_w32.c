@@ -235,8 +235,14 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
              * path+> prompt after the OSC. Non-cmd shells ignore the
              * PROMPT variable. */
             L"PROMPT=$e]9;9;\"$P\"$e\\$S$P$G",
+            /* CHERE_INVOKING tells MSYS2 bash to start in the current
+             * directory instead of cd'ing to $HOME. Without this, Ctrl
+             * +Shift+N spawns a new terminal that always opens in $HOME
+             * regardless of the working directory passed to
+             * CreateProcessW. */
+            L"CHERE_INVOKING=1",
         };
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             size_t len = wcslen(overrides[i]);
             if (ep + len + 1 >= envBlock + 65536)
                 break;
@@ -299,7 +305,9 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
                 break;
             if (wcsncmp(p, L"TERMINFO_DIRS=", 14) == 0 ||
                 wcsncmp(p, L"PROMPT_COMMAND=", 15) == 0 ||
-                wcsncmp(p, L"PROMPT=", 7) == 0) {
+                wcsncmp(p, L"PROMPT=", 7) == 0 ||
+                wcsncmp(p, L"CHERE_INVOKING=", 15) == 0 ||
+                wcsncmp(p, L"_PORTTY_DETACHED=", 17) == 0) {
                 p += len + 1;
                 continue;
             }
