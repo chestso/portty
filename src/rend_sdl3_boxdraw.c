@@ -601,234 +601,131 @@ static void draw_aa_line(SDL_Renderer *renderer,
     }
 }
 
+// Clamp x to [0, 1]
+static float clampf01(float x)
+{
+    return x < 0.0f ? 0.0f : (x > 1.0f ? 1.0f : x);
+}
+
+// Hermite smoothstep: 0 below edge0, 1 above edge1, smooth in between.
+static float smoothstepf(float edge0, float edge1, float x)
+{
+    if (edge0 == edge1)
+        return x < edge0 ? 0.0f : 1.0f;
+    float t = clampf01((x - edge0) / (edge1 - edge0));
+    return t * t * (3.0f - 2.0f * t);
+}
+
 // Draw a rounded corner arc for U+256D-U+2570 (╭╮╯╰).
 //
-// Uses a "rounded rectangle" model inspired by Windows Terminal's
-// BuiltinGlyphs.cpp.  The stroke is rendered as a filled quarter-annulus
-// (the area between an outer and inner arc) plus solid horizontal and
-// vertical stubs that connect the arc's tangent points to the cell edges.
+// Uses a signed distance field (SDF) approach inspired by kitty's
+// decorations.c.  The corner is modelled as the outline of a rounded
+// rectangle whose bounding box spans from the cell centre (cx, cy) to
+// just past the outer cell edges.  The corner radius equals min(Hx, Hy)
+// — i.e. the maximum possible radius — so the arc is a true quarter
+// circle that smoothly transitions into straight stubs on both sides.
 //
-// The arc is centred at (cx±r, cy±r) so that its tangent points lie
-// exactly on x=cx and y=cy — the same lines used by straight box-drawing
-// characters.  This guarantees pixel-perfect alignment with neighbouring
-// cells' horizontal and vertical lines.
-//
-// For each corner we draw three parts:
-//   1. A solid horizontal stub at y=cy from the arc tangent to the cell edge
-//   2. A solid vertical stub at x=cx from the arc tangent to the cell edge
-//   3. A filled quarter-annulus connecting the two stubs (scanline rendered)
+// For each pixel, we compute the signed distance to the rounded-
+// rectangle boundary, then use smoothstep to produce anti-aliased
+// coverage.  The result is a stroke of uniform thickness that is
+// smooth on both the inner and outer edges, with no seams between
+// the arc and the straight stubs.
 static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
                                 int x, int y, int w, int h,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
-    int thickness = w / 5;
-    if (thickness < 1)
-        thickness = 1;
-    int half = thickness / 2;
-
-    // Corner radius: proportional to thickness, capped at half the
-    // narrower cell dimension.  A radius of ~3× thickness produces a
-    // smooth visible arc while leaving enough straight stub to connect
-    // cleanly with neighbouring cells.
-    float radius = (float)thickness * 3.0f;
-    float max_r = (float)(w < h ? w : h) * 0.5f;
-    if (radius > max_r)
-        radius = max_r;
-    if (radius < 1.0f)
-        radius = 1.0f;
+    int light = w / 5;
+    if (light < 1)
+        light = 1;
 
     int cx = x + w / 2;
     int cy = y + h / 2;
 
-    // Outer and inner radii of the stroke annulus
-    float r_out = radius + (float)half;
-    float r_in = radius - (float)half;
-    if (r_in < 0.0f)
-        r_in = 0.0f;
-
-    // Per-corner geometry:
-    //   arc_cx, arc_cy — centre of the quarter-circle
-    //   arc_left       — true if arc is on the left side of arc_cx
-    //   hstub_x0/x1   — horizontal stub x-range (at y = cy)
-    //   vstub_y0/y1   — vertical stub y-range (at x = cx)
-    float arc_cx, arc_cy;
-    bool arc_left;
-    int hstub_x0 = 0, hstub_x1 = 0;
-    int vstub_y0 = 0, vstub_y1 = 0;
+    // Following kitty's approach: the rounded rectangle is centred at the
+    // cell centre (cx, cy) with half-extents matching the line centers.
+    // adjusted_Hx/Hy are the distances from the cell edges to the center
+    // of the vertical/horizontal line stroke (accounting for pixel centering).
+    float light_f = (float)light;
+    int light_half = light / 2;
+    float adjusted_Hx = (float)(cx - x - light_half) + light_f * 0.5f;
+    float adjusted_Hy = (float)(cy - y - light_half) + light_f * 0.5f;
+    float x_shift, y_shift;
 
     switch (cp) {
-    case 0x256D: // ╭ down+right — arc in bottom-left quadrant of (cx,cy)
-        arc_cx = (float)cx + radius;
-        arc_cy = (float)cy + radius;
-        arc_left = true;
-        hstub_x0 = cx;
-        hstub_x1 = x + w;
-        vstub_y0 = cy;
-        vstub_y1 = y + h;
+    case 0x256D: // ╭ down+right — arc at (cx,cy), outer corner at (x,y)
+        x_shift = -adjusted_Hx;
+        y_shift = -adjusted_Hy;
         break;
-    case 0x256E: // ╮ down+left — arc in bottom-right quadrant of (cx,cy)
-        arc_cx = (float)cx - radius;
-        arc_cy = (float)cy + radius;
-        arc_left = false;
-        hstub_x0 = x;
-        hstub_x1 = cx;
-        vstub_y0 = cy;
-        vstub_y1 = y + h;
+    case 0x256E: // ╮ down+left — arc at (cx,cy), outer corner at (x+w,y)
+        x_shift = adjusted_Hx;
+        y_shift = -adjusted_Hy;
         break;
-    case 0x256F: // ╯ up+left — arc in top-right quadrant of (cx,cy)
-        arc_cx = (float)cx - radius;
-        arc_cy = (float)cy - radius;
-        arc_left = false;
-        hstub_x0 = x;
-        hstub_x1 = cx;
-        vstub_y0 = y;
-        vstub_y1 = cy;
+    case 0x256F: // ╯ up+left — arc at (cx,cy), outer corner at (x+w,y+h)
+        x_shift = adjusted_Hx;
+        y_shift = adjusted_Hy;
         break;
-    case 0x2570: // ╰ up+right — arc in top-left quadrant of (cx,cy)
-        arc_cx = (float)cx + radius;
-        arc_cy = (float)cy - radius;
-        arc_left = true;
-        hstub_x0 = cx;
-        hstub_x1 = x + w;
-        vstub_y0 = y;
-        vstub_y1 = cy;
+    case 0x2570: // ╰ up+right — arc at (cx,cy), outer corner at (x,y+h)
+        x_shift = -adjusted_Hx;
+        y_shift = adjusted_Hy;
         break;
     default:
         return;
     }
 
-    // --- Solid stubs (crisp, pixel-aligned, matching straight lines) ---
-    // Horizontal stub at y = cy
-    if (hstub_x1 > hstub_x0) {
-        SDL_FRect hstub = { (float)hstub_x0, (float)(cy - half),
-                            (float)(hstub_x1 - hstub_x0), (float)thickness };
-        SDL_RenderFillRect(renderer, &hstub);
-    }
-    // Vertical stub at x = cx
-    if (vstub_y1 > vstub_y0) {
-        SDL_FRect vstub = { (float)(cx - half), (float)vstub_y0,
-                            (float)thickness, (float)(vstub_y1 - vstub_y0) };
-        SDL_RenderFillRect(renderer, &vstub);
-    }
+    float stroke = (float)light;
+    float half_stroke = stroke * 0.5f;
+    float corner_radius = adjusted_Hx < adjusted_Hy ? adjusted_Hx : adjusted_Hy;
+    float bx = adjusted_Hx - corner_radius;
+    float by = adjusted_Hy - corner_radius;
+    float aa = 0.5f; // anti-aliasing band width
 
-    // --- Filled quarter-annulus (scanline rendering) ---
-    // For each scanline row, compute the x-extent of the annulus and
-    // fill it with a solid 1px-tall rectangle.  This gives crisp, opaque
-    // pixels at the arc endpoints, eliminating gaps with the stubs.
-    int y_lo = (int)floorf(arc_cy - r_out);
-    int y_hi = (int)ceilf(arc_cy + r_out);
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    for (int sy = y_lo; sy <= y_hi; sy++) {
-        // Sample at pixel centre
-        float dy = (float)sy + 0.5f - arc_cy;
-        float dy2 = dy * dy;
+    for (int py = y; py < y + h; py++) {
+        float sample_y = (float)py + y_shift + 0.5f;
+        float pos_y = sample_y - adjusted_Hy;
 
-        if (dy2 > r_out * r_out)
-            continue;
+        for (int px = x; px < x + w; px++) {
+            float sample_x = (float)px + x_shift + 0.5f;
+            float pos_x = sample_x - adjusted_Hx;
 
-        float outer_dx = sqrtf(r_out * r_out - dy2);
-        float inner_dx = (dy2 <= r_in * r_in)
-                             ? sqrtf(r_in * r_in - dy2)
-                             : 0.0f;
+            // SDF of a rounded rectangle centred at origin with half-extents
+            // (Hx, Hy) and corner radius.  The distance to the nearest point
+            // on the rounded rectangle boundary:
+            //   qx = |pos_x| - (Hx - corner_radius)
+            //   qy = |pos_y| - (Hy - corner_radius)
+            //   dist = hypot(max(qx,0), max(qy,0)) + min(max(qx,qy),0) - corner_radius
+            float qx = fabsf(pos_x) - bx;
+            float qy = fabsf(pos_y) - by;
+            float dx = qx > 0.0f ? qx : 0.0f;
+            float dy = qy > 0.0f ? qy : 0.0f;
+            float dist = sqrtf(dx * dx + dy * dy) +
+                         (qx > qy ? (qx < 0.0f ? qx : 0.0f)
+                                  : (qy < 0.0f ? qy : 0.0f)) -
+                         corner_radius;
 
-        int x0, x1;
-        if (arc_left) {
-            x0 = (int)floorf(arc_cx - outer_dx);
-            x1 = (int)ceilf(arc_cx - inner_dx);
-        } else {
-            x0 = (int)floorf(arc_cx + inner_dx);
-            x1 = (int)ceilf(arc_cx + outer_dx);
-        }
+            // Stroke = area between dist = +half_stroke (outer) and
+            // dist = -half_stroke (inner).  Anti-alias both edges.
+            float outer = half_stroke - dist;
+            float inner = -half_stroke - dist;
 
-        if (x1 > x0) {
-            SDL_FRect row = { (float)x0, (float)sy,
-                              (float)(x1 - x0), 1.0f };
-            SDL_RenderFillRect(renderer, &row);
-        }
-    }
+            // smoothstep(-aa, aa, x) gives 0 below -aa, 1 above +aa,
+            // with a smooth transition in between.
+            float alpha = smoothstepf(-aa, aa, outer) -
+                          smoothstepf(-aa, aa, inner);
 
-    // --- Anti-aliased outer edge ---
-    // Draw AA points along the outer arc for smooth edges at larger sizes.
-    if (thickness >= 2) {
-        int num_segments = 2 * (w + h);
-        if (num_segments < 16)
-            num_segments = 16;
+            if (alpha <= 0.0f)
+                continue;
 
-        // Determine angle range from corner type
-        float t_start, t_end;
-        if (cp == 0x256D) {
-            t_start = (float)M_PI / 2.0f;
-            t_end = (float)M_PI;
-        } else if (cp == 0x256E) {
-            t_start = 0.0f;
-            t_end = (float)M_PI / 2.0f;
-        } else if (cp == 0x256F) {
-            t_start = 3.0f * (float)M_PI / 2.0f;
-            t_end = 2.0f * (float)M_PI;
-        } else {
-            t_start = (float)M_PI;
-            t_end = 3.0f * (float)M_PI / 2.0f;
-        }
-
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-
-        float dt = (t_end - t_start) / (float)num_segments;
-        for (int i = 0; i <= num_segments; i++) {
-            float angle = t_start + dt * (float)i;
-            float px = arc_cx + r_out * cosf(angle);
-            float py = arc_cy - r_out * sinf(angle);
-
-            // Compute coverage based on fractional pixel position
-            float fx = px - floorf(px);
-            float fy = py - floorf(py);
-            // Blend four neighbouring pixels with appropriate alpha
-            for (int dx = 0; dx <= 1; dx++) {
-                for (int dy_i = 0; dy_i <= 1; dy_i++) {
-                    float dist = sqrtf((fx - dx) * (fx - dx) +
-                                       (fy - dy_i) * (fy - dy_i));
-                    if (dist > 1.0f)
-                        continue;
-                    uint8_t alpha = (uint8_t)(255.0f * (1.0f - dist) + 0.5f);
-                    if (alpha > 0) {
-                        SDL_SetRenderDrawColor(renderer, r, g, b, alpha);
-                        SDL_RenderPoint(renderer,
-                                        (float)(int)floorf(px) + dx,
-                                        (float)(int)floorf(py) + dy_i);
-                    }
-                }
+            uint8_t a = (uint8_t)(alpha * 255.0f + 0.5f);
+            if (a > 0) {
+                SDL_SetRenderDrawColor(renderer, r, g, b, a);
+                SDL_RenderPoint(renderer, (float)px, (float)py);
             }
         }
-
-        // AA on the inner edge too
-        if (r_in >= 1.0f) {
-            for (int i = 0; i <= num_segments; i++) {
-                float angle = t_start + dt * (float)i;
-                float px = arc_cx + r_in * cosf(angle);
-                float py = arc_cy - r_in * sinf(angle);
-
-                float fx = px - floorf(px);
-                float fy = py - floorf(py);
-                for (int dx = 0; dx <= 1; dx++) {
-                    for (int dy_i = 0; dy_i <= 1; dy_i++) {
-                        float dist = sqrtf((fx - dx) * (fx - dx) +
-                                           (fy - dy_i) * (fy - dy_i));
-                        if (dist > 1.0f)
-                            continue;
-                        // Inner edge: pixels just outside the inner arc
-                        // should be partially transparent (erasing)
-                        uint8_t alpha = (uint8_t)(255.0f * dist + 0.5f);
-                        if (alpha > 0 && alpha < 255) {
-                            // Draw with bg-blend to soften inner edge.
-                            // Since we can't read the background, we just
-                            // skip — the solid fill already covers this.
-                        }
-                    }
-                }
-            }
-        }
-
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
     }
+
+    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
 }
 
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
