@@ -106,15 +106,26 @@ int png_read_rgba(const char *filename, uint8_t **pixels, int *width,
 }
 
 /* libpng custom read callback for memory buffers */
+typedef struct
+{
+    const uint8_t *data;
+    size_t remaining;
+} MemReadCtx;
+
 static void mem_read_fn(png_structp png, png_bytep buf, size_t size)
 {
-    png_bytepp cursor = (png_bytepp)png_get_io_ptr(png);
-    if (!cursor || !*cursor) {
+    MemReadCtx *ctx = (MemReadCtx *)png_get_io_ptr(png);
+    if (!ctx) {
         png_error(png, "null io pointer");
         return;
     }
-    memcpy(buf, *cursor, size);
-    *cursor += size;
+    if (size > ctx->remaining) {
+        png_error(png, "read past end of buffer");
+        return;
+    }
+    memcpy(buf, ctx->data, size);
+    ctx->data += size;
+    ctx->remaining -= size;
 }
 
 int png_read_rgba_mem(const uint8_t *data, size_t len, uint8_t **pixels,
@@ -139,8 +150,8 @@ int png_read_rgba_mem(const uint8_t *data, size_t len, uint8_t **pixels,
         return -1;
     }
 
-    png_bytep cursor = (png_bytep)data;
-    png_set_read_fn(png, &cursor, mem_read_fn);
+    MemReadCtx ctx = { .data = data + 8, .remaining = len - 8 };
+    png_set_read_fn(png, &ctx, mem_read_fn);
     png_set_sig_bytes(png, 8);
 
     return decode_rgba(png, info, pixels, width, height);
