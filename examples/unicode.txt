@@ -26,3 +26,18 @@ Box drawing alignment (pipes should align — all are 1 cell wide):
 ┌─┬─┐   ╱╲╱╲   ╳╳╳
 ├─┼─┤   ╲╱╲╱   ╳╳╳
 └─┴─┘   ╱╲╱╲   ╳╳╳
+
+Rounded corners (should align with straight boxes above):
+  ╭─────────────╮   ┌─────────────┐
+  │ Rounded     │   │ Straight    │
+  ├─────────────┤   ├─────────────┤
+  │ Mixed       │   │ Mixed       │
+  ╰─────────────╯   └─────────────┘
+
+  ╭───╮ ╭───╮ ╭───╮   ┌───┐ ┌───┐ ┌───┐
+  │   │ │   │ │   │   │   │ │   │ │   │
+  ╰───╯ ╰───╯ ╰───╯   └───┘ └───┘ └───┘
+
+  ╭─╮ ╭─╮       ╭─┬─╮
+  │ │ │ │       │ │ │
+  ╰─╯ ╰─╯       ╰─┴─╯
