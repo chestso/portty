@@ -1761,13 +1761,43 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     for (int i = 0; i < cp_count; i++)
         cps[i] = nf_translate_codepoint(cps[i]);
 
-    // Procedural box drawing / block elements — bypass font pipeline
+    // Procedural box drawing / block elements — render to pixel buffer
+    // and cache in the atlas like a regular font glyph.
     if (cp_count == 1 && rend_sdl3_boxdraw_is_supported(cps[0])) {
-        if (!populate_only) {
-            rend_sdl3_boxdraw_draw(data->renderer, cps[0],
-                                   vis_col * data->cell_width,
-                                   row * data->cell_height,
-                                   data->cell_width, data->cell_height, r, g, b);
+        uint32_t bd_cp = cps[0];
+        int cell_x = vis_col * data->cell_width;
+        int cell_y = row * data->cell_height;
+        int avail_w = columns_to_consume * data->cell_width;
+        int avail_h = data->cell_height;
+
+        // Atlas key: sentinel font_data + codepoint as glyph_id.
+        // Color is baked into the bitmap (like color emoji), so use
+        // the fg color as the color_key to get per-color caching.
+        uint32_t color_key = ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
+        RendSdl3AtlasEntry *entry =
+            rend_sdl3_atlas_lookup(&data->atlas, BOXDRAW_FONT_DATA,
+                                   (int)bd_cp, color_key);
+
+        if (!entry) {
+            GlyphBitmap *bmp = rend_sdl3_boxdraw_render(bd_cp,
+                                                        data->cell_width,
+                                                        data->cell_height,
+                                                        r, g, b);
+            if (bmp) {
+                entry = rend_sdl3_atlas_insert(&data->atlas, BOXDRAW_FONT_DATA,
+                                               (int)bd_cp, color_key, bmp, true);
+                free(bmp->pixels);
+                free(bmp);
+            }
+        }
+
+        if (!populate_only && entry) {
+            // Box-drawing bitmaps are cell-sized and centered.
+            // Use blit_glyph for consistent placement + shader path.
+            blit_glyph(data->renderer, &data->atlas, entry,
+                       cell_x, cell_y, 0, 0,
+                       avail_w, avail_h, data->font_ascent,
+                       true, r, g, b, NULL, bg_luma);
         }
         goto render_cursor;
     }

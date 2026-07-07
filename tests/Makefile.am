@@ -78,10 +78,10 @@ endif
 test_path_compat_SOURCES = test_path_compat.c $(TEST_COMMON) ../src/path_compat.c
 test_path_compat_CFLAGS = $(TEST_CFLAGS)
 
-# Procedural box-drawing alignment test.  Intercepts SDL draw calls
-# to verify rounded corners (╭╮╯╰) align with straight corners (┌┐└┘).
+# Procedural box-drawing alignment test.  Renders to a CPU pixel buffer
+# (GlyphBitmap) and inspects pixels directly — no SDL or GPU required.
 test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) ../src/rend_sdl3_boxdraw.c
-test_boxdraw_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
+test_boxdraw_CFLAGS = $(TEST_CFLAGS)
 test_boxdraw_LDADD = -lm
 
 TESTS = $(check_PROGRAMS)

@@ -1,6 +1,87 @@
 #include "rend_sdl3_boxdraw.h"
+#include "font.h"
 
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+// ── Pixel buffer rendering context ──────────────────────────────────────
+// Replaces SDL_Renderer with a simple RGBA pixel buffer so box-drawing
+// glyphs can be rendered to a GlyphBitmap and cached in the texture atlas.
+
+typedef struct
+{
+    uint8_t *pixels; // RGBA, 4 bytes/pixel
+    int width, height;
+    uint8_t r, g, b; // current draw color
+    uint8_t alpha;   // current alpha (255 = opaque)
+    bool blend;      // blend mode (true = alpha-composite, false = overwrite)
+} BoxDrawCtx;
+
+static void ctx_fill_rect(BoxDrawCtx *ctx, int x, int y, int w, int h)
+{
+    if (!ctx->pixels || w <= 0 || h <= 0)
+        return;
+    int x0 = x < 0 ? 0 : x;
+    int y0 = y < 0 ? 0 : y;
+    int x1 = x + w > ctx->width ? ctx->width : x + w;
+    int y1 = y + h > ctx->height ? ctx->height : y + h;
+    for (int py = y0; py < y1; py++) {
+        for (int px = x0; px < x1; px++) {
+            int idx = (py * ctx->width + px) * 4;
+            if (ctx->blend) {
+                float a = (float)ctx->alpha / 255.0f;
+                ctx->pixels[idx + 0] = (uint8_t)(ctx->r * a + ctx->pixels[idx + 0] * (1.0f - a));
+                ctx->pixels[idx + 1] = (uint8_t)(ctx->g * a + ctx->pixels[idx + 1] * (1.0f - a));
+                ctx->pixels[idx + 2] = (uint8_t)(ctx->b * a + ctx->pixels[idx + 2] * (1.0f - a));
+                ctx->pixels[idx + 3] = (uint8_t)(255 * a + ctx->pixels[idx + 3] * (1.0f - a));
+            } else {
+                ctx->pixels[idx + 0] = ctx->r;
+                ctx->pixels[idx + 1] = ctx->g;
+                ctx->pixels[idx + 2] = ctx->b;
+                ctx->pixels[idx + 3] = ctx->alpha;
+            }
+        }
+    }
+}
+
+static void ctx_draw_point(BoxDrawCtx *ctx, float x, float y)
+{
+    if (!ctx->pixels)
+        return;
+    int px = (int)roundf(x);
+    int py = (int)roundf(y);
+    if (px < 0 || px >= ctx->width || py < 0 || py >= ctx->height)
+        return;
+    int idx = (py * ctx->width + px) * 4;
+    if (ctx->blend) {
+        float a = (float)ctx->alpha / 255.0f;
+        ctx->pixels[idx + 0] = (uint8_t)(ctx->r * a + ctx->pixels[idx + 0] * (1.0f - a));
+        ctx->pixels[idx + 1] = (uint8_t)(ctx->g * a + ctx->pixels[idx + 1] * (1.0f - a));
+        ctx->pixels[idx + 2] = (uint8_t)(ctx->b * a + ctx->pixels[idx + 2] * (1.0f - a));
+        ctx->pixels[idx + 3] = (uint8_t)(255 * a + ctx->pixels[idx + 3] * (1.0f - a));
+    } else {
+        ctx->pixels[idx + 0] = ctx->r;
+        ctx->pixels[idx + 1] = ctx->g;
+        ctx->pixels[idx + 2] = ctx->b;
+        ctx->pixels[idx + 3] = ctx->alpha;
+    }
+}
+
+static inline void ctx_set_color(BoxDrawCtx *ctx, uint8_t r, uint8_t g, uint8_t b, uint8_t a)
+{
+    ctx->r = r;
+    ctx->g = g;
+    ctx->b = b;
+    ctx->alpha = a;
+}
+
+static inline void ctx_set_blend(BoxDrawCtx *ctx, bool blend)
+{
+    ctx->blend = blend;
+}
+
+// ── End pixel buffer context ────────────────────────────────────────────
 
 // Encode direction weights into a byte: (up << 6) | (down << 4) | (left << 2) | right
 // Weight values: 0=none, 1=light, 2=heavy, 3=double
@@ -167,7 +248,7 @@ bool rend_sdl3_boxdraw_is_supported(uint32_t cp)
 
 // Draw single/heavy box lines (weights 1 and 2) from center to edges.
 // All coordinates are intentionally integer-truncated for pixel-aligned rendering.
-static void draw_single_heavy_lines(SDL_Renderer *renderer,
+static void draw_single_heavy_lines(BoxDrawCtx *ctx,
                                     int up, int down, int left, int right,
                                     int x, int y, int w, int h,
                                     int light, int heavy)
@@ -177,11 +258,7 @@ static void draw_single_heavy_lines(SDL_Renderer *renderer,
     int light_half = light / 2;
     int heavy_half = heavy / 2;
 
-#define FILL(rx, ry, rw, rh)                                                   \
-    do {                                                                       \
-        SDL_FRect _r = { (float)(rx), (float)(ry), (float)(rw), (float)(rh) }; \
-        SDL_RenderFillRect(renderer, &_r);                                     \
-    } while (0)
+#define FILL(rx, ry, rw, rh) ctx_fill_rect(ctx, (rx), (ry), (rw), (rh))
 
     if (up == 1)
         FILL(cx - light_half, y, light, cy - y + light_half);
@@ -211,7 +288,7 @@ static void draw_single_heavy_lines(SDL_Renderer *renderer,
 // top-h (at cy-off), bot-h (at cy+off).
 // At corners, outer sub-lines connect to outer, inner to inner, forming L-shapes.
 // All coordinates are intentionally integer-truncated for pixel-aligned rendering.
-static void draw_double_lines(SDL_Renderer *renderer,
+static void draw_double_lines(BoxDrawCtx *ctx,
                               int up, int down, int left, int right,
                               int x, int y, int w, int h,
                               int light)
@@ -244,11 +321,7 @@ static void draw_double_lines(SDL_Renderer *renderer,
     bool has_dv = du || dd;
     bool has_dh = dl || dr;
 
-#define FILL(rx, ry, rw, rh)                                                   \
-    do {                                                                       \
-        SDL_FRect _r = { (float)(rx), (float)(ry), (float)(rw), (float)(rh) }; \
-        SDL_RenderFillRect(renderer, &_r);                                     \
-    } while (0)
+#define FILL(rx, ry, rw, rh) ctx_fill_rect(ctx, (rx), (ry), (rw), (rh))
 
     // --- Vertical sub-lines ---
     if (has_dv) {
@@ -369,7 +442,7 @@ static void draw_double_lines(SDL_Renderer *renderer,
 #undef FILL
 }
 
-static void draw_box_lines(SDL_Renderer *renderer, uint8_t enc,
+static void draw_box_lines(BoxDrawCtx *ctx, uint8_t enc,
                            int x, int y, int w, int h)
 {
     int up = (enc >> 6) & 3;
@@ -386,25 +459,22 @@ static void draw_box_lines(SDL_Renderer *renderer, uint8_t enc,
         heavy = light + 2;
 
     // Draw single/heavy lines (weights 1 and 2)
-    draw_single_heavy_lines(renderer, up, down, left, right,
+    draw_single_heavy_lines(ctx, up, down, left, right,
                             x, y, w, h, light, heavy);
 
     // Draw double lines (weight 3)
     if (up == 3 || down == 3 || left == 3 || right == 3)
-        draw_double_lines(renderer, up, down, left, right,
+        draw_double_lines(ctx, up, down, left, right,
                           x, y, w, h, light);
 }
 
-static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
+static void draw_block_element(BoxDrawCtx *ctx, uint32_t cp,
                                int x, int y, int w, int h)
 {
-    SDL_FRect rect;
-
     if (cp == 0x2580) {
         // Upper half block
         int half_h = h / 2;
-        rect = (SDL_FRect){ (float)x, (float)y, (float)w, (float)half_h };
-        SDL_RenderFillRect(renderer, &rect);
+        ctx_fill_rect(ctx, x, y, w, half_h);
         return;
     }
 
@@ -412,8 +482,7 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
         // Lower N/8 blocks (1/8 through full)
         int n = cp - 0x2580;
         int block_h = (h * n + 4) / 8;
-        rect = (SDL_FRect){ (float)x, (float)(y + h - block_h), (float)w, (float)block_h };
-        SDL_RenderFillRect(renderer, &rect);
+        ctx_fill_rect(ctx, x, y + h - block_h, w, block_h);
         return;
     }
 
@@ -421,16 +490,14 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
         // Left N/8 blocks (7/8 down to 1/8)
         int n = 0x2590 - cp;
         int block_w = (w * n + 4) / 8;
-        rect = (SDL_FRect){ (float)x, (float)y, (float)block_w, (float)h };
-        SDL_RenderFillRect(renderer, &rect);
+        ctx_fill_rect(ctx, x, y, block_w, h);
         return;
     }
 
     if (cp == 0x2590) {
         // Right half block
         int half = w / 2;
-        rect = (SDL_FRect){ (float)(x + w - half), (float)y, (float)half, (float)h };
-        SDL_RenderFillRect(renderer, &rect);
+        ctx_fill_rect(ctx, x + w - half, y, half, h);
         return;
     }
 
@@ -444,14 +511,13 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
         else
             alpha = 192;
 
-        uint8_t cr, cg, cb, ca;
-        SDL_GetRenderDrawColor(renderer, &cr, &cg, &cb, &ca);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(renderer, cr, cg, cb, alpha);
-        rect = (SDL_FRect){ (float)x, (float)y, (float)w, (float)h };
-        SDL_RenderFillRect(renderer, &rect);
-        SDL_SetRenderDrawColor(renderer, cr, cg, cb, ca);
-        SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+        uint8_t saved_alpha = ctx->alpha;
+        bool saved_blend = ctx->blend;
+        ctx_set_blend(ctx, true);
+        ctx_set_color(ctx, ctx->r, ctx->g, ctx->b, alpha);
+        ctx_fill_rect(ctx, x, y, w, h);
+        ctx_set_color(ctx, ctx->r, ctx->g, ctx->b, saved_alpha);
+        ctx_set_blend(ctx, saved_blend);
         return;
     }
 
@@ -460,8 +526,7 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
         int block_h = (h + 4) / 8;
         if (block_h < 1)
             block_h = 1;
-        rect = (SDL_FRect){ (float)x, (float)y, (float)w, (float)block_h };
-        SDL_RenderFillRect(renderer, &rect);
+        ctx_fill_rect(ctx, x, y, w, block_h);
         return;
     }
 
@@ -470,8 +535,7 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
         int block_w = (w + 4) / 8;
         if (block_w < 1)
             block_w = 1;
-        rect = (SDL_FRect){ (float)(x + w - block_w), (float)y, (float)block_w, (float)h };
-        SDL_RenderFillRect(renderer, &rect);
+        ctx_fill_rect(ctx, x + w - block_w, y, block_w, h);
         return;
     }
 
@@ -519,28 +583,20 @@ static void draw_block_element(SDL_Renderer *renderer, uint32_t cp,
             return;
         }
 
-        if (bits & 0x01) {
-            rect = (SDL_FRect){ (float)x, (float)(y + half_h), (float)half_w, (float)bottom_h };
-            SDL_RenderFillRect(renderer, &rect);
-        }
-        if (bits & 0x02) {
-            rect = (SDL_FRect){ (float)(x + half_w), (float)(y + half_h), (float)right_w, (float)bottom_h };
-            SDL_RenderFillRect(renderer, &rect);
-        }
-        if (bits & 0x04) {
-            rect = (SDL_FRect){ (float)x, (float)y, (float)half_w, (float)half_h };
-            SDL_RenderFillRect(renderer, &rect);
-        }
-        if (bits & 0x08) {
-            rect = (SDL_FRect){ (float)(x + half_w), (float)y, (float)right_w, (float)half_h };
-            SDL_RenderFillRect(renderer, &rect);
-        }
+        if (bits & 0x01)
+            ctx_fill_rect(ctx, x, y + half_h, half_w, bottom_h);
+        if (bits & 0x02)
+            ctx_fill_rect(ctx, x + half_w, y + half_h, right_w, bottom_h);
+        if (bits & 0x04)
+            ctx_fill_rect(ctx, x, y, half_w, half_h);
+        if (bits & 0x08)
+            ctx_fill_rect(ctx, x + half_w, y, right_w, half_h);
     }
 }
 
 // Draw a single-pixel anti-aliased line using Xiaolin Wu's algorithm.
 // Caller must set blend mode to SDL_BLENDMODE_BLEND before calling.
-static void draw_aa_line(SDL_Renderer *renderer,
+static void draw_aa_line(BoxDrawCtx *ctx,
                          float x0, float y0, float x1, float y1,
                          uint8_t r, uint8_t g, uint8_t b)
 {
@@ -580,21 +636,21 @@ static void draw_aa_line(SDL_Renderer *renderer,
 
         if (steep) {
             if (a1 > 0) {
-                SDL_SetRenderDrawColor(renderer, r, g, b, a1);
-                SDL_RenderPoint(renderer, (float)iy, (float)x);
+                ctx_set_color(ctx, r, g, b, a1);
+                ctx_draw_point(ctx, (float)iy, (float)x);
             }
             if (a2 > 0) {
-                SDL_SetRenderDrawColor(renderer, r, g, b, a2);
-                SDL_RenderPoint(renderer, (float)(iy + 1), (float)x);
+                ctx_set_color(ctx, r, g, b, a2);
+                ctx_draw_point(ctx, (float)(iy + 1), (float)x);
             }
         } else {
             if (a1 > 0) {
-                SDL_SetRenderDrawColor(renderer, r, g, b, a1);
-                SDL_RenderPoint(renderer, (float)x, (float)iy);
+                ctx_set_color(ctx, r, g, b, a1);
+                ctx_draw_point(ctx, (float)x, (float)iy);
             }
             if (a2 > 0) {
-                SDL_SetRenderDrawColor(renderer, r, g, b, a2);
-                SDL_RenderPoint(renderer, (float)x, (float)(iy + 1));
+                ctx_set_color(ctx, r, g, b, a2);
+                ctx_draw_point(ctx, (float)x, (float)(iy + 1));
             }
         }
         intery += gradient;
@@ -630,7 +686,7 @@ static float smoothstepf(float edge0, float edge1, float x)
 // coverage.  The result is a stroke of uniform thickness that is
 // smooth on both the inner and outer edges, with no seams between
 // the arc and the straight stubs.
-static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
+static void draw_rounded_corner(BoxDrawCtx *ctx, uint32_t cp,
                                 int x, int y, int w, int h,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
@@ -679,7 +735,7 @@ static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
     float by = adjusted_Hy - corner_radius;
     float aa = 0.5f; // anti-aliasing band width
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    ctx_set_blend(ctx, true);
 
     for (int py = y; py < y + h; py++) {
         float sample_y = (float)py + y_shift + 0.5f;
@@ -719,18 +775,18 @@ static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
 
             uint8_t a = (uint8_t)(alpha * 255.0f + 0.5f);
             if (a > 0) {
-                SDL_SetRenderDrawColor(renderer, r, g, b, a);
-                SDL_RenderPoint(renderer, (float)px, (float)py);
+                ctx_set_color(ctx, r, g, b, a);
+                ctx_draw_point(ctx, (float)px, (float)py);
             }
         }
     }
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    ctx_set_blend(ctx, false);
 }
 
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
 // Uses anti-aliased line rendering with thickness matching the light line width.
-static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
+static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int x, int y, int w, int h,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
@@ -738,7 +794,7 @@ static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
     if (thickness < 1)
         thickness = 1;
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    ctx_set_blend(ctx, true);
 
     // Draw bottom-left to top-right diagonal (╱)
     if (cp == 0x2571 || cp == 0x2573) {
@@ -747,7 +803,7 @@ static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
         float x1 = (float)(x + w);
         float y1 = (float)y;
         for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
-            draw_aa_line(renderer, x0 + (float)i, y0, x1 + (float)i, y1,
+            draw_aa_line(ctx, x0 + (float)i, y0, x1 + (float)i, y1,
                          r, g, b);
     }
 
@@ -758,30 +814,66 @@ static void draw_diagonal_lines(SDL_Renderer *renderer, uint32_t cp,
         float x1 = (float)(x + w);
         float y1 = (float)(y + h);
         for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
-            draw_aa_line(renderer, x0 + (float)i, y0, x1 + (float)i, y1,
+            draw_aa_line(ctx, x0 + (float)i, y0, x1 + (float)i, y1,
                          r, g, b);
     }
 
-    SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
+    ctx_set_blend(ctx, false);
 }
 
-void rend_sdl3_boxdraw_draw(SDL_Renderer *renderer, uint32_t cp,
-                            int cell_x, int cell_y, int cell_w, int cell_h,
-                            uint8_t r, uint8_t g, uint8_t b)
+// Internal: draw into a BoxDrawCtx at the given cell-local coordinates.
+static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
+                                  int cell_w, int cell_h,
+                                  uint8_t r, uint8_t g, uint8_t b)
 {
-    SDL_SetRenderDrawColor(renderer, r, g, b, 255);
+    ctx_set_color(ctx, r, g, b, 255);
 
     if (cp >= 0x256D && cp <= 0x2570) {
-        draw_rounded_corner(renderer, cp, cell_x, cell_y, cell_w, cell_h,
-                            r, g, b);
+        draw_rounded_corner(ctx, cp, 0, 0, cell_w, cell_h, r, g, b);
     } else if (cp >= 0x2571 && cp <= 0x2573) {
-        draw_diagonal_lines(renderer, cp, cell_x, cell_y, cell_w, cell_h,
-                            r, g, b);
+        draw_diagonal_lines(ctx, cp, 0, 0, cell_w, cell_h, r, g, b);
     } else if (cp >= 0x2500 && cp <= 0x257F) {
         uint8_t enc = get_box_encoding(cp);
         if (enc != 0)
-            draw_box_lines(renderer, enc, cell_x, cell_y, cell_w, cell_h);
+            draw_box_lines(ctx, enc, 0, 0, cell_w, cell_h);
     } else if (cp >= 0x2580 && cp <= 0x259F) {
-        draw_block_element(renderer, cp, cell_x, cell_y, cell_w, cell_h);
+        draw_block_element(ctx, cp, 0, 0, cell_w, cell_h);
     }
+}
+
+// Public API: render a box-drawing character to a GlyphBitmap.
+// The bitmap is cell-sized (w×h) with centered=true, RGBA pixels,
+// and is intended to be inserted into the texture atlas like a font glyph.
+GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
+                                      uint8_t r, uint8_t g, uint8_t b)
+{
+    GlyphBitmap *bmp = malloc(sizeof(GlyphBitmap));
+    if (!bmp)
+        return NULL;
+    bmp->width = cell_w;
+    bmp->height = cell_h;
+    bmp->x_offset = 0;
+    bmp->y_offset = 0;
+    bmp->advance = cell_w;
+    bmp->glyph_id = (int)cp;
+    bmp->centered = true;
+    bmp->pixels = calloc((size_t)cell_w * cell_h * 4, 1);
+    if (!bmp->pixels) {
+        free(bmp);
+        return NULL;
+    }
+
+    BoxDrawCtx ctx = {
+        .pixels = bmp->pixels,
+        .width = cell_w,
+        .height = cell_h,
+        .r = r,
+        .g = g,
+        .b = b,
+        .alpha = 255,
+        .blend = false,
+    };
+
+    boxdraw_render_to_ctx(&ctx, cp, cell_w, cell_h, r, g, b);
+    return bmp;
 }
