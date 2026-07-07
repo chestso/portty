@@ -602,9 +602,18 @@ static void draw_aa_line(SDL_Renderer *renderer,
 }
 
 // Draw a rounded corner arc for U+256D-U+2570 (╭╮╯╰).
-// Uses a quarter-circle arc (radius = w/2) centered so that the arc is tangent
-// to the cell-center vertical (cx) and horizontal (cy) lines. A straight stub
-// at cx extends from the arc to the top/bottom cell edge when h > w.
+//
+// Uses a "rounded rectangle" model inspired by Windows Terminal's
+// BuiltinGlyphs.cpp: the arc is centered at (cx±r, cy±r) so that the
+// straight edges of the arc naturally lie on x=cx and y=cy — exactly
+// where straight box-drawing lines are drawn.  Solid stubs extend from
+// the arc endpoints to the cell edges, ensuring seamless connections
+// with adjacent cells' horizontal and vertical lines.
+//
+// For each corner we draw three parts:
+//   1. A solid horizontal stub at y=cy from the arc to the cell edge
+//   2. A solid vertical stub at x=cx from the arc to the cell edge
+//   3. An anti-aliased quarter-circle arc connecting the two stubs
 static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
                                 int x, int y, int w, int h,
                                 uint8_t r, uint8_t g, uint8_t b)
@@ -614,76 +623,130 @@ static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
         thickness = 1;
     int half = thickness / 2;
 
-    float radius = (float)w / 2.0f;
+    // Corner radius: proportional to thickness, capped at half the
+    // narrower cell dimension.  A radius of ~3× thickness produces a
+    // smooth visible arc while leaving enough straight stub to connect
+    // cleanly with neighbouring cells.
+    float radius = (float)thickness * 3.0f;
+    float max_r = (float)(w < h ? w : h) * 0.5f;
+    if (radius > max_r)
+        radius = max_r;
+    if (radius < 1.0f)
+        radius = 1.0f;
 
     int cx = x + w / 2;
     int cy = y + h / 2;
 
-    // Arc center, angles, and stub endpoints per codepoint.
-    // The arc is tangent to x=cx and y=cy, so it naturally meets horizontal
-    // lines at (left/right edge, cy) and vertical stubs at (cx, arc endpoint).
-    float ex, ey, t_start, t_end;
-    int stub_y0 = 0, stub_y1 = 0;
-    bool need_stub = (h != w);
+    // Per-corner geometry:
+    //   arc_cx, arc_cy — centre of the quarter-circle
+    //   t_start, t_end — angle range (screen coords: y = cy - r*sin(θ))
+    //   hstub_x0, hstub_x1 — horizontal stub x-range (at y = cy)
+    //   vstub_y0, vstub_y1 — vertical stub y-range (at x = cx)
+    float arc_cx, arc_cy;
+    float t_start, t_end;
+    int hstub_x0 = 0, hstub_x1 = 0;
+    int vstub_y0 = 0, vstub_y1 = 0;
 
     switch (cp) {
-    case 0x256D: // ╭ down+right: arc in bottom-right, stub goes down
-        ex = (float)(x + w);
-        ey = (float)cy + radius;
+    case 0x256D: // ╭ down+right — arc curves at bottom-left of (cx,cy)
+        //              ╭           |
+        //              |           |
+        //             cx (stub)    |
+        // The arc occupies the bottom-left quadrant from (cx,cy).
+        // Horizontal stub: right half (cx → x+w)
+        // Vertical stub:   bottom half (cy → y+h)
+        arc_cx = (float)cx + radius;
+        arc_cy = (float)cy + radius;
         t_start = (float)M_PI / 2.0f;
         t_end = (float)M_PI;
-        stub_y0 = cy + w / 2;
-        stub_y1 = y + h;
+        hstub_x0 = cx;
+        hstub_x1 = x + w;
+        vstub_y0 = cy;
+        vstub_y1 = y + h;
         break;
-    case 0x256E: // ╮ down+left: arc in bottom-left, stub goes down
-        ex = (float)x;
-        ey = (float)cy + radius;
+    case 0x256E: // ╮ down+left — arc curves at bottom-right of (cx,cy)
+        //              |           ╮
+        //              |           |
+        //              |     cx (stub)
+        // Horizontal stub: left half (x → cx)
+        // Vertical stub:   bottom half (cy → y+h)
+        arc_cx = (float)cx - radius;
+        arc_cy = (float)cy + radius;
         t_start = 0.0f;
         t_end = (float)M_PI / 2.0f;
-        stub_y0 = cy + w / 2;
-        stub_y1 = y + h;
+        hstub_x0 = x;
+        hstub_x1 = cx;
+        vstub_y0 = cy;
+        vstub_y1 = y + h;
         break;
-    case 0x256F: // ╯ up+left: arc in top-left, stub goes up
-        ex = (float)x;
-        ey = (float)cy - radius;
+    case 0x256F: // ╯ up+left — arc curves at top-right of (cx,cy)
+        //              |     cx (stub)
+        //              |           |
+        //              |           ╯
+        // Horizontal stub: left half (x → cx)
+        // Vertical stub:   top half (y → cy)
+        arc_cx = (float)cx - radius;
+        arc_cy = (float)cy - radius;
         t_start = 3.0f * (float)M_PI / 2.0f;
         t_end = 2.0f * (float)M_PI;
-        stub_y0 = y;
-        stub_y1 = cy - w / 2;
+        hstub_x0 = x;
+        hstub_x1 = cx;
+        vstub_y0 = y;
+        vstub_y1 = cy;
         break;
-    case 0x2570: // ╰ up+right: arc in top-right, stub goes up
-        ex = (float)(x + w);
-        ey = (float)cy - radius;
+    case 0x2570: // ╰ up+right — arc curves at top-left of (cx,cy)
+        //             cx (stub)   |
+        //              |           |
+        //              ╰           |
+        // Horizontal stub: right half (cx → x+w)
+        // Vertical stub:   top half (y → cy)
+        arc_cx = (float)cx + radius;
+        arc_cy = (float)cy - radius;
         t_start = (float)M_PI;
         t_end = 3.0f * (float)M_PI / 2.0f;
-        stub_y0 = y;
-        stub_y1 = cy - w / 2;
+        hstub_x0 = cx;
+        hstub_x1 = x + w;
+        vstub_y0 = y;
+        vstub_y1 = cy;
         break;
     default:
         return;
     }
 
+    // --- Solid stubs (crisp, pixel-aligned, matching straight lines) ---
+    // Horizontal stub at y = cy
+    if (hstub_x1 > hstub_x0) {
+        SDL_FRect hstub = { (float)hstub_x0, (float)(cy - half),
+                            (float)(hstub_x1 - hstub_x0), (float)thickness };
+        SDL_RenderFillRect(renderer, &hstub);
+    }
+    // Vertical stub at x = cx
+    if (vstub_y1 > vstub_y0) {
+        SDL_FRect vstub = { (float)(cx - half), (float)vstub_y0,
+                            (float)thickness, (float)(vstub_y1 - vstub_y0) };
+        SDL_RenderFillRect(renderer, &vstub);
+    }
+
+    // --- Anti-aliased quarter-circle arc ---
     int num_segments = 2 * (w + h);
     if (num_segments < 16)
         num_segments = 16;
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
 
-    // Draw concentric arcs for thickness
     for (int t = -half; t < thickness - half; t++) {
-        float offset = (float)t;
-        float cr = radius + offset;
+        float cr = radius + (float)t;
         if (cr < 0.5f)
             continue;
 
         float dt = (t_end - t_start) / (float)num_segments;
-        float prev_x = ex + cr * cosf(t_start);
-        float prev_y = ey - cr * sinf(t_start);
+        float prev_x = arc_cx + cr * cosf(t_start);
+        float prev_y = arc_cy - cr * sinf(t_start);
 
         for (int i = 1; i <= num_segments; i++) {
             float angle = t_start + dt * (float)i;
-            float cur_x = ex + cr * cosf(angle);
-            float cur_y = ey - cr * sinf(angle);
+            float cur_x = arc_cx + cr * cosf(angle);
+            float cur_y = arc_cy - cr * sinf(angle);
             draw_aa_line(renderer, prev_x, prev_y, cur_x, cur_y, r, g, b);
             prev_x = cur_x;
             prev_y = cur_y;
@@ -691,13 +754,6 @@ static void draw_rounded_corner(SDL_Renderer *renderer, uint32_t cp,
     }
 
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_NONE);
-
-    // Draw vertical stub at cx connecting arc endpoint to cell edge
-    if (need_stub && stub_y1 > stub_y0) {
-        SDL_FRect stub = { (float)(cx - half), (float)stub_y0,
-                           (float)thickness, (float)(stub_y1 - stub_y0) };
-        SDL_RenderFillRect(renderer, &stub);
-    }
 }
 
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).

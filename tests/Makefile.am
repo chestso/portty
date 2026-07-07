@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -77,5 +77,11 @@ endif
 # MSYS2/Unix → Windows path conversion. Pure C, no SDL/coffer dependency.
 test_path_compat_SOURCES = test_path_compat.c $(TEST_COMMON) ../src/path_compat.c
 test_path_compat_CFLAGS = $(TEST_CFLAGS)
+
+# Procedural box-drawing alignment test.  Intercepts SDL draw calls
+# to verify rounded corners (╭╮╯╰) align with straight corners (┌┐└┘).
+test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) ../src/rend_sdl3_boxdraw.c
+test_boxdraw_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
+test_boxdraw_LDADD = -lm
 
 TESTS = $(check_PROGRAMS)
