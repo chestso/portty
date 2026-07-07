@@ -305,20 +305,17 @@ static void cb_osc(int code, const char *data, size_t len, void *user)
         uri[len] = '\0';
 
         /* Convert file:// URI to local path.
-         * file:///C:/Users/foo → C:/Users/foo (Windows)
-         * file:///home/foo    → /home/foo    (Unix)       */
+         * file:///C:/Users/foo → C:/Users/foo (Windows drive letter)
+         * file:///home/foo    → /home/foo    (Unix)               */
         char *path = uri;
         if (strncmp(path, "file://", 7) == 0) {
             path += 7;
-#ifdef _WIN32
-            /* Windows: file:///C:/... → strip the leading / to get C:/...
-             * file://host/share/...  → no leading /, keep as-is. */
+            /* Strip the leading / for Windows drive-letter paths
+             * (e.g. file:///C:/... → C:/...).  This check runs on
+             * all platforms — a file:///C:/ URI always refers to a
+             * Windows drive, even when received on a Unix host. */
             if (*path == '/' && path[1] && path[2] == ':')
-                path++; /* file:///C:/... → C:/... */
-#endif
-            /* Unix: file:///home/... → /home/... (path already
-             * starts with / after the file:// prefix, no adjustment
-             * needed). */
+                path++;
         }
 
         /* URL-decode %XX sequences in-place */

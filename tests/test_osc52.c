@@ -347,11 +347,9 @@ static void test_osc7_windows_path(void)
     feed(&t, seq, sizeof(seq) - 1);
 
     ASSERT_EQ(cap.call_count, 1);
-#ifdef _WIN32
+    /* A file:///C:/ URI always refers to a Windows drive letter,
+     * regardless of the host OS (SSH from Linux to Windows, etc.). */
     ASSERT_STR_EQ(cap.last, "C:/Users/foo");
-#else
-    ASSERT_STR_EQ(cap.last, "C:/Users/foo");
-#endif
 
     terminal_destroy(&t);
 }
