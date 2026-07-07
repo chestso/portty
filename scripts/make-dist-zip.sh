@@ -8,6 +8,8 @@
 #     portty.exe               — main binary
 #     portty.cmd               — launcher (sets TERMINFO_DIRS, then runs exe)
 #     README-PORTABLE.txt      — quick-start instructions
+#     README.md                — full project readme
+#     COPYING                  — MIT license
 #     share/
 #       icons/hicolor/scalable/apps/portty.svg
 #       terminfo/70/portty-256color     (compiled by tic; 70 = hex 'p')
@@ -68,6 +70,14 @@ if [ -f "$SRC_DIR/data/portty.el" ]; then
 	cp "$SRC_DIR/data/portty.el" \
 		"$STAGE_DIR/share/emacs/site-lisp/portty.el"
 fi
+
+# --- Docs ------------------------------------------------------------------
+echo "==> Copying documentation"
+for doc in README.md COPYING; do
+	if [ -f "$SRC_DIR/$doc" ]; then
+		cp "$SRC_DIR/$doc" "$STAGE_DIR/$doc"
+	fi
+done
 
 # --- Terminfo --------------------------------------------------------------
 echo "==> Compiling terminfo"

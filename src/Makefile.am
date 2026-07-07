@@ -5,7 +5,7 @@
 # rewritten when the version actually changes — so dependent .o files stay
 # cached when nothing changed.
 BUILT_SOURCES = portty_version.h
-CLEANFILES = portty_version.h
+CLEANFILES = portty_version.h portty-resources.o
 
 .PHONY: portty_version_force regen-shaders regen-icon
 portty_version.h: portty_version_force
@@ -84,9 +84,15 @@ AM_CFLAGS = $(SDL3_CFLAGS) $(FREETYPE_CFLAGS) \
 portty_LDADD = $(SDL3_LIBS) \
     $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) $(LIBPNG_LIBS) $(COFFER_LIBS) -lm
 
-if HAVE_WINDRES
-portty_SOURCES += portty.rc
-endif HAVE_WINDRES
+if HAVE_RC
+# Compile the Windows resource file (portty.rc) with windres to embed the
+# app icon into the .exe. Automake has no built-in .rc → .o rule, so we
+# provide an explicit one and link the resulting object into portty.
+portty-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico
+	$(AM_V_GEN)$(RC) $(RCFLAGS) -I$(srcdir) -I$(top_srcdir)/data/icons -i $< -o $@
+portty_LDADD += portty-resources.o
+BUILT_SOURCES += portty-resources.o
+endif HAVE_RC
 
 if HOST_WINDOWS
 portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite -lwinpthread

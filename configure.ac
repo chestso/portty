@@ -40,9 +40,10 @@ esac
 AM_CONDITIONAL([HOST_WINDOWS], [test "x$host_windows" = "xyes"])
 AM_CONDITIONAL([HOST_MACOS], [test "x$host_macos" = "xyes"])
 
-# Windows resource compiler (windres) for embedding the app icon in the .exe
-AC_CHECK_TOOL([WINDRES], [windres], [])
-AM_CONDITIONAL([HAVE_WINDRES], [test -n "$WINDRES" && test "x$host_windows" = "xyes"])
+# Windows resource compiler (windres) for embedding the app icon in the .exe.
+# Automake recognizes the RC variable and auto-generates .rc → .o build rules.
+AC_CHECK_TOOL([RC], [windres], [])
+AM_CONDITIONAL([HAVE_RC], [test -n "$RC" && test "x$host_windows" = "xyes"])
 
 # dlopen support (POSIX only)
 if test "x$host_windows" = "xno"; then
