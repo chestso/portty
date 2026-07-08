@@ -164,6 +164,25 @@ typedef struct
     // SDL-drawn panel) and mark the terminal dirty for a repaint.
     RendererBackend *rend;
     TerminalBackend *term;
+
+    // True while the left mouse button is held down. On Wayland, when the
+    // pointer crosses the window border during a drag, the compositor sends
+    // wl_pointer.leave and SDL synthesizes a BUTTON_UP — but the physical
+    // button may still be held. We track the real press state here so motion
+    // events after re-entry can keep the drag alive. The release after a
+    // border crossing cannot be detected on Wayland (SDL loses all button
+    // state); the drag stays active until a click or copy resets it.
+    bool left_button_down;
+    // When a left-button BUTTON_UP arrives during an active selection, we
+    // buffer it briefly instead of forwarding immediately. On Wayland, SDL
+    // delivers a synthetic BUTTON_UP just before MOUSE_LEAVE when the
+    // pointer crosses the window border — if MOUSE_LEAVE arrives within a
+    // short time window, we discard the buffer (border artifact) and keep
+    // the drag alive. Otherwise we forward it as a real release.
+    bool left_button_up_buffered;
+    int left_button_up_x;
+    int left_button_up_y;
+    Uint32 left_button_up_tick;
 } SDL3PlatformData;
 
 // Convert SDL modifier flags to TERM_MOD_* flags
@@ -1353,6 +1372,18 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 renderer_set_link_hint(ctx->rend, NULL, 0);
                 if (term)
                     terminal_set_hovered_hyperlink(term, 0);
+                // On Wayland, when the pointer reaches the window border
+                // during a drag, SDL delivers a synthetic BUTTON_UP just
+                // before MOUSE_LEAVE. If we have a buffered button-up from
+                // within a short time window, discard it — it was the
+                // border artifact, not a real release. Restore
+                // left_button_down so motion events after re-entry keep
+                // the drag alive.
+                if (ctx->left_button_up_buffered &&
+                    SDL_GetTicks() - ctx->left_button_up_tick < 100) {
+                    ctx->left_button_up_buffered = false;
+                    ctx->left_button_down = true;
+                }
                 // If a left-button drag (selection) is in progress, notify
                 // main so it can start drag-autoscroll. On Wayland,
                 // SDL_CaptureMouse is a no-op, so no further MOUSE_MOTION
@@ -1401,23 +1432,80 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     int button = event.button.button;
                     int clicks = pressed ? event.button.clicks : 0;
                     int tmod = sdl_mod_to_term(SDL_GetModState());
-                    // Capture the mouse on left-button press so drag motion
-                    // events keep arriving when the pointer leaves the
-                    // window (needed for drag-to-autoscroll selection).
-                    if (button == 1)
-                        SDL_CaptureMouse(pressed);
-                    if (callbacks->on_mouse(callbacks->user_data, (int)event.button.x,
-                                            (int)event.button.y, button, pressed,
-                                            clicks, tmod)) {
-                        terminal_mark_dirty(term);
+                    // Flush any buffered button-up from a previous event
+                    // (not consumed by MOUSE_LEAVE) — it was a real release.
+                    if (ctx->left_button_up_buffered) {
+                        ctx->left_button_up_buffered = false;
+                        ctx->left_button_down = false;
+                        SDL_CaptureMouse(false);
+                        if (callbacks->on_mouse(callbacks->user_data,
+                                                ctx->left_button_up_x,
+                                                ctx->left_button_up_y, 1, false,
+                                                0, tmod)) {
+                            terminal_mark_dirty(term);
+                        }
+                    }
+                    if (button == 1) {
+                        if (pressed) {
+                            ctx->left_button_down = true;
+                            SDL_CaptureMouse(true);
+                            if (callbacks->on_mouse(callbacks->user_data,
+                                                    (int)event.button.x,
+                                                    (int)event.button.y, button,
+                                                    pressed, clicks, tmod)) {
+                                terminal_mark_dirty(term);
+                            }
+                        } else {
+                            // Buffer the release. On Wayland, a synthetic
+                            // BUTTON_UP arrives just before MOUSE_LEAVE when
+                            // the pointer crosses the border during a drag.
+                            // MOUSE_LEAVE will discard the buffer; if no
+                            // MOUSE_LEAVE follows, the next event or LOOP_END
+                            // flushes it as a real release.
+                            ctx->left_button_up_buffered = true;
+                            ctx->left_button_up_x = (int)event.button.x;
+                            ctx->left_button_up_y = (int)event.button.y;
+                            ctx->left_button_up_tick = SDL_GetTicks();
+                            ctx->left_button_down = false;
+                        }
+                    } else {
+                        if (callbacks->on_mouse(callbacks->user_data,
+                                                (int)event.button.x,
+                                                (int)event.button.y, button,
+                                                pressed, clicks, tmod)) {
+                            terminal_mark_dirty(term);
+                        }
                     }
                 }
                 break;
 
             case SDL_EVENT_MOUSE_MOTION:
                 if (callbacks && callbacks->on_mouse) {
+                    // Flush a buffered button-up if present (real release,
+                    // not consumed by MOUSE_LEAVE).
+                    if (ctx->left_button_up_buffered) {
+                        ctx->left_button_up_buffered = false;
+                        ctx->left_button_down = false;
+                        SDL_CaptureMouse(false);
+                        int tmod = sdl_mod_to_term(SDL_GetModState());
+                        if (callbacks->on_mouse(callbacks->user_data,
+                                                ctx->left_button_up_x,
+                                                ctx->left_button_up_y, 1, false,
+                                                0, tmod)) {
+                            terminal_mark_dirty(term);
+                        }
+                    }
                     bool any_button_pressed = (event.motion.state != 0);
                     int tmod = sdl_mod_to_term(SDL_GetModState());
+                    // On Wayland, after the pointer crosses the window
+                    // border during a drag, SDL loses the button state —
+                    // motion events arrive with state=0 even though the
+                    // button is still held. Use left_button_down to keep
+                    // the drag alive. The release after a border crossing
+                    // cannot be detected on Wayland; the drag stays active
+                    // until a click or copy resets it.
+                    if (ctx->left_button_down)
+                        any_button_pressed = true;
                     if (callbacks->on_mouse(callbacks->user_data, (int)event.motion.x,
                                             (int)event.motion.y, 0, any_button_pressed,
                                             0, tmod)) {
@@ -1430,6 +1518,22 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 break;
             }
         } while (SDL_PollEvent(&event));
+
+        // If a left-button release was buffered (not consumed by MOUSE_LEAVE)
+        // and no more events are pending, it's a real release — flush it now.
+        if (ctx->left_button_up_buffered && callbacks && callbacks->on_mouse) {
+            ctx->left_button_up_buffered = false;
+            ctx->left_button_down = false;
+            SDL_CaptureMouse(false);
+            int tmod = sdl_mod_to_term(SDL_GetModState());
+            callbacks->on_mouse(callbacks->user_data,
+                                ctx->left_button_up_x,
+                                ctx->left_button_up_y, 1, false,
+                                0, tmod);
+            // A release returns false from on_mouse, but we must repaint
+            // to show the finalized selection state.
+            terminal_mark_dirty(term);
+        }
 
         // Age and prune deferred-clipboard entries.  By now SDL_PumpEvents
         // (inside SDL_PollEvent) has drained the Wayland dispatch, so entries

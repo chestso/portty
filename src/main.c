@@ -106,6 +106,11 @@ typedef struct
     // MOUSE_ENTER). When set, the motion handler skips autoscroll updates
     // because no motion events arrive — the autoscroll timer owns scrolling.
     bool pointer_outside;
+    // True while the left mouse button is held down (press → release).
+    // Used to distinguish an active drag from a lingering selection that
+    // was already released — on_mouse_leave must only start autoscroll
+    // when a drag is in progress, not merely when the selection is active.
+    bool drag_in_progress;
 } MainContext;
 
 // Convert pixel coordinates to display row/col
@@ -239,16 +244,16 @@ static void on_autoscroll_tick(void *user_data)
     extend_selection_from_pixel(ctx, ctx->drag_last_pixel_x, ctx->drag_last_pixel_y);
 }
 
-// Mouse left the window during a drag — start autoscroll if a selection is
-// active and the pointer exited through the top or bottom edge. On Wayland,
-// SDL_CaptureMouse is a no-op, so this is the only signal we get that the
-// pointer has exited while the user is dragging.
+// Mouse left the window during a drag — start autoscroll if a drag is
+// in progress and the pointer exited through the top or bottom edge. On
+// Wayland, SDL_CaptureMouse is a no-op, so this is the only signal we get
+// that the pointer has exited while the user is dragging.
 static void on_mouse_leave(void *user_data, int pixel_x, int pixel_y)
 {
     MainContext *ctx = (MainContext *)user_data;
     ctx->pointer_outside = true;
 
-    if (!terminal_selection_active(ctx->term))
+    if (!ctx->drag_in_progress)
         return;
 
     ctx->drag_last_pixel_x = pixel_x;
@@ -276,7 +281,10 @@ static void on_mouse_leave(void *user_data, int pixel_x, int pixel_y)
 }
 
 // Mouse re-entered the window — stop autoscroll. Motion events will resume
-// driving selection updates normally.
+// driving selection updates normally. On Wayland, if the user released the
+// button while outside, the platform backend synthesizes a BUTTON_UP event
+// (since SDL_CaptureMouse is a no-op and no real BUTTON_UP was delivered),
+// which clears drag_in_progress via the normal on_mouse path.
 static void on_mouse_enter(void *user_data)
 {
     MainContext *ctx = (MainContext *)user_data;
@@ -820,6 +828,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
     // Left button press — start selection (or defer for char mode)
     if (button == 1 && pressed) {
+        ctx->drag_in_progress = true;
         if (clicks >= 3) {
             ctx->drag_pending = false;
             terminal_selection_start(ctx->term, unified_row, display_col, TERM_SELECT_LINE);
@@ -840,6 +849,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
 
     // Left button release — cancel pending drag if no motion occurred
     if (button == 1 && !pressed) {
+        ctx->drag_in_progress = false;
         ctx->drag_pending = false;
         ctx->pointer_outside = false;
         set_autoscroll(ctx, false);
