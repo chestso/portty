@@ -48,7 +48,7 @@ However, after the border crossing, SDL has lost all button state (`SDL_GetMouse
 
 This is a fundamental Wayland protocol limitation ([SDL issue #14980](https://github.com/libsdl-org/SDL/issues/14980), closed as "not our bug"), not a portty bug. The compositor only sends pointer events for surfaces the application owns, and once `wl_pointer.leave` fires, the button state is irrecoverably lost.
 
-**Workaround**: Click anywhere to start a new selection, or right-click to copy the current one.
+**Workaround**: Click anywhere to cancel the stuck selection, then click and drag to start a new one. Right-click copies the current selection and clears it.
 
 ## Architecture
 
