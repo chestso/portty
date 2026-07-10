@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
@@ -90,5 +90,11 @@ test_boxdraw_LDADD = -lm
 # no full-screen clear is performed.
 test_cursor_render_SOURCES = test_cursor_render.c $(TEST_COMMON)
 test_cursor_render_CFLAGS = $(TEST_CFLAGS)
+
+# Mouse-wheel scroll logic: sub-tick accumulation and consolidated
+# dispatch decision tree. Pure C, no SDL/coffer dependency.
+test_scroll_SOURCES = test_scroll.c $(TEST_COMMON)
+test_scroll_CFLAGS = $(TEST_CFLAGS)
+test_scroll_LDADD = -lm
 
 TESTS = $(check_PROGRAMS)

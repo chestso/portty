@@ -183,6 +183,12 @@ typedef struct
     int left_button_up_x;
     int left_button_up_y;
     Uint32 left_button_up_tick;
+
+    // Sub-tick scroll accumulator. SDL3 reports wheel deltas as floats;
+    // trackpads produce fractional values (e.g. 0.1 per event). We accumulate
+    // until a whole tick is reached before dispatching scroll callbacks,
+    // so slow trackpad scrolling is not silently dropped.
+    float wheel_accum_y;
 } SDL3PlatformData;
 
 // Convert SDL modifier flags to TERM_MOD_* flags
@@ -1417,25 +1423,40 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 break;
 
             case SDL_EVENT_MOUSE_WHEEL:
-                if (event.wheel.y != 0) {
-                    bool consumed = false;
-                    if (callbacks && callbacks->on_mouse) {
-                        int button = (event.wheel.y > 0) ? 4 : 5;
-                        int clicks = abs((int)event.wheel.y);
+            {
+                float dy = event.wheel.y;
+                if (dy != 0.0f) {
+                    // SDL3 delivers float wheel deltas. Trackpads produce
+                    // sub-tick values (e.g. 0.1); without accumulation those
+                    // events truncate to zero and are silently dropped,
+                    // making slow trackpad scrolling non-functional.
+                    ctx->wheel_accum_y += dy;
+                    int whole_ticks = (int)ctx->wheel_accum_y; // truncates toward zero
+                    if (whole_ticks != 0) {
+                        ctx->wheel_accum_y -= (float)whole_ticks;
+                        bool consumed = false;
+                        int button = (whole_ticks > 0) ? 4 : 5;
+                        int clicks = abs(whole_ticks);
                         int tmod = sdl_mod_to_term(SDL_GetModState());
-                        for (int i = 0; i < clicks && !consumed; i++) {
-                            float mx, my;
-                            SDL_GetMouseState(&mx, &my);
-                            consumed = callbacks->on_mouse(callbacks->user_data, (int)mx, (int)my,
-                                                           button, true, 0, tmod);
+                        // Use the position embedded in the wheel event rather
+                        // than a separate SDL_GetMouseState() call.
+                        int mx = (int)event.wheel.mouse_x;
+                        int my = (int)event.wheel.mouse_y;
+                        if (callbacks && callbacks->on_mouse) {
+                            for (int i = 0; i < clicks && !consumed; i++) {
+                                consumed = callbacks->on_mouse(
+                                    callbacks->user_data, mx, my,
+                                    button, true, 0, tmod);
+                            }
                         }
-                    }
-                    if (!consumed && callbacks && callbacks->on_scroll) {
-                        callbacks->on_scroll(callbacks->user_data, (int)event.wheel.y * SCROLL_LINES_PER_TICK);
+                        if (!consumed && callbacks && callbacks->on_scroll) {
+                            callbacks->on_scroll(callbacks->user_data, whole_ticks);
+                        }
                     }
                 }
                 terminal_mark_dirty(term);
                 break;
+            }
 
             case SDL_EVENT_MOUSE_BUTTON_DOWN:
             case SDL_EVENT_MOUSE_BUTTON_UP:

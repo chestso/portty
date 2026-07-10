@@ -567,15 +567,35 @@ static void on_resize(void *user_data, int pixel_w, int pixel_h)
     }
 }
 
-// Scroll callback
-static void on_scroll(void *user_data, int delta)
+// Scroll callback — the single dispatch point for wheel scrolling.
+// ticks is the number of whole wheel ticks (positive = up, negative = down).
+// The platform layer handles sub-tick accumulation; this function decides
+// what the ticks do: pager scroll, altscreen arrow keys, or scrollback.
+static void on_scroll(void *user_data, int ticks)
 {
     MainContext *ctx = (MainContext *)user_data;
+    if (ticks == 0)
+        return;
+
     if (pager_active(ctx->pager)) {
-        pager_scroll(ctx->pager, delta);
+        pager_scroll(ctx->pager, ticks * SCROLL_LINES_PER_TICK);
         return;
     }
-    renderer_scroll(ctx->rend, ctx->term, delta);
+
+    // In altscreen with no mouse mode, convert wheel to arrow keys so
+    // apps like less/man scroll. This was previously handled in on_mouse
+    // with a hardcoded 3; it is now consolidated here using the constant.
+    if (terminal_is_altscreen(ctx->term) && terminal_get_mouse_mode(ctx->term) == 0) {
+        int key = (ticks > 0) ? TERM_KEY_UP : TERM_KEY_DOWN;
+        int count = abs(ticks) * SCROLL_LINES_PER_TICK;
+        if (count < 1)
+            count = 1;
+        for (int i = 0; i < count; i++)
+            terminal_send_key(ctx->term, key, TERM_MOD_NONE);
+        return;
+    }
+
+    renderer_scroll(ctx->rend, ctx->term, ticks * SCROLL_LINES_PER_TICK);
 }
 
 // Output callback for terminal - sends data to PTY
@@ -779,16 +799,10 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
             return false;
     }
 
-    // Wheel events not consumed by terminal — convert to arrow keys in altscreen
-    if (button == 4 || button == 5) {
-        if (terminal_is_altscreen(ctx->term)) {
-            int key = (button == 4) ? TERM_KEY_UP : TERM_KEY_DOWN;
-            for (int i = 0; i < 3; i++)
-                terminal_send_key(ctx->term, key, TERM_MOD_NONE);
-            return true;
-        }
+    // Wheel events not consumed by terminal mouse-mode forwarding fall
+    // through to on_scroll, which handles altscreen arrows and scrollback.
+    if (button == 4 || button == 5)
         return false;
-    }
 
     // In altscreen the application owns the display.  When no mouse protocol
     // is active, the app hasn't claimed the pointer — but terminal-level

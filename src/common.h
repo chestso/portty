@@ -27,7 +27,7 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
 
 /* Shared constants */
 #define CURSOR_BLINK_INTERVAL_MS 1000
-#define SCROLL_LINES_PER_TICK    3
+#define SCROLL_LINES_PER_TICK    1
 #define AUTOSCROLL_INTERVAL_MS   33
 
 #endif /* COMMON_H */
