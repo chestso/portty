@@ -3236,10 +3236,12 @@ static void sdl3_draw_cursor(RendererBackend *backend, TerminalBackend *term,
     rend_sdl3_atlas_begin_frame(&data->atlas);
     populate_atlas(data, term, display_rows, display_cols, cursor_visible);
 
-    /* Draw the scene with clip rect set. draw_scene_linear clears the full
-     * linear target and renders all cells, but only the cursor cell's pixels
-     * survive the clip rect. The linear->sRGB encode blit is also clipped,
-     * so only the cursor cell is written to the backbuffer. */
+    /* Draw the scene with clip rect set. render_visible_cells draws each
+     * cell's background, so no RenderClear is needed — and RenderClear
+     * ignores the clip rect, which would wipe the entire target. Only the
+     * cursor cell's pixels are written within the clip rect. The final blit
+     * copies only the cursor cell region, preserving the rest of the
+     * backbuffer. */
     SDL_Texture *dst = SDL_GetRenderTarget(data->renderer);
     int out_w = 0, out_h = 0;
     bool linear = ensure_linear_target(data, &out_w, &out_h);
@@ -3250,8 +3252,6 @@ static void sdl3_draw_cursor(RendererBackend *backend, TerminalBackend *term,
     }
 
     SDL_SetRenderClipRect(data->renderer, &clip);
-    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
-    SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols,
                          cursor_visible, false);
     SDL_SetRenderClipRect(data->renderer, NULL);
@@ -3260,8 +3260,10 @@ static void sdl3_draw_cursor(RendererBackend *backend, TerminalBackend *term,
         SDL_FlushRenderer(data->renderer);
         SDL_SetRenderTarget(data->renderer, dst);
         SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
-        SDL_FRect used = { 0.0f, 0.0f, (float)out_w, (float)out_h };
-        SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
+        SDL_FRect cell_rect = { (float)clip.x, (float)clip.y,
+                                (float)clip.w, (float)clip.h };
+        SDL_RenderTexture(data->renderer, data->linear_target,
+                          &cell_rect, &cell_rect);
     }
 }
 
