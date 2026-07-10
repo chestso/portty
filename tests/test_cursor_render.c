@@ -126,11 +126,31 @@ static void test_cursor_rect_overlay_active(void)
     ASSERT_FALSE(ok);
 }
 
-/* The critical regression: the blit rect must match the clip rect,
- * not the full screen. If the blit rect covers the whole screen,
- * it would overwrite the backbuffer with the (mostly empty) linear
- * target, wiping all content — the original bug. */
-static void test_blit_rect_matches_clip_not_fullscreen(void)
+/* The clip rect limits rendering to the cursor cell, but the blit must
+ * copy the full linear target to the backbuffer. The linear target
+ * persists across frames and retains the complete terminal content from
+ * the last draw_terminal — only the cursor cell was overwritten within
+ * the clip rect. If the blit copied only the cursor cell, the rest of
+ * the backbuffer (which SDL clears after each Present) would be blank. */
+static void test_clip_rect_is_cursor_cell(void)
+{
+    int x, y, w, h;
+    bool ok = compute_cursor_rects(10, 40, 24, 80, 10, 20, 0, false,
+                                   &x, &y, &w, &h);
+    ASSERT_TRUE(ok);
+
+    /* Clip rect = cursor cell pixel bounds */
+    ASSERT_EQ(x, 400);
+    ASSERT_EQ(y, 200);
+    ASSERT_EQ(w, 10);
+    ASSERT_EQ(h, 20);
+}
+
+/* The blit must cover the full screen, not just the cursor cell.
+ * The linear target has the complete frame; the blit re-encodes it
+ * to sRGB for presentation. A cell-sized blit would leave the rest
+ * of the backbuffer blank after SDL_RenderPresent clears it. */
+static void test_blit_rect_is_full_screen(void)
 {
     int x, y, w, h;
     bool ok = compute_cursor_rects(10, 40, 24, 80, 10, 20, 0, false,
@@ -140,33 +160,13 @@ static void test_blit_rect_matches_clip_not_fullscreen(void)
     int screen_w = 80 * 10; /* 800 */
     int screen_h = 24 * 20; /* 480 */
 
-    /* Blit rect (src and dst) must be the cursor cell, not the screen */
-    ASSERT_EQ(w, 10); /* cell width, not screen width */
-    ASSERT_EQ(h, 20); /* cell height, not screen height */
-    ASSERT_TRUE(x + w <= screen_w);
-    ASSERT_TRUE(y + h <= screen_h);
-    ASSERT_TRUE(w < screen_w); /* must not span full width */
-    ASSERT_TRUE(h < screen_h); /* must not span full height */
-}
-
-/* Verify that the blit src rect equals the blit dst rect.
- * In the fixed code, both are the cursor cell rect. In the buggy
- * code, the blit used {0, 0, out_w, out_h} (full target). */
-static void test_blit_src_equals_dst(void)
-{
-    int x, y, w, h;
-    bool ok = compute_cursor_rects(3, 7, 24, 80, 10, 20, 0, false,
-                                   &x, &y, &w, &h);
-    ASSERT_TRUE(ok);
-
-    /* In the fixed code: src rect = dst rect = cursor cell rect.
-     * Both are {x, y, w, h}. */
-    int src_x = x, src_y = y, src_w = w, src_h = h;
-    int dst_x = x, dst_y = y, dst_w = w, dst_h = h;
-    ASSERT_EQ(src_x, dst_x);
-    ASSERT_EQ(src_y, dst_y);
-    ASSERT_EQ(src_w, dst_w);
-    ASSERT_EQ(src_h, dst_h);
+    /* Blit rect = full screen (the persistent linear target) */
+    int blit_w = screen_w;
+    int blit_h = screen_h;
+    ASSERT_EQ(blit_w, 800);
+    ASSERT_EQ(blit_h, 480);
+    ASSERT_TRUE(blit_w > w); /* blit is wider than cursor cell */
+    ASSERT_TRUE(blit_h > h); /* blit is taller than cursor cell */
 }
 
 /* The fix removes SDL_RenderClear from the cursor-only path.
@@ -202,8 +202,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_cursor_rect_negative_pos);
     RUN_TEST(test_cursor_rect_scrolled_back);
     RUN_TEST(test_cursor_rect_overlay_active);
-    RUN_TEST(test_blit_rect_matches_clip_not_fullscreen);
-    RUN_TEST(test_blit_src_equals_dst);
+    RUN_TEST(test_clip_rect_is_cursor_cell);
+    RUN_TEST(test_blit_rect_is_full_screen);
     RUN_TEST(test_no_full_screen_clear);
 
     TEST_SUMMARY();

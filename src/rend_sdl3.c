@@ -3236,12 +3236,14 @@ static void sdl3_draw_cursor(RendererBackend *backend, TerminalBackend *term,
     rend_sdl3_atlas_begin_frame(&data->atlas);
     populate_atlas(data, term, display_rows, display_cols, cursor_visible);
 
-    /* Draw the scene with clip rect set. render_visible_cells draws each
-     * cell's background, so no RenderClear is needed — and RenderClear
-     * ignores the clip rect, which would wipe the entire target. Only the
-     * cursor cell's pixels are written within the clip rect. The final blit
-     * copies only the cursor cell region, preserving the rest of the
-     * backbuffer. */
+    /* Render into the linear target with a clip rect so only the cursor
+     * cell's pixels change. The linear target persists across frames, so
+     * it retains the full terminal content from the last draw_terminal —
+     * only the cursor cell is overwritten. The blit then copies the full
+     * linear target to the backbuffer (which SDL clears after each
+     * Present), giving a complete frame with the updated cursor cell.
+     * No RenderClear is needed: cells self-paint their backgrounds, and
+     * the clip rect ensures only the cursor cell is written. */
     SDL_Texture *dst = SDL_GetRenderTarget(data->renderer);
     int out_w = 0, out_h = 0;
     bool linear = ensure_linear_target(data, &out_w, &out_h);
@@ -3260,10 +3262,8 @@ static void sdl3_draw_cursor(RendererBackend *backend, TerminalBackend *term,
         SDL_FlushRenderer(data->renderer);
         SDL_SetRenderTarget(data->renderer, dst);
         SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
-        SDL_FRect cell_rect = { (float)clip.x, (float)clip.y,
-                                (float)clip.w, (float)clip.h };
-        SDL_RenderTexture(data->renderer, data->linear_target,
-                          &cell_rect, &cell_rect);
+        SDL_FRect used = { 0.0f, 0.0f, (float)out_w, (float)out_h };
+        SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
     }
 }
 
