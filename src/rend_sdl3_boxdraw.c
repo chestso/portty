@@ -786,6 +786,12 @@ static void draw_rounded_corner(BoxDrawCtx *ctx, uint32_t cp,
 
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
 // Uses anti-aliased line rendering with thickness matching the light line width.
+//
+// The bitmap is padded by 1px on every side so the Xiaolin Wu AA endpoints
+// — which sit exactly on the cell corners — have a full pixel of room
+// instead of being half-clipped at the bitmap edge.  This eliminates the
+// faded half-pixel seam that appeared at every row boundary when cells
+// were stacked.
 static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int x, int y, int w, int h,
                                 uint8_t r, uint8_t g, uint8_t b)
@@ -822,8 +828,11 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
 }
 
 // Internal: draw into a BoxDrawCtx at the given cell-local coordinates.
+// pad_x / pad_y give the pixel inset of the cell within the padded bitmap
+// (used for diagonals whose line is extrapolated beyond the cell corners).
 static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
                                   int cell_w, int cell_h,
+                                  int pad_x, int pad_y,
                                   uint8_t r, uint8_t g, uint8_t b)
 {
     ctx_set_color(ctx, r, g, b, 255);
@@ -831,7 +840,7 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
     if (cp >= 0x256D && cp <= 0x2570) {
         draw_rounded_corner(ctx, cp, 0, 0, cell_w, cell_h, r, g, b);
     } else if (cp >= 0x2571 && cp <= 0x2573) {
-        draw_diagonal_lines(ctx, cp, 0, 0, cell_w, cell_h, r, g, b);
+        draw_diagonal_lines(ctx, cp, pad_x, pad_y, cell_w, cell_h, r, g, b);
     } else if (cp >= 0x2500 && cp <= 0x257F) {
         uint8_t enc = get_box_encoding(cp);
         if (enc != 0)
@@ -844,20 +853,30 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
 // Public API: render a box-drawing character to a GlyphBitmap.
 // The bitmap is cell-sized (w×h) with centered=true, RGBA pixels,
 // and is intended to be inserted into the texture atlas like a font glyph.
+//
+// Diagonal characters (U+2571-U+2573) get a 1px padding on every side so
+// the AA line endpoints have a full pixel of room instead of being
+// half-clipped at the cell edge.  The 1px overhang fills the half-pixel
+// gap at row boundaries, producing seamless stripes when cells are stacked.
 GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                       uint8_t r, uint8_t g, uint8_t b)
 {
+    bool is_diagonal = (cp >= 0x2571 && cp <= 0x2573);
+    int pad = is_diagonal ? 1 : 0;
+    int bmp_w = cell_w + pad * 2;
+    int bmp_h = cell_h + pad * 2;
+
     GlyphBitmap *bmp = malloc(sizeof(GlyphBitmap));
     if (!bmp)
         return NULL;
-    bmp->width = cell_w;
-    bmp->height = cell_h;
+    bmp->width = bmp_w;
+    bmp->height = bmp_h;
     bmp->x_offset = 0;
     bmp->y_offset = 0;
     bmp->advance = cell_w;
     bmp->glyph_id = (int)cp;
     bmp->centered = true;
-    bmp->pixels = calloc((size_t)cell_w * cell_h * 4, 1);
+    bmp->pixels = calloc((size_t)bmp_w * bmp_h * 4, 1);
     if (!bmp->pixels) {
         free(bmp);
         return NULL;
@@ -865,8 +884,8 @@ GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
 
     BoxDrawCtx ctx = {
         .pixels = bmp->pixels,
-        .width = cell_w,
-        .height = cell_h,
+        .width = bmp_w,
+        .height = bmp_h,
         .r = r,
         .g = g,
         .b = b,
@@ -874,6 +893,6 @@ GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
         .blend = false,
     };
 
-    boxdraw_render_to_ctx(&ctx, cp, cell_w, cell_h, r, g, b);
+    boxdraw_render_to_ctx(&ctx, cp, cell_w, cell_h, pad, pad, r, g, b);
     return bmp;
 }
