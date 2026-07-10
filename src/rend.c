@@ -34,6 +34,13 @@ void renderer_draw_terminal(RendererBackend *rend, TerminalBackend *term, bool c
     rend->draw_terminal(rend, term, cursor_visible);
 }
 
+void renderer_draw_cursor(RendererBackend *rend, TerminalBackend *term, bool cursor_visible)
+{
+    if (!rend || !rend->draw_cursor)
+        return;
+    rend->draw_cursor(rend, term, cursor_visible);
+}
+
 void renderer_present(RendererBackend *rend)
 {
     if (!rend || !rend->present)

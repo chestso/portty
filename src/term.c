@@ -761,6 +761,13 @@ bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us)
     return term->lottie_tick(term, now_us);
 }
 
+int terminal_lottie_count(TerminalBackend *term)
+{
+    if (!term || !term->lottie_count)
+        return 0;
+    return term->lottie_count(term);
+}
+
 // Emoji width paradigm.
 //
 // coffer computes UAX #11 + #29 cluster widths at insertion time and

@@ -212,6 +212,7 @@ struct TerminalBackend
     const CfrLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
                                                        uint64_t id, int *count);
     bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
+    int (*lottie_count)(TerminalBackend *term);
 
     // Query a coffer mode (CfrMode). Returns false if the backend or mode
     // is unavailable.
@@ -408,6 +409,7 @@ const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count);
 const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
                                                          uint64_t id, int *count);
 bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
+int terminal_lottie_count(TerminalBackend *term);
 
 // Query a coffer mode (CfrMode). Returns false if the backend or mode
 // is unavailable.

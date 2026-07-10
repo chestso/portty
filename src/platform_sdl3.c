@@ -1157,9 +1157,9 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
     ctx->cursor_blink_timer = timer_add(ctx->timers, CURSOR_BLINK_INTERVAL_MS, true,
                                         EVENT_CURSOR_BLINK, NULL);
 
-    // Start lottie animation tick timer (~60 fps)
-    ctx->lottie_timer = timer_add(ctx->timers, 16, true,
-                                  EVENT_LOTTIE_TICK, NULL);
+    // Lottie animation tick timer (~60 fps) is started on demand when
+    // animations are loaded, and stopped when all are removed. See the
+    // EVENT_PTY_DATA and EVENT_LOTTIE_TICK handlers below.
 
     // Start PTY reader thread (skip in demo mode when no PTY)
     SDL_SetAtomicInt(&ctx->running, 1);
@@ -1204,6 +1204,13 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         platform_set_window_title(plat, terminal_get_title(term));
                         free(payload);
                         pty_processed = true;
+                        // Start the Lottie tick timer if animations are now
+                        // present (the shell may have loaded one via APC).
+                        if (ctx->lottie_timer == TIMER_INVALID &&
+                            terminal_lottie_count(term) > 0) {
+                            ctx->lottie_timer = timer_add(ctx->timers, 16, true,
+                                                          EVENT_LOTTIE_TICK, NULL);
+                        }
                     }
                     break;
                 }
@@ -1218,9 +1225,12 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     break;
 
                 case EVENT_CURSOR_BLINK:
-                    if (terminal_get_cursor_blink(term)) {
+                    if (terminal_get_cursor_blink(term) && ctx->has_focus &&
+                        terminal_get_cursor_visible(term)) {
                         ctx->cursor_blink_visible = !ctx->cursor_blink_visible;
-                        terminal_mark_dirty(term);
+                        bool cursor_vis = ctx->cursor_blink_visible;
+                        renderer_draw_cursor(rend, term, cursor_vis);
+                        SDL_RenderPresent(ctx->sdl_renderer);
                     }
                     break;
 
@@ -1234,6 +1244,11 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                 case EVENT_LOTTIE_TICK:
                     if (terminal_lottie_tick(term, SDL_GetTicksNS() / 1000))
                         terminal_mark_dirty(term);
+                    // Stop the timer if all animations have been removed.
+                    if (terminal_lottie_count(term) == 0) {
+                        timer_remove(ctx->timers, ctx->lottie_timer);
+                        ctx->lottie_timer = TIMER_INVALID;
+                    }
                     break;
 
                 case EVENT_NOTIFY_SHOW:
@@ -1576,6 +1591,12 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
     if (ctx->cursor_blink_timer != TIMER_INVALID) {
         timer_remove(ctx->timers, ctx->cursor_blink_timer);
         ctx->cursor_blink_timer = TIMER_INVALID;
+    }
+
+    // Stop lottie animation tick timer
+    if (ctx->lottie_timer != TIMER_INVALID) {
+        timer_remove(ctx->timers, ctx->lottie_timer);
+        ctx->lottie_timer = TIMER_INVALID;
     }
 
     // Stop autoscroll timer

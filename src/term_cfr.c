@@ -567,6 +567,11 @@ static bool cfr_back_lottie_tick(TerminalBackend *term, uint64_t now_us)
     CfrBackendData *d = term->backend_data;
     return cfr_lottie_tick(d->vt, now_us);
 }
+static int cfr_back_lottie_count(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    return cfr_lottie_active_count(d->vt);
+}
 static void cfr_back_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
 {
     CfrBackendData *d = term->backend_data;
@@ -957,6 +962,7 @@ TerminalBackend terminal_backend_cfr = {
     .get_lotties = cfr_back_get_lotties,
     .get_lottie_placements = cfr_back_get_lottie_placements,
     .lottie_tick = cfr_back_lottie_tick,
+    .lottie_count = cfr_back_lottie_count,
     .get_mode = cfr_back_get_mode,
 };
 
