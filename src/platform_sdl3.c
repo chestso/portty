@@ -1225,12 +1225,9 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                     break;
 
                 case EVENT_CURSOR_BLINK:
-                    if (terminal_get_cursor_blink(term) && ctx->has_focus &&
-                        terminal_get_cursor_visible(term)) {
+                    if (terminal_get_cursor_blink(term)) {
                         ctx->cursor_blink_visible = !ctx->cursor_blink_visible;
-                        bool cursor_vis = ctx->cursor_blink_visible;
-                        renderer_draw_cursor(rend, term, cursor_vis);
-                        SDL_RenderPresent(ctx->sdl_renderer);
+                        terminal_mark_dirty(term);
                     }
                     break;
 

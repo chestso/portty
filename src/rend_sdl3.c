@@ -3191,82 +3191,6 @@ static void populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
     rend_sdl3_atlas_flush(&data->atlas);
 }
 
-/* Render only the cursor cell for blink-phase toggles. Uses a clip rect to
- * limit painting to one cell, then re-renders all cells (only the unclipped
- * one writes pixels) with the new cursor visibility. Replaces a full-screen
- * repaint (~3000 cells, GPU clear, linear blit) with a single-cell render. */
-static void sdl3_draw_cursor(RendererBackend *backend, TerminalBackend *term,
-                             bool cursor_visible)
-{
-    if (!backend || !backend->backend_data || !term)
-        return;
-
-    RendererSdl3Data *data = (RendererSdl3Data *)backend->backend_data;
-
-    /* No cursor-only render when the pager overlay is active (no cursor). */
-    if (data->overlay)
-        return;
-
-    /* Cursor is hidden when scrolled back in scrollback. */
-    if (data->scroll_offset != 0)
-        return;
-
-    if (!font_has_style(data->font, FONT_STYLE_NORMAL))
-        return;
-
-    /* Query cursor position and bounds-check against the visible grid. */
-    TerminalPos cursor_pos = terminal_get_cursor_pos(term);
-    int display_rows = data->height / data->cell_height;
-    int display_cols = data->width / data->cell_width;
-    int term_rows, term_cols;
-    terminal_get_dimensions(term, &term_rows, &term_cols);
-    if (display_rows > term_rows)
-        display_rows = term_rows;
-    if (display_cols > term_cols)
-        display_cols = term_cols;
-    if (cursor_pos.row < 0 || cursor_pos.row >= display_rows ||
-        cursor_pos.col < 0 || cursor_pos.col >= display_cols)
-        return;
-
-    /* Clip to the cursor cell so only that one cell's pixels are touched. */
-    SDL_Rect clip = { cursor_pos.col * data->cell_width,
-                      cursor_pos.row * data->cell_height,
-                      data->cell_width, data->cell_height };
-
-    rend_sdl3_atlas_begin_frame(&data->atlas);
-    populate_atlas(data, term, display_rows, display_cols, cursor_visible);
-
-    /* Render into the linear target with a clip rect so only the cursor
-     * cell's pixels change. The linear target persists across frames, so
-     * it retains the full terminal content from the last draw_terminal —
-     * only the cursor cell is overwritten. The blit then copies the full
-     * linear target to the backbuffer (which SDL clears after each
-     * Present), giving a complete frame with the updated cursor cell.
-     * No RenderClear is needed: cells self-paint their backgrounds, and
-     * the clip rect ensures only the cursor cell is written. */
-    SDL_Texture *dst = SDL_GetRenderTarget(data->renderer);
-    int out_w = 0, out_h = 0;
-    bool linear = ensure_linear_target(data, &out_w, &out_h);
-
-    if (linear) {
-        SDL_FlushRenderer(data->renderer);
-        SDL_SetRenderTarget(data->renderer, data->linear_target);
-    }
-
-    SDL_SetRenderClipRect(data->renderer, &clip);
-    render_visible_cells(data, term, display_rows, display_cols,
-                         cursor_visible, false);
-    SDL_SetRenderClipRect(data->renderer, NULL);
-
-    if (linear) {
-        SDL_FlushRenderer(data->renderer);
-        SDL_SetRenderTarget(data->renderer, dst);
-        SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
-        SDL_FRect used = { 0.0f, 0.0f, (float)out_w, (float)out_h };
-        SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
-    }
-}
-
 static void sdl3_draw_terminal(RendererBackend *backend, TerminalBackend *term,
                                bool cursor_visible)
 {
@@ -3739,7 +3663,6 @@ RendererBackend renderer_backend_sdl3 = {
     .destroy = sdl3_destroy,
     .load_fonts = sdl3_load_fonts,
     .draw_terminal = sdl3_draw_terminal,
-    .draw_cursor = sdl3_draw_cursor,
     .present = sdl3_present,
     .resize = sdl3_resize,
     .log_stats = sdl3_log_stats,
