@@ -166,9 +166,10 @@ static void cb_set_title(const char *utf8, void *user)
     size_t n = strlen(utf8);
     if (n >= sizeof(d->title)) {
         n = sizeof(d->title) - 1;
-        /* Don't slice through a UTF-8 codepoint — GTK/Pango/Gdk abort
-         * hard on mid-codepoint truncation. Walk the last `n` bytes back
-         * to a leading byte and drop the codepoint if it doesn't fit. */
+        /* Don't slice through a UTF-8 codepoint — truncation
+         * on mid-codepoint bytes can cause assertion failures.
+         * Walk the last `n` bytes back to a leading byte and
+         * drop the codepoint if it doesn't fit. */
         if (n > 0) {
             size_t k = n - 1;
             while (k > 0 && ((unsigned char)utf8[k] & 0xC0) == 0x80)

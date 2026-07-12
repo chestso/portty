@@ -36,7 +36,7 @@ typedef struct
     float text_gamma;
     float text_contrast;
     const char *word_chars;
-    const char *platform_name; // "sdl3" / "gtk4"
+    const char *platform_name; // "sdl3"
 
     // Session / environment
     const char *term_env;      // TERM advertised to the shell

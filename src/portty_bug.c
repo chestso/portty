@@ -9,9 +9,7 @@ void portty_bug_register_dump(void (*fn)(void))
 {
     if (!fn || dumper_count >= PORTTY_BUG_MAX_DUMPERS)
         return;
-    /* Duplicate registrations are not deduplicated -- the gtk4 plugin
-     * can be unloaded and reloaded across sessions, but within a single
-     * run each init path registers once. */
+    /* Duplicate registrations are not deduplicated. */
     dumpers[dumper_count++] = fn;
 }
 

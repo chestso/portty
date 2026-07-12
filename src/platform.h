@@ -119,7 +119,7 @@ struct PlatformBackend
     void (*clipboard_free)(PlatformBackend *plat, char *text);
 
     // Async clipboard paste — write clipboard content to PTY with
-    // bracketed paste. Returns true if handled asynchronously (GTK4).
+    // bracketed paste. Returns true if handled asynchronously.
     // If NULL or returns false, caller falls back to synchronous path.
     bool (*clipboard_paste_async)(PlatformBackend *plat,
                                   TerminalBackend *term, PtyContext *pty);
@@ -145,8 +145,7 @@ struct PlatformBackend
 
     // Open a URL with the system's default handler. Returns true on success.
     // On failure, writes a human-readable reason into `err` (size `errlen`,
-    // never overflowed, may be left untouched on success). Implementations:
-    // SDL_OpenURL on SDL3, g_app_info_launch_default_for_uri on GTK4.
+    // never overflowed, may be left untouched on success).
     bool (*open_url)(PlatformBackend *plat, const char *url, char *err,
                      size_t errlen);
 
@@ -166,16 +165,15 @@ struct PlatformBackend
     // OSC-8 link under the pointer; url == NULL/"" hides it. anchor_py is the
     // hovered link's physical-pixel Y, used to position the hint clear of the
     // link (top, flipping to bottom). SDL3 draws a full-width strip via the
-    // renderer; GTK4 reveals a native .osd pill. Independent of notify().
+    // renderer. Independent of notify().
     void (*set_link_hint)(PlatformBackend *plat, const char *url, int anchor_py);
 
     // Enable or disable the drag-autoscroll tick. While enabled, the
     // backend fires `on_autoscroll_tick` on its own timer (~30Hz).
     void (*set_autoscroll)(PlatformBackend *plat, bool enabled);
 
-    // GPU device + driver description for the diagnostics report (only the
-    // GTK4/Vulkan backend, which owns device creation, knows this). Returns
-    // false and leaves the out-params untouched when unavailable. *libre is set
+    // GPU device + driver description for the diagnostics report.
+    // Returns false and leaves the out-params untouched when unavailable. *libre is set
     // true for permissively-licensed open-source drivers (Mesa). Strings are
     // platform-owned, valid for the platform's lifetime.
     bool (*get_gpu_info)(PlatformBackend *plat, const char **device,
@@ -223,7 +221,7 @@ bool platform_clipboard_paste_async(PlatformBackend *plat,
  * and bracketed-paste framing. Normalizes CRLF / bare LF to a single
  * CR (see terminal_paste_normalize) so a multi-line paste produces one
  * Enter per line, then wraps the write in terminal_start/end_paste.
- * Shared by the SDL3 sync path (main.c) and the GTK4 async callback. */
+ * Shared by all paste paths. */
 void platform_paste_text(TerminalBackend *term, PtyContext *pty,
                          const char *text, size_t len);
 

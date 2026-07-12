@@ -54,7 +54,7 @@ float portty_text_contrast = 0.0f;            /* neutral */
 bool portty_notification_transparent = false; /* opaque notification panel by default */
 
 /* ASan/UBSan runtime defaults. Only compiled in when the binary is
- * built with -fsanitize=address. detect_leaks=0 silences GTK/Mesa exit
+ * built with -fsanitize=address. detect_leaks=0 silences Mesa exit
  * leaks; abort_on_error=1 produces a core file via systemd-coredump so
  * the trace survives the GUI shutdown; log_path writes reports to
  * /tmp/portty-asan.<pid> in case stderr is lost.
@@ -329,10 +329,7 @@ static void show_diagnostics_report(MainContext *ctx)
     int rows = 0, cols = 0;
     terminal_get_dimensions(ctx->term, &rows, &cols);
 
-    // GPU + driver. The GTK4/Vulkan backend owns its device and reports via the
-    // platform; the portable --sdl backend lets SDL own it and reports via the
-    // renderer (SDL_GetGPUDeviceProperties). Prefer the platform, fall back to
-    // the renderer.
+    // GPU + driver, reported via the renderer (SDL_GetGPUDeviceProperties).
     const char *gpu_device = NULL, *gpu_driver = NULL;
     bool gpu_libre = false;
     if (!platform_get_gpu_info(ctx->plat, &gpu_device, &gpu_driver, &gpu_libre)) {
@@ -456,7 +453,7 @@ static KeyboardResult on_key(void *user_data, int key, int mod,
 
     // Ctrl+Shift+V → paste
     if (key == TERM_KEY_NONE && codepoint == 'V' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
-        // Try async paste first (GTK4), fall back to synchronous (SDL3)
+        // Paste synchronously
         if (!platform_clipboard_paste_async(ctx->plat, ctx->term, ctx->pty)) {
             char *clipboard = platform_clipboard_get(ctx->plat);
             if (clipboard && clipboard[0] != '\0')
@@ -683,8 +680,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
     // The SDL3 notification panel floats above the terminal. While the pointer
     // is over it, the panel owns the cursor (pointer over the close button, with
     // a hover highlight), suppresses link hover underneath, and consumes the
-    // event so the terminal doesn't react beneath it. (No-op on the GTK4 path —
-    // its native strip handles its own input and cursor.)
+    // event so the terminal doesn't react beneath it.
     int notif_hit = renderer_notification_hit(ctx->rend, pixel_x, pixel_y);
     if (notif_hit != 0) {
         // Pointer is over the panel — no link underneath it to hint.
@@ -919,7 +915,7 @@ static bool on_mouse(void *user_data, int pixel_x, int pixel_y, int button, bool
             }
             terminal_selection_clear(ctx->term);
         } else {
-            // Try async paste first (GTK4), fall back to synchronous (SDL3)
+            // Paste synchronously
             if (!platform_clipboard_paste_async(ctx->plat, ctx->term, ctx->pty)) {
                 char *clipboard = platform_clipboard_get(ctx->plat);
                 if (clipboard && clipboard[0] != '\0') {

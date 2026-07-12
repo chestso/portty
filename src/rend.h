@@ -23,9 +23,8 @@ typedef struct
     int cell_height;
     const char *font_path; // resolved normal font file path, or NULL
     const char *hinting;   // effective FT hint target ("none"/"light"/"normal"/"mono"), or NULL
-    // GPU + driver via SDL's GPU renderer (SDL_GetGPUDeviceProperties). NULL on
-    // the GTK4/Vulkan path (SDL owns no GPU device there — the platform reports
-    // it instead). gpu_driver_libre flags a permissively-licensed (Mesa) driver.
+    // GPU + driver via SDL's GPU renderer (SDL_GetGPUDeviceProperties).
+    // gpu_driver_libre flags a permissively-licensed (Mesa) driver.
     const char *gpu_device;
     const char *gpu_driver;
     bool gpu_driver_libre;
@@ -69,7 +68,7 @@ struct RendererBackend
     /* Set whether the close button is hovered (draws a highlight behind it).
      * Returns true if the state changed (caller should request a repaint). */
     bool (*set_notification_hover)(RendererBackend *rend, bool hovered);
-    /* Transient OSC-8 hover hint (pure-SDL3 path; GTK4 uses a native pill).
+    /* Transient OSC-8 hover hint.
      * Draws a single-line full-width strip showing the link's real URI;
      * url == NULL/"" hides it. anchor_py is the link's physical-pixel Y — the
      * strip sits at the top, flipping to the bottom when the link is up there. */

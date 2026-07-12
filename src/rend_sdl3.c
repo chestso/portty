@@ -903,8 +903,7 @@ typedef struct RendererSdl3Data
     const char *hint_name;
 
     // GPU + driver captured from SDL's GPU device at init, for the diagnostics
-    // report. Empty (gpu_name[0]=='\0') when SDL owns no GPU device (e.g. the
-    // GTK4/Vulkan renderer, where the platform reports this instead).
+    // report. Empty (gpu_name[0]=='\0') when SDL owns no GPU device.
     char gpu_name[128];
     char gpu_driver[160];
     bool gpu_driver_libre;
@@ -1031,10 +1030,7 @@ static void notif_free(RendererSdl3Data *data)
 }
 
 // Capture the GPU model + driver from SDL's GPU renderer device for the
-// diagnostics report. Pure SDL (portable across Vulkan/D3D12/Metal). Present
-// only for the "gpu" render driver, where SDL owns the device; the GTK4
-// "vulkan" renderer uses portty's own VkDevice (no SDL_GPUDevice), so the
-// platform reports GPU info there instead.
+// diagnostics report. SDL GPU owns the device here.
 static void capture_sdl_gpu_info(RendererSdl3Data *data)
 {
     data->gpu_name[0] = '\0';
@@ -1047,7 +1043,7 @@ static void capture_sdl_gpu_info(RendererSdl3Data *data)
         return;
     SDL_GPUDevice *gpu = SDL_GetPointerProperty(rp, SDL_PROP_RENDERER_GPU_DEVICE_POINTER, NULL);
     if (!gpu)
-        return; // not the "gpu" render driver (e.g. GTK4's "vulkan" renderer)
+        return; // not a GPU render driver
     SDL_PropertiesID dp = SDL_GetGPUDeviceProperties(gpu);
     if (!dp)
         return;
@@ -1325,7 +1321,7 @@ static int sdl3_load_fonts(RendererBackend *backend, float font_size, const char
     options.dpi_y = 96;
 
     // Determine font DPI from content scale.
-    // content_scale is pre-set by GTK4 or main.c; also check SDL window.
+    // content_scale is pre-set by main.c; also check SDL window.
     float font_scale = data->content_scale;
     if (data->window && font_scale <= 1.0f) {
         float sdl_scale = SDL_GetWindowDisplayScale(data->window);
@@ -2678,8 +2674,7 @@ static void linear_blend_selfcheck(RendererSdl3Data *data)
 }
 
 // Draw the already-populated scene into the linear-light target and encode it
-// onto whatever render target is currently bound (SDL window, GTK4 render
-// target, or PNG export target). Falls back to drawing straight into the bound
+// onto whatever render target is currently bound (SDL window or PNG export target). Falls back to drawing straight into the bound
 // target (legacy sRGB) when the float target is unavailable.
 static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
                               int display_rows, int display_cols,

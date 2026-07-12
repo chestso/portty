@@ -9,7 +9,7 @@ extern int verbose;
 
 /* Notification panel transparency (defined in main.c, set from config). When
  * false (default) the top notification panel is fully opaque; when true it is
- * drawn translucent (SDL3: alpha background; GTK4: a translucent .osd surface). */
+ * drawn translucent (alpha background). */
 extern bool portty_notification_transparent;
 
 /* kitty-style text_composition_strategy knob (defined in main.c, set from

@@ -62,8 +62,7 @@ static ClipboardDeferredFree *clipboard_deferred_head;
 // Minimum age before a deferred string is safe to free.  The string
 // must survive the iteration where cleanup fires plus one more full
 // iteration, because the compositor's data_source_send can arrive
-// during the SDL_WaitEvent of the *next* iteration (observed with
-// libdecor-gtk under Wayland).
+// during the SDL_WaitEvent of the *next* iteration (observed under Wayland).
 #define CLIPBOARD_DEFERRED_MIN_AGE 2
 
 // SDL keycode → terminal key mapping
@@ -1342,7 +1341,7 @@ static void sdl3_run(PlatformBackend *plat, TerminalBackend *term,
                         // those return handled with no data, and the host term must
                         // still be marked dirty or the frame only repaints on the
                         // next unrelated event (cursor blink, PTY output). Mirrors
-                        // the KEY_DOWN handler and GTK4's handle_keyboard_result.
+                        // the KEY_DOWN handler.
                         if (result.handled || result.force_redraw || result.len > 0) {
                             // Reset scroll position when typing
                             if (renderer_get_scroll_offset(rend) != 0) {
