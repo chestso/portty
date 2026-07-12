@@ -369,8 +369,7 @@ char *diag_build_report(const DiagSources *s)
     sb_puts(&sb, "\n  ");
     rule(&sb, "─", DW);
     sb_puts(&sb, DIM "  Report issues at " RST);
-    // Clickable OSC 8 hyperlink (cyan URL as the visible text). No explicit
-    // underline — portty draws the hyperlink underline itself.
+    // Clickable OSC 8 hyperlink (cyan URL as the visible text).
     sb_puts(&sb, FG_LINK OSC8_OPEN(ISSUES_URL) ISSUES_URL RST OSC8_CLOSE);
     sb_puts(&sb, "\n\n");
 
