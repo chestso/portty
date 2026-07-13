@@ -2,12 +2,12 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Features
 
 - Full terminal emulation using coffer — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
-- Rendering with SDL3
+- Rendering with SDL3 GPU or Sokol (OpenGL/Metal/D3D11/WebGPU)
 - Damage-driven rendering — coffer's accumulated damage is flushed once per frame into a single dirty signal, so the frame is repainted only when terminal content, the cursor, selection, or the scrollback view actually changes; an idle terminal does no rendering work
 - Gamma-correct text rendering — antialiased glyph coverage is composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), so text gets its physically-correct, heavier/softer weight like kitty rather than the thin look of sRGB-space blending. Tunable with the kitty-style `text_composition_strategy` config key, which on the GPU renderer runs as a luminance-aware fragment shader — thickening dark-on-light text (reverse video) without bolding normal light-on-dark text.
 - Text shaping with HarfBuzz
@@ -29,7 +29,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
-- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), rendered by the SDL3 renderer; dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
+- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
 - Scrollback buffer with mouse wheel and Shift+PageUp/Down
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
@@ -54,18 +54,14 @@ This is a fundamental Wayland protocol limitation ([SDL issue #14980](https://gi
 
 portty uses a modular backend abstraction design:
 
-- **Platform Backend**: Handles windowing, input events, clipboard, and the main event loop
-  - SDL3 (`platform_backend_sdl3`) — uses libdecor for Wayland decorations
+- **PorttyBackend**: Unified platform + rendering backend — handles windowing, input events, clipboard, PTY lifecycle, the main event loop, and graphics output. Selected at configure time via `--with-backend=sdl3|sokol` (default: `sdl3`).
+  - **SDL3** (`backend_sdl3.c`) — uses SDL3 for both windowing and GPU rendering. Draws the frame into an `RGBA64_FLOAT` / `SRGB_LINEAR` target via SDL's GPU renderer (Vulkan/D3D12/Metal), so glyph coverage is blended in linear light and re-encoded to sRGB on present. Uses libdecor for Wayland decorations. The SDL3 renderer (`rend_sdl3.c`) is called directly — no separate renderer vtable.
+    - Texture atlas with shelf packing and FNV-1a hash-based lookup; LRU eviction when the atlas fills
+    - Color-glyph (emoji) texels are sRGB→linear decoded as they enter the atlas: SDL linearizes draw/vertex colors on this path but not sampled texels, so without the decode the present-time re-encode would double-encode color emoji and wash them out. White text-coverage texels are gamma-invariant, so text is unaffected
+  - **Sokol** (`backend_sokol.c`) — uses sokol_app for windowing and sokol_gfx for rendering (OpenGL Core on Linux, Metal on macOS, D3D11 on Windows, WebGPU on web). Renders inline within the backend; uses shared atlas packing from `rend_common.c` and a Sokol-specific atlas adapter (`rend_sokol_atlas.c`)
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: coffer (`terminal_backend_cfr`) — external VT engine consumed via `pkg-config coffer`, bridged through `term_cfr.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
-
-- **Renderer Backend**: Handles graphics output
-  - Current implementation: SDL3 (`renderer_backend_sdl3`)
-  - Draws the frame into an `RGBA64_FLOAT` / `SRGB_LINEAR` target via SDL's GPU renderer (Vulkan/D3D12/Metal), so glyph coverage is blended in linear light and re-encoded to sRGB on present — the OpenGL renderer ignores the colorspace and is not used
-  - Uses a texture atlas with shelf packing and FNV-1a hash-based lookup
-  - LRU eviction occurs when the atlas fills
-  - Color-glyph (emoji) texels are sRGB→linear decoded as they enter the atlas: SDL linearizes draw/vertex colors on this path but not sampled texels, so without the decode the present-time re-encode would double-encode color emoji and wash them out. White text-coverage texels are gamma-invariant, so text is unaffected
 
 - **Font Backend**: Handles font loading, shaping, and glyph rasterization
   - Current implementation: FreeType/HarfBuzz (`font_backend_ft`)
@@ -79,7 +75,7 @@ portty uses a modular backend abstraction design:
   - macOS: Core Text (`font_resolve_backend_ct`) with `CTFontCreateForString` codepoint fallback
   - Windows: Native resolver (`font_resolve_backend_w32`) — GDI enumeration + DirectWrite path resolution for UWP/Store fonts + FreeType codepoint fallback
 
-Each backend defines a standard interface (`PlatformBackend`, `TerminalBackend`, `RendererBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic.
+Each backend defines a standard interface (`PorttyBackend`, `TerminalBackend`, `FontBackend`, `FontResolveBackend`) with `*_init()`/`*_destroy()` lifecycle functions, allowing implementations to be swapped without changing the core application logic. Shared app logic lives in `portty_app.c`; shared rendering helpers (atlas packing, sRGB LUT, font loading) live in `rend_common.c`.
 
 ## Building
 
@@ -95,6 +91,16 @@ make install
 ```
 
 Use `--enable-release` for an optimized build or `--enable-debug` for unsanitized debug.
+
+To build the Sokol backend instead of SDL3:
+
+```bash
+./autogen.sh
+mkdir build-sokol && cd build-sokol
+../configure --with-backend=sokol
+make -j$(nproc)
+make check
+```
 
 ### Make Targets
 
@@ -131,10 +137,10 @@ build/src/portty -- htop
 # Display text without spawning a shell (for testing)
 build/src/portty --demo "Hello, world!"
 
-# Render text to a PNG file
+# Render text to a PNG file (SDL3 backend only)
 build/src/portty -P "😀" output.png
 
-# Render a command's output to PNG
+# Render a command's output to PNG (SDL3 backend only)
 build/src/portty -P "" --exec ls --wait 500 output.png
 ```
 
@@ -147,12 +153,12 @@ build/src/portty -P "" --exec ls --wait 500 output.png
 | `-f PATTERN`              | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                    |
 | `-g COLSxROWS`            | Initial terminal size (default: 80x24)                                        |
 | `-P TEXT`                 | Render TEXT to PNG (output path as positional arg)                            |
-| `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc.               |
+| `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only)   |
 | `--list-fonts`            | List available monospace fonts and exit                                       |
 | `--ft-hinting S`          | FreeType hinting: none/light/normal/mono (default: light)                     |
 | `--demo TEXT`             | Display TEXT in terminal without spawning a shell (for testing)               |
 | `-V` / `--version`        | Print version and dependency versions, then exit                              |
-| `--exec CMD`              | With `-P`, spawn CMD on a PTY and render its output to PNG                    |
+| `--exec CMD`              | With `-P`, spawn CMD on a PTY and render its output to PNG (SDL3 only)        |
 | `--wait MS`               | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
 | `-s N` / `--scrollback N` | Scrollback history lines (default: 1000, 0 to disable)                        |
 
@@ -406,7 +412,12 @@ cd build && make check
 | `test_lottie`             | Lottie animation bridge to coffer                                     |
 | `test_paste_normalize`    | Clipboard line-ending normalization (CRLF→LF fix for Windows paste)   |
 | `test_diag`               | Diagnostics report generation                                         |
-| `test_pty_pause`          | PTY pause/resume during selection (POSIX only)                        |
+| `test_rend_common`        | Shared rendering helpers (atlas packing, sRGB LUT)                    |
+| `test_portty_app`         | Shared app logic and state management                                 |
+| `test_timer`              | Timer wheel and callback scheduling                                   |
+| `test_pty_pause`          | PTY pause/resume during selection (SDL3 + POSIX only)                 |
+
+The test count differs by backend: 20 tests on SDL3 (POSIX), 18 on Sokol/Windows — `test_pty_pause` is SDL3+POSIX only.
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
