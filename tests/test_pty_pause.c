@@ -1,53 +1,7 @@
-#include "platform.h"
 #include "term.h"
 #include "test_helpers.h"
 #include <stdlib.h>
 #include <string.h>
-
-// ---- Mock platform backend ----
-
-static int mock_pause_count = 0;
-static int mock_resume_count = 0;
-static int mock_clipboard_set_count = 0;
-
-static void mock_pause_pty(PlatformBackend *plat)
-{
-    (void)plat;
-    mock_pause_count++;
-}
-
-static void mock_resume_pty(PlatformBackend *plat)
-{
-    (void)plat;
-    mock_resume_count++;
-}
-
-static bool mock_clipboard_set(PlatformBackend *plat, const char *text)
-{
-    (void)plat;
-    (void)text;
-    mock_clipboard_set_count++;
-    return true;
-}
-
-static PlatformBackend mock_platform = {
-    .name = "mock",
-    .pause_pty = mock_pause_pty,
-    .resume_pty = mock_resume_pty,
-    .clipboard_set = mock_clipboard_set,
-};
-
-// Platform backend with no pause/resume (NULL function pointers)
-static PlatformBackend mock_platform_no_pause = {
-    .name = "mock_no_pause",
-};
-
-static void reset_mock_counts(void)
-{
-    mock_pause_count = 0;
-    mock_resume_count = 0;
-    mock_clipboard_set_count = 0;
-}
 
 // ---- Mock terminal backend ----
 
@@ -143,7 +97,9 @@ static void tracking_selection_cb(bool active, void *user_data)
         cb_inactive_count++;
 }
 
-// Mock callback that mirrors main.c on_selection_change
+static int mock_pause_count = 0;
+static int mock_resume_count = 0;
+
 static void mock_selection_cb(bool active, void *user_data)
 {
     (void)user_data;
@@ -158,40 +114,6 @@ static void reset_cb_counts(void)
     cb_active_count = 0;
     cb_inactive_count = 0;
     cb_last_active = false;
-}
-
-// ---- Tests: platform.c wrapper delegation ----
-
-static void test_wrapper_pause_delegates(void)
-{
-    reset_mock_counts();
-    platform_pause_pty(&mock_platform);
-    ASSERT_EQ(mock_pause_count, 1);
-    platform_pause_pty(&mock_platform);
-    ASSERT_EQ(mock_pause_count, 2);
-}
-
-static void test_wrapper_resume_delegates(void)
-{
-    reset_mock_counts();
-    platform_resume_pty(&mock_platform);
-    ASSERT_EQ(mock_resume_count, 1);
-    platform_resume_pty(&mock_platform);
-    ASSERT_EQ(mock_resume_count, 2);
-}
-
-static void test_wrapper_null_plat(void)
-{
-    // Should not crash
-    platform_pause_pty(NULL);
-    platform_resume_pty(NULL);
-}
-
-static void test_wrapper_null_fn_ptr(void)
-{
-    // Backend with NULL pause_pty/resume_pty — should not crash
-    platform_pause_pty(&mock_platform_no_pause);
-    platform_resume_pty(&mock_platform_no_pause);
 }
 
 // ---- Tests: process_input selection behavior ----
@@ -255,7 +177,8 @@ static void test_callback_not_fired_on_redundant_clear(void)
 
 static void test_callback_pause_resume_integration(void)
 {
-    reset_mock_counts();
+    mock_pause_count = 0;
+    mock_resume_count = 0;
     TerminalBackend *term = create_mock_term();
     terminal_set_selection_callback(term, mock_selection_cb, NULL);
 
@@ -275,12 +198,6 @@ int main(int argc, char *argv[])
     test_parse_args(argc, argv);
 
     printf("test_pty_pause\n");
-
-    // Wrapper delegation tests
-    RUN_TEST(test_wrapper_pause_delegates);
-    RUN_TEST(test_wrapper_resume_delegates);
-    RUN_TEST(test_wrapper_null_plat);
-    RUN_TEST(test_wrapper_null_fn_ptr);
 
     // process_input selection behavior
     RUN_TEST(test_process_input_clears_selection);

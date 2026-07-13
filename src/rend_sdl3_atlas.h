@@ -2,79 +2,26 @@
 #define REND_SDL3_ATLAS_H
 
 #include "font.h"
+#include "rend_common.h"
 #include <SDL3/SDL.h>
-#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 
-#define REND_SDL3_ATLAS_HASH_SIZE    8192
-#define REND_SDL3_ATLAS_TEXTURE_SIZE 2048
-#define REND_SDL3_ATLAS_MAX_SHELVES  128
-
-// sRGB transfer function, single-sourced here for every CPU-side color-space
-// conversion in the renderer (the color-glyph atlas linearize LUT and the
-// notification/link-hint panel glyph blend). The standard sRGB EOTF/OETF.
-static inline float rend_srgb_to_linear(uint8_t v)
-{
-    double c = v / 255.0;
-    double lin = (c <= 0.04045) ? (c / 12.92) : pow((c + 0.055) / 1.055, 2.4);
-    return (float)lin;
-}
-
-static inline uint8_t rend_linear_to_srgb(float lin)
-{
-    double l = lin;
-    double s = (l <= 0.0031308) ? (l * 12.92) : (1.055 * pow(l, 1.0 / 2.4) - 0.055);
-    int v = (int)(s * 255.0 + 0.5);
-    return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
-}
+// SDL3-specific glyph atlas. Embeds the shared RendAtlas packing engine
+// (rend_common.c) and adds an SDL_Texture for GPU upload.
 
 typedef struct
 {
-    int x, y, w, h;
-} RendSdl3AtlasRegion;
-
-typedef struct
-{
-    int y;
-    int height;
-    int cursor_x;
-} RendSdl3AtlasShelf;
-
-typedef struct
-{
-    void *font_data;
-    int glyph_id;
-    uint32_t color;
-    RendSdl3AtlasRegion region;
-    int x_offset, y_offset;
-    uint64_t last_used_frame;
-    bool occupied;
-    bool centered; // Forwarded from GlyphBitmap.centered.
-} RendSdl3AtlasEntry;
-
-typedef struct
-{
+    RendAtlas packing;
     SDL_Texture *texture;
-    uint8_t *staging;
-    bool dirty;
-    SDL_Rect dirty_rect;
-    RendSdl3AtlasShelf shelves[REND_SDL3_ATLAS_MAX_SHELVES];
-    int num_shelves;
-    int next_shelf_y;
-    RendSdl3AtlasEntry entries[REND_SDL3_ATLAS_HASH_SIZE];
-    int entry_count;
-    uint64_t current_frame;
     SDL_Renderer *renderer;
-    bool eviction_occurred;
-    // When the renderer composites in linear light (SDL gpu/vulkan into an
-    // SRGB_LINEAR target), color-glyph texels must be sRGB->linear decoded on
-    // insert: SDL re-encodes the float target on blit-out but never decodes
-    // sampled texels, so without this color emoji come back double-encoded
-    // (washed out). White text-coverage texels are gamma-invariant. Set from
-    // the renderer's linear_ok in sdl3_init.
     bool linearize_color;
 } RendSdl3Atlas;
+
+// RendSdl3AtlasEntry is an alias for RendAtlasEntry (back-compat with
+// existing renderer code that uses the SDL3-prefixed name).
+typedef RendAtlasEntry RendSdl3AtlasEntry;
+typedef RendAtlasRegion RendSdl3AtlasRegion;
 
 bool rend_sdl3_atlas_init(RendSdl3Atlas *atlas, SDL_Renderer *renderer);
 void rend_sdl3_atlas_destroy(RendSdl3Atlas *atlas);

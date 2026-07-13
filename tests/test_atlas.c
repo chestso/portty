@@ -102,10 +102,10 @@ static void test_staging_buffer_contents(void)
     ASSERT_TRUE(entry != NULL);
 
     // Verify pixels in staging buffer
-    int staging_pitch = REND_SDL3_ATLAS_TEXTURE_SIZE * 4;
+    int staging_pitch = REND_ATLAS_TEXTURE_SIZE * 4;
 
     for (int y = 0; y < 3; y++) {
-        uint8_t *row = atlas.staging + (entry->region.y + y) * staging_pitch +
+        uint8_t *row = atlas.packing.staging + (entry->region.y + y) * staging_pitch +
                        entry->region.x * 4;
         for (int x = 0; x < 4 * 4; x++) {
             ASSERT_EQ(row[x], 0xBB);
@@ -123,7 +123,7 @@ static void test_eviction_sets_flag(void)
     ASSERT_TRUE(rend_sdl3_atlas_init(&atlas, NULL));
 
     void *font = (void *)0x4000;
-    ASSERT_TRUE(!atlas.eviction_occurred);
+    ASSERT_TRUE(!atlas.packing.eviction_occurred);
 
     // Insert 40 wide glyphs (2000x49) — each gets its own shelf (50px with padding)
     // After 40: next_shelf_y = 2000
@@ -134,13 +134,13 @@ static void test_eviction_sets_flag(void)
         free_bitmap(bmp);
     }
 
-    ASSERT_TRUE(!atlas.eviction_occurred);
+    ASSERT_TRUE(!atlas.packing.eviction_occurred);
 
     // 41st insert: needs next_shelf_y(2000) + 50 = 2050 > 2048 → eviction
     GlyphBitmap *trigger_bmp = make_bitmap(2000, 49, 0xFF);
     RendSdl3AtlasEntry *trigger = rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp, false);
     ASSERT_TRUE(trigger != NULL);
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
 
     free_bitmap(trigger_bmp);
     rend_sdl3_atlas_destroy(&atlas);
@@ -186,11 +186,11 @@ static void test_load_factor_eviction(void)
     ASSERT_TRUE(rend_sdl3_atlas_init(&atlas, NULL));
 
     void *font = (void *)0x6000;
-    ASSERT_TRUE(!atlas.eviction_occurred);
+    ASSERT_TRUE(!atlas.packing.eviction_occurred);
 
     // Insert enough small glyphs to hit 75% hash table load
     // REND_SDL3_ATLAS_HASH_SIZE = 8192, threshold = 6144
-    int threshold = REND_SDL3_ATLAS_HASH_SIZE * 3 / 4;
+    int threshold = REND_ATLAS_HASH_SIZE * 3 / 4;
     for (int i = 0; i < threshold; i++) {
         GlyphBitmap *bmp = make_bitmap(1, 1, 0x11);
         RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, i, 0, bmp, false);
@@ -198,16 +198,16 @@ static void test_load_factor_eviction(void)
         free_bitmap(bmp);
     }
 
-    ASSERT_TRUE(!atlas.eviction_occurred);
+    ASSERT_TRUE(!atlas.packing.eviction_occurred);
 
     // Next insert should trigger load factor eviction
     GlyphBitmap *bmp = make_bitmap(1, 1, 0x22);
     RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, threshold, 0, bmp, false);
     ASSERT_TRUE(e != NULL);
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
 
     // Only the new entry should exist
-    ASSERT_EQ(atlas.entry_count, 1);
+    ASSERT_EQ(atlas.packing.entry_count, 1);
 
     free_bitmap(bmp);
     rend_sdl3_atlas_destroy(&atlas);
@@ -234,20 +234,20 @@ static void test_post_eviction_staging_correct(void)
     GlyphBitmap *trigger_bmp = make_bitmap(2000, 49, marker);
     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_insert(&atlas, font, 200, 0, trigger_bmp, false);
     ASSERT_TRUE(entry != NULL);
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
 
     // Verify that the staging buffer has the correct pixel data
-    int staging_pitch = REND_SDL3_ATLAS_TEXTURE_SIZE * 4;
+    int staging_pitch = REND_ATLAS_TEXTURE_SIZE * 4;
 
     // Check first row of the glyph in staging
-    uint8_t *row = atlas.staging + entry->region.y * staging_pitch + entry->region.x * 4;
+    uint8_t *row = atlas.packing.staging + entry->region.y * staging_pitch + entry->region.x * 4;
     // Check a few pixels (first 16 bytes = 4 RGBA pixels)
     for (int i = 0; i < 16; i++) {
         ASSERT_EQ(row[i], marker);
     }
 
     // Check last row too
-    uint8_t *last_row = atlas.staging + (entry->region.y + 48) * staging_pitch +
+    uint8_t *last_row = atlas.packing.staging + (entry->region.y + 48) * staging_pitch +
                         entry->region.x * 4;
     for (int i = 0; i < 16; i++) {
         ASSERT_EQ(last_row[i], marker);
@@ -282,7 +282,7 @@ static void test_regression_bulk_inserts_never_fail(void)
     }
 
     // Atlas must have evicted at least once (10000 > 8192*0.75 = 6144)
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
 
     rend_sdl3_atlas_destroy(&atlas);
 }
@@ -309,7 +309,7 @@ static void test_regression_post_eviction_all_entries_reachable(void)
     GlyphBitmap *trigger = make_bitmap(2000, 49, 0xFF);
     rend_sdl3_atlas_insert(&atlas, font, 9999, 0, trigger, false);
     free_bitmap(trigger);
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
 
     // Now insert many new entries post-eviction
     int post_count = 200;
@@ -352,7 +352,7 @@ static void test_regression_multi_glyph_staging_after_eviction(void)
     GlyphBitmap *trigger = make_bitmap(2000, 49, 0x99);
     RendSdl3AtlasEntry *te = rend_sdl3_atlas_insert(&atlas, font, 9999, 0, trigger, false);
     ASSERT_TRUE(te != NULL);
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
     free_bitmap(trigger);
 
     // Now insert 3 more glyphs with distinct fill values post-eviction
@@ -367,9 +367,9 @@ static void test_regression_multi_glyph_staging_after_eviction(void)
     }
 
     // Verify staging data for all 3 glyphs — none should be zeroed out
-    int staging_pitch = REND_SDL3_ATLAS_TEXTURE_SIZE * 4;
+    int staging_pitch = REND_ATLAS_TEXTURE_SIZE * 4;
     for (int g = 0; g < 3; g++) {
-        uint8_t *row = atlas.staging + entries[g]->region.y * staging_pitch +
+        uint8_t *row = atlas.packing.staging + entries[g]->region.y * staging_pitch +
                        entries[g]->region.x * 4;
         for (int x = 0; x < 10 * 4; x++) {
             ASSERT_EQ(row[x], fills[g]);
@@ -413,7 +413,7 @@ static void test_regression_repeated_eviction_cycles(void)
         ASSERT_TRUE(found != NULL);
     }
 
-    ASSERT_TRUE(atlas.eviction_occurred);
+    ASSERT_TRUE(atlas.packing.eviction_occurred);
     rend_sdl3_atlas_destroy(&atlas);
 }
 

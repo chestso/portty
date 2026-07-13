@@ -1,6 +1,9 @@
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include "timer.h"
 #include "common.h"
-#include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -8,34 +11,19 @@ typedef struct Timer
 {
     TimerId id;
     uint32_t interval_ms;
-    bool repeat;
+    uint32_t remaining_ms;
     uint32_t event_code;
     void *event_data;
-    SDL_TimerID sdl_timer_id;
+    bool active;
 } Timer;
 
 struct TimerManager
 {
-    Timer **timers; // array of pointers (stable across realloc)
+    Timer *timers; // dense array, stable slots while active
     size_t count;
     size_t capacity;
     TimerId next_id;
 };
-
-// SDL timer callback - runs in timer thread, just pushes event
-static Uint32 timer_sdl_callback(void *param, SDL_TimerID sdl_id, Uint32 interval)
-{
-    (void)sdl_id;
-    Timer *timer = (Timer *)param;
-
-    SDL_Event event = { 0 };
-    event.type = SDL_EVENT_USER;
-    event.user.code = (Sint32)timer->event_code;
-    event.user.data1 = timer->event_data;
-    SDL_PushEvent(&event);
-
-    return timer->repeat ? interval : 0;
-}
 
 TimerManager *timer_manager_create(void)
 {
@@ -43,9 +31,6 @@ TimerManager *timer_manager_create(void)
     if (!mgr)
         return NULL;
 
-    mgr->timers = NULL;
-    mgr->count = 0;
-    mgr->capacity = 0;
     mgr->next_id = 1; // Start at 1 since 0 is TIMER_INVALID
 
     vlog("Timer manager created\n");
@@ -57,14 +42,6 @@ void timer_manager_destroy(TimerManager *mgr)
     if (!mgr)
         return;
 
-    // Remove all active timers
-    for (size_t i = 0; i < mgr->count; i++) {
-        if (mgr->timers[i]->sdl_timer_id != 0) {
-            SDL_RemoveTimer(mgr->timers[i]->sdl_timer_id);
-        }
-        free(mgr->timers[i]);
-    }
-
     free(mgr->timers);
     free(mgr);
 
@@ -74,53 +51,48 @@ void timer_manager_destroy(TimerManager *mgr)
 static Timer *find_timer(TimerManager *mgr, TimerId id)
 {
     for (size_t i = 0; i < mgr->count; i++) {
-        if (mgr->timers[i]->id == id) {
-            return mgr->timers[i];
-        }
+        if (mgr->timers[i].id == id && mgr->timers[i].active)
+            return &mgr->timers[i];
     }
     return NULL;
 }
 
-TimerId timer_add(TimerManager *mgr, uint32_t interval_ms, bool repeat,
+TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
                   uint32_t event_code, void *event_data)
 {
-    if (!mgr)
+    if (!mgr || interval_ms == 0)
         return TIMER_INVALID;
 
-    // Grow pointer array if needed
-    if (mgr->count >= mgr->capacity) {
-        size_t new_capacity = mgr->capacity == 0 ? 4 : mgr->capacity * 2;
-        Timer **new_timers = realloc(mgr->timers, new_capacity * sizeof(Timer *));
-        if (!new_timers)
-            return TIMER_INVALID;
-        mgr->timers = new_timers;
-        mgr->capacity = new_capacity;
+    // Reuse an inactive slot if possible, otherwise grow.
+    Timer *timer = NULL;
+    for (size_t i = 0; i < mgr->count; i++) {
+        if (!mgr->timers[i].active) {
+            timer = &mgr->timers[i];
+            break;
+        }
     }
 
-    // Allocate timer on the heap so its address is stable
-    Timer *timer = malloc(sizeof(Timer));
-    if (!timer)
-        return TIMER_INVALID;
+    if (!timer) {
+        if (mgr->count >= mgr->capacity) {
+            size_t new_capacity = mgr->capacity == 0 ? 4 : mgr->capacity * 2;
+            Timer *new_timers = realloc(mgr->timers, new_capacity * sizeof(Timer));
+            if (!new_timers)
+                return TIMER_INVALID;
+            mgr->timers = new_timers;
+            mgr->capacity = new_capacity;
+        }
+        timer = &mgr->timers[mgr->count++];
+    }
 
     timer->id = mgr->next_id++;
     timer->interval_ms = interval_ms;
-    timer->repeat = repeat;
+    timer->remaining_ms = interval_ms;
     timer->event_code = event_code;
     timer->event_data = event_data;
+    timer->active = true;
 
-    // Start SDL timer
-    timer->sdl_timer_id = SDL_AddTimer(interval_ms, timer_sdl_callback, timer);
-    if (timer->sdl_timer_id == 0) {
-        vlog("Failed to create SDL timer: %s\n", SDL_GetError());
-        free(timer);
-        return TIMER_INVALID;
-    }
-
-    mgr->timers[mgr->count] = timer;
-    mgr->count++;
-
-    vlog("Timer added: id=%u interval=%ums repeat=%s event_code=%u\n",
-         timer->id, interval_ms, repeat ? "yes" : "no", event_code);
+    vlog("Timer added: id=%u interval=%ums event_code=%u\n",
+         timer->id, interval_ms, event_code);
 
     return timer->id;
 }
@@ -130,25 +102,12 @@ void timer_remove(TimerManager *mgr, TimerId id)
     if (!mgr || id == TIMER_INVALID)
         return;
 
-    for (size_t i = 0; i < mgr->count; i++) {
-        if (mgr->timers[i]->id == id) {
-            // Stop SDL timer
-            if (mgr->timers[i]->sdl_timer_id != 0) {
-                SDL_RemoveTimer(mgr->timers[i]->sdl_timer_id);
-            }
+    Timer *timer = find_timer(mgr, id);
+    if (!timer)
+        return;
 
-            vlog("Timer removed: id=%u\n", id);
-
-            free(mgr->timers[i]);
-
-            // Remove from array by swapping with last element
-            if (i < mgr->count - 1) {
-                mgr->timers[i] = mgr->timers[mgr->count - 1];
-            }
-            mgr->count--;
-            return;
-        }
-    }
+    vlog("Timer removed: id=%u\n", id);
+    timer->active = false;
 }
 
 void timer_reset(TimerManager *mgr, TimerId id)
@@ -160,17 +119,41 @@ void timer_reset(TimerManager *mgr, TimerId id)
     if (!timer)
         return;
 
-    // Stop old SDL timer
-    if (timer->sdl_timer_id != 0) {
-        SDL_RemoveTimer(timer->sdl_timer_id);
-    }
-
-    // Start new SDL timer
-    timer->sdl_timer_id = SDL_AddTimer(timer->interval_ms, timer_sdl_callback, timer);
-    if (timer->sdl_timer_id == 0) {
-        vlog("Failed to reset timer %u: %s\n", id, SDL_GetError());
-        return;
-    }
+    timer->remaining_ms = timer->interval_ms;
 
     vlog("Timer reset: id=%u interval=%ums\n", id, timer->interval_ms);
+}
+
+size_t timer_poll(TimerManager *mgr, uint32_t elapsed_ms,
+                  TimerEvent *events, size_t max_events)
+{
+    if (!mgr || !events || max_events == 0)
+        return 0;
+
+    size_t emitted = 0;
+
+    for (size_t i = 0; i < mgr->count; i++) {
+        Timer *timer = &mgr->timers[i];
+        if (!timer->active)
+            continue;
+
+        uint32_t remaining = elapsed_ms;
+        while (timer->remaining_ms <= remaining) {
+            remaining -= timer->remaining_ms;
+            timer->remaining_ms = timer->interval_ms;
+
+            if (emitted < max_events) {
+                events[emitted].code = timer->event_code;
+                events[emitted].data = timer->event_data;
+                emitted++;
+            }
+            // Timers that overflow the output array are still consumed:
+            // we advance their state so they do not fire again on the
+            // next poll. The caller can detect overflow by comparing the
+            // return value to max_events.
+        }
+        timer->remaining_ms -= remaining;
+    }
+
+    return emitted;
 }

@@ -1,9 +1,9 @@
 #ifndef PAGER_H
 #define PAGER_H
 
-#include "platform.h"
-#include "rend.h"
+#include "portty_backend.h"
 #include "term.h"
+#include <coffer/coffer.h>
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -18,10 +18,9 @@
 // PTY across an open session so background output stays frozen behind it.
 typedef struct Pager Pager;
 
-// Create a pager bound to a renderer (overlay drawing + cell metrics) and
-// platform (link opening, cursor, PTY pause). Returns NULL on allocation
-// failure.
-Pager *pager_create(RendererBackend *rend, PlatformBackend *plat);
+// Create a pager bound to a unified backend (overlay drawing + cell metrics,
+// link opening, cursor, PTY pause). Returns NULL on allocation failure.
+Pager *pager_create(PorttyBackend *backend, PorttyApp *app);
 void pager_destroy(Pager *p);
 
 // Open the pager showing `ansi_text` (NUL-terminated; copied internally) over a

@@ -3,6 +3,14 @@
 
 #include <stdbool.h>
 
+// Tri-state driver licensing classification for the diagnostics report.
+typedef enum
+{
+    GPU_DRIVER_LIBRE_UNKNOWN = -1,
+    GPU_DRIVER_LIBRE_NO = 0,
+    GPU_DRIVER_LIBRE_YES = 1,
+} GpuDriverLibre;
+
 // Plain-data snapshot of everything the diagnostics report prints. The caller
 // (main.c) fills this from the live backends; diag.c has no dependency on SDL,
 // the terminal, or renderer internals, so it stays self-contained and
@@ -11,10 +19,10 @@
 typedef struct
 {
     // Rendering / runtime
-    const char *renderer_name; // "gpu" / "vulkan" / "opengl" / "software"
-    const char *gpu_device;    // GPU model (e.g. "NVIDIA GeForce RTX 4060 (NVK AD107)"), or NULL
-    const char *gpu_driver;    // driver description (e.g. "NVK (open source) — Mesa 25.x"), or NULL
-    bool gpu_driver_libre;     // driver is permissively-licensed open source (shown green)
+    const char *renderer_name;       // "gpu" / "vulkan" / "opengl" / "software"
+    const char *gpu_device;          // GPU model (e.g. "NVIDIA GeForce RTX 4060 (NVK AD107)"), or NULL
+    const char *gpu_driver;          // driver description (e.g. "NVK (open source) — Mesa 25.x"), or NULL
+    GpuDriverLibre gpu_driver_libre; // driver licensing: libre / proprietary / unknown
     bool linear_light;
     bool glyph_shader; // luminance-aware GPU glyph-coverage shader active
     float content_scale;

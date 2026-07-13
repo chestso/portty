@@ -5,7 +5,6 @@
 #include "common.h"
 #include "png_mode.h"
 #include "portty_pty.h"
-#include "rend.h"
 #include "rend_sdl3.h"
 #include "term.h"
 #include "term_cfr.h"
@@ -29,7 +28,7 @@ typedef struct
     SDL_Window *window;
     SDL_Renderer *sdl_rend;
     TerminalBackend *term;
-    RendererBackend *rend;
+    RendererSdl3Data rend;
 } RenderContext;
 
 static int init_render_context(RenderContext *ctx, int cols, int rows,
@@ -70,26 +69,24 @@ static int init_render_context(RenderContext *ctx, int cols, int rows,
         fprintf(stderr, "ERROR: Failed to initialize terminal for PNG\n");
         return -1;
     }
-    ctx->rend = renderer_init(&renderer_backend_sdl3, ctx->window, ctx->sdl_rend);
-    if (!ctx->rend) {
+    if (!rend_sdl3_init(&ctx->rend, ctx->window, ctx->sdl_rend)) {
         fprintf(stderr, "ERROR: Failed to initialize renderer for PNG\n");
         return -1;
     }
-    if (renderer_load_fonts(ctx->rend, font_size, font_name, ft_hint_target) < 0) {
+    if (rend_sdl3_load_fonts(&ctx->rend, font_size, font_name, ft_hint_target) < 0) {
         fprintf(stderr, "ERROR: Failed to load fonts for PNG\n");
         return -1;
     }
     // Let the VT engine place sixel images by giving it the cell pixel size.
     int cell_w, cell_h;
-    if (renderer_get_cell_size(ctx->rend, &cell_w, &cell_h))
+    if (rend_sdl3_get_cell_size(&ctx->rend, &cell_w, &cell_h))
         terminal_set_cell_px(ctx->term, cell_w, cell_h);
     return 0;
 }
 
 static void cleanup_render_context(RenderContext *ctx)
 {
-    if (ctx->rend)
-        renderer_destroy(ctx->rend);
+    rend_sdl3_destroy(&ctx->rend);
     if (ctx->sdl_rend)
         SDL_DestroyRenderer(ctx->sdl_rend);
     if (ctx->window)
@@ -116,7 +113,7 @@ int png_render_text(const char *text, const char *output_path,
         goto cleanup;
 
     terminal_process_input(ctx.term, text, strlen(text));
-    ret = renderer_render_to_png(ctx.rend, ctx.term, output_path);
+    ret = rend_sdl3_render_to_png(&ctx.rend, ctx.term, output_path);
 
 cleanup:
     cleanup_render_context(&ctx);
@@ -208,7 +205,7 @@ int png_render_exec(const char *cmd, int wait_ms, int cols, int rows,
 #endif
     }
 
-    ret = renderer_render_to_png(ctx.rend, ctx.term, output_path);
+    ret = rend_sdl3_render_to_png(&ctx.rend, ctx.term, output_path);
 
 cleanup:
     cleanup_render_context(&ctx);

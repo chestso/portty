@@ -3,11 +3,24 @@
 
 #include <stdbool.h>
 #include <stdint.h>
+#include <stddef.h>
 
 typedef uint32_t TimerId;
 #define TIMER_INVALID 0
 
 typedef struct TimerManager TimerManager;
+
+/**
+ * Event fired by a timer. Backends poll these out of the manager and
+ * dispatch them however they like (SDL_EVENT_USER, direct handler call,
+ * etc.). The event_data pointer is owned by the timer creator and must
+ * remain valid for the lifetime of the timer.
+ */
+typedef struct
+{
+    uint32_t code;
+    void *data;
+} TimerEvent;
 
 /**
  * Create a new timer manager.
@@ -24,19 +37,19 @@ TimerManager *timer_manager_create(void);
 void timer_manager_destroy(TimerManager *mgr);
 
 /**
- * Add a new timer.
+ * Add a new repeating timer.
  *
- * When the timer fires, it pushes an SDL_EVENT_USER event with the specified
- * event_code in the user.code field and event_data in user.data1.
+ * The timer fires every `interval_ms` milliseconds. Each time it fires,
+ * `timer_poll()` reports an event with the given `event_code` and the
+ * optional `event_data` pointer.
  *
  * @param mgr Timer manager
  * @param interval_ms Timer interval in milliseconds
- * @param repeat If true, timer repeats; if false, fires once
- * @param event_code Event code to use in SDL_Event.user.code
- * @param event_data Optional data to pass in SDL_Event.user.data1
+ * @param event_code Event code returned by timer_poll()
+ * @param event_data Optional data pointer returned by timer_poll()
  * @return Timer ID on success, TIMER_INVALID on failure
  */
-TimerId timer_add(TimerManager *mgr, uint32_t interval_ms, bool repeat,
+TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
                   uint32_t event_code, void *event_data);
 
 /**
@@ -54,5 +67,24 @@ void timer_remove(TimerManager *mgr, TimerId id);
  * @param id Timer ID to reset
  */
 void timer_reset(TimerManager *mgr, TimerId id);
+
+/**
+ * Advance time by `elapsed_ms` and fill `events` with timers that fired.
+ *
+ * Call this once per frame/event-loop iteration. `events` must be large
+ * enough to hold all firing timers; in practice a small fixed-size array
+ * (e.g. 8-16 entries) is sufficient. Events are emitted in the order the
+ * timers fire; timers with the same deadline are ordered by stable timer
+ * slot order.
+ *
+ * @param mgr Timer manager
+ * @param elapsed_ms Milliseconds since the last call
+ * @param events Output array of fired timer events
+ * @param max_events Maximum number of events to write
+ * @return Number of events written (may be more than max_events if
+ *         timers overflowed; compare return to max to detect overflow)
+ */
+size_t timer_poll(TimerManager *mgr, uint32_t elapsed_ms,
+                  TimerEvent *events, size_t max_events);
 
 #endif /* TIMER_H */

@@ -1,5 +1,5 @@
 #include "test_helpers.h"
-#include "rend_sdl3_boxdraw.h"
+#include "rend_common.h"
 #include "font.h"
 
 #include <math.h>
@@ -11,7 +11,7 @@
 /* ---------------------------------------------------------------------------
  * Rounded-corner alignment test for procedural box drawing.
  *
- * We call rend_sdl3_boxdraw_render() which returns a GlyphBitmap (RGBA
+ * We call rend_boxdraw_render() which returns a GlyphBitmap (RGBA
  * pixel buffer).  We inspect the pixels directly to verify geometric
  * alignment between rounded corners (╭╮╯╰) and straight corners (┌┐└┘).
  * ------------------------------------------------------------------------- */
@@ -79,7 +79,7 @@ static int col_last(const GlyphBitmap *bmp, int x, int y0, int y1)
 
 static GlyphBitmap *draw_cp(uint32_t cp)
 {
-    return rend_sdl3_boxdraw_render(cp, CELL_W, CELL_H, 255, 255, 255);
+    return rend_boxdraw_render(cp, CELL_W, CELL_H, 255, 255, 255);
 }
 
 static void free_bmp(GlyphBitmap *bmp)
@@ -93,16 +93,16 @@ static void free_bmp(GlyphBitmap *bmp)
 /* Test: box-drawing support detection. */
 static void test_boxdraw_is_supported(void)
 {
-    ASSERT_TRUE(rend_sdl3_boxdraw_is_supported(0x2500));
-    ASSERT_TRUE(rend_sdl3_boxdraw_is_supported(0x256D));
-    ASSERT_TRUE(rend_sdl3_boxdraw_is_supported(0x257F));
-    ASSERT_TRUE(rend_sdl3_boxdraw_is_supported(0x2580));
-    ASSERT_TRUE(rend_sdl3_boxdraw_is_supported(0x259F));
-    ASSERT_FALSE(rend_sdl3_boxdraw_is_supported(0x24FF));
-    ASSERT_FALSE(rend_sdl3_boxdraw_is_supported(0x25A0));
+    ASSERT_TRUE(rend_boxdraw_is_supported(0x2500));
+    ASSERT_TRUE(rend_boxdraw_is_supported(0x256D));
+    ASSERT_TRUE(rend_boxdraw_is_supported(0x257F));
+    ASSERT_TRUE(rend_boxdraw_is_supported(0x2580));
+    ASSERT_TRUE(rend_boxdraw_is_supported(0x259F));
+    ASSERT_FALSE(rend_boxdraw_is_supported(0x24FF));
+    ASSERT_FALSE(rend_boxdraw_is_supported(0x25A0));
 }
 
-/* Test: rend_sdl3_boxdraw_render returns a valid bitmap. */
+/* Test: rend_boxdraw_render returns a valid bitmap. */
 static void test_render_returns_valid_bitmap(void)
 {
     GlyphBitmap *bmp = draw_cp(0x2500); /* ─ */
@@ -307,7 +307,7 @@ static void test_rounded_corner_large_cell(void)
     int big_w = 36, big_h = 72;
     int cx = big_w / 2, cy = big_h / 2;
 
-    GlyphBitmap *bmp = rend_sdl3_boxdraw_render(0x256D, big_w, big_h, 255, 255, 255);
+    GlyphBitmap *bmp = rend_boxdraw_render(0x256D, big_w, big_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
     ASSERT_TRUE(col_count(bmp, cx, 0, big_h - 1) > 0);
 

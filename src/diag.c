@@ -214,7 +214,9 @@ char *diag_build_report(const DiagSources *s)
     kv(&sb, "portty", PORTTY_VERSION);
     kv(&sb, "built with", BUILD_CC);
     kv(&sb, "coffer", DEP_COFFER_VERSION);
+#ifdef DEP_SDL3_VERSION
     kv(&sb, "SDL3", DEP_SDL3_VERSION);
+#endif
     kv(&sb, "FreeType", DEP_FREETYPE_VERSION);
     kv(&sb, "HarfBuzz", DEP_HARFBUZZ_VERSION);
     kv(&sb, "libpng", DEP_LIBPNG_VERSION);
@@ -238,7 +240,7 @@ char *diag_build_report(const DiagSources *s)
     if (s->gpu_device)
         kv(&sb, "GPU", s->gpu_device);
     if (s->gpu_driver) {
-        if (s->gpu_driver_libre)
+        if (s->gpu_driver_libre == GPU_DRIVER_LIBRE_YES)
             kv_colored(&sb, "driver", FG_ON, s->gpu_driver);
         else
             kv(&sb, "driver", s->gpu_driver);

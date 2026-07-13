@@ -101,8 +101,48 @@ if test "x$have_hardened_heap" = "xyes"; then
   AC_MSG_NOTICE([Hardened heap allocator enabled (catches UAF / overflow at the source)])
 fi
 
-# Check for libraries
-PKG_CHECK_MODULES([SDL3], [sdl3])
+# Backend selection (SDL3 is the default).
+AC_ARG_WITH([backend],
+  [AS_HELP_STRING([--with-backend=sdl3|sokol],
+    [Windowing+GPU backend @<:@default=sdl3@:>@])],
+  [portty_backend="$withval"],
+  [portty_backend="sdl3"])
+
+AS_CASE([$portty_backend],
+  [sdl3], [
+    PKG_CHECK_MODULES([SDL3], [sdl3])
+    AC_DEFINE([PORTTY_BACKEND_SDL3], [1], [Use SDL3 backend])
+  ],
+  [sokol], [
+    # Sokol is vendored in third_party/sokol; add it to the include path.
+    SOKOL_CFLAGS="-I${srcdir}/third_party/sokol"
+    CFLAGS="$SOKOL_CFLAGS $CFLAGS"
+    AC_SUBST([SOKOL_CFLAGS])
+    AC_DEFINE([PORTTY_BACKEND_SOKOL], [1], [Use Sokol backend])
+    AS_CASE([$host_os],
+      [*linux*], [
+        AC_DEFINE([SOKOL_GLCORE], [1], [Use Sokol OpenGL core profile])
+        PLATFORM_LIBS="-lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm"
+      ],
+      [*mingw*|*msys*], [
+        AC_DEFINE([SOKOL_D3D11], [1], [Use Sokol D3D11 backend])
+        PLATFORM_LIBS="-ld3d11 -ldxgi -lkernel32 -luser32 -lshell32 -lole32 -ladvapi32 -ldwrite -lgdi32 -ldwmapi -lwinpthread"
+      ],
+      [*darwin*], [
+        AC_DEFINE([SOKOL_METAL], [1], [Use Sokol Metal backend])
+        PLATFORM_LIBS="-framework AppKit -framework QuartzCore -framework Metal -framework CoreText -framework CoreFoundation"
+      ])
+    AC_SUBST([PLATFORM_LIBS])
+  ],
+  [AC_MSG_ERROR([Unknown backend: $portty_backend])])
+
+AM_CONDITIONAL([BACKEND_SDL3], [test "x$portty_backend" = xsdl3])
+AM_CONDITIONAL([BACKEND_SOKOL], [test "x$portty_backend" = xsokol])
+
+AS_IF([test "x$portty_backend" = xsdl3], [
+  # Check for libraries
+  PKG_CHECK_MODULES([SDL3], [sdl3])
+])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
 fi
@@ -111,15 +151,14 @@ PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 PKG_CHECK_MODULES([COFFER], [coffer])
 
-# Lottie rasterization support is determined at runtime by querying
-# cfr_have_lottie(), which reflects whether coffer was built with
-# ThorVG. No need to check for ThorVG here.
+AS_IF([test "x$portty_backend" = xsdl3], [
+  DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
+  AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
+])
 
 # Capture dependency versions and build info for --help output
 BUILD_CC_VERSION=$($CC --version 2>/dev/null | head -1 || echo "$CC")
 AC_DEFINE_UNQUOTED([BUILD_CC], ["$BUILD_CC_VERSION"], [C compiler version string])
-DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
-AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
 DEP_FREETYPE_VER=$($PKG_CONFIG --modversion freetype2 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_FREETYPE_VERSION], ["$DEP_FREETYPE_VER"], [FreeType version])
 DEP_HARFBUZZ_VER=$($PKG_CONFIG --modversion harfbuzz 2>/dev/null || echo "unknown")

@@ -7,8 +7,10 @@
 
 #include "pager.h"
 #include "common.h"
+#include "portty_app.h"
 #include "term_cfr.h"
 
+#include <coffer/coffer.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,10 +20,10 @@
 
 struct Pager
 {
-    RendererBackend *rend;
-    PlatformBackend *plat;
-    TerminalBackend *term; // overlay terminal; NULL when closed
-    char *text;            // retained source document (for rebuild on resize)
+    PorttyBackend *backend; // unified backend; transitional split fields inside
+    PorttyApp *app;         // transitional access to rend/plat
+    TerminalBackend *term;  // overlay terminal; NULL when closed
+    char *text;             // retained source document (for rebuild on resize)
     int cols, rows;
     uint16_t hovered; // last hovered hyperlink id (debounces cursor changes)
     // Char-selection drag: a left press defers selection until first motion so
@@ -32,15 +34,15 @@ struct Pager
 
 static void copy_selection(Pager *p);
 
-Pager *pager_create(RendererBackend *rend, PlatformBackend *plat)
+Pager *pager_create(PorttyBackend *backend, PorttyApp *app)
 {
-    if (!rend || !plat)
+    if (!backend || !app)
         return NULL;
     Pager *p = calloc(1, sizeof(*p));
     if (!p)
         return NULL;
-    p->rend = rend;
-    p->plat = plat;
+    p->backend = backend;
+    p->app = app;
     return p;
 }
 
@@ -80,7 +82,7 @@ static void feed_text(TerminalBackend *term, const char *s)
 static bool overlay_build(Pager *p, const char *text, int cols, int rows)
 {
     int cell_w = 10, cell_h = 20;
-    renderer_get_cell_size(p->rend, &cell_w, &cell_h);
+    p->backend->get_cell_size(p->backend, &cell_w, &cell_h);
     CfrConfig cfg = CFR_CONFIG_DEFAULTS;
     cfg.cols = cols;
     cfg.rows = rows;
@@ -103,7 +105,7 @@ static bool overlay_build(Pager *p, const char *text, int cols, int rows)
     p->cols = cols;
     p->rows = rows;
     p->hovered = 0;
-    renderer_set_overlay(p->rend, t); // positions the shared view at the top
+    p->backend->set_overlay(p->backend, t); // positions the shared view at the top
     return true;
 }
 
@@ -111,7 +113,7 @@ static void overlay_teardown(Pager *p)
 {
     if (!p->term)
         return;
-    renderer_clear_overlay(p->rend); // restore host scroll view, stop drawing overlay
+    p->backend->clear_overlay(p->backend); // restore host scroll view, stop drawing overlay
     terminal_destroy(p->term);
     free(p->term); // heap instance from term_cfr_new
     p->term = NULL;
@@ -135,7 +137,7 @@ bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
         free(copy);
         // If we tore down a prior session, it is now closed — release the PTY.
         if (was_open)
-            platform_resume_pty(p->plat);
+            p->backend->resume_pty(p->backend);
         return false;
     }
 
@@ -144,10 +146,10 @@ bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
 
     // Drop any link hint left over from the main terminal — the pager owns the
     // hint channel while it is open and re-resolves on the next hover.
-    platform_set_link_hint(p->plat, NULL, 0);
+    p->backend->set_link_hint(p->backend, NULL, 0);
 
     if (!was_open)
-        platform_pause_pty(p->plat); // freeze background output behind the overlay
+        p->backend->pause_pty(p->backend); // freeze background output behind the overlay
     return true;
 }
 
@@ -159,9 +161,9 @@ void pager_close(Pager *p)
     free(p->text);
     p->text = NULL;
     p->hovered = 0;
-    platform_set_link_hint(p->plat, NULL, 0);
-    platform_set_cursor(p->plat, PLATFORM_CURSOR_TEXT);
-    platform_resume_pty(p->plat);
+    p->backend->set_link_hint(p->backend, NULL, 0);
+    p->backend->set_cursor(p->backend, PORTTY_CURSOR_TEXT);
+    p->backend->resume_pty(p->backend);
 }
 
 void pager_resize(Pager *p, int cols, int rows)
@@ -177,7 +179,7 @@ void pager_resize(Pager *p, int cols, int rows)
         p->text = text;
     else {
         free(text);
-        platform_resume_pty(p->plat); // build failed → session is closed
+        p->backend->resume_pty(p->backend); // build failed → session is closed
     }
 }
 
@@ -251,7 +253,7 @@ bool pager_key(Pager *p, int key, int mod, uint32_t codepoint)
         break;
     }
     if (delta != 0)
-        renderer_scroll(p->rend, p->term, delta);
+        p->backend->scroll(p->backend, p->term, delta);
 
     // Modal: consume every key so nothing leaks to the shell.
     return true;
@@ -261,7 +263,7 @@ bool pager_scroll(Pager *p, int delta)
 {
     if (!pager_active(p))
         return false;
-    renderer_scroll(p->rend, p->term, delta);
+    p->backend->scroll(p->backend, p->term, delta);
     return true;
 }
 
@@ -271,7 +273,7 @@ bool pager_scroll(Pager *p, int delta)
 static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
 {
     int cw, ch;
-    if (!renderer_get_cell_size(p->rend, &cw, &ch) || cw <= 0 || ch <= 0)
+    if (!p->backend->get_cell_size(p->backend, &cw, &ch) || cw <= 0 || ch <= 0)
         return false;
     int display_col = px / cw;
     int display_row = py / ch;
@@ -281,7 +283,7 @@ static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
     if (display_row < 0 || display_row >= rows || display_col < 0 || display_col >= cols)
         return false;
 
-    int scroll_offset = renderer_get_scroll_offset(p->rend);
+    int scroll_offset = p->backend->get_scroll_offset(p->backend);
     int scrollback_row = scroll_offset - 1 - display_row;
     int unified_row =
         (scrollback_row >= 0) ? -(scrollback_row + 1) : (display_row - scroll_offset);
@@ -315,7 +317,7 @@ static void copy_selection(Pager *p)
         return;
     char *text = terminal_selection_get_text(p->term);
     if (text) {
-        platform_clipboard_set(p->plat, text);
+        p->backend->clipboard_set(p->backend, text);
         free(text);
     }
     // Clear the highlight after copying, matching the main view.
@@ -340,14 +342,14 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     // positioned via the pixel-Y anchor like the main terminal.
     if (hid != p->hovered) {
         terminal_set_hovered_hyperlink(p->term, hid);
-        platform_set_cursor(p->plat,
-                            hid != 0 ? PLATFORM_CURSOR_POINTER : PLATFORM_CURSOR_TEXT);
+        p->backend->set_cursor(p->backend,
+                               hid != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
         if (hid != 0) {
             char url[4096];
             size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
-            platform_set_link_hint(p->plat, n > 0 ? url : NULL, pixel_y);
+            p->backend->set_link_hint(p->backend, n > 0 ? url : NULL, pixel_y);
         } else {
-            platform_set_link_hint(p->plat, NULL, pixel_y);
+            p->backend->set_link_hint(p->backend, NULL, pixel_y);
         }
         p->hovered = hid;
     }
@@ -358,7 +360,7 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
         size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
         if (n > 0 && terminal_hyperlink_is_safe(url)) {
             char err[256];
-            if (!platform_open_url(p->plat, url, err, sizeof(err)))
+            if (!p->backend->open_url(p->backend, url, err, sizeof(err)))
                 fprintf(stderr, "ERROR: failed to open URL: %s\n", err);
         } else if (n > 0) {
             fprintf(stderr, "WARNING: refusing to open URL with disallowed scheme: %s\n",

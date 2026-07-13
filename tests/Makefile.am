@@ -5,9 +5,10 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app
 
-test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) ../src/rend_sdl3_atlas.c
+test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) $(TERM_STUBS) \
+    ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/font.c font_stubs.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
 # rend_sdl3_atlas.c uses pow() for the sRGB->linear LUT.
 test_atlas_LDADD = -lm
@@ -67,11 +68,14 @@ test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_lottie_LDADD = $(COFFER_LIBS)
 
 
-# test_pty_pause depends on POSIX PTY APIs
+# test_pty_pause depends on POSIX PTY APIs. It is only relevant when
+# the SDL3 backend is active. Under the Sokol backend this is excluded.
+if BACKEND_SDL3
 if !HOST_WINDOWS
 check_PROGRAMS += test_pty_pause
-test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/platform.c ../src/term.c ../src/unicode.c
+test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/term.c ../src/unicode.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
+endif
 endif
 
 # MSYS2/Unix → Windows path conversion. Pure C, no SDL/coffer dependency.
@@ -80,7 +84,7 @@ test_path_compat_CFLAGS = $(TEST_CFLAGS)
 
 # Procedural box-drawing alignment test.  Renders to a CPU pixel buffer
 # (GlyphBitmap) and inspects pixels directly — no SDL or GPU required.
-test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) ../src/rend_sdl3_boxdraw.c
+test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_boxdraw.c ../src/rend_common.c ../src/font.c font_stubs.c
 test_boxdraw_CFLAGS = $(TEST_CFLAGS)
 test_boxdraw_LDADD = -lm
 
@@ -96,5 +100,25 @@ test_cursor_render_CFLAGS = $(TEST_CFLAGS)
 test_scroll_SOURCES = test_scroll.c $(TEST_COMMON)
 test_scroll_CFLAGS = $(TEST_CFLAGS)
 test_scroll_LDADD = -lm
+
+# Poll-based timer manager. Pure C, no SDL/coffer dependency.
+test_timer_SOURCES = test_timer.c $(TEST_COMMON) ../src/timer.c
+test_timer_CFLAGS = $(TEST_CFLAGS)
+test_timer_LDADD =
+
+# Shared GPU-agnostic renderer helpers (Nerd Font map, sRGB helpers).
+test_rend_common_SOURCES = test_rend_common.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_common.c ../src/font.c font_stubs.c
+test_rend_common_CFLAGS = $(TEST_CFLAGS)
+test_rend_common_LDADD = -lm
+
+# PorttyApp terminal callbacks. Uses a stub PorttyBackend to verify the
+# callback wiring without SDL or a real PTY. It still needs term.c and
+# coffer for the full handler implementations.
+test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
+    ../src/portty_app.c ../src/term.c ../src/term_cfr.c ../src/base64.c \
+    ../src/unicode.c ../src/path_compat.c ../src/pager.c ../src/rend_common.c \
+    ../src/portty_conf.c ../src/diag.c ../src/pty.c ../src/font.c font_stubs.c
+test_portty_app_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
+test_portty_app_LDADD = $(COFFER_LIBS)
 
 TESTS = $(check_PROGRAMS)

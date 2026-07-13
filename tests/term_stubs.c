@@ -17,3 +17,12 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
     (void)data;
     return (ssize_t)len;
 }
+
+// Stub for terminal_get_scrollback_lines — only linked when term.c
+// is not compiled into the test. Use weak symbol to avoid multiple
+// definition errors when term.c is also linked.
+__attribute__((weak)) int terminal_get_scrollback_lines(void *term)
+{
+    (void)term;
+    return 0;
+}

@@ -26,9 +26,8 @@ compile
 ltmain.sh
 
 # Build directories
-build/
-build-release/
-build-mingw64/
+build*/
+!build-aux/
 _build/
 .deps/
 .dirstamp

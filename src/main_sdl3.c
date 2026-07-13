@@ -426,6 +426,8 @@ int main(int argc, char *argv[])
     }
     backend.set_window_size(&backend, win_w, win_h);
     backend.resize(&backend, win_w, win_h);
+    if (backend.show_window)
+        backend.show_window(&backend);
 
     PtyContext *pty = NULL;
     if (demo_text) {
@@ -450,7 +452,7 @@ int main(int argc, char *argv[])
 
     term->exe_path = backend.get_exe_path(&backend);
 
-    terminal_set_output_callback(term, portty_app_term_output_to_pty, pty);
+    terminal_set_output_callback(term, portty_app_term_output_to_pty, &app);
     terminal_set_selection_callback(term, portty_app_selection_change, &app);
     terminal_set_clipboard_set_callback(term, portty_app_clipboard_set, &app);
     terminal_set_cwd_callback(term, portty_app_cwd_change, &app);
