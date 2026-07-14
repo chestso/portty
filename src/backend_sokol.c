@@ -1891,6 +1891,23 @@ static void sokol_init_cb(void)
         fprintf(stderr, "ERROR: Failed to initialize Sokol backend\n");
         return;
     }
+
+#if !defined(_WIN32) && !defined(__APPLE__)
+    // Sokol doesn't set WM_CLASS, which prevents the desktop environment
+    // from matching the window to the .desktop file for tray/taskbar icons.
+    Display *xdisp = (Display *)sapp_x11_get_display();
+    Window xwin = (Window)(intptr_t)sapp_x11_get_window();
+    if (xdisp && xwin) {
+        XClassHint *hint = XAllocClassHint();
+        if (hint) {
+            hint->res_name = (char *)"portty";
+            hint->res_class = (char *)"portty";
+            XSetClassHint(xdisp, xwin, hint);
+            XFree(hint);
+        }
+    }
+#endif
+
     sokol_finish_setup(g_sokol.backend, g_sokol.app);
 
     // Check for screenshot automation via env var
