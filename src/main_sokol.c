@@ -131,8 +131,6 @@ sapp_desc sokol_main(int argc, char *argv[])
     int ft_hint_target = FT_LOAD_TARGET_LIGHT;
     char *demo_text = NULL;
     const char *font_name = NULL;
-    int font_from_flag = 0;
-    const char *font_source = NULL;
     const char *colr_debug_path = NULL;
     char **exec_argv = NULL;
     const float font_size = 12.0f;
@@ -196,7 +194,6 @@ sapp_desc sokol_main(int argc, char *argv[])
             break;
         case 'f':
             font_name = optarg;
-            font_from_flag = 1;
             break;
         case 'L':
             list_fonts = 1;
@@ -329,7 +326,6 @@ sapp_desc sokol_main(int argc, char *argv[])
     }
     app->term = term;
     app->conf = conf;
-    app->font_source = font_source;
     app->backend = backend;
     backend->data = app;
 
