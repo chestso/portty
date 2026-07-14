@@ -154,6 +154,7 @@ typedef struct
     int last_click_x, last_click_y;
     TimerId autoscroll_timer;
     bool pty_paused;
+    bool suppress_next_char; // KEY_DOWN handled by pager — drop the paired CHAR event
     // Debug script infrastructure
     PorttyDebugScript *debug_script;
     int debug_cmd_index;
@@ -2363,6 +2364,9 @@ static void sokol_event_cb(const sapp_event *ev)
         KeyboardResult kr = portty_app_handle_key(d->app, term_key, mod, cp);
         if (kr.len > 0 && !kr.handled && d->pty)
             pty_write(d->pty, kr.data, kr.len);
+        if (kr.handled && term_key == TERM_KEY_NONE &&
+            !(mod & (TERM_MOD_CTRL | TERM_MOD_ALT)))
+            d->suppress_next_char = true;
         // Reset cursor blink on user input
         d->cursor_blink_visible = true;
         if (d->cursor_blink_timer != TIMER_INVALID)
@@ -2378,6 +2382,13 @@ static void sokol_event_cb(const sapp_event *ev)
         // the literal letter to the shell.
         if (ev->modifiers & (SAPP_MODIFIER_CTRL | SAPP_MODIFIER_ALT))
             break;
+        // Drop CHAR events that were consumed by the KEY_DOWN handler
+        // (e.g. 'q' closing the pager — the paired CHAR must not leak
+        // to the PTY after the pager closes).
+        if (d->suppress_next_char) {
+            d->suppress_next_char = false;
+            break;
+        }
         char utf8[8] = { 0 };
         int n = 0;
         uint32_t cp = ev->char_code;
