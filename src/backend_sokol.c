@@ -22,6 +22,7 @@
 #include "portty_conf.h"
 #include "portty_debug_script.h"
 #include "portty_pty.h"
+#include "os_compat.h"
 #include "rend_sokol_atlas.h"
 #include "rend_common.h"
 #include "term.h"
@@ -32,7 +33,13 @@
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
+#include <limits.h>
 #include <coffer/coffer.h>
+
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define SOKOL_IMPL
 
 #include <sokol/sokol_app.h>
@@ -200,6 +207,11 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
     d->last_click_y = 0;
     d->autoscroll_timer = TIMER_INVALID;
     d->pty_paused = false;
+
+    // Cache exe path for spawn_new_terminal
+    char exe_buf[PATH_MAX];
+    if (os_compat_get_exe_path(exe_buf, sizeof(exe_buf)))
+        d->exe_path = strdup(exe_buf);
 
     app->backend = self;
 
@@ -561,8 +573,21 @@ static void sokol_set_autoscroll(PorttyBackend *self, bool enabled)
 
 static bool sokol_spawn_new_terminal(PorttyBackend *self)
 {
-    (void)self;
-    return false;
+    SokolData *d = sokol_data(self);
+    if (!d || !d->exe_path)
+        return false;
+
+    char cwd_path[PATH_MAX] = "";
+    if (d->working_dir) {
+        snprintf(cwd_path, sizeof(cwd_path), "%s", d->working_dir);
+    }
+#ifndef _WIN32
+    else if (d->pty) {
+        pty_get_child_cwd(d->pty, cwd_path, sizeof(cwd_path));
+    }
+#endif
+
+    return os_compat_spawn_process(d->exe_path, cwd_path);
 }
 
 static void sokol_set_working_dir(PorttyBackend *self, const char *dir)

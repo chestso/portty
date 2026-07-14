@@ -6,6 +6,7 @@
 
 #include "backend_sdl3.h"
 #include "common.h"
+#include "os_compat.h"
 #include "pager.h"
 #include "path_compat.h"
 #include "png_reader.h"
@@ -558,14 +559,7 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
 #endif
 
     // Cache exe path
-    const char *base = SDL_GetBasePath();
-    if (base) {
-#ifdef _WIN32
-        snprintf(d->exe_path, sizeof(d->exe_path), "%s" PACKAGE ".exe", base);
-#else
-        snprintf(d->exe_path, sizeof(d->exe_path), "%s" PACKAGE, base);
-#endif
-    }
+    os_compat_get_exe_path(d->exe_path, sizeof(d->exe_path));
 
     // Create window
     vlog("Creating window (placeholder size, will resize after font load)\n");
@@ -966,51 +960,7 @@ static bool sdl3_spawn_new_terminal(PorttyBackend *self)
     }
 #endif
 
-#ifdef _WIN32
-    WCHAR wexe[MAX_PATH];
-    MultiByteToWideChar(CP_UTF8, 0, d->exe_path, -1, wexe, MAX_PATH);
-    WCHAR wcmdline[MAX_PATH];
-    swprintf(wcmdline, MAX_PATH, L"\"%s\"", wexe);
-    WCHAR wcwd[MAX_PATH] = L"";
-    LPWSTR lpcwd = NULL;
-    if (cwd_path[0]) {
-        char norm[PATH_MAX];
-        snprintf(norm, sizeof(norm), "%s", cwd_path);
-        for (char *p = norm; *p; p++)
-            if (*p == '/')
-                *p = '\\';
-        MultiByteToWideChar(CP_UTF8, 0, norm, -1, wcwd, MAX_PATH);
-        lpcwd = wcwd;
-    }
-    STARTUPINFOW si;
-    ZeroMemory(&si, sizeof(si));
-    si.cb = sizeof(si);
-    PROCESS_INFORMATION pi;
-    ZeroMemory(&pi, sizeof(pi));
-    if (CreateProcessW(wexe, wcmdline, NULL, NULL, FALSE,
-                       DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP,
-                       NULL, lpcwd, &si, &pi)) {
-        CloseHandle(pi.hProcess);
-        CloseHandle(pi.hThread);
-        return true;
-    }
-    vlog("Failed to spawn terminal: %lu\n", GetLastError());
-    return false;
-#else
-    pid_t pid = fork();
-    if (pid < 0) {
-        vlog("Failed to fork for new terminal: %s\n", strerror(errno));
-        return false;
-    }
-    if (pid == 0) {
-        setsid();
-        if (cwd_path[0])
-            chdir(cwd_path);
-        execl(d->exe_path, d->exe_path, NULL);
-        _exit(1);
-    }
-    return true;
-#endif
+    return os_compat_spawn_process(d->exe_path, cwd_path);
 }
 
 static char *sdl3_get_default_font(PorttyBackend *self)
