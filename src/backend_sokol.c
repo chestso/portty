@@ -1518,6 +1518,8 @@ static int sokol_load_fonts(PorttyBackend *self, float size,
     d->font_cap_height = r.font_cap_height;
     d->cell_w = r.cell_width;
     d->cell_h = r.cell_height;
+    d->font_size = r.font_size;
+    d->font_options = r.font_options;
     free(d->font_path);
     d->font_path = r.font_path;
     r.font_path = NULL;
