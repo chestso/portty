@@ -155,6 +155,7 @@ typedef struct
     TimerId autoscroll_timer;
     bool pty_paused;
     bool suppress_next_char; // KEY_DOWN handled by pager — drop the paired CHAR event
+    float wheel_accum_y;     // fractional mouse-wheel accumulation (matches SDL3 backend)
     // Debug script infrastructure
     PorttyDebugScript *debug_script;
     int debug_cmd_index;
@@ -2474,8 +2475,30 @@ static void sokol_event_cb(const sapp_event *ev)
             terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_MOUSE_SCROLL:
-        portty_app_handle_scroll(d->app, (int)ev->scroll_y);
+    {
+        float dy = ev->scroll_y;
+        if (dy != 0.0f) {
+            d->wheel_accum_y += dy;
+            int whole_ticks = (int)d->wheel_accum_y;
+            if (whole_ticks != 0) {
+                d->wheel_accum_y -= (float)whole_ticks;
+                bool consumed = false;
+                int button = (whole_ticks > 0) ? 4 : 5;
+                int clicks = abs(whole_ticks);
+                int tmod = sokol_map_mod(ev->modifiers);
+                int mx = (int)ev->mouse_x;
+                int my = (int)ev->mouse_y;
+                for (int i = 0; i < clicks && !consumed; i++) {
+                    consumed = portty_app_handle_mouse(
+                        d->app, mx, my, button, true, 0, tmod);
+                }
+                if (!consumed)
+                    portty_app_handle_scroll(d->app, whole_ticks);
+            }
+        }
+        terminal_mark_dirty(d->term);
         break;
+    }
     case SAPP_EVENTTYPE_MOUSE_ENTER:
         portty_app_handle_mouse_enter(d->app);
         terminal_mark_dirty(d->term);
