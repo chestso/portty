@@ -36,7 +36,10 @@ Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeT
 - Window title via OSC 2
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
 - Kitty keyboard protocol (push/pop/set/query plus the Disambiguate and Report-all flags) — modern TUIs like Claude Code can tell Shift+Enter apart from plain Enter, and Ctrl+letter combos no longer collide with their literal control bytes
+- Working-directory tracking via OSC 7 (`file://` URI) and OSC 9;9 (ConEmu protocol) — shells emit these on `cd` so `Ctrl+Shift+N` can spawn a new terminal in the same directory. On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
+- Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs
+- Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
 
 ## Known Issues
 
@@ -106,21 +109,26 @@ make check
 
 - `make` — build everything
 - `make check` — run the test suite
-- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`
-- `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, prettier on Markdown
+- `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`; on Windows, also creates a Start Menu shortcut
+- `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, black on `contrib/`, prettier on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
+- `make regen-icon` — regenerate the embedded window icon PNG header from the source SVG (requires rsvg-convert)
+- `make dist-portable` — Windows-only: stage exe + DLLs + terminfo into a self-contained ZIP
 
 ### Helper Scripts
 
-| Script                      | Purpose                                                                          |
-| --------------------------- | -------------------------------------------------------------------------------- |
-| `scripts/profile.sh`        | Build with `-pg`, run a benchmark, write `profile-report.txt`                    |
-| `scripts/ref-png.sh T OUT`  | Generate reference PNG of TEXT using hb-view                                     |
-| `scripts/ref-layers.sh T P` | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                        |
-| `scripts/colr_layers.py`    | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer) |
-| `scripts/pty_record.py`     | Record PTY traffic from a child process (debug feature-detect probes)            |
-| `scripts/build-ucrt64.sh`   | Build natively on Windows (MSYS2 UCRT64)                                         |
+| Script                           | Purpose                                                                          |
+| -------------------------------- | -------------------------------------------------------------------------------- |
+| `scripts/profile.sh`             | Build with `-pg`, run a benchmark, write `profile-report.txt`                    |
+| `scripts/ref-png.sh T OUT`       | Generate reference PNG of TEXT using hb-view                                     |
+| `scripts/ref-layers.sh T P`      | Export each COLR v1 paint layer as `<P>_layer00.png` etc.                        |
+| `scripts/colr_layers.py`         | Export individual COLR v1 paint layers as PNG (Python fonttools + blackrenderer) |
+| `scripts/pty_record.py`          | Record PTY traffic from a child process (debug feature-detect probes)            |
+| `scripts/build-ucrt64.sh`        | Build natively on Windows (MSYS2 UCRT64)                                         |
+| `scripts/make-dist-zip.sh`       | Assemble a portable Windows ZIP (called by `make dist-portable`)                 |
+| `scripts/install-shortcut.ps1`   | Install a Start Menu shortcut for Portty on Windows (called by `make install`)   |
+| `scripts/uninstall-shortcut.ps1` | Uninstall the Start Menu shortcut (called by `make uninstall`)                   |
 
 ## Usage
 
@@ -146,22 +154,22 @@ build/src/portty -P "" --exec ls --wait 500 output.png
 
 ### CLI Flags
 
-| Flag                        | Description                                                                   |
-| --------------------------- | ----------------------------------------------------------------------------- |
-| `-h`                        | Show help message                                                             |
-| `-v`                        | Verbose output (font resolution, COLR, atlas events)                          |
-| `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                    |
-| `-g COLSxROWS`              | Initial terminal size (default: 80x24)                                        |
-| `-P TEXT`                   | Render TEXT to PNG (output path as positional arg)                            |
-| `-D PREFIX`                 | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only)   |
-| `--list-fonts`              | List available monospace fonts and exit                                       |
-| `--ft-hinting S`            | FreeType hinting: none/light/normal/mono (default: light)                     |
-| `--demo TEXT`               | Display TEXT in terminal without spawning a shell (for testing)               |
-| `-V` / `--version`          | Print version and dependency versions, then exit                              |
-| `--exec CMD`                | With `-P`, spawn CMD on a PTY and render its output to PNG (SDL3 only)        |
-| `--wait MS`                 | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
-| `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                        |
-| `-S FILE` / `--script FILE` | Run debug script FILE (see [Debug Scripting](#debug-scripting))               |
+| Flag                        | Description                                                                              |
+| --------------------------- | ---------------------------------------------------------------------------------------- |
+| `-h`                        | Show help message                                                                        |
+| `-v`                        | Verbose output (font resolution, COLR, atlas events)                                     |
+| `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                               |
+| `-g COLSxROWS`              | Initial terminal size (default: 80x24)                                                   |
+| `-P TEXT`                   | Render TEXT to PNG (output path as positional arg; SDL3 only)                            |
+| `-D PREFIX`                 | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only)              |
+| `-L` / `--list-fonts`       | List available monospace fonts and exit (Sokol only)                                     |
+| `-H S` / `--ft-hinting S`   | FreeType hinting: none/light/normal/mono (default: light; Sokol only)                    |
+| `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing; Sokol only)              |
+| `-V` / `--version`          | Print version and exit                                                                   |
+| `--exec CMD`                | With `-P`, spawn CMD on a PTY and render its output to PNG (SDL3 only)                   |
+| `--wait MS`                 | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200; SDL3 only) |
+| `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                                   |
+| `-S FILE` / `--script FILE` | Run debug script FILE (see [Debug Scripting](#debug-scripting))                          |
 
 ### Keyboard Shortcuts
 
@@ -246,8 +254,8 @@ portty can be configured with an INI-style config file called `portty.conf`. CLI
 The first file found is used:
 
 1. `./portty.conf` (project-level, current working directory)
-2. `%APPDATA%\portty\portty.conf` (Windows only)
-3. `$XDG_CONFIG_HOME/portty/portty.conf` (defaults to `~/.config/portty/portty.conf`)
+2. `$XDG_CONFIG_HOME/portty/portty.conf` (defaults to `~/.config/portty/portty.conf`; on Windows, checked before APPDATA if set)
+3. `%APPDATA%\portty\portty.conf` (Windows only)
 
 ### Example
 
@@ -279,6 +287,7 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC` | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`          | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
 | `notification_transparency` | `true`/`false`                                        | `false`            | Draw the top notification panel translucent instead of opaque                                                                                        |
+| `platform`                  | `sdl3`                                                | _(unset)_          | Select the platform backend (only `sdl3` is accepted; use `--with-backend` at configure time for backend selection)                                  |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
@@ -316,12 +325,14 @@ infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 All platforms:
 
 - coffer (VT engine, consumed via `pkg-config coffer`; source at https://github.com/chestso/coffer)
-- SDL3
+- SDL3 (when using the SDL3 backend)
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
 - libpng
 
-Rendering uses SDL's GPU renderer for gamma-correct linear-light blending, so a working GPU backend is required **at runtime**: Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS.
+The SDL3 backend uses SDL's GPU renderer for gamma-correct linear-light blending, so a working GPU backend is required **at runtime**: Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS.
+
+The Sokol backend uses sokol_gfx instead of SDL3 for rendering (OpenGL Core on Linux, Metal on macOS, D3D11 on Windows), so no Vulkan/D3D12 runtime is needed.
 
 Linux only:
 
@@ -330,7 +341,7 @@ Linux only:
 
 macOS only:
 
-- Core Text + Core Foundation (system frameworks, always available)
+- Core Text + Core Foundation (system frameworks, always available; SDL3 also links GameController, CoreHaptics, CoreMotion, and CoreMedia)
 
 ### Fedora 41+
 
@@ -361,7 +372,7 @@ pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
       mingw-w64-ucrt-x86_64-freetype mingw-w64-ucrt-x86_64-harfbuzz \
       mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-autotools
 
-# Optional: only needed to regenerate the Windows .ico (make gen-ico / --gen-ico)
+# Optional: only needed to regenerate the Windows .ico (see [Regenerating the Windows icon](#regenerating-the-windows-icon))
 pacman -S mingw-w64-ucrt-x86_64-imagemagick mingw-w64-ucrt-x86_64-librsvg
 ```
 
@@ -461,8 +472,12 @@ cd build && make check
 | `test_timer`              | Timer wheel and callback scheduling                                   |
 | `test_pty_pause`          | PTY pause/resume during selection (SDL3 + POSIX only)                 |
 | `test_debug_script`       | Debug script parser (all command types, edge cases, escapes)          |
+| `test_path_compat`        | MSYS2/Unix → Windows path conversion                                  |
+| `test_boxdraw`            | Procedural box-drawing alignment                                      |
+| `test_cursor_render`      | Cursor-only render regression                                         |
+| `test_scroll`             | Mouse-wheel scroll logic: sub-tick accumulation                       |
 
-The test count differs by backend: 21 tests on SDL3 (POSIX), 19 on Sokol/Windows — `test_pty_pause` is SDL3+POSIX only.
+The test count differs by backend: 20 tests on SDL3 (POSIX), 19 on Sokol/Windows — `test_pty_pause` is SDL3+POSIX only.
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
