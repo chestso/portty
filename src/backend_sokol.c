@@ -34,6 +34,7 @@
 #include <signal.h>
 #include <time.h>
 #include <limits.h>
+#include <math.h>
 #include <coffer/coffer.h>
 
 #ifdef _WIN32
@@ -448,6 +449,8 @@ static void sokol_drain_pty(SokolData *d)
     if (d->pty_closed && !d->child_exited) {
         d->child_exited = true;
         portty_app_handle_pty_closed(d->app);
+        vlog("PTY closed, requesting quit\n");
+        d->quit_requested = true;
     }
 }
 
@@ -690,6 +693,7 @@ typedef struct
 static GlyphVertex s_frame_verts[SOKOL_MAX_VERTICES];
 static int s_frame_vert_count;
 static int s_vert_index[SOKOL_MAX_ROWS][SOKOL_MAX_COLS];
+static GlyphVertex s_glyph_verts[SOKOL_MAX_VERTICES];
 
 static void sokol_ensure_glyph_pipeline(SokolData *d)
 {
@@ -925,7 +929,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     // Build vertex data (using file-scope arrays for debug access)
     static GlyphVertex sel_verts[SOKOL_MAX_VERTICES];
-    int vert_count = 0;
+    int vert_count = 0;       // bg quads in s_frame_verts
+    int glyph_vert_count = 0; // glyph/cursor quads in s_glyph_verts
     int sel_vert_count = 0;
     float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
     int scroll_offset = d->scroll.scroll_offset;
@@ -949,7 +954,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 if (cursor_visible && scroll_offset == 0 &&
                     terminal_get_cursor_visible(term) && vert_count + 6 <= SOKOL_MAX_VERTICES) {
                     TerminalPos cp = terminal_get_cursor_pos(term);
-                    if (cp.row == row && cp.col == col) {
+                    if (cp.row == row && cp.col == col &&
+                        glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                         float cx0 = (float)(col * cell_w);
                         float cy0 = (float)(row * cell_h);
                         float cx1 = cx0 + (float)cell_w;
@@ -958,14 +964,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                           CURSOR_COLOR_B, CURSOR_COLOR_A };
                         float cu0 = -(0.0f + 2.0f);
                         float cu1 = -(1.0f + 2.0f);
-                        GlyphVertex *q = &s_frame_verts[vert_count];
+                        GlyphVertex *q = &s_glyph_verts[glyph_vert_count];
                         q[0] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[1] = (GlyphVertex){ cx1, cy0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[2] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[3] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[4] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[5] = (GlyphVertex){ cx0, cy1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        vert_count += 6;
+                        glyph_vert_count += 6;
                     }
                 }
                 continue; // continuation cell
@@ -1020,23 +1026,84 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             // Cursor overlay: draw a solid cursor-color quad on top of the bg.
             // UVs encode local cell position (negative u = cursor mode) so the
             // fragment shader can clip rounded corners.
-            if (is_cursor && vert_count + 6 <= SOKOL_MAX_VERTICES) {
+            if (is_cursor && glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                 uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G,
                                   CURSOR_COLOR_B, CURSOR_COLOR_A };
                 float cu0 = -(0.0f + 2.0f);
                 float cu1 = -(1.0f + 2.0f);
-                q = &s_frame_verts[vert_count];
+                q = &s_glyph_verts[glyph_vert_count];
                 q[0] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[1] = (GlyphVertex){ cell_x1, cell_y0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[2] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[3] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[4] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[5] = (GlyphVertex){ cell_x0, cell_y1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                vert_count += 6;
+                glyph_vert_count += 6;
             }
 
             // Overlay glyph quad on top (only if there's a glyph and not cursor)
-            if (cell.cp != 0 && cell.cp != 0x20 && d->font && !is_cursor) {
+            if (cell.cp != 0 && cell.cp != 0x20 && !is_cursor) {
+                // Procedural box drawing / block elements — render to pixel
+                // buffer and cache in the atlas like a regular font glyph.
+                if (rend_boxdraw_is_supported(cell.cp)) {
+                    uint32_t bd_cp = cell.cp;
+                    uint32_t color_key = 0;
+
+                    RendSokolAtlasEntry *bd_entry = rend_sokol_atlas_lookup(
+                        &d->atlas, BOXDRAW_FONT_DATA, (int)bd_cp, color_key);
+
+                    if (!bd_entry) {
+                        GlyphBitmap *bmp = rend_boxdraw_render(
+                            bd_cp, cell_w, cell_h, fg[0], fg[1], fg[2]);
+                        if (bmp) {
+                            bd_entry = rend_sokol_atlas_insert(
+                                &d->atlas, BOXDRAW_FONT_DATA,
+                                (int)bd_cp, color_key, bmp, false);
+                            free(bmp->pixels);
+                            free(bmp);
+                        } else {
+                            bd_entry = rend_sokol_atlas_insert_empty(
+                                &d->atlas, BOXDRAW_FONT_DATA,
+                                (int)bd_cp, color_key);
+                        }
+                    }
+
+                    if (bd_entry && bd_entry->region.w > 0 &&
+                        bd_entry->region.h > 0 &&
+                        glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                        float gx0, gy0, gx1, gy1;
+                        if (bd_entry->centered) {
+                            gx0 = cell_x0 +
+                                  ((float)cell_w - (float)bd_entry->region.w) * 0.5f;
+                            gy0 = cell_y0 +
+                                  ((float)cell_h - (float)bd_entry->region.h) * 0.5f;
+                        } else {
+                            gx0 = (float)cell_x0;
+                            gy0 = (float)cell_y0;
+                        }
+                        gx1 = gx0 + (float)bd_entry->region.w;
+                        gy1 = gy0 + (float)bd_entry->region.h;
+
+                        float u0 = (float)bd_entry->region.x / atlas_size;
+                        float v0 = (float)bd_entry->region.y / atlas_size;
+                        float u1 = (float)(bd_entry->region.x + bd_entry->region.w) / atlas_size;
+                        float v1 = (float)(bd_entry->region.y + bd_entry->region.h) / atlas_size;
+
+                        q = &s_glyph_verts[glyph_vert_count];
+                        q[0] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        q[1] = (GlyphVertex){ gx1, gy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        q[2] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        q[3] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        q[4] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        q[5] = (GlyphVertex){ gx0, gy1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        glyph_vert_count += 6;
+                    }
+                    goto selection_check;
+                }
+
+                if (!d->font)
+                    goto selection_check;
+
                 FontStyle style = FONT_STYLE_NORMAL;
                 if (cell.attrs.bold && cell.attrs.italic)
                     style = FONT_STYLE_BOLD_ITALIC;
@@ -1073,8 +1140,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     int gx = (int)cell_x0 + entry->x_offset;
                     int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
                     if (entry->centered) {
-                        gx = (int)cell_x0 + (cell_w - entry->region.w) / 2;
-                        gy = (int)cell_y0 + (cell_h - entry->region.h) / 2;
+                        gx = (int)floorf(cell_x0 + ((float)cell_w - (float)entry->region.w) * 0.5f);
+                        gy = (int)floorf(cell_y0 + ((float)cell_h - (float)entry->region.h) * 0.5f);
                     }
 
                     float gx0 = (float)gx;
@@ -1087,17 +1154,18 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
                     float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
 
-                    q = &s_frame_verts[vert_count];
+                    q = &s_glyph_verts[glyph_vert_count];
                     q[0] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[1] = (GlyphVertex){ gx1, gy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[2] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[3] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[4] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[5] = (GlyphVertex){ gx0, gy1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    vert_count += 6;
+                    glyph_vert_count += 6;
                 }
             }
 
+        selection_check:
             // Selection overlay: record cell geometry for a semi-transparent
             // overlay quad drawn after all glyphs. Collected in sel_verts[]
             // and appended to the buffer after the glyph loop so only one
@@ -1117,7 +1185,21 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         }
     }
 
-    // Append selection overlay quads after glyph quads so both fit in one
+    // Append glyph quads after bg quads, then selection overlay quads.
+    // Two-pass rendering: all bg quads are drawn first (vertices 0..bg_count),
+    // then all glyph/cursor quads on top (vertices bg_count..glyph_end).
+    // This ensures glyph overhangs (e.g. diagonal box-drawing 1px padding)
+    // are not overwritten by neighboring cells' bg quads.
+    int bg_vert_count = vert_count;
+    if (glyph_vert_count > 0 && vert_count + glyph_vert_count <= SOKOL_MAX_VERTICES) {
+        memcpy(&s_frame_verts[vert_count], s_glyph_verts,
+               (size_t)glyph_vert_count * sizeof(GlyphVertex));
+        vert_count += glyph_vert_count;
+    }
+    int glyph_vert_start = bg_vert_count;
+    int glyph_end = vert_count;
+
+    // Append selection overlay quads after glyph quads so all fit in one
     // buffer update (Sokol allows only one sg_update_buffer per frame).
     int sel_vert_start = vert_count;
     if (sel_vert_count > 0 && vert_count + sel_vert_count <= SOKOL_MAX_VERTICES) {
@@ -1152,19 +1234,24 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
         float uniforms[4] = { (float)win_w, (float)win_h,
                               (float)cell_w, (float)cell_h };
-        // Pass 1: draw glyph+bg quads (opaque, bg.alpha=0xFF)
-        int glyph_count = sel_vert_start;
-        if (glyph_count > 0) {
-            sg_apply_pipeline(d->glyph_pip);
-            sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->glyph_vbuf,
-                .views[0] = d->atlas.texture_view,
-                .samplers[0] = d->atlas.sampler,
-            });
-            sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(0, glyph_count, 1);
+        sg_apply_pipeline(d->glyph_pip);
+        sg_apply_bindings(&(sg_bindings){
+            .vertex_buffers[0] = d->glyph_vbuf,
+            .views[0] = d->atlas.texture_view,
+            .samplers[0] = d->atlas.sampler,
+        });
+        sg_apply_uniforms(0, &SG_RANGE(uniforms));
+
+        // Pass 1: draw all background quads (opaque, replace)
+        if (bg_vert_count > 0) {
+            sg_draw(0, bg_vert_count, 1);
         }
-        // Pass 2: draw selection overlay quads (alpha-blended)
+        // Pass 2: draw all glyph/cursor quads on top (opaque, replace)
+        int glyph_count = glyph_end - glyph_vert_start;
+        if (glyph_count > 0) {
+            sg_draw(glyph_vert_start, glyph_count, 1);
+        }
+        // Pass 3: draw selection overlay quads (alpha-blended)
         int sel_count = vert_count - sel_vert_start;
         if (sel_count > 0 && d->sel_pip_created) {
             sg_apply_pipeline(d->sel_pip);
