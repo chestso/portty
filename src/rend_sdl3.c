@@ -18,6 +18,7 @@
 #define FONT_RESOLVE_BACKEND font_resolve_backend_fc
 #endif
 #include "png_writer.h"
+#include "display_info.h"
 
 #include "unicode.h"
 #include <SDL3/SDL.h>
@@ -2339,6 +2340,12 @@ bool rend_sdl3_get_diag(RendererSdl3Data *data, PorttyDiag *out)
     out->gpu_device = data->gpu_name[0] ? data->gpu_name : NULL;
     out->gpu_driver = data->gpu_driver[0] ? data->gpu_driver : NULL;
     out->gpu_driver_libre = data->gpu_driver_libre;
+    out->display_session = NULL;
+    out->display_xwayland = NULL;
+    out->display_screen = NULL;
+    out->display_dpi = NULL;
+    out->display_scale = NULL;
+    out->display_physical = display_info_get_physical();
     return true;
 }
 

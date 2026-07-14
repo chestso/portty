@@ -260,6 +260,20 @@ char *diag_build_report(const DiagSources *s)
     kvf(&sb, "cell", "%d x %d px", s->cell_width, s->cell_height);
     kvf(&sb, "grid", "%d cols x %d rows", s->cols, s->rows);
 
+    // Physical screen specs (all platforms, NULL if unavailable)
+    if (s->display_physical)
+        kv(&sb, "physical", s->display_physical);
+
+    // X11 / XWayland scaling context (Linux only)
+    if (s->display_session) {
+        subsection(&sb, "display", "X11 / XWayland scaling context");
+        kv(&sb, "session", s->display_session);
+        kv(&sb, "XWayland", s->display_xwayland);
+        kv(&sb, "X11 screen", s->display_screen);
+        kv(&sb, "DPI", s->display_dpi);
+        kv(&sb, "scale", s->display_scale);
+    }
+
     // Configuration
     section(&sb, "CONFIGURATION");
     kv(&sb, "config file", s->config_path ? s->config_path : DIM "(defaults)" RST);

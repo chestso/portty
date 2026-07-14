@@ -46,6 +46,12 @@ static DiagSources sample(void)
         .focus_reporting = false,
         .sixel_scrolling = false,
         .hardened_heap = false,
+        .display_session = "wayland",
+        .display_xwayland = "yes",
+        .display_screen = "3072x1728 px, 812x457 mm",
+        .display_dpi = "physical 96.1, Xft.dpi 192",
+        .display_scale = "sapp_dpi_scale 2.00, high_dpi true",
+        .display_physical = "1920x1080, 309x174 mm, 158x157 DPI (card2-eDP-1)",
     };
     return s;
 }
@@ -281,6 +287,29 @@ static void test_lottie_rasterizer_off(void)
     free(r);
 }
 
+static void test_display_info(void)
+{
+    // Display subsection appears when display_session is set.
+    DiagSources s = sample();
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "display") != NULL);
+    ASSERT_TRUE(strstr(r, "wayland") != NULL);
+    ASSERT_TRUE(strstr(r, "XWayland") != NULL);
+    ASSERT_TRUE(strstr(r, "Xft.dpi") != NULL);
+    ASSERT_TRUE(strstr(r, "physical") != NULL);
+    ASSERT_TRUE(strstr(r, "1920x1080") != NULL);
+    free(r);
+
+    // When display_session is NULL, no display subsection.
+    s = sample();
+    s.display_session = NULL;
+    r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "XWayland") == NULL);
+    free(r);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -300,6 +329,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_vt_features_section);
     RUN_TEST(test_vt_features_enabled);
     RUN_TEST(test_lottie_rasterizer_off);
+    RUN_TEST(test_display_info);
 
     TEST_SUMMARY();
 }
