@@ -69,96 +69,7 @@ typedef struct
 // fits vertically passes through unchanged regardless of width (overhang is
 // handled by the renderer's two-pass row draw). When the glyph overflows
 // vertically, scale uniformly by the height ratio so aspect is preserved.
-static GlyphBitmap *downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
-                                     bool height_only_fit)
-{
-    if (!src || !src->pixels || src->width <= 0 || src->height <= 0)
-        return NULL;
-    if (height_only_fit) {
-        if (src->height <= max_h)
-            return NULL;
-    } else if (src->width <= max_w && src->height <= max_h) {
-        return NULL;
-    }
-
-    float scale_x = (float)max_w / (float)src->width;
-    float scale_y = (float)max_h / (float)src->height;
-    float scale = height_only_fit ? scale_y : fminf(scale_x, scale_y);
-
-    int dst_w = (int)(src->width * scale + 0.5f);
-    int dst_h = (int)(src->height * scale + 0.5f);
-    if (dst_w <= 0)
-        dst_w = 1;
-    if (dst_h <= 0)
-        dst_h = 1;
-
-    vlog("Downscale: src=%dx%d max=%dx%d scale=%.3f dst=%dx%d\n",
-         src->width, src->height, max_w, max_h, scale, dst_w, dst_h);
-
-    uint8_t *dst_pixels = calloc((size_t)dst_w * dst_h, 4);
-    if (!dst_pixels)
-        return NULL;
-
-    for (int dy = 0; dy < dst_h; dy++) {
-        int sy0 = dy * src->height / dst_h;
-        int sy1 = (dy + 1) * src->height / dst_h;
-        if (sy1 > src->height)
-            sy1 = src->height;
-        if (sy0 == sy1)
-            sy1 = sy0 + 1;
-
-        for (int dx = 0; dx < dst_w; dx++) {
-            int sx0 = dx * src->width / dst_w;
-            int sx1 = (dx + 1) * src->width / dst_w;
-            if (sx1 > src->width)
-                sx1 = src->width;
-            if (sx0 == sx1)
-                sx1 = sx0 + 1;
-
-            float pr_sum = 0, pg_sum = 0, pb_sum = 0, a_sum = 0;
-            int count = 0;
-            for (int sy = sy0; sy < sy1; sy++) {
-                for (int sx = sx0; sx < sx1; sx++) {
-                    uint8_t *p = src->pixels + (sy * src->width + sx) * 4;
-                    float a = p[3] / 255.0f;
-                    pr_sum += p[0] * a;
-                    pg_sum += p[1] * a;
-                    pb_sum += p[2] * a;
-                    a_sum += p[3];
-                    count++;
-                }
-            }
-            if (count > 0) {
-                uint8_t *dp = dst_pixels + (dy * dst_w + dx) * 4;
-                float avg_a = a_sum / count;
-                if (avg_a > 0.5f) {
-                    float inv = 255.0f / a_sum;
-                    dp[0] = (uint8_t)fminf(pr_sum * inv + 0.5f, 255.0f);
-                    dp[1] = (uint8_t)fminf(pg_sum * inv + 0.5f, 255.0f);
-                    dp[2] = (uint8_t)fminf(pb_sum * inv + 0.5f, 255.0f);
-                } else {
-                    dp[0] = dp[1] = dp[2] = 0;
-                }
-                dp[3] = (uint8_t)(avg_a + 0.5f);
-            }
-        }
-    }
-
-    GlyphBitmap *result = malloc(sizeof(GlyphBitmap));
-    if (!result) {
-        free(dst_pixels);
-        return NULL;
-    }
-    result->pixels = dst_pixels;
-    result->width = dst_w;
-    result->height = dst_h;
-    result->x_offset = (int)(src->x_offset * scale + 0.5f);
-    result->y_offset = (int)(src->y_offset * scale + 0.5f);
-    result->advance = (int)(src->advance * scale + 0.5f);
-    result->glyph_id = src->glyph_id;
-
-    return result;
-}
+// (Implementation moved to rend_common.c as rend_downscale_bitmap)
 
 // Draw a filled rounded rectangle
 static void draw_rounded_rect(SDL_Renderer *renderer, float x, float y,
@@ -638,7 +549,7 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
         vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d%s\n",
              glyph_id, bitmap->width, bitmap->height, max_w, max_h,
              height_only_fit ? " (height-only)" : "");
-        scaled = downscale_bitmap(bitmap, max_w, max_h, height_only_fit);
+        scaled = rend_downscale_bitmap(bitmap, max_w, max_h, height_only_fit);
         // Color emoji are placed by cell-center, not baseline. Symbol-class
         // glyphs from a text font (height_only_fit) use the baseline branch
         // of blit_glyph but with x_offset overridden: FreeType's bitmap_left
@@ -670,22 +581,9 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
     return entry;
 }
 
-static bool is_color_font(FontBackend *font, FontStyle style)
-{
-    return style == FONT_STYLE_EMOJI || font_style_has_colr(font, style);
-}
+// (rend_is_color_font moved to rend_common.c as rend_is_color_font)
 
-// Symbol/dingbat codepoints whose glyphs frequently exceed the text cell.
-// Box Drawing (0x2500-0x257F) and Block Elements (0x2580-0x259F) are drawn
-// procedurally elsewhere and intentionally excluded.
-static bool is_symbol_cell_cp(uint32_t cp)
-{
-    return is_emoji_presentation(cp) || is_regional_indicator(cp) ||
-           (cp >= 0x2300 && cp <= 0x23FF) || // Misc Technical
-           (cp >= 0x25A0 && cp <= 0x25FF) || // Geometric Shapes
-           (cp >= 0x2900 && cp <= 0x297F) || // Supplemental Arrows-B
-           (cp >= 0x2B00 && cp <= 0x2BFF);   // Misc Symbols and Arrows
-}
+// (rend_is_symbol_cell_cp moved to rend_common.c as rend_is_symbol_cell_cp)
 
 static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                        RendSdl3AtlasEntry *entry,
@@ -944,14 +842,14 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     }
 
     void *font_data = data->font->font_data[style];
-    bool color_baked = is_color_font(data->font, style);
+    bool color_baked = rend_is_color_font(data->font, style);
     uint8_t render_r = color_baked ? r : 255;
     uint8_t render_g = color_baked ? g : 255;
     uint8_t render_b = color_baked ? b : 255;
     uint32_t color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
                                      : 0xFFFFFF;
     bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
-    bool symbol_cell = (cp_count > 0) && is_symbol_cell_cp(cps[0]);
+    bool symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
     bool downscale_glyph = (emoji_render && color_baked) || symbol_cell;
     // Symbol-class glyphs rendered through a text/fallback font keep their
     // natural design width — only height drives the (rare) downscale, and
@@ -977,7 +875,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         if (!shaped && style != FONT_STYLE_NORMAL) {
             style = FONT_STYLE_NORMAL;
             font_data = data->font->font_data[style];
-            color_baked = is_color_font(data->font, style);
+            color_baked = rend_is_color_font(data->font, style);
             render_r = color_baked ? r : 255;
             render_g = color_baked ? g : 255;
             render_b = color_baked ? b : 255;
@@ -995,7 +893,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 font_data = data->font->font_data[style];
                 // Lazily loaded — set presentation_width now
                 font_set_presentation_width(data->font, style, avail_w);
-                color_baked = is_color_font(data->font, style);
+                color_baked = rend_is_color_font(data->font, style);
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;
                 render_b = color_baked ? b : 255;
@@ -1056,7 +954,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         if (glyph_index == 0 && style != FONT_STYLE_NORMAL) {
             style = FONT_STYLE_NORMAL;
             font_data = data->font->font_data[style];
-            color_baked = is_color_font(data->font, style);
+            color_baked = rend_is_color_font(data->font, style);
             render_r = color_baked ? r : 255;
             render_g = color_baked ? g : 255;
             render_b = color_baked ? b : 255;
@@ -1073,7 +971,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                 font_data = data->font->font_data[style];
                 // Lazily loaded — set presentation_width now
                 font_set_presentation_width(data->font, style, avail_w);
-                color_baked = is_color_font(data->font, style);
+                color_baked = rend_is_color_font(data->font, style);
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;
                 render_b = color_baked ? b : 255;
@@ -2497,8 +2395,8 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
                 int end = col + (cell.width > 0 ? cell.width : 1);
                 if (end > last_col) {
                     last_col = end;
-                    last_is_symbol_overhang = is_symbol_cell_cp(cell.cp);
-                } else if (end == last_col && is_symbol_cell_cp(cell.cp)) {
+                    last_is_symbol_overhang = rend_is_symbol_cell_cp(cell.cp);
+                } else if (end == last_col && rend_is_symbol_cell_cp(cell.cp)) {
                     last_is_symbol_overhang = true;
                 }
             }

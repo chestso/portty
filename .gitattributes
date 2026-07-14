@@ -13,6 +13,10 @@
 *.iss  text eol=crlf
 *.nsi  text eol=crlf
 
+# Example demo files are cat-able but use CRLF so they render identically
+# when piped to a terminal on Windows (cmd echoes CRLF natively).
+examples/** text eol=crlf
+
 # Binary files — don't touch
 *.png  binary
 *.ico  binary

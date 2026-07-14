@@ -37,6 +37,20 @@ void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport
 
 #include "font.h"
 
+// Downscale a glyph bitmap to fit within max_w × max_h using area-averaging.
+// When height_only_fit is true, only vertical overflow triggers downscaling.
+// Returns a new GlyphBitmap (caller frees pixels + struct), or NULL if no
+// scaling was needed or on allocation failure.
+GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
+                                   bool height_only_fit);
+
+// Check if a codepoint is a symbol/dingbat that may overflow the text cell
+// and needs downscaling or centered placement.
+bool rend_is_symbol_cell_cp(uint32_t cp);
+
+// Check if a font style produces color (COLR v1 or emoji) glyphs.
+bool rend_is_color_font(FontBackend *font, FontStyle style);
+
 #define REND_ATLAS_HASH_SIZE    8192
 #define REND_ATLAS_TEXTURE_SIZE 2048
 #define REND_ATLAS_MAX_SHELVES  128

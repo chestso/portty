@@ -8,7 +8,7 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) $(TERM_STUBS) \
-    ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/font.c font_stubs.c
+    ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
 # rend_sdl3_atlas.c uses pow() for the sRGB->linear LUT.
 test_atlas_LDADD = -lm
@@ -84,7 +84,7 @@ test_path_compat_CFLAGS = $(TEST_CFLAGS)
 
 # Procedural box-drawing alignment test.  Renders to a CPU pixel buffer
 # (GlyphBitmap) and inspects pixels directly — no SDL or GPU required.
-test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_boxdraw.c ../src/rend_common.c ../src/font.c font_stubs.c
+test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_boxdraw.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
 test_boxdraw_CFLAGS = $(TEST_CFLAGS)
 test_boxdraw_LDADD = -lm
 
@@ -107,7 +107,7 @@ test_timer_CFLAGS = $(TEST_CFLAGS)
 test_timer_LDADD =
 
 # Shared GPU-agnostic renderer helpers (Nerd Font map, sRGB helpers).
-test_rend_common_SOURCES = test_rend_common.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_common.c ../src/font.c font_stubs.c
+test_rend_common_SOURCES = test_rend_common.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
 test_rend_common_CFLAGS = $(TEST_CFLAGS)
 test_rend_common_LDADD = -lm
 
@@ -125,7 +125,7 @@ test_portty_app_LDADD = $(COFFER_LIBS)
 # the parser itself, but portty_debug_script.h includes term.h which pulls
 # in coffer, and the step helper calls rend_display_row_to_unified.
 test_debug_script_SOURCES = test_debug_script.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/portty_debug_script.c ../src/rend_common.c ../src/font.c font_stubs.c
+    ../src/portty_debug_script.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
 test_debug_script_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_debug_script_LDADD = $(COFFER_LIBS) -lm
 
