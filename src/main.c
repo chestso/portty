@@ -22,7 +22,6 @@
 #include "font_resolve_fc.h"
 #define FONT_RESOLVE_BACKEND font_resolve_backend_fc
 #endif
-#include "png_mode.h"
 #include "term.h"
 #include "term_cfr.h"
 #include <getopt.h>
@@ -112,8 +111,6 @@ static void print_usage(const char *progname)
     printf("  -g COLSxROWS          Set initial geometry (e.g. 120x40)\n");
     printf("  -L, --list-fonts      List available monospace fonts and exit\n");
     printf("  -H none|light|normal|mono  Set FreeType hinting target\n");
-    printf("  -P TEXT OUT.png       Render TEXT to PNG and exit\n");
-    printf("  -P \"\" -X CMD [--wait MS] OUT.png  Render CMD output to PNG\n");
     printf("  -s LINES              Set scrollback buffer size in lines\n");
     printf("  -d TEXT               Demo mode: feed TEXT into the terminal\n");
 }
@@ -139,9 +136,6 @@ int main(int argc, char *argv[])
     int opt;
     int list_fonts = 0;
     int ft_hint_target = FT_LOAD_TARGET_LIGHT;
-    char *png_text = NULL;
-    const char *png_exec = NULL;
-    int png_wait_ms = 200;
     char *demo_text = NULL;
     const char *font_name = NULL;
     int font_from_flag = 0;
@@ -159,8 +153,6 @@ int main(int argc, char *argv[])
         { "list-fonts", no_argument, NULL, 'L' },
         { "ft-hinting", required_argument, NULL, 'H' },
         { "demo", required_argument, NULL, 'd' },
-        { "exec", required_argument, NULL, 'X' },
-        { "wait", required_argument, NULL, 'W' },
         { "scrollback", required_argument, NULL, 's' },
         { NULL, 0, NULL, 0 }
     };
@@ -191,7 +183,7 @@ int main(int argc, char *argv[])
     if (conf.notification_transparency == 1)
         portty_notification_transparent = true;
 
-    while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvVf:g:D:s:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -238,19 +230,6 @@ int main(int argc, char *argv[])
             }
             break;
         }
-        case 'P':
-            png_text = optarg;
-            break;
-        case 'X':
-            png_exec = optarg;
-            break;
-        case 'W':
-            png_wait_ms = atoi(optarg);
-            if (png_wait_ms <= 0) {
-                fprintf(stderr, "ERROR: --wait requires a positive millisecond value\n");
-                return 1;
-            }
-            break;
         case 'D':
             colr_debug_path = optarg;
             break;
@@ -315,18 +294,6 @@ int main(int argc, char *argv[])
     if (colr_debug_path) {
         colr_set_debug_prefix(colr_debug_path);
         vlog("COLR layer debug enabled, prefix: %s\n", colr_debug_path);
-    }
-
-    if (png_text || png_exec) {
-        if (optind >= argc) {
-            fprintf(stderr, "ERROR: -P requires output PNG path as positional argument\n");
-            return 1;
-        }
-        if (png_exec) {
-            return png_render_exec(png_exec, png_wait_ms, init_cols, init_rows,
-                                   argv[optind], font_name, ft_hint_target);
-        }
-        return png_render_text(png_text, argv[optind], font_name, ft_hint_target);
     }
 
     TerminalBackend *vt_backend = &terminal_backend_cfr;

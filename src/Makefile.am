@@ -58,7 +58,7 @@ PORTTY_COMMON_LDADD = $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) \
 if BACKEND_SDL3
 portty_SOURCES = main_sdl3.c $(PORTTY_COMMON_SRC) \
     backend_sdl3.c rend_sdl3.c rend_sdl3_atlas.c \
-    rend_sdl3_shader.c png_mode.c
+    rend_sdl3_shader.c
 portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) $(SDL3_CFLAGS) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
 portty_LDADD = $(PORTTY_COMMON_LDADD)
