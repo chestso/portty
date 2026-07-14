@@ -1,0 +1,108 @@
+#ifndef PORTTY_DEBUG_SCRIPT_H
+#define PORTTY_DEBUG_SCRIPT_H
+
+#include <stdbool.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum
+{
+    DBG_CMD_WAIT,
+    DBG_CMD_SEND,
+    DBG_CMD_RAW,
+    DBG_CMD_ASSERT_CONTAINS,
+    DBG_CMD_ASSERT_NOT_CONTAINS,
+    DBG_CMD_SCREENDUMP,
+    DBG_CMD_DUMPROW,
+    DBG_CMD_DUMPCELLS,
+    DBG_CMD_DUMPVERTS,
+    DBG_CMD_VERIFYBUF,
+    DBG_CMD_QUIT,
+} DebugCmdType;
+
+typedef struct
+{
+    DebugCmdType type;
+    /* WAIT */
+    double wait_seconds;
+    /* SEND / RAW / ASSERT_* */
+    char *text; /* heap-allocated, freed by script_free */
+    /* DUMPROW / DUMPCELLS / DUMPVERTS / VERIFYBUF */
+    int row;
+    int col_start; /* -1 = all columns (for dumprow) */
+    int col_end;
+    /* SCREENDUMP */
+    char path[512];
+} DebugCmd;
+
+typedef struct PorttyDebugScript PorttyDebugScript;
+
+/* Load and parse a script file. Returns NULL on error. */
+PorttyDebugScript *portty_debug_script_load(const char *path);
+
+/* Free a script and all its DebugCmd text strings. Safe to call on NULL. */
+void portty_debug_script_free(PorttyDebugScript *s);
+
+/* Get the number of parsed commands. */
+int portty_debug_script_count(const PorttyDebugScript *s);
+
+/* Get a command by index (0-based). Returns NULL if out of range. */
+const DebugCmd *portty_debug_script_get(const PorttyDebugScript *s, int index);
+
+/* Get a human-readable error message if load() failed.
+ * Returns NULL if no error or if s is NULL. */
+const char *portty_debug_script_error(const PorttyDebugScript *s);
+
+/* ── Shared execution helpers ── */
+
+#include "portty_backend.h"
+#include "portty_pty.h"
+#include "term.h"
+
+/* Monotonic time helper (no existing utility in the codebase) */
+double portty_debug_now_seconds(void); /* clock_gettime(CLOCK_MONOTONIC) */
+
+/* Grid scan for assert-contains / assert-not-contains.
+ * Searches all visible rows (and current scrollback view if scroll_offset > 0)
+ * for the needle string. Returns true if found. */
+bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
+                                const char *needle);
+
+/* Context for the shared step function. Each backend fills this with
+ * its own state pointers. NULL pointers mean the backend doesn't support
+ * that deferred action (e.g. SDL3 passes NULL for verifybuf). */
+typedef struct
+{
+    PorttyBackend *backend;
+    TerminalBackend *term;
+    PtyContext *pty;
+    int scroll_offset;
+    /* Deferred action flags — backend points these at its own fields: */
+    bool *pending_screendump;
+    char *screendump_path_buf; /* backend's destination buffer */
+    bool *pending_verifybuf;
+    int *verify_row, *verify_col_start, *verify_col_end;
+    /* Vertex dump callback (Sokol only, NULL on SDL3) */
+    void (*dumpverts_fn)(int row, int col_start, int col_end);
+} DebugExecCtx;
+
+/* Execute one script step. Called each frame by the backend's main loop.
+ * Handles wait/send/raw/assert/dumpcells/dumprow.
+ * Sets *pending_screendump / *pending_verifybuf for deferred commands
+ * that need GL access (screendump, verifybuf).
+ * When pending pointers are NULL, unsupported commands print a warning
+ * and are skipped.
+ * Advances *cmd_index; when all commands are done, sets *cmd_index to
+ * count (caller can detect completion by comparing). */
+void portty_debug_script_step(PorttyDebugScript *script,
+                              int *cmd_index,
+                              DebugExecCtx *ctx);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* PORTTY_DEBUG_SCRIPT_H */

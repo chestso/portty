@@ -116,6 +116,7 @@ static void print_usage(const char *progname)
     printf("  -P \"\" -X CMD [--wait MS] OUT.png  Render CMD output to PNG\n");
     printf("  -s LINES              Set scrollback buffer size in lines\n");
     printf("  -d TEXT               Demo mode: feed TEXT into the terminal\n");
+    printf("  -S, --script FILE     Run debug script FILE (see docs/debug-infrastructure-design.md)\n");
 }
 
 static void print_version(void)
@@ -152,6 +153,7 @@ int main(int argc, char *argv[])
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
     int init_scrollback = -1;
+    const char *script_path = NULL;
 
     static struct option long_options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -162,6 +164,7 @@ int main(int argc, char *argv[])
         { "exec", required_argument, NULL, 'X' },
         { "wait", required_argument, NULL, 'W' },
         { "scrollback", required_argument, NULL, 's' },
+        { "script", required_argument, NULL, 'S' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -191,7 +194,7 @@ int main(int argc, char *argv[])
     if (conf.notification_transparency == 1)
         portty_notification_transparent = true;
 
-    while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvVf:g:P:D:s:S:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -204,6 +207,9 @@ int main(int argc, char *argv[])
             break;
         case 'd':
             demo_text = optarg;
+            break;
+        case 'S':
+            script_path = optarg;
             break;
         case 'f':
             font_name = optarg;
@@ -353,6 +359,10 @@ int main(int argc, char *argv[])
         .conf = &conf,
         .font_source = font_source,
         .backend = &backend,
+        .demo_text = demo_text,
+        .exec_argv = exec_argv,
+        .font_size = font_size,
+        .script_path = script_path,
     };
     backend.data = &app;
 

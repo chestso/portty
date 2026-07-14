@@ -113,6 +113,7 @@ static void print_usage(const char *progname)
     printf("  -H none|light|normal|mono  Set FreeType hinting target\n");
     printf("  -s LINES              Set scrollback buffer size in lines\n");
     printf("  -d TEXT               Demo mode: feed TEXT into the terminal\n");
+    printf("  -S, --script FILE     Run debug script FILE (see docs/debug-infrastructure-design.md)\n");
 }
 
 static void print_version(void)
@@ -128,7 +129,6 @@ sapp_desc sokol_main(int argc, char *argv[])
 {
     int opt;
     int list_fonts = 0;
-    int ft_hint_target = FT_LOAD_TARGET_LIGHT;
     char *demo_text = NULL;
     const char *font_name = NULL;
     const char *colr_debug_path = NULL;
@@ -137,6 +137,7 @@ sapp_desc sokol_main(int argc, char *argv[])
     int init_cols = DEFAULT_COLS;
     int init_rows = DEFAULT_ROWS;
     int init_scrollback = -1;
+    const char *script_path = NULL;
 
     static struct option long_options[] = {
         { "help", no_argument, NULL, 'h' },
@@ -145,6 +146,7 @@ sapp_desc sokol_main(int argc, char *argv[])
         { "ft-hinting", required_argument, NULL, 'H' },
         { "demo", required_argument, NULL, 'd' },
         { "scrollback", required_argument, NULL, 's' },
+        { "script", required_argument, NULL, 'S' },
         { NULL, 0, NULL, 0 }
     };
 
@@ -164,11 +166,6 @@ sapp_desc sokol_main(int argc, char *argv[])
         init_cols = conf->cols;
     if (conf->rows > 0)
         init_rows = conf->rows;
-    if (conf->hinting != PORTTY_HINT_UNSET) {
-        static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
-                                        FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
-        ft_hint_target = hint_map[conf->hinting];
-    }
     if (conf->scrollback >= 0)
         init_scrollback = conf->scrollback;
     if (conf->text_gamma > 0.0f)
@@ -178,7 +175,7 @@ sapp_desc sokol_main(int argc, char *argv[])
     if (conf->notification_transparency == 1)
         portty_notification_transparent = true;
 
-    while ((opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -192,7 +189,11 @@ sapp_desc sokol_main(int argc, char *argv[])
         case 'd':
             demo_text = optarg;
             break;
+        case 'S':
+            script_path = optarg;
+            break;
         case 'f':
+            conf->font = optarg;
             font_name = optarg;
             break;
         case 'L':
@@ -200,13 +201,13 @@ sapp_desc sokol_main(int argc, char *argv[])
             break;
         case 'H':
             if (strcmp(optarg, "none") == 0) {
-                ft_hint_target = FT_LOAD_NO_HINTING;
+                conf->hinting = PORTTY_HINT_NONE;
             } else if (strcmp(optarg, "light") == 0) {
-                ft_hint_target = FT_LOAD_TARGET_LIGHT;
+                conf->hinting = PORTTY_HINT_LIGHT;
             } else if (strcmp(optarg, "normal") == 0) {
-                ft_hint_target = FT_LOAD_TARGET_NORMAL;
+                conf->hinting = PORTTY_HINT_NORMAL;
             } else if (strcmp(optarg, "mono") == 0) {
-                ft_hint_target = FT_LOAD_TARGET_MONO;
+                conf->hinting = PORTTY_HINT_MONO;
             } else {
                 fprintf(stderr, "ERROR: Invalid hinting target: %s\n", optarg);
                 exit(1);
@@ -327,22 +328,15 @@ sapp_desc sokol_main(int argc, char *argv[])
     app->term = term;
     app->conf = conf;
     app->backend = backend;
+    app->demo_text = demo_text;
+    app->exec_argv = exec_argv;
+    app->font_size = font_size;
+    app->script_path = script_path;
     backend->data = app;
 
     // Initialization happens in the Sokol init callback so that sokol_app
     // has already created the window and GL context.  We just configure the
     // sapp_desc here and stash the application state in the backend's
     // user-data pointer for the callbacks to use.
-    SokolLaunchConfig launch_cfg = {
-        .demo_text = demo_text,
-        .font_name = font_name,
-        .exec_argv = exec_argv,
-        .ft_hint_target = ft_hint_target,
-        .font_size = font_size,
-        .init_cols = init_cols,
-        .init_rows = init_rows,
-    };
-    backend_sokol_set_launch_config(&launch_cfg);
-
     return backend_sokol_desc(app, backend, "portty", 800, 600);
 }

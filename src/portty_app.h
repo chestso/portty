@@ -39,6 +39,12 @@ typedef struct PorttyApp
 
     PorttyBackend *backend;           // selected backend (filled by entry point)
     FontResolveBackend *font_resolve; // platform-specific via #ifdef
+
+    // Fields previously in SokolLaunchConfig, now unified for both backends.
+    const char *demo_text;   // -d TEXT, NULL if none
+    char **exec_argv;        // fully-resolved command for pty_create
+    float font_size;         // default 12.0f, not in PorttyConf
+    const char *script_path; // -S FILE, NULL if none
 } PorttyApp;
 
 // Terminal output callbacks (registered with coffer).

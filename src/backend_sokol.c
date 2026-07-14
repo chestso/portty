@@ -19,6 +19,8 @@
 #include "png_writer.h"
 #include "display_info.h"
 #include "portty_app.h"
+#include "portty_conf.h"
+#include "portty_debug_script.h"
 #include "portty_pty.h"
 #include "rend_sokol_atlas.h"
 #include "rend_common.h"
@@ -144,6 +146,15 @@ typedef struct
     int last_click_x, last_click_y;
     TimerId autoscroll_timer;
     bool pty_paused;
+    // Debug script infrastructure
+    PorttyDebugScript *debug_script;
+    int debug_cmd_index;
+    bool debug_script_done;
+    bool debug_pending_screendump;
+    char debug_screendump_path[512];
+    bool debug_pending_verifybuf;
+    int debug_verify_row, debug_verify_col_start, debug_verify_col_end;
+    unsigned int debug_glyph_vbuf_gl_id; // GL buffer ID for verifybuf
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
@@ -233,6 +244,10 @@ static void sokol_destroy(PorttyBackend *self)
         node = next;
     }
     pthread_mutex_destroy(&d->pty_queue_mtx);
+
+    // Free debug script
+    portty_debug_script_free(d->debug_script);
+    d->debug_script = NULL;
 
     if (d->cursor_blink_timer != TIMER_INVALID) {
         timer_remove(d->timers, d->cursor_blink_timer);
@@ -645,6 +660,12 @@ typedef struct
 #define SOKOL_MAX_ROWS     120
 #define SOKOL_MAX_VERTICES (SOKOL_MAX_COLS * SOKOL_MAX_ROWS * 12)
 
+// File-scope vertex arrays (moved from static-local in sokol_draw_terminal
+// so debug dump functions can access them after the render pass).
+static GlyphVertex s_frame_verts[SOKOL_MAX_VERTICES];
+static int s_frame_vert_count;
+static int s_vert_index[SOKOL_MAX_ROWS][SOKOL_MAX_COLS];
+
 static void sokol_ensure_glyph_pipeline(SokolData *d)
 {
     if (d->glyph_pip_created)
@@ -680,8 +701,8 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
         "out vec4 frag_color;\n"
         "uniform sampler2D atlas;\n"
         "vec3 srgb_to_linear(vec3 c) {\n"
-        "  return mix(vec3(1.055) * pow(c, vec3(2.4)) - vec3(0.055),\n"
-        "             c * 12.92,\n"
+        "  return mix(pow((c + vec3(0.055)) / vec3(1.055), vec3(2.4)),\n"
+        "             c / 12.92,\n"
         "             lessThanEqual(c, vec3(0.04045)));\n"
         "}\n"
         "void main() {\n"
@@ -697,6 +718,12 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
         "      if (length(vec2(r - qx, r - qy)) > r) discard;\n"
         "    }\n"
         "    frag_color = vec4(srgb_to_linear(v_fg.rgb), v_fg.a);\n"
+        "    return;\n"
+        "  }\n"
+        "  if (v_uv.x >= 2.0) {\n"
+        "    // bg-only quad: output pure bg color, no glyph\n"
+        "    vec3 bg_lin = srgb_to_linear(v_bg.rgb);\n"
+        "    frag_color = vec4(bg_lin, v_bg.a);\n"
         "    return;\n"
         "  }\n"
         "  vec4 texel = texture(atlas, v_uv);\n"
@@ -736,9 +763,12 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
 
     d->glyph_vbuf = sg_make_buffer(&(sg_buffer_desc){
         .size = SOKOL_MAX_VERTICES * sizeof(GlyphVertex),
-        .usage.stream_update = true,
+        .usage.dynamic_update = true,
         .label = "sokol-glyph-vbuf",
     });
+
+    // Capture GL buffer ID for debug verifybuf (sokol leaves it bound).
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, (GLint *)&d->debug_glyph_vbuf_gl_id);
 
     d->glyph_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shd,
@@ -848,10 +878,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     if (cell_w <= 0 || cell_h <= 0)
         return;
 
-    // Use the actual window/framebuffer dimensions for the render resolution
-    // so resizing the window updates the viewport correctly. The cell grid
-    // still maps to rows*cols cells, but the resolution uniform uses the
-    // real framebuffer size.
+    // Use the actual framebuffer dimensions (sapp_width/height return
+    // physical pixels on all platforms).
     int win_w = (int)sapp_width();
     int win_h = (int)sapp_height();
     if (win_w <= 0 || win_h <= 0) {
@@ -870,13 +898,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     rend_sokol_atlas_begin_frame(&d->atlas);
 
-    // Build vertex data
-    static GlyphVertex verts[SOKOL_MAX_VERTICES];
+    // Build vertex data (using file-scope arrays for debug access)
     static GlyphVertex sel_verts[SOKOL_MAX_VERTICES];
     int vert_count = 0;
     int sel_vert_count = 0;
     float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
     int scroll_offset = d->scroll.scroll_offset;
+
+    memset(s_vert_index, -1, sizeof(s_vert_index));
 
     for (int row = 0; row < rows && vert_count + 12 <= SOKOL_MAX_VERTICES; row++) {
         int unified_row = rend_display_row_to_unified(scroll_offset, row);
@@ -904,7 +933,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                           CURSOR_COLOR_B, CURSOR_COLOR_A };
                         float cu0 = -(0.0f + 2.0f);
                         float cu1 = -(1.0f + 2.0f);
-                        GlyphVertex *q = &verts[vert_count];
+                        GlyphVertex *q = &s_frame_verts[vert_count];
                         q[0] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[1] = (GlyphVertex){ cx1, cy0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[2] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
@@ -947,12 +976,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             float cell_y1 = cell_y0 + (float)cell_h;
 
             // Always emit a full-cell background quad.
-            // UV points to the bottom-right texel of the atlas which is
-            // guaranteed zero coverage (the allocator starts at (0,0) and
-            // fills top-to-bottom; the last texel is never allocated).
-            float bg_u = (atlas_size - 0.5f) / atlas_size;
-            float bg_v = (atlas_size - 0.5f) / atlas_size;
-            GlyphVertex *q = &verts[vert_count];
+            // UV uses x=2.0 to signal a bg-only quad (zero coverage) to
+            // the fragment shader, which checks v_uv.x >= 2.0 and sets
+            // coverage=0. This avoids relying on a specific atlas texel
+            // being zero.
+            float bg_u = 2.0f;
+            float bg_v = 0.0f;
+            s_vert_index[row][col] = vert_count;
+            GlyphVertex *q = &s_frame_verts[vert_count];
             q[0] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[1] = (GlyphVertex){ cell_x1, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[2] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
@@ -969,7 +1000,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                   CURSOR_COLOR_B, CURSOR_COLOR_A };
                 float cu0 = -(0.0f + 2.0f);
                 float cu1 = -(1.0f + 2.0f);
-                q = &verts[vert_count];
+                q = &s_frame_verts[vert_count];
                 q[0] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[1] = (GlyphVertex){ cell_x1, cell_y0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[2] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
@@ -980,7 +1011,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             }
 
             // Overlay glyph quad on top (only if there's a glyph and not cursor)
-            if (cell.cp != 0 && d->font && !is_cursor) {
+            if (cell.cp != 0 && cell.cp != 0x20 && d->font && !is_cursor) {
                 FontStyle style = FONT_STYLE_NORMAL;
                 if (cell.attrs.bold && cell.attrs.italic)
                     style = FONT_STYLE_BOLD_ITALIC;
@@ -1031,7 +1062,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
                     float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
 
-                    q = &verts[vert_count];
+                    q = &s_frame_verts[vert_count];
                     q[0] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[1] = (GlyphVertex){ gx1, gy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[2] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
@@ -1065,7 +1096,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     // buffer update (Sokol allows only one sg_update_buffer per frame).
     int sel_vert_start = vert_count;
     if (sel_vert_count > 0 && vert_count + sel_vert_count <= SOKOL_MAX_VERTICES) {
-        memcpy(&verts[vert_count], sel_verts, (size_t)sel_vert_count * sizeof(GlyphVertex));
+        memcpy(&s_frame_verts[vert_count], sel_verts, (size_t)sel_vert_count * sizeof(GlyphVertex));
         vert_count += sel_vert_count;
     }
 
@@ -1076,8 +1107,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     // OpenGL auto-decodes blend src/dst to linear, blends in linear, and
     // re-encodes to sRGB on store. The shader also decodes v_fg/v_bg to
     // linear before mix() since vertex attributes are not auto-linearized.
-    if (d->linear_ok)
-        glEnable(GL_FRAMEBUFFER_SRGB);
+    // Note: sg_begin_pass already enables GL_FRAMEBUFFER_SRGB for sRGB
+    // swapchains, so we must NOT manually enable it here (that was the
+    // source of the bg color rendering bug).
 
     // Render
     sg_begin_pass(&(sg_pass){
@@ -1090,7 +1122,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     });
 
     if (vert_count > 0 && d->glyph_pip_created) {
-        sg_update_buffer(d->glyph_vbuf, &(sg_range){ .ptr = verts, .size = (size_t)vert_count * sizeof(GlyphVertex) });
+        s_frame_vert_count = vert_count;
+        sg_update_buffer(d->glyph_vbuf, &(sg_range){ .ptr = s_frame_verts, .size = (size_t)vert_count * sizeof(GlyphVertex) });
 
         float uniforms[4] = { (float)win_w, (float)win_h,
                               (float)cell_w, (float)cell_h };
@@ -1120,46 +1153,20 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         }
     }
 
-    // Screenshot automation: read framebuffer while the pass is still active
-    // (sg_end_pass may restore a different framebuffer binding on GL)
+    // Screenshot automation: defer to after sg_commit (glReadPixels inside
+    // the pass triggers VALIDATION_FAILED panics).
     if (d->screenshot_frames > 0 && !d->screenshot_saved) {
         d->screenshot_frames--;
         if (d->screenshot_frames == 0) {
-            int ss_w = win_w;
-            int ss_h = win_h;
-            uint8_t *ss_pixels = malloc((size_t)ss_w * ss_h * 4);
-            if (ss_pixels) {
-                glFinish();
-                glPixelStorei(GL_PACK_ALIGNMENT, 1);
-                glReadBuffer(GL_BACK);
-                glReadPixels(0, 0, ss_w, ss_h, GL_RGBA, GL_UNSIGNED_BYTE,
-                             ss_pixels);
-                // Flip rows: GL origin is bottom-left, PNG expects top-to-bottom
-                uint8_t *flipped = malloc((size_t)ss_w * ss_h * 4);
-                if (flipped) {
-                    for (int y = 0; y < ss_h; y++) {
-                        memcpy(flipped + (size_t)y * ss_w * 4,
-                               ss_pixels + (size_t)(ss_h - 1 - y) * ss_w * 4,
-                               (size_t)ss_w * 4);
-                    }
-                    png_write_rgba(d->screenshot_path, flipped, ss_w, ss_h);
-                    free(flipped);
-                } else {
-                    png_write_rgba(d->screenshot_path, ss_pixels, ss_w, ss_h);
-                }
-                free(ss_pixels);
-            }
             d->screenshot_saved = true;
-            vlog("sokol_draw_terminal: screenshot saved to %s (%dx%d)\n",
-                 d->screenshot_path, ss_w, ss_h);
-            d->quit_requested = true;
+            d->debug_pending_screendump = true;
+            snprintf(d->debug_screendump_path,
+                     sizeof(d->debug_screendump_path), "%s",
+                     d->screenshot_path);
         }
     }
 
     sg_end_pass();
-
-    if (d->linear_ok)
-        glDisable(GL_FRAMEBUFFER_SRGB);
 }
 
 static void sokol_present(PorttyBackend *self)
@@ -1366,7 +1373,7 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
             float y1 = y0 + (float)cell_h;
             float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
 
-            if (cell.cp != 0 && d->font) {
+            if (cell.cp != 0 && cell.cp != 0x20 && d->font) {
                 FontStyle style = FONT_STYLE_NORMAL;
                 if (cell.attrs.bold && cell.attrs.italic)
                     style = FONT_STYLE_BOLD_ITALIC;
@@ -1436,9 +1443,6 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
 
     rend_sokol_atlas_flush(&d->atlas);
 
-    if (d->linear_ok)
-        glEnable(GL_FRAMEBUFFER_SRGB);
-
     sg_begin_pass(&(sg_pass){
         .action = {
             .colors[0] = { .load_action = SG_LOADACTION_CLEAR,
@@ -1487,9 +1491,6 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
 
     sg_end_pass();
     sg_commit();
-
-    if (d->linear_ok)
-        glDisable(GL_FRAMEBUFFER_SRGB);
 
     if (rc == 0)
         fprintf(stderr, "STATUS: png_output=%s (%dx%d)\n", path, img_w, img_h);
@@ -1763,13 +1764,116 @@ PorttyBackend backend_sokol = {
     .get_diag = sokol_get_diag,
 };
 
+// ── Debug helpers ───────────────────────────────────────────────────────
+
+static void sokol_debug_screendump(SokolData *d, const char *path)
+{
+    int ss_w = (int)sapp_width();
+    int ss_h = (int)sapp_height();
+    uint8_t *pixels = malloc((size_t)ss_w * ss_h * 4);
+    if (!pixels)
+        return;
+
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadBuffer(GL_BACK);
+    glReadPixels(0, 0, ss_w, ss_h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+    // Flip vertically (GL origin is bottom-left, PNG expects top-to-bottom)
+    uint8_t *flipped = malloc((size_t)ss_w * ss_h * 4);
+    if (flipped) {
+        for (int y = 0; y < ss_h; y++) {
+            memcpy(flipped + (size_t)y * ss_w * 4,
+                   pixels + (size_t)(ss_h - 1 - y) * ss_w * 4,
+                   (size_t)ss_w * 4);
+        }
+        png_write_rgba(path, flipped, ss_w, ss_h);
+        free(flipped);
+    } else {
+        png_write_rgba(path, pixels, ss_w, ss_h);
+    }
+    free(pixels);
+    vlog("screendump: saved %s (%dx%d)\n", path, ss_w, ss_h);
+}
+
+static void sokol_debug_dumpverts(int row, int col_start, int col_end)
+{
+    for (int col = col_start; col <= col_end; col++) {
+        if (row < 0 || row >= SOKOL_MAX_ROWS || col < 0 || col >= SOKOL_MAX_COLS) {
+            printf("  col=%3d: out of range\n", col);
+            continue;
+        }
+        int vi = s_vert_index[row][col];
+        if (vi < 0 || vi + 5 >= s_frame_vert_count) {
+            printf("  col=%3d: no vertices (vi=%d)\n", col, vi);
+            continue;
+        }
+        GlyphVertex *q = &s_frame_verts[vi];
+        printf("  col=%3d vi=%d: pos=(%.0f,%.0f)-(%.0f,%.0f) "
+               "fg=[%d,%d,%d,%d] bg=[%d,%d,%d,%d]\n",
+               col, vi,
+               q[0].x, q[0].y, q[2].x, q[2].y,
+               q[0].fg[0], q[0].fg[1], q[0].fg[2], q[0].fg[3],
+               q[0].bg[0], q[0].bg[1], q[0].bg[2], q[0].bg[3]);
+        // Hex dump for raw verification
+        uint8_t *raw = (uint8_t *)q;
+        printf("    hex: ");
+        for (int i = 0; i < 24; i++)
+            printf("%02X ", raw[i]);
+        printf("\n");
+    }
+}
+
+static void sokol_debug_verifybuf(SokolData *d, int row, int col_start,
+                                  int col_end)
+{
+    GLuint gl_buf = d->debug_glyph_vbuf_gl_id;
+    if (!gl_buf) {
+        printf("verifybuf: GL buffer ID not available\n");
+        return;
+    }
+
+    glBindBuffer(GL_ARRAY_BUFFER, gl_buf);
+
+    for (int col = col_start; col <= col_end; col++) {
+        if (row < 0 || row >= SOKOL_MAX_ROWS || col < 0 || col >= SOKOL_MAX_COLS)
+            continue;
+        int vi = s_vert_index[row][col];
+        if (vi < 0)
+            continue;
+
+        size_t offset = (size_t)vi * sizeof(GlyphVertex);
+        void *mapped = glMapBufferRange(GL_ARRAY_BUFFER, offset,
+                                        sizeof(GlyphVertex), GL_MAP_READ_BIT);
+        if (!mapped) {
+            printf("  col=%3d vi=%d: FAILED to map GPU buffer\n", col, vi);
+            continue;
+        }
+        GlyphVertex gpu_vert;
+        memcpy(&gpu_vert, mapped, sizeof(GlyphVertex));
+        glUnmapBuffer(GL_ARRAY_BUFFER);
+
+        GlyphVertex *cpu_vert = &s_frame_verts[vi];
+        bool match = (memcmp(cpu_vert, &gpu_vert, sizeof(GlyphVertex)) == 0);
+
+        printf("  col=%3d vi=%d %s\n", col, vi, match ? "MATCH" : "MISMATCH");
+        if (!match) {
+            printf("    CPU bg: [%d,%d,%d,%d]  GPU bg: [%d,%d,%d,%d]\n",
+                   cpu_vert->bg[0], cpu_vert->bg[1],
+                   cpu_vert->bg[2], cpu_vert->bg[3],
+                   gpu_vert.bg[0], gpu_vert.bg[1],
+                   gpu_vert.bg[2], gpu_vert.bg[3]);
+        }
+    }
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+}
+
 // ── sokol_app.h callbacks ────────────────────────────────────────────────
 
 static struct
 {
     PorttyApp *app;
     PorttyBackend *backend;
-    SokolLaunchConfig cfg;
 } g_sokol;
 
 static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
@@ -1779,7 +1883,7 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
         return;
 
     char *desktop_font = NULL;
-    const char *font_name = g_sokol.cfg.font_name;
+    const char *font_name = app->conf->font;
     const char *font_source = "fontconfig generic (no desktop default)";
     if (!font_name) {
         desktop_font = self->get_default_font(self);
@@ -1796,8 +1900,15 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     if (display_scale > 0.0f)
         self->set_content_scale(self, display_scale);
 
-    if (self->load_fonts(self, g_sokol.cfg.font_size, font_name,
-                         g_sokol.cfg.ft_hint_target) < 0) {
+    // Convert hinting enum to FT int (moved here from main_sokol.c)
+    static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
+                                    FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
+    int ft_hint = (app->conf->hinting != PORTTY_HINT_UNSET)
+                      ? hint_map[app->conf->hinting]
+                      : FT_LOAD_TARGET_LIGHT;
+
+    if (self->load_fonts(self, app->font_size, font_name,
+                         ft_hint) < 0) {
         fprintf(stderr, "Failed to load fonts\n");
         free(desktop_font);
         return;
@@ -1806,10 +1917,12 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
 
     int cell_w, cell_h;
     int win_w = 800, win_h = 600;
+    int term_rows = 0, term_cols = 0;
+    terminal_get_dimensions(app->term, &term_rows, &term_cols);
     if (self->get_cell_size(self, &cell_w, &cell_h)) {
         terminal_set_cell_px(app->term, cell_w, cell_h);
-        win_w = g_sokol.cfg.init_cols * cell_w;
-        win_h = g_sokol.cfg.init_rows * cell_h;
+        win_w = term_cols * cell_w;
+        win_h = term_rows * cell_h;
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);
 
         int disp_w, disp_h;
@@ -1840,13 +1953,11 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
         // already set via get_cell_size
     }
 
-    if (g_sokol.cfg.demo_text) {
-        terminal_process_input(app->term, g_sokol.cfg.demo_text,
-                               strlen(g_sokol.cfg.demo_text));
+    if (app->demo_text) {
+        terminal_process_input(app->term, app->demo_text,
+                               strlen(app->demo_text));
     } else {
-        PtyContext *pty = pty_create(g_sokol.cfg.init_rows,
-                                     g_sokol.cfg.init_cols,
-                                     g_sokol.cfg.exec_argv);
+        PtyContext *pty = pty_create(term_rows, term_cols, app->exec_argv);
         if (!pty) {
             fprintf(stderr, "ERROR: Failed to create PTY\n");
             return;
@@ -1877,6 +1988,14 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     d->cursor_blink_visible = true;
     d->cursor_blink_timer = timer_add(d->timers, CURSOR_BLINK_INTERVAL_MS,
                                       SOKOL_EVENT_CURSOR_BLINK, NULL);
+
+    // Load debug script if specified
+    if (app->script_path) {
+        d->debug_script = portty_debug_script_load(app->script_path);
+        if (!d->debug_script)
+            fprintf(stderr, "WARNING: Failed to load debug script: %s\n",
+                    app->script_path);
+    }
 
     vlog("sokol_finish_setup: complete, win=%dx%d\n", win_w, win_h);
 }
@@ -1963,6 +2082,26 @@ static void sokol_frame_cb(void)
     // Drain PTY data from reader thread before rendering
     sokol_drain_pty(d);
 
+    // === Debug script: pre-render commands ===
+    if (d->debug_script && !d->debug_script_done) {
+        DebugExecCtx ctx = {
+            .backend = g_sokol.backend,
+            .term = d->term,
+            .pty = d->pty,
+            .scroll_offset = d->scroll.scroll_offset,
+            .pending_screendump = &d->debug_pending_screendump,
+            .screendump_path_buf = d->debug_screendump_path,
+            .pending_verifybuf = &d->debug_pending_verifybuf,
+            .verify_row = &d->debug_verify_row,
+            .verify_col_start = &d->debug_verify_col_start,
+            .verify_col_end = &d->debug_verify_col_end,
+            .dumpverts_fn = sokol_debug_dumpverts,
+        };
+        portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
+        if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
+            d->debug_script_done = true;
+    }
+
     // Compute cursor visibility: always shown when unfocused or blink off,
     // otherwise follows the blink toggle.
     bool cursor_vis = !d->has_focus ||
@@ -1970,7 +2109,26 @@ static void sokol_frame_cb(void)
                       d->cursor_blink_visible;
 
     d->self->draw_terminal(d->self, d->term, cursor_vis);
+
+    // === Debug script: pre-commit deferred commands ===
+    // screendump must run after sg_end_pass but BEFORE sg_commit (SwapBuffers),
+    // otherwise glReadPixels reads the previous frame's back buffer.
+    if (d->debug_pending_screendump) {
+        d->debug_pending_screendump = false;
+        sokol_debug_screendump(d, d->debug_screendump_path);
+        if (d->screenshot_saved)
+            d->quit_requested = true;
+    }
+
     d->self->present(d->self);
+
+    // === Debug script: post-present deferred commands ===
+    if (d->debug_pending_verifybuf) {
+        d->debug_pending_verifybuf = false;
+        sokol_debug_verifybuf(d, d->debug_verify_row,
+                              d->debug_verify_col_start,
+                              d->debug_verify_col_end);
+    }
 }
 
 static int sokol_map_key(sapp_keycode key)
@@ -2247,12 +2405,4 @@ sapp_desc backend_sokol_desc(PorttyApp *app, PorttyBackend *backend,
         .enable_clipboard = true,
         .logger.func = slog_func,
     };
-}
-
-void backend_sokol_set_launch_config(const SokolLaunchConfig *cfg)
-{
-    if (cfg)
-        g_sokol.cfg = *cfg;
-    else
-        memset(&g_sokol.cfg, 0, sizeof(g_sokol.cfg));
 }

@@ -9,7 +9,9 @@
 #include "pager.h"
 #include "path_compat.h"
 #include "png_reader.h"
+#include "png_writer.h"
 #include "portty_app.h"
+#include "portty_debug_script.h"
 #include "portty_pty.h"
 #include "rend_sdl3.h"
 #include "term.h"
@@ -157,6 +159,13 @@ typedef struct
     Uint32 left_button_up_tick;
 
     float wheel_accum_y;
+
+    // Debug script infrastructure
+    PorttyDebugScript *debug_script;
+    int debug_cmd_index;
+    bool debug_script_done;
+    bool debug_pending_screendump;
+    char debug_screendump_path[512];
 } Sdl3BackendData;
 
 static Sdl3BackendData *sdl3_data(PorttyBackend *self)
@@ -1205,6 +1214,22 @@ static void sdl3_request_quit(PorttyBackend *self)
     SDL_SetAtomicInt(&d->quit_requested, 1);
 }
 
+static void sdl3_debug_screendump(Sdl3BackendData *d, const char *path)
+{
+    int w, h;
+    SDL_GetCurrentRenderOutputSize(d->sdl_renderer, &w, &h);
+    SDL_Surface *surface = SDL_RenderReadPixels(d->sdl_renderer, NULL);
+    if (!surface)
+        return;
+    SDL_Surface *rgba = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    if (rgba) {
+        png_write_rgba(path, rgba->pixels, rgba->w, rgba->h);
+        SDL_DestroySurface(rgba);
+    }
+    SDL_DestroySurface(surface);
+    vlog("screendump: saved %s (%dx%d)\n", path, w, h);
+}
+
 // ── Event loop ───────────────────────────────────────────────────────────
 
 static void sdl3_run(PorttyBackend *self)
@@ -1235,12 +1260,37 @@ static void sdl3_run(PorttyBackend *self)
 
     SDL_StartTextInput(d->window);
 
+    // Load debug script if specified
+    if (d->app->script_path) {
+        d->debug_script = portty_debug_script_load(d->app->script_path);
+        if (!d->debug_script)
+            fprintf(stderr, "WARNING: Failed to load debug script: %s\n",
+                    d->app->script_path);
+    }
+
     vlog("Event loop starting (event-driven)\n");
     terminal_mark_dirty(term);
 
     SDL_Event event;
     Uint64 last_tick = SDL_GetTicks();
     while (!SDL_GetAtomicInt(&d->quit_requested)) {
+        // === Debug script: pre-render commands ===
+        if (d->debug_script && !d->debug_script_done) {
+            DebugExecCtx ctx = {
+                .backend = self,
+                .term = term,
+                .pty = d->pty,
+                .scroll_offset = rend_sdl3_get_scroll_offset(rend),
+                .pending_screendump = &d->debug_pending_screendump,
+                .screendump_path_buf = d->debug_screendump_path,
+                .pending_verifybuf = NULL,
+                .dumpverts_fn = NULL,
+            };
+            portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
+            if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
+                d->debug_script_done = true;
+        }
+
         if (!SDL_WaitEventTimeout(&event, 33)) {
             // Timeout — no SDL events, but timers may need to fire.
         }
@@ -1593,11 +1643,21 @@ static void sdl3_run(PorttyBackend *self)
             SDL_RenderPresent(d->sdl_renderer);
             terminal_clear_redraw(term);
         }
+
+        // === Debug script: post-render screendump ===
+        if (d->debug_pending_screendump) {
+            d->debug_pending_screendump = false;
+            sdl3_debug_screendump(d, d->debug_screendump_path);
+        }
     }
 
     vlog("Event loop exiting\n");
 
     SDL_StopTextInput(d->window);
+
+    // Free debug script
+    portty_debug_script_free(d->debug_script);
+    d->debug_script = NULL;
 
     if (d->cursor_blink_timer != TIMER_INVALID) {
         timer_remove(d->timers, d->cursor_blink_timer);

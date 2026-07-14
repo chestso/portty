@@ -47,7 +47,8 @@ PORTTY_COMMON_SRC = \
     png_writer.c png_reader.c \
     portty_conf.c diag.c pager.c timer.c path_compat.c display_info.c \
     portty_bug.c heap_harden.c \
-    rend_common.c rend_boxdraw.c
+    rend_common.c rend_boxdraw.c \
+    portty_debug_script.c
 
 PORTTY_COMMON_CFLAGS = $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
     $(LIBPNG_CFLAGS) $(COFFER_CFLAGS)

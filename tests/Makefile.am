@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app
+check_PROGRAMS = test_atlas test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script
 
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) $(TERM_STUBS) \
     ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/font.c font_stubs.c
@@ -120,5 +120,13 @@ test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
     ../src/portty_conf.c ../src/diag.c ../src/pty.c ../src/font.c font_stubs.c
 test_portty_app_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
 test_portty_app_LDADD = $(COFFER_LIBS)
+
+# Debug script parser. Pure string parsing — no SDL/coffer dependency for
+# the parser itself, but portty_debug_script.h includes term.h which pulls
+# in coffer, and the step helper calls rend_display_row_to_unified.
+test_debug_script_SOURCES = test_debug_script.c $(TEST_COMMON) $(TERM_STUBS) \
+    ../src/portty_debug_script.c ../src/rend_common.c ../src/font.c font_stubs.c
+test_debug_script_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_debug_script_LDADD = $(COFFER_LIBS) -lm
 
 TESTS = $(check_PROGRAMS)
