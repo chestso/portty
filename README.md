@@ -146,21 +146,22 @@ build/src/portty -P "" --exec ls --wait 500 output.png
 
 ### CLI Flags
 
-| Flag                      | Description                                                                   |
-| ------------------------- | ----------------------------------------------------------------------------- |
-| `-h`                      | Show help message                                                             |
-| `-v`                      | Verbose output (font resolution, COLR, atlas events)                          |
-| `-f PATTERN`              | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                    |
-| `-g COLSxROWS`            | Initial terminal size (default: 80x24)                                        |
-| `-P TEXT`                 | Render TEXT to PNG (output path as positional arg)                            |
-| `-D PREFIX`               | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only)   |
-| `--list-fonts`            | List available monospace fonts and exit                                       |
-| `--ft-hinting S`          | FreeType hinting: none/light/normal/mono (default: light)                     |
-| `--demo TEXT`             | Display TEXT in terminal without spawning a shell (for testing)               |
-| `-V` / `--version`        | Print version and dependency versions, then exit                              |
-| `--exec CMD`              | With `-P`, spawn CMD on a PTY and render its output to PNG (SDL3 only)        |
-| `--wait MS`               | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
-| `-s N` / `--scrollback N` | Scrollback history lines (default: 1000, 0 to disable)                        |
+| Flag                        | Description                                                                   |
+| --------------------------- | ----------------------------------------------------------------------------- |
+| `-h`                        | Show help message                                                             |
+| `-v`                        | Verbose output (font resolution, COLR, atlas events)                          |
+| `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                    |
+| `-g COLSxROWS`              | Initial terminal size (default: 80x24)                                        |
+| `-P TEXT`                   | Render TEXT to PNG (output path as positional arg)                            |
+| `-D PREFIX`                 | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only)   |
+| `--list-fonts`              | List available monospace fonts and exit                                       |
+| `--ft-hinting S`            | FreeType hinting: none/light/normal/mono (default: light)                     |
+| `--demo TEXT`               | Display TEXT in terminal without spawning a shell (for testing)               |
+| `-V` / `--version`          | Print version and dependency versions, then exit                              |
+| `--exec CMD`                | With `-P`, spawn CMD on a PTY and render its output to PNG (SDL3 only)        |
+| `--wait MS`                 | With `-P --exec`, milliseconds to drain the PTY before capture (default: 200) |
+| `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                        |
+| `-S FILE` / `--script FILE` | Run debug script FILE (see [Debug Scripting](#debug-scripting))               |
 
 ### Keyboard Shortcuts
 
@@ -192,6 +193,49 @@ While the pager is open:
 | Drag, double-click, triple-click | Select text / word / line |
 | `Ctrl+C` or `Ctrl+Shift+C`       | Copy selection            |
 | `Ctrl+click` on a link           | Open URL                  |
+
+## Debug Scripting
+
+portty includes a built-in scripting system for automated debugging and regression testing. Scripts are plain-text files loaded via the `-S` / `--script` CLI flag. Each command executes one per frame inside the render loop, so you can drive the terminal, inspect its state, and capture screenshots at precise points.
+
+```bash
+portty --script debug.txt -- my-shell
+```
+
+### Script File Format
+
+One command per line. Lines starting with `#` and blank lines are ignored. The `send` command supports `\n`, `\r`, `\t`, `\e` (ESC), and `\\` escape sequences; surrounding double quotes are stripped.
+
+### Commands
+
+| Command                                 | Description                                                                        |
+| --------------------------------------- | ---------------------------------------------------------------------------------- |
+| `wait <seconds>`                        | Pause script execution for N seconds (monotonic clock)                             |
+| `send <text>`                           | Write text to the PTY (supports `\n \r \t \e \\` escapes)                          |
+| `raw <hex bytes>`                       | Write raw binary bytes to the PTY (e.g. `raw 1b 5b 6d` = `ESC [ m`)                |
+| `assert-contains <text>`                | Assert the terminal grid contains the given substring (prints PASS/FAIL)           |
+| `assert-not-contains <text>`            | Assert the terminal grid does NOT contain the given substring                      |
+| `screendump <path>`                     | Save the framebuffer to a PNG file (captured after render, before present)         |
+| `dumprow <row>`                         | Print all cells in a terminal row                                                  |
+| `dumpcells <row> <col_start> <col_end>` | Print cells in the given range with codepoint, width, attributes, and fg/bg colors |
+| `dumpverts <row> <col_start> <col_end>` | Dump GPU vertex data for glyphs (Sokol backend only)                               |
+| `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)   |
+| `quit`                                  | Request application quit                                                           |
+
+### Example Script
+
+```
+# Type a command and verify the output
+send echo hello\n
+wait 0.5
+assert-contains hello
+screendump /tmp/portty-screenshot.png
+quit
+```
+
+### Backend Support
+
+The Sokol backend supports all commands. The SDL3 backend supports all commands except `dumpverts` and `verifybuf` (GPU-specific), which print "not supported by this backend" and skip.
 
 ## Configuration
 
@@ -416,8 +460,9 @@ cd build && make check
 | `test_portty_app`         | Shared app logic and state management                                 |
 | `test_timer`              | Timer wheel and callback scheduling                                   |
 | `test_pty_pause`          | PTY pause/resume during selection (SDL3 + POSIX only)                 |
+| `test_debug_script`       | Debug script parser (all command types, edge cases, escapes)          |
 
-The test count differs by backend: 20 tests on SDL3 (POSIX), 18 on Sokol/Windows — `test_pty_pause` is SDL3+POSIX only.
+The test count differs by backend: 21 tests on SDL3 (POSIX), 19 on Sokol/Windows — `test_pty_pause` is SDL3+POSIX only.
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 
