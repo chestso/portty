@@ -44,6 +44,7 @@
 #include <coffer/coffer.h>
 
 #ifdef _WIN32
+#define CINTERFACE
 #include <windows.h>
 #include <d3d11.h>
 #include <dxgi.h>
@@ -2320,12 +2321,12 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
     ID3D11Device *d3d_dev = (ID3D11Device *)sg_d3d11_device();
     if (d3d_dev) {
         IDXGIDevice *dxgi_dev = NULL;
-        if (SUCCEEDED(ID3D11Device_QueryInterface(d3d_dev, &IID_IDXGIDevice,
-                                                  (void **)&dxgi_dev))) {
+        if (SUCCEEDED(d3d_dev->lpVtbl->QueryInterface(
+                d3d_dev, &IID_IDXGIDevice, (void **)&dxgi_dev))) {
             IDXGIAdapter *adapter = NULL;
-            if (SUCCEEDED(IDXGIDevice_GetAdapter(dxgi_dev, &adapter))) {
+            if (SUCCEEDED(dxgi_dev->lpVtbl->GetAdapter(dxgi_dev, &adapter))) {
                 DXGI_ADAPTER_DESC desc;
-                if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &desc))) {
+                if (SUCCEEDED(adapter->lpVtbl->GetDesc(adapter, &desc))) {
                     // desc.Description is a WCHAR[]; convert to UTF-8
                     char name_utf8[256];
                     WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1,
@@ -2339,9 +2340,9 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
                              (size_t)(desc.DedicatedVideoMemory /
                                       (1024 * 1024)));
                 }
-                IDXGIAdapter_Release(adapter);
+                adapter->lpVtbl->Release(adapter);
             }
-            IDXGIDevice_Release(dxgi_dev);
+            dxgi_dev->lpVtbl->Release(dxgi_dev);
         }
     }
     driver_libre = GPU_DRIVER_LIBRE_NO; // D3D11 drivers are typically proprietary
