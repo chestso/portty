@@ -18,10 +18,8 @@ jobs:
       fail-fast: false
       matrix:
         backend: [sdl3, sokol]
-        arch: [x86_64, arm64]
+        arch: [arm64]
         include:
-          - arch: x86_64
-            runner: macos-13
           - arch: arm64
             runner: macos-14
 
@@ -93,18 +91,6 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     steps:
-      - name: Download x86_64 SDL3
-        uses: actions/download-artifact@v8
-        with:
-          name: portty-macos-x86_64-sdl3
-          path: artifacts/x86_64-sdl3
-
-      - name: Download x86_64 Sokol
-        uses: actions/download-artifact@v8
-        with:
-          name: portty-macos-x86_64-sokol
-          path: artifacts/x86_64-sokol
-
       - name: Download arm64 SDL3
         uses: actions/download-artifact@v8
         with:
@@ -121,8 +107,6 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            artifacts/x86_64-sdl3/portty
-            artifacts/x86_64-sokol/portty
             artifacts/arm64-sdl3/portty
             artifacts/arm64-sokol/portty
           generate_release_notes: false
