@@ -70,6 +70,13 @@ portty_SOURCES = main_sokol.c $(PORTTY_COMMON_SRC) \
 portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) -I$(top_srcdir)/third_party -I$(top_srcdir) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
 portty_LDADD = $(PORTTY_COMMON_LDADD)
+
+# On macOS, Sokol's Metal backend requires Objective-C for AppKit/Foundation
+# headers. Compile backend_sokol.c as Objective-C via a per-file override.
+if HOST_MACOS
+portty-backend_sokol.o: backend_sokol.c
+	$(COMPILE) -x objective-c $(portty_CFLAGS) -c $< -o $@
+endif
 endif
 
 if BACKEND_SDL3
