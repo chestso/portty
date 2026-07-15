@@ -48,9 +48,9 @@ format:
 	    echo "prettier not found - skipping Markdown formatting." >&2; \
 	fi
 
-# Portable Windows ZIP target — stages the exe, data files, runtime DLLs,
-# compiled terminfo, and a launcher .cmd into a self-contained ZIP. Only
-# meaningful on Windows (MSYS2 UCRT64), where ldd and tic are available.
+# Portable ZIP target — on Windows, stages exe + DLLs + terminfo + launcher .cmd
+# into a self-contained ZIP. On macOS, stages a .app bundle with bundled dylibs,
+# terminfo, resources, and Info.plist into a ZIP.
 .PHONY: dist-portable
 dist-portable:
 	@sh "$(top_srcdir)/scripts/make-dist-zip.sh" "$(abs_builddir)" "$(top_srcdir)" "$(portty_backend)"
