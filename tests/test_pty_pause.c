@@ -1,7 +1,16 @@
 #include "term.h"
+#include "portty_pty.h"
 #include "test_helpers.h"
 #include <stdlib.h>
 #include <string.h>
+
+// pty_write stub — term.c references this but the test has no real PTY.
+ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
+{
+    (void)ctx;
+    (void)data;
+    return (ssize_t)len;
+}
 
 // ---- Mock terminal backend ----
 

@@ -1,11 +1,9 @@
 /*
- * Placeholder translation unit.
+ * Stub translation unit for tests that don't link term.c.
  *
- * term.c used to call sixel_image_free(), which this file stubbed for
- * unit tests. Sixel decoding now lives entirely in coffer, so term.c
- * has no such dependency and no stub is needed. Kept (with additions)
- * so existing test targets that list it keep building without a
- * Makefile change.
+ * Provides minimal implementations of terminal functions that rend_common.c
+ * and portty_debug_script.c call. These are hard (non-weak) definitions —
+ * tests that DO link term.c must NOT also link this file.
  */
 
 #include "portty_pty.h"
@@ -20,19 +18,13 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
     return (ssize_t)len;
 }
 
-// Stub for terminal_get_scrollback_lines — only linked when term.c
-// is not compiled into the test. Use weak symbol to avoid multiple
-// definition errors when term.c is also linked.
-__attribute__((weak)) int terminal_get_scrollback_lines(TerminalBackend *term)
+int terminal_get_scrollback_lines(TerminalBackend *term)
 {
     (void)term;
     return 0;
 }
 
-// Weak stubs for terminal functions used by portty_debug_script.c.
-// Only active when term.c is not linked into the test binary.
-__attribute__((weak)) int terminal_get_cell(TerminalBackend *term, int row,
-                                            int col, TerminalCell *cell)
+int terminal_get_cell(TerminalBackend *term, int row, int col, TerminalCell *cell)
 {
     (void)term;
     (void)row;
@@ -42,9 +34,8 @@ __attribute__((weak)) int terminal_get_cell(TerminalBackend *term, int row,
     return -1;
 }
 
-__attribute__((weak)) int terminal_get_scrollback_cell(TerminalBackend *term,
-                                                       int sb_row, int col,
-                                                       TerminalCell *cell)
+int terminal_get_scrollback_cell(TerminalBackend *term, int sb_row, int col,
+                                 TerminalCell *cell)
 {
     (void)term;
     (void)sb_row;
@@ -54,8 +45,7 @@ __attribute__((weak)) int terminal_get_scrollback_cell(TerminalBackend *term,
     return -1;
 }
 
-__attribute__((weak)) int terminal_get_dimensions(TerminalBackend *term,
-                                                  int *rows, int *cols)
+int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols)
 {
     (void)term;
     if (rows)

@@ -38,17 +38,17 @@ test_paste_normalize_CFLAGS = $(TEST_CFLAGS)
 # Altscreen + mouse-tracking mode state through the coffer bridge.
 # Regression test for the on_mouse guard: altscreen without mouse_mode
 # must not allow terminal-level selection without Shift.
-test_altscreen_mouse_SOURCES = test_altscreen_mouse.c $(TEST_COMMON) $(TERM_STUBS) \
+test_altscreen_mouse_SOURCES = test_altscreen_mouse.c $(TEST_COMMON) \
     ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_altscreen_mouse_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_altscreen_mouse_LDADD = $(COFFER_LIBS)
 
-test_term_cfr_SOURCES = test_term_cfr.c $(TEST_COMMON) $(TERM_STUBS) \
+test_term_cfr_SOURCES = test_term_cfr.c $(TEST_COMMON) \
     ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_term_cfr_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_term_cfr_LDADD = $(COFFER_LIBS)
 
-test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) $(TERM_STUBS) \
+test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) \
     ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
 test_osc52_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_osc52_LDADD = $(COFFER_LIBS)
@@ -73,7 +73,7 @@ test_lottie_LDADD = $(COFFER_LIBS)
 if BACKEND_SDL3
 if !HOST_WINDOWS
 check_PROGRAMS += test_pty_pause
-test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) $(TERM_STUBS) ../src/term.c ../src/unicode.c
+test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) ../src/term.c ../src/unicode.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
 endif
 endif
@@ -85,7 +85,7 @@ test_lottie_cache_CFLAGS = $(TEST_CFLAGS)
 
 # Shift+Click selection extension. Uses a mock TerminalBackend (no coffer
 # or SDL dependency). Compiles term.c for the selection logic.
-test_selection_extend_SOURCES = test_selection_extend.c $(TEST_COMMON) $(TERM_STUBS) ../src/term.c
+test_selection_extend_SOURCES = test_selection_extend.c $(TEST_COMMON) ../src/term.c
 test_selection_extend_CFLAGS = $(TEST_CFLAGS)
 
 # MSYS2/Unix → Windows path conversion. Pure C, no SDL/coffer dependency.
@@ -127,7 +127,12 @@ test_rend_common_LDADD = -lm
 test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
     ../src/portty_app.c ../src/term.c ../src/term_cfr.c ../src/base64.c \
     ../src/unicode.c ../src/path_compat.c ../src/pager.c ../src/rend_common.c \
-    ../src/portty_conf.c ../src/diag.c ../src/pty.c ../src/font.c font_stubs.c
+    ../src/portty_conf.c ../src/diag.c ../src/font.c font_stubs.c
+if HOST_WINDOWS
+test_portty_app_SOURCES += ../src/pty_w32.c
+else !HOST_WINDOWS
+test_portty_app_SOURCES += ../src/pty.c
+endif
 test_portty_app_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
 test_portty_app_LDADD = $(COFFER_LIBS)
 
