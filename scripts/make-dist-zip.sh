@@ -24,7 +24,7 @@ set -eu
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${1:-$SRC_DIR/build}"
-OUTPUT_DIR="${2:-$SRC_DIR}"
+OUTPUT_DIR="$(cd "${2:-$SRC_DIR}" && pwd)"
 BACKEND="${3:-sdl3}"
 
 # Get version from the same script configure uses
@@ -233,7 +233,7 @@ README
 	# --- Create ZIP ---
 	echo "==> Creating ZIP: $(basename "$ZIP_FILE")"
 	rm -f "$ZIP_FILE"
-	(cd "$OUTPUT_DIR" && zip -r -9 "$ZIP_FILE" "$PKG_NAME" >/dev/null)
+	(cd "$OUTPUT_DIR" && zip -r -9 "$(basename "$ZIP_FILE")" "$PKG_NAME" >/dev/null)
 
 	rm -rf "$STAGE_DIR"
 
@@ -395,7 +395,7 @@ README
 		win_pkg="$(cygpath -w "$PKG_NAME" 2>/dev/null || echo "$PKG_NAME")"
 		(cd "$OUTPUT_DIR" && 7z a -tzip -mx=9 "$win_zip" "$win_pkg" >/dev/null)
 	elif command -v zip >/dev/null 2>&1; then
-		(cd "$OUTPUT_DIR" && zip -r -9 "$ZIP_FILE" "$PKG_NAME" >/dev/null)
+		(cd "$OUTPUT_DIR" && zip -r -9 "$(basename "$ZIP_FILE")" "$PKG_NAME" >/dev/null)
 	else
 		echo "ERROR: Neither 7z nor zip found — cannot create ZIP" >&2
 		echo " staged directory left at: $STAGE_DIR" >&2
