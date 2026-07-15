@@ -22,10 +22,10 @@
 #   make dist-portable
 #
 # Or directly:
-#   scripts/make-dist-zip.sh [BUILD_DIR] [OUTPUT_DIR]
+#   scripts/make-dist-zip.sh [BUILD_DIR] [OUTPUT_DIR] [BACKEND]
 #
-# BUILD_DIR defaults to "build", OUTPUT_DIR defaults to ".".
-# The resulting file is portty-<version>-windows-x86_64.zip.
+# BUILD_DIR defaults to "build", OUTPUT_DIR defaults to ".", BACKEND defaults to "sdl3".
+# The resulting file is portty-<version>-windows-<arch>-<backend>.zip.
 
 set -eu
 
@@ -34,6 +34,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 SRC_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 BUILD_DIR="${1:-$SRC_DIR/build}"
 OUTPUT_DIR="${2:-$SRC_DIR}"
+BACKEND="${3:-sdl3}"
 
 # Get version from the same script configure uses
 VERSION="$("$SRC_DIR/build-aux/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0.0.0-unknown")"
@@ -47,7 +48,7 @@ fi
 
 # Detect target architecture from the built binary
 ARCH=$(file "$REAL_EXE" 2>/dev/null | grep -oq 'ARM64\|aarch64' && echo "aarch64" || echo "x86_64")
-PKG_NAME="portty-${VERSION}-windows-${ARCH}"
+PKG_NAME="portty-${VERSION}-windows-${ARCH}-${BACKEND}"
 STAGE_DIR="$OUTPUT_DIR/$PKG_NAME"
 ZIP_FILE="$OUTPUT_DIR/${PKG_NAME}.zip"
 

@@ -1,0 +1,75 @@
+name: Linux (Sokol)
+
+on:
+  push:
+    branches: [master, sokol-dev]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+
+jobs:
+  build-and-test:
+    name: Build & Test (Sokol)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout portty
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout coffer (dependency)
+        uses: actions/checkout@v7
+        with:
+          repository: chestso/coffer
+          ref: v0.1.3
+          path: coffer
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            autoconf \
+            automake \
+            libtool \
+            make \
+            pkg-config \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpng-dev \
+            libfontconfig1-dev \
+            libx11-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libgl-dev \
+            libncurses-dev \
+            curl
+
+      - name: Build & install coffer
+        working-directory: coffer
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          ../configure --prefix=/usr/local
+          make -j"$(nproc)"
+          make check
+          sudo make install
+
+      - name: Fetch Sokol headers
+        run: sh scripts/fetch-sokol.sh
+
+      - name: Build portty
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            ../configure --enable-release --with-backend=sokol
+          else
+            ../configure --with-backend=sokol
+          fi
+          make -j"$(nproc)"
+
+      - name: Run tests
+        run: make -C build check

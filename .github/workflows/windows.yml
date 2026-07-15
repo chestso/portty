@@ -2,7 +2,7 @@ name: Windows
 
 on:
   push:
-    branches: [master]
+    branches: [master, sokol-dev]
     tags: ["v*"]
   pull_request:
     branches: [master]
@@ -12,11 +12,15 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build & Test
+    name: Build & Test (${{ matrix.backend }})
     runs-on: windows-latest
     defaults:
       run:
         shell: msys2 {0}
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sdl3, sokol]
 
     steps:
       - name: Checkout portty
@@ -46,7 +50,6 @@ jobs:
             libtool
             make
             pkg-config
-            mingw-w64-ucrt-x86_64-sdl3
             mingw-w64-ucrt-x86_64-freetype
             mingw-w64-ucrt-x86_64-harfbuzz
             mingw-w64-ucrt-x86_64-libpng
@@ -54,6 +57,14 @@ jobs:
             ncurses
             zip
             p7zip
+
+      - name: Install SDL3 (SDL3 backend only)
+        if: matrix.backend == 'sdl3'
+        run: pacman -S --noconfirm mingw-w64-ucrt-x86_64-sdl3
+
+      - name: Fetch Sokol headers (Sokol backend only)
+        if: matrix.backend == 'sokol'
+        run: sh scripts/fetch-sokol.sh
 
       - name: Build & install coffer
         working-directory: coffer
@@ -69,10 +80,14 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
+          CONFIGURE_ARGS=""
+          if [ "${{ matrix.backend }}" = "sokol" ]; then
+            CONFIGURE_ARGS="--with-backend=sokol"
+          fi
           if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            sh ../configure --enable-release
+            sh ../configure --enable-release $CONFIGURE_ARGS
           else
-            sh ../configure
+            sh ../configure $CONFIGURE_ARGS
           fi
           make -j"$(nproc)"
 
@@ -85,8 +100,8 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: portty-windows-x86_64
-          path: portty-*-windows-*.zip
+          name: portty-windows-x86_64-${{ matrix.backend }}
+          path: portty-*-windows-*-${{ matrix.backend }}.zip
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 1 || 30 }}
 
@@ -96,16 +111,23 @@ jobs:
     needs: build-and-test
     runs-on: ubuntu-latest
     steps:
-      - name: Download x86_64 artifact
+      - name: Download SDL3 artifact
         uses: actions/download-artifact@v8
         with:
-          name: portty-windows-x86_64
-          path: artifacts/x86_64
+          name: portty-windows-x86_64-sdl3
+          path: artifacts/sdl3
+
+      - name: Download Sokol artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-windows-x86_64-sokol
+          path: artifacts/sokol
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
           files: |
-            artifacts/x86_64/portty-*-windows-*.zip
+            artifacts/sdl3/portty-*-windows-*-sdl3.zip
+            artifacts/sokol/portty-*-windows-*-sokol.zip
           generate_release_notes: false
           fail_on_unmatched_files: true

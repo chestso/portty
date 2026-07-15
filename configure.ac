@@ -114,8 +114,9 @@ AS_CASE([$portty_backend],
     AC_DEFINE([PORTTY_BACKEND_SDL3], [1], [Use SDL3 backend])
   ],
   [sokol], [
-    # Sokol is vendored in third_party/sokol; add it to the include path.
-    SOKOL_CFLAGS="-I${srcdir}/third_party/sokol"
+    # Sokol headers live in third_party/sokol/ (fetched by scripts/fetch-sokol.sh).
+    # Use -I for the parent so #include <sokol/sokol_app.h> resolves.
+    SOKOL_CFLAGS="-I${srcdir}/third_party"
     CFLAGS="$SOKOL_CFLAGS $CFLAGS"
     AC_SUBST([SOKOL_CFLAGS])
     AC_DEFINE([PORTTY_BACKEND_SOKOL], [1], [Use Sokol backend])
@@ -138,6 +139,7 @@ AS_CASE([$portty_backend],
 
 AM_CONDITIONAL([BACKEND_SDL3], [test "x$portty_backend" = xsdl3])
 AM_CONDITIONAL([BACKEND_SOKOL], [test "x$portty_backend" = xsokol])
+AC_SUBST([portty_backend])
 
 AS_IF([test "x$portty_backend" = xsdl3], [
   # Check for libraries

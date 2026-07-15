@@ -53,7 +53,7 @@ format:
 # meaningful on Windows (MSYS2 UCRT64), where ldd and tic are available.
 .PHONY: dist-portable
 dist-portable:
-	@sh "$(top_srcdir)/scripts/make-dist-zip.sh" "$(abs_builddir)" "$(top_srcdir)"
+	@sh "$(top_srcdir)/scripts/make-dist-zip.sh" "$(abs_builddir)" "$(top_srcdir)" "$(portty_backend)"
 
 # Bear target — produce compile_commands.json for clangd by intercepting
 # the build. Cleans first so bear sees every compile invocation.
