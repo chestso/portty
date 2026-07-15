@@ -48,6 +48,7 @@
 #include <sokol/sokol_gfx.h>
 #include <sokol/sokol_glue.h>
 #include <sokol/sokol_log.h>
+#include <sokol/sokol_time.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -79,7 +80,20 @@ enum
 {
     SOKOL_EVENT_CURSOR_BLINK = 1,
     SOKOL_EVENT_AUTOSCROLL_TICK,
+    SOKOL_EVENT_LOTTIE_TICK,
 };
+
+#define SOKOL_LOTTIE_CACHE_MAX 64
+#define SOKOL_LOTTIE_TICK_MS   16
+
+typedef struct
+{
+    sg_image image;
+    sg_view view;
+    uint64_t id;
+    uint32_t version;
+    int w, h;
+} SokolLottieCacheEntry;
 
 typedef struct PtyDataNode
 {
@@ -166,6 +180,14 @@ typedef struct
     bool debug_pending_verifybuf;
     int debug_verify_row, debug_verify_col_start, debug_verify_col_end;
     unsigned int debug_glyph_vbuf_gl_id; // GL buffer ID for verifybuf
+    // Lottie animation rendering
+    TimerId lottie_timer;
+    SokolLottieCacheEntry lottie_cache[SOKOL_LOTTIE_CACHE_MAX];
+    int lottie_cache_count;
+    sg_pipeline lottie_pip;
+    sg_buffer lottie_vbuf;
+    sg_sampler lottie_sampler;
+    bool lottie_pip_created;
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
@@ -210,6 +232,9 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
     d->last_click_x = 0;
     d->last_click_y = 0;
     d->autoscroll_timer = TIMER_INVALID;
+    d->lottie_timer = TIMER_INVALID;
+    d->lottie_pip_created = false;
+    d->lottie_cache_count = 0;
     d->pty_paused = false;
 
     // Cache exe path for spawn_new_terminal
@@ -219,6 +244,7 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
 
     app->backend = self;
 
+    stm_setup();
     sg_setup(&(sg_desc){
         .environment = sglue_environment(),
         .logger.func = slog_func,
@@ -273,9 +299,27 @@ static void sokol_destroy(PorttyBackend *self)
         timer_remove(d->timers, d->autoscroll_timer);
         d->autoscroll_timer = TIMER_INVALID;
     }
+    if (d->lottie_timer != TIMER_INVALID) {
+        timer_remove(d->timers, d->lottie_timer);
+        d->lottie_timer = TIMER_INVALID;
+    }
     if (d->timers) {
         timer_manager_destroy(d->timers);
         d->timers = NULL;
+    }
+
+    // Destroy lottie cache and pipeline
+    for (int i = 0; i < d->lottie_cache_count; i++) {
+        if (d->lottie_cache[i].image.id != SG_INVALID_ID)
+            sg_destroy_image(d->lottie_cache[i].image);
+        if (d->lottie_cache[i].view.id != SG_INVALID_ID)
+            sg_destroy_view(d->lottie_cache[i].view);
+    }
+    d->lottie_cache_count = 0;
+    if (d->lottie_pip_created) {
+        sg_destroy_pipeline(d->lottie_pip);
+        sg_destroy_buffer(d->lottie_vbuf);
+        sg_destroy_sampler(d->lottie_sampler);
     }
 
     if (d->tex_created)
@@ -448,6 +492,12 @@ static void sokol_drain_pty(SokolData *d)
     }
 
     terminal_flush_damage(d->term);
+
+    // Start lottie tick timer if animations are active
+    if (d->lottie_timer == TIMER_INVALID && terminal_lottie_count(d->term) > 0) {
+        d->lottie_timer = timer_add(d->timers, SOKOL_LOTTIE_TICK_MS,
+                                    SOKOL_EVENT_LOTTIE_TICK, NULL);
+    }
 
     if (d->pty_closed && !d->child_exited) {
         d->child_exited = true;
@@ -698,6 +748,304 @@ static int s_frame_vert_count;
 static int s_vert_index[SOKOL_MAX_ROWS][SOKOL_MAX_COLS];
 static GlyphVertex s_glyph_verts[SOKOL_MAX_VERTICES];
 
+#define SOKOL_MAX_LOTTIE_VERTICES 4096
+
+static GlyphVertex s_lottie_verts[SOKOL_MAX_LOTTIE_VERTICES];
+
+static void sokol_ensure_lottie_pipeline(SokolData *d)
+{
+    if (d->lottie_pip_created)
+        return;
+
+    static const char *vs_src =
+        "#version 410\n"
+        "layout(location=0) in vec2 pos;\n"
+        "layout(location=1) in vec2 uv;\n"
+        "layout(location=2) in vec4 fg;\n"
+        "layout(location=3) in vec4 bg;\n"
+        "out vec2 v_uv;\n"
+        "out float v_opacity;\n"
+        "uniform vec2 u_resolution;\n"
+        "void main() {\n"
+        "  vec2 clip = vec2(pos.x / u_resolution.x * 2.0 - 1.0,\n"
+        "                   1.0 - pos.y / u_resolution.y * 2.0);\n"
+        "  gl_Position = vec4(clip, 0.0, 1.0);\n"
+        "  v_uv = uv;\n"
+        "  v_opacity = fg.r;\n"
+        "}\n";
+    static const char *fs_src =
+        "#version 410\n"
+        "in vec2 v_uv;\n"
+        "in float v_opacity;\n"
+        "out vec4 frag_color;\n"
+        "uniform sampler2D lottie_tex;\n"
+        "vec3 srgb_to_linear(vec3 c) {\n"
+        "  return mix(pow((c + vec3(0.055)) / vec3(1.055), vec3(2.4)),\n"
+        "             c / 12.92,\n"
+        "             lessThanEqual(c, vec3(0.04045)));\n"
+        "}\n"
+        "void main() {\n"
+        "  vec4 texel = texture(lottie_tex, v_uv);\n"
+        "  float alpha = texel.a * v_opacity;\n"
+        "  frag_color = vec4(srgb_to_linear(texel.rgb), alpha);\n"
+        "}\n";
+
+    sg_shader shd = sg_make_shader(&(sg_shader_desc){
+        .vertex_func.source = vs_src,
+        .fragment_func.source = fs_src,
+        .attrs[0].glsl_name = "pos",
+        .attrs[1].glsl_name = "uv",
+        .attrs[2].glsl_name = "fg",
+        .attrs[3].glsl_name = "bg",
+        .uniform_blocks[0] = {
+            .stage = SG_SHADERSTAGE_VERTEX,
+            .size = sizeof(float) * 2,
+            .glsl_uniforms = {
+                [0] = { .glsl_name = "u_resolution", .type = SG_UNIFORMTYPE_FLOAT2 },
+            },
+        },
+        .views[0].texture.stage = SG_SHADERSTAGE_FRAGMENT,
+        .views[0].texture.image_type = SG_IMAGETYPE_2D,
+        .views[0].texture.sample_type = SG_IMAGESAMPLETYPE_FLOAT,
+        .samplers[0].stage = SG_SHADERSTAGE_FRAGMENT,
+        .samplers[0].sampler_type = SG_SAMPLERTYPE_FILTERING,
+        .texture_sampler_pairs[0].stage = SG_SHADERSTAGE_FRAGMENT,
+        .texture_sampler_pairs[0].view_slot = 0,
+        .texture_sampler_pairs[0].sampler_slot = 0,
+        .texture_sampler_pairs[0].glsl_name = "lottie_tex",
+        .label = "sokol-lottie-shader",
+    });
+
+    d->lottie_vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
+        .usage.dynamic_update = true,
+        .label = "sokol-lottie-vbuf",
+    });
+
+    d->lottie_pip = sg_make_pipeline(&(sg_pipeline_desc){
+        .shader = shd,
+        .layout = {
+            .buffers[0].stride = sizeof(GlyphVertex),
+            .attrs = {
+                [0] = { .offset = offsetof(GlyphVertex, x), .format = SG_VERTEXFORMAT_FLOAT2 },
+                [1] = { .offset = offsetof(GlyphVertex, u), .format = SG_VERTEXFORMAT_FLOAT2 },
+                [2] = { .offset = offsetof(GlyphVertex, fg), .format = SG_VERTEXFORMAT_UBYTE4N },
+                [3] = { .offset = offsetof(GlyphVertex, bg), .format = SG_VERTEXFORMAT_UBYTE4N },
+            },
+        },
+        .colors[0] = {
+            .pixel_format = d->linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8,
+            .blend = {
+                .enabled = true,
+                .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
+                .dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+                .src_factor_alpha = SG_BLENDFACTOR_ONE,
+                .dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA,
+            },
+        },
+        .label = "sokol-lottie-pipeline",
+    });
+
+    d->lottie_sampler = sg_make_sampler(&(sg_sampler_desc){
+        .min_filter = SG_FILTER_LINEAR,
+        .mag_filter = SG_FILTER_LINEAR,
+        .label = "sokol-lottie-sampler",
+    });
+
+    d->lottie_pip_created = true;
+}
+
+static void lottie_cache_reconcile(SokolData *d, const CfrLottie *anims, int count)
+{
+    for (int i = 0; i < d->lottie_cache_count;) {
+        bool live = false;
+        for (int j = 0; j < count; j++) {
+            if (anims[j].id == d->lottie_cache[i].id) {
+                live = true;
+                break;
+            }
+        }
+        if (live) {
+            i++;
+        } else {
+            if (d->lottie_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->lottie_cache[i].image);
+            if (d->lottie_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->lottie_cache[i].view);
+            d->lottie_cache[i] = d->lottie_cache[--d->lottie_cache_count];
+        }
+    }
+}
+
+static int lottie_get_texture(SokolData *d, const CfrLottie *anim)
+{
+    for (int i = 0; i < d->lottie_cache_count; i++) {
+        if (d->lottie_cache[i].id != anim->id)
+            continue;
+        if (d->lottie_cache[i].w != anim->canvas_w ||
+            d->lottie_cache[i].h != anim->canvas_h) {
+            // Size changed — recreate
+            if (d->lottie_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->lottie_cache[i].image);
+            if (d->lottie_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->lottie_cache[i].view);
+            d->lottie_cache[i].image.id = SG_INVALID_ID;
+            d->lottie_cache[i].view.id = SG_INVALID_ID;
+        } else if (d->lottie_cache[i].version != anim->version) {
+            // Version changed — update pixels
+            sg_update_image(d->lottie_cache[i].image, &(sg_image_data){
+                                                          .mip_levels[0] = {
+                                                              .ptr = (void *)anim->rgba,
+                                                              .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
+                                                          },
+                                                      });
+            d->lottie_cache[i].version = anim->version;
+            return i;
+        } else {
+            return i;
+        }
+        // Re-create image (size changed or first creation)
+        d->lottie_cache[i].image = sg_make_image(&(sg_image_desc){
+            .width = anim->canvas_w,
+            .height = anim->canvas_h,
+            .pixel_format = SG_PIXELFORMAT_RGBA8,
+            .usage.dynamic_update = true,
+            .label = "sokol-lottie",
+        });
+        d->lottie_cache[i].view = sg_make_view(&(sg_view_desc){
+            .texture.image = d->lottie_cache[i].image,
+            .label = "sokol-lottie-view",
+        });
+        sg_update_image(d->lottie_cache[i].image, &(sg_image_data){
+                                                      .mip_levels[0] = {
+                                                          .ptr = (void *)anim->rgba,
+                                                          .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
+                                                      },
+                                                  });
+        d->lottie_cache[i].version = anim->version;
+        d->lottie_cache[i].w = anim->canvas_w;
+        d->lottie_cache[i].h = anim->canvas_h;
+        return i;
+    }
+
+    // New cache entry
+    if (d->lottie_cache_count >= SOKOL_LOTTIE_CACHE_MAX)
+        return -1;
+
+    sg_image img = sg_make_image(&(sg_image_desc){
+        .width = anim->canvas_w,
+        .height = anim->canvas_h,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.dynamic_update = true,
+        .label = "sokol-lottie",
+    });
+    sg_update_image(img, &(sg_image_data){
+                             .mip_levels[0] = {
+                                 .ptr = (void *)anim->rgba,
+                                 .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
+                             },
+                         });
+    sg_view view = sg_make_view(&(sg_view_desc){
+        .texture.image = img,
+        .label = "sokol-lottie-view",
+    });
+    int n = d->lottie_cache_count++;
+    d->lottie_cache[n].image = img;
+    d->lottie_cache[n].view = view;
+    d->lottie_cache[n].id = anim->id;
+    d->lottie_cache[n].version = anim->version;
+    d->lottie_cache[n].w = anim->canvas_w;
+    d->lottie_cache[n].h = anim->canvas_h;
+    return n;
+}
+
+// Build lottie verts for one layer AND draw them per-animation in one pass.
+// Returns the number of vertices built (for offset tracking by the caller).
+static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
+                                     uint8_t target_layer, int vert_offset)
+{
+    int anim_count = 0;
+    const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
+    if (anim_count == 0)
+        return 0;
+
+    int cell_w = d->cell_w;
+    int cell_h = d->cell_h;
+    float scale = d->content_scale > 0.0f ? d->content_scale : 1.0f;
+    int win_w = (int)sapp_width();
+    int win_h = (int)sapp_height();
+    int scroll_offset = d->scroll.scroll_offset;
+    float uniforms[2] = { (float)win_w, (float)win_h };
+
+    int vert_base = vert_offset;
+
+    for (int i = 0; i < anim_count; i++) {
+        const CfrLottie *anim = &anims[i];
+        int pl_count = 0;
+        const CfrLottiePlacement *pls =
+            terminal_get_lottie_placements(term, anim->id, &pl_count);
+
+        int scaled_canvas_w = (int)(anim->canvas_w * scale);
+        int scaled_canvas_h = (int)(anim->canvas_h * scale);
+        int anim_vert_count = 0;
+
+        for (int j = 0; j < pl_count; j++) {
+            const CfrLottiePlacement *pl = &pls[j];
+            if (pl->layer != target_layer)
+                continue;
+
+            int screen_row = pl->row + scroll_offset;
+            int px = pl->col * cell_w;
+            int py = screen_row * cell_h;
+            int box_w = pl->cols * cell_w;
+            int box_h = pl->rows * cell_h;
+
+            if (py + box_h <= 0 || py >= win_h)
+                continue;
+            if (px + box_w <= 0 || px >= win_w)
+                continue;
+            if (vert_base + anim_vert_count + 6 > SOKOL_MAX_LOTTIE_VERTICES)
+                break;
+
+            int off_x = (box_w - scaled_canvas_w) / 2;
+            int off_y = (box_h - scaled_canvas_h) / 2;
+            float x0 = (float)(px + off_x);
+            float y0 = (float)(py + off_y);
+            float x1 = x0 + (float)scaled_canvas_w;
+            float y1 = y0 + (float)scaled_canvas_h;
+
+            uint8_t op = (uint8_t)pl->opacity_x256;
+            uint8_t op_color[4] = { op, op, op, op };
+
+            GlyphVertex *q = &s_lottie_verts[vert_base + anim_vert_count];
+            q[0] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
+            q[1] = (GlyphVertex){ x1, y0, 1.0f, 0.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
+            q[2] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
+            q[3] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
+            q[4] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
+            q[5] = (GlyphVertex){ x0, y1, 0.0f, 1.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
+            anim_vert_count += 6;
+        }
+
+        if (anim_vert_count > 0) {
+            int cache_idx = lottie_get_texture(d, anim);
+            if (cache_idx >= 0) {
+                sg_apply_pipeline(d->lottie_pip);
+                sg_apply_bindings(&(sg_bindings){
+                    .vertex_buffers[0] = d->lottie_vbuf,
+                    .views[0] = d->lottie_cache[cache_idx].view,
+                    .samplers[0] = d->lottie_sampler,
+                });
+                sg_apply_uniforms(0, &SG_RANGE(uniforms));
+                sg_draw(vert_base, anim_vert_count, 1);
+            }
+            vert_base += anim_vert_count;
+        }
+    }
+
+    return vert_base - vert_offset;
+}
+
 static void sokol_ensure_glyph_pipeline(SokolData *d)
 {
     if (d->glyph_pip_created)
@@ -938,6 +1286,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     // Ensure glyph pipeline is created
     sokol_ensure_glyph_pipeline(d);
+    sokol_ensure_lottie_pipeline(d);
 
     rend_sokol_atlas_begin_frame(&d->atlas);
 
@@ -1397,6 +1746,23 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         if (bg_vert_count > 0) {
             sg_draw(0, bg_vert_count, 1);
         }
+        // Lottie: upload vertex buffer once, then render both layers
+        int lottie_bg_count = 0;
+        int lottie_fg_count = 0;
+        if (d->lottie_pip_created && terminal_lottie_count(term) > 0) {
+            int anim_count = 0;
+            const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
+            lottie_cache_reconcile(d, anims, anim_count);
+
+            // Upload the full lottie vertex buffer before any draws
+            sg_update_buffer(d->lottie_vbuf, &(sg_range){
+                                                 .ptr = s_lottie_verts,
+                                                 .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
+                                             });
+
+            // Draw background lottie (between bg and glyph quads)
+            lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
+        }
         // Pass 2: draw all glyph/cursor quads on top (opaque, replace)
         int glyph_count = glyph_end - glyph_vert_start;
         if (glyph_count > 0) {
@@ -1414,6 +1780,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(sel_vert_start, sel_count, 1);
         }
+        // Pass 4: draw foreground lottie (on top of everything)
+        if (lottie_bg_count >= 0 && d->lottie_pip_created && terminal_lottie_count(term) > 0)
+            lottie_fg_count = sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
     }
 
     // Screenshot automation: defer to after sg_commit (glReadPixels inside
@@ -2347,6 +2716,14 @@ static void sokol_poll_timers(SokolData *d)
         } else if (events[i].code == SOKOL_EVENT_AUTOSCROLL_TICK) {
             portty_app_handle_autoscroll_tick(d->app);
             terminal_mark_dirty(d->term);
+        } else if (events[i].code == SOKOL_EVENT_LOTTIE_TICK) {
+            uint64_t now_us = stm_now() / 1000;
+            if (terminal_lottie_tick(d->term, now_us))
+                terminal_mark_dirty(d->term);
+            if (terminal_lottie_count(d->term) == 0) {
+                timer_remove(d->timers, d->lottie_timer);
+                d->lottie_timer = TIMER_INVALID;
+            }
         }
     }
 }
