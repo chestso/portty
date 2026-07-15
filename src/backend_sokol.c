@@ -607,7 +607,11 @@ static void sokol_drain_pty(SokolData *d)
 
     while (head) {
         PtyDataNode *next = head->next;
-        portty_app_process_pty_data(d->app, head->data, head->len);
+        terminal_consume_pushed_rows(d->term);
+        terminal_process_input(d->term, head->data, head->len);
+        int pushed = terminal_consume_pushed_rows(d->term);
+        if (pushed > 0 && rend_get_scroll_offset(&d->scroll) > 0)
+            rend_scroll(&d->scroll, d->term, pushed);
         free(head);
         head = next;
     }
@@ -3285,6 +3289,13 @@ static void sokol_event_cb(const sapp_event *ev)
         if (kr.handled && term_key == TERM_KEY_NONE &&
             !(mod & (TERM_MOD_CTRL | TERM_MOD_ALT)))
             d->suppress_next_char = true;
+        // Scroll to cursor when user types while scrolled back
+        if (kr.force_redraw) {
+            terminal_mark_dirty(d->term);
+        } else if ((kr.handled || kr.len > 0) && rend_get_scroll_offset(&d->scroll) != 0) {
+            rend_reset_scroll(&d->scroll);
+            terminal_mark_dirty(d->term);
+        }
         // Reset cursor blink on user input
         d->cursor_blink_visible = true;
         if (d->cursor_blink_timer != TIMER_INVALID)
@@ -3329,6 +3340,9 @@ static void sokol_event_cb(const sapp_event *ev)
             KeyboardResult kr = portty_app_handle_text(d->app, utf8);
             if (kr.len > 0 && !kr.handled && d->pty)
                 pty_write(d->pty, kr.data, kr.len);
+            // Scroll to cursor when user types while scrolled back
+            if ((kr.handled || kr.len > 0) && rend_get_scroll_offset(&d->scroll) != 0)
+                rend_reset_scroll(&d->scroll);
             // Reset cursor blink on user input
             d->cursor_blink_visible = true;
             if (d->cursor_blink_timer != TIMER_INVALID)
