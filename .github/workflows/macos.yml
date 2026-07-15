@@ -1,0 +1,129 @@
+name: macOS
+
+on:
+  push:
+    branches: [master, sokol-dev]
+    tags: ["v*"]
+  pull_request:
+    branches: [master]
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.backend }}, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        backend: [sdl3, sokol]
+        arch: [x86_64, arm64]
+        include:
+          - arch: x86_64
+            runner: macos-13
+          - arch: arm64
+            runner: macos-14
+
+    steps:
+      - name: Checkout portty
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout coffer (dependency)
+        uses: actions/checkout@v7
+        with:
+          repository: chestso/coffer
+          ref: v0.1.3
+          path: coffer
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          brew install autoconf automake libtool pkg-config \
+            freetype harfbuzz libpng
+          if [ "${{ matrix.backend }}" = "sdl3" ]; then
+            brew install sdl3
+          fi
+
+      - name: Fetch Sokol headers (Sokol backend only)
+        if: matrix.backend == 'sokol'
+        run: sh scripts/fetch-sokol.sh
+
+      - name: Build & install coffer
+        working-directory: coffer
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          ../configure --prefix="$(brew --prefix)"
+          make -j"$(sysctl -n hw.ncpu)"
+          make check || true
+          make install
+
+      - name: Build portty
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          CONFIGURE_ARGS=""
+          if [ "${{ matrix.backend }}" = "sokol" ]; then
+            CONFIGURE_ARGS="--with-backend=sokol"
+          fi
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            ../configure --enable-release $CONFIGURE_ARGS
+          else
+            ../configure $CONFIGURE_ARGS
+          fi
+          make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Run tests
+        run: make -C build check
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: portty-macos-${{ matrix.arch }}-${{ matrix.backend }}
+          path: build/src/portty
+          if-no-files-found: error
+          retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 1 || 30 }}
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build-and-test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download x86_64 SDL3
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-macos-x86_64-sdl3
+          path: artifacts/x86_64-sdl3
+
+      - name: Download x86_64 Sokol
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-macos-x86_64-sokol
+          path: artifacts/x86_64-sokol
+
+      - name: Download arm64 SDL3
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-macos-arm64-sdl3
+          path: artifacts/arm64-sdl3
+
+      - name: Download arm64 Sokol
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-macos-arm64-sokol
+          path: artifacts/arm64-sokol
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            artifacts/x86_64-sdl3/portty
+            artifacts/x86_64-sokol/portty
+            artifacts/arm64-sdl3/portty
+            artifacts/arm64-sokol/portty
+          generate_release_notes: false
+          fail_on_unmatched_files: true
