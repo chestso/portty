@@ -45,6 +45,8 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#include <d3d11.h>
+#include <dxgi.h>
 #endif
 
 #define SOKOL_IMPL
@@ -224,7 +226,11 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
     d->content_scale = 1.0f;
     d->cell_w = 10;
     d->cell_h = 20;
+#ifndef _WIN32
     d->wakeup_pipe[0] = d->wakeup_pipe[1] = -1;
+#else
+    d->wakeup_event = NULL;
+#endif
     pthread_mutex_init(&d->pty_queue_mtx, NULL);
     memset(&d->scroll, 0, sizeof(d->scroll));
     rend_fallback_init(&d->fallback);
@@ -1258,7 +1264,9 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
     });
 
     // Capture GL buffer ID for debug verifybuf (sokol leaves it bound).
+#if defined(SOKOL_GLCORE)
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, (GLint *)&d->debug_glyph_vbuf_gl_id);
+#endif
 
     d->glyph_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shd,
@@ -2201,6 +2209,7 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
     int rc = -1;
     uint8_t *pixels = malloc((size_t)img_w * img_h * 4);
     if (pixels) {
+#if defined(SOKOL_GLCORE)
         glFinish();
         glPixelStorei(GL_PACK_ALIGNMENT, 1);
         glReadBuffer(GL_BACK);
@@ -2218,6 +2227,10 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
         } else {
             rc = png_write_rgba(path, pixels, img_w, img_h);
         }
+#else
+        // D3D11/Metal screendump not yet implemented
+        (void)path;
+#endif
         free(pixels);
     }
 
@@ -2307,12 +2320,12 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
     ID3D11Device *d3d_dev = (ID3D11Device *)sg_d3d11_device();
     if (d3d_dev) {
         IDXGIDevice *dxgi_dev = NULL;
-        if (SUCCEEDED(d3d_dev->QueryInterface(__uuidof(IDXGIDevice),
-                                              (void **)&dxgi_dev))) {
+        if (SUCCEEDED(ID3D11Device_QueryInterface(d3d_dev, &IID_IDXGIDevice,
+                                                  (void **)&dxgi_dev))) {
             IDXGIAdapter *adapter = NULL;
-            if (SUCCEEDED(dxgi_dev->GetAdapter(&adapter))) {
+            if (SUCCEEDED(IDXGIDevice_GetAdapter(dxgi_dev, &adapter))) {
                 DXGI_ADAPTER_DESC desc;
-                if (SUCCEEDED(adapter->GetDesc(&desc))) {
+                if (SUCCEEDED(IDXGIAdapter_GetDesc(adapter, &desc))) {
                     // desc.Description is a WCHAR[]; convert to UTF-8
                     char name_utf8[256];
                     WideCharToMultiByte(CP_UTF8, 0, desc.Description, -1,
@@ -2326,9 +2339,9 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
                              (size_t)(desc.DedicatedVideoMemory /
                                       (1024 * 1024)));
                 }
-                adapter->Release();
+                IDXGIAdapter_Release(adapter);
             }
-            dxgi_dev->Release();
+            IDXGIDevice_Release(dxgi_dev);
         }
     }
     driver_libre = GPU_DRIVER_LIBRE_NO; // D3D11 drivers are typically proprietary
@@ -2519,6 +2532,11 @@ PorttyBackend backend_sokol = {
 static void sokol_debug_screendump(SokolData *d, const char *path)
 {
     (void)d;
+#if !defined(SOKOL_GLCORE)
+    (void)path;
+    vlog("screendump: not supported on this backend\n");
+    return;
+#else
     int ss_w = (int)sapp_width();
     int ss_h = (int)sapp_height();
     uint8_t *pixels = malloc((size_t)ss_w * ss_h * 4);
@@ -2545,6 +2563,7 @@ static void sokol_debug_screendump(SokolData *d, const char *path)
     }
     free(pixels);
     vlog("screendump: saved %s (%dx%d)\n", path, ss_w, ss_h);
+#endif
 }
 
 static void sokol_debug_dumpverts(int row, int col_start, int col_end)
@@ -2578,6 +2597,14 @@ static void sokol_debug_dumpverts(int row, int col_start, int col_end)
 static void sokol_debug_verifybuf(SokolData *d, int row, int col_start,
                                   int col_end)
 {
+#if !defined(SOKOL_GLCORE)
+    (void)d;
+    (void)row;
+    (void)col_start;
+    (void)col_end;
+    printf("verifybuf: not supported on this backend\n");
+    return;
+#else
     GLuint gl_buf = d->debug_glyph_vbuf_gl_id;
     if (!gl_buf) {
         printf("verifybuf: GL buffer ID not available\n");
@@ -2617,6 +2644,7 @@ static void sokol_debug_verifybuf(SokolData *d, int row, int col_start,
         }
     }
     glBindBuffer(GL_ARRAY_BUFFER, 0);
+#endif
 }
 
 // ── sokol_app.h callbacks ────────────────────────────────────────────────
