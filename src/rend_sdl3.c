@@ -308,7 +308,6 @@ static void capture_sdl_gpu_info(RendererSdl3Data *data)
     data->gpu_name[0] = '\0';
     data->gpu_driver[0] = '\0';
     data->gpu_driver_libre = GPU_DRIVER_LIBRE_NO;
-    return;
     SDL_PropertiesID rp = SDL_GetRendererProperties(data->renderer);
     if (!rp)
         return;
@@ -2244,6 +2243,67 @@ bool rend_sdl3_get_diag(RendererSdl3Data *data, PorttyDiag *out)
     out->display_dpi = NULL;
     out->display_scale = NULL;
     out->display_physical = display_info_get_physical();
+
+    // Display scaling context — uses SDL3 display APIs (cross-platform)
+    {
+        static char session_str[32];
+        static char scale_str[128];
+        static char screen_str[128];
+        static char dpi_str[128];
+        static char xwayland_str[8];
+
+        const char *video_driver = SDL_GetCurrentVideoDriver();
+        const char *xdg_session = getenv("XDG_SESSION_TYPE");
+
+        if (xdg_session && *xdg_session) {
+            snprintf(session_str, sizeof(session_str), "%s", xdg_session);
+        } else if (video_driver) {
+            snprintf(session_str, sizeof(session_str), "%s", video_driver);
+        }
+        if (session_str[0])
+            out->display_session = session_str;
+
+        // XWayland detection (Linux only)
+        if (xdg_session && strcmp(xdg_session, "wayland") == 0 && video_driver &&
+            strcmp(video_driver, "x11") == 0) {
+            snprintf(xwayland_str, sizeof(xwayland_str), "yes");
+            out->display_xwayland = xwayland_str;
+        }
+
+        if (data->window) {
+            SDL_DisplayID display_id = SDL_GetDisplayForWindow(data->window);
+            if (!display_id)
+                display_id = SDL_GetPrimaryDisplay();
+            if (display_id) {
+                SDL_Rect bounds;
+                if (SDL_GetDisplayBounds(display_id, &bounds)) {
+                    const char *display_name = SDL_GetDisplayName(display_id);
+                    if (display_name)
+                        snprintf(screen_str, sizeof(screen_str), "%dx%d px (%s)",
+                                 bounds.w, bounds.h, display_name);
+                    else
+                        snprintf(screen_str, sizeof(screen_str), "%dx%d px",
+                                 bounds.w, bounds.h);
+                    out->display_screen = screen_str;
+                }
+
+                float content_scale = SDL_GetDisplayContentScale(display_id);
+                float window_scale = SDL_GetWindowDisplayScale(data->window);
+                snprintf(scale_str, sizeof(scale_str),
+                         "content %.2f, window %.2f",
+                         (double)content_scale, (double)window_scale);
+                out->display_scale = scale_str;
+
+                // DPI estimate: SDL3 content scale is relative to 96 DPI
+                if (content_scale > 0.0f) {
+                    float dpi = content_scale * 96.0f;
+                    snprintf(dpi_str, sizeof(dpi_str), "%.1f (from content scale)", dpi);
+                    out->display_dpi = dpi_str;
+                }
+            }
+        }
+    }
+
     return true;
 }
 

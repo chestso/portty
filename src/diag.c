@@ -264,14 +264,18 @@ char *diag_build_report(const DiagSources *s)
     if (s->display_physical)
         kv(&sb, "physical", s->display_physical);
 
-    // X11 / XWayland scaling context (Linux only)
+    // Display scaling context (Linux only)
     if (s->display_session) {
-        subsection(&sb, "display", "X11 / XWayland scaling context");
+        subsection(&sb, "display", "Display scaling context");
         kv(&sb, "session", s->display_session);
-        kv(&sb, "XWayland", s->display_xwayland);
-        kv(&sb, "X11 screen", s->display_screen);
-        kv(&sb, "DPI", s->display_dpi);
-        kv(&sb, "scale", s->display_scale);
+        if (s->display_xwayland)
+            kv(&sb, "XWayland", s->display_xwayland);
+        if (s->display_screen)
+            kv(&sb, "screen", s->display_screen);
+        if (s->display_dpi)
+            kv(&sb, "DPI", s->display_dpi);
+        if (s->display_scale)
+            kv(&sb, "scale", s->display_scale);
     }
 
     // Configuration

@@ -1900,7 +1900,7 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
     out->font_path = d->font_path;
     out->hinting = d->hint_name[0] ? d->hint_name : NULL;
 
-    // Display / scaling info (Linux/X11 only)
+    // Display / scaling info
     out->display_session = NULL;
     out->display_xwayland = NULL;
     out->display_screen = NULL;
@@ -1908,64 +1908,82 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
     out->display_scale = NULL;
     out->display_physical = display_info_get_physical();
 
-#if !defined(_WIN32) && !defined(__APPLE__)
-    static char session_str[16];
-    static char xwayland_str[8];
-    static char screen_str[128];
-    static char dpi_str[128];
-    static char scale_str[128];
+    {
+        static char scale_str[128];
+        static char dpi_str[128];
 
-    const char *xdg_session = getenv("XDG_SESSION_TYPE");
-    if (xdg_session && *xdg_session) {
-        snprintf(session_str, sizeof(session_str), "%s", xdg_session);
-        out->display_session = session_str;
-    }
+        // Scale info — available on all platforms via sokol
+        snprintf(scale_str, sizeof(scale_str), "sapp_dpi_scale %.2f, high_dpi %s",
+                 sapp_dpi_scale(), sapp_high_dpi() ? "true" : "false");
+        out->display_scale = scale_str;
 
-    bool is_xwayland = false;
-    if (xdg_session && strcmp(xdg_session, "wayland") == 0)
-        is_xwayland = true;
-
-    snprintf(xwayland_str, sizeof(xwayland_str), "%s", is_xwayland ? "yes" : "no");
-    out->display_xwayland = xwayland_str;
-
-    Display *xdisp = (Display *)sapp_x11_get_display();
-    if (xdisp) {
-        int screen = DefaultScreen(xdisp);
-        int scr_w = DisplayWidth(xdisp, screen);
-        int scr_h = DisplayHeight(xdisp, screen);
-        int scr_wmm = DisplayWidthMM(xdisp, screen);
-        int scr_hmm = DisplayHeightMM(xdisp, screen);
-        float phys_dpi = scr_wmm > 0 ? (float)scr_w * 25.4f / (float)scr_wmm : 0.0f;
-        snprintf(screen_str, sizeof(screen_str), "%dx%d px, %dx%d mm",
-                 scr_w, scr_h, scr_wmm, scr_hmm);
-        out->display_screen = screen_str;
-
-        float xft_dpi = 0.0f;
-        char *rms = XResourceManagerString(xdisp);
-        if (rms) {
-            XrmDatabase db = XrmGetStringDatabase(rms);
-            if (db) {
-                XrmValue value;
-                char *type = NULL;
-                if (XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &value)) {
-                    if (type && strcmp(type, "String") == 0)
-                        xft_dpi = (float)atof(value.addr);
-                }
-                XrmDestroyDatabase(db);
-            }
+        // DPI estimate from sapp_dpi_scale (relative to 96 DPI)
+        float dpi = sapp_dpi_scale() * 96.0f;
+        if (dpi > 0.0f) {
+            snprintf(dpi_str, sizeof(dpi_str), "%.1f (from dpi_scale)", dpi);
+            out->display_dpi = dpi_str;
         }
-        if (xft_dpi > 0.0f)
-            snprintf(dpi_str, sizeof(dpi_str), "physical %.1f, Xft.dpi %.0f",
-                     phys_dpi, xft_dpi);
-        else
-            snprintf(dpi_str, sizeof(dpi_str), "physical %.1f, Xft.dpi (unset)",
-                     phys_dpi);
-        out->display_dpi = dpi_str;
     }
 
-    snprintf(scale_str, sizeof(scale_str), "sapp_dpi_scale %.2f, high_dpi %s",
-             sapp_dpi_scale(), sapp_high_dpi() ? "true" : "false");
-    out->display_scale = scale_str;
+#if !defined(_WIN32) && !defined(__APPLE__)
+    {
+        static char session_str[16];
+        static char xwayland_str[8];
+        static char screen_str[128];
+        static char dpi_str[128];
+
+        const char *xdg_session = getenv("XDG_SESSION_TYPE");
+        if (xdg_session && *xdg_session) {
+            snprintf(session_str, sizeof(session_str), "%s", xdg_session);
+            out->display_session = session_str;
+        }
+
+        bool is_xwayland = false;
+        if (xdg_session && strcmp(xdg_session, "wayland") == 0)
+            is_xwayland = true;
+
+        snprintf(xwayland_str, sizeof(xwayland_str), "%s", is_xwayland ? "yes" : "no");
+        out->display_xwayland = xwayland_str;
+
+        Display *xdisp = (Display *)sapp_x11_get_display();
+        if (xdisp) {
+            int screen = DefaultScreen(xdisp);
+            int scr_w = DisplayWidth(xdisp, screen);
+            int scr_h = DisplayHeight(xdisp, screen);
+            int scr_wmm = DisplayWidthMM(xdisp, screen);
+            int scr_hmm = DisplayHeightMM(xdisp, screen);
+            float phys_dpi = scr_wmm > 0 ? (float)scr_w * 25.4f / (float)scr_wmm : 0.0f;
+            snprintf(screen_str, sizeof(screen_str), "%dx%d px, %dx%d mm",
+                     scr_w, scr_h, scr_wmm, scr_hmm);
+            out->display_screen = screen_str;
+
+            float xft_dpi = 0.0f;
+            char *rms = XResourceManagerString(xdisp);
+            if (rms) {
+                XrmDatabase db = XrmGetStringDatabase(rms);
+                if (db) {
+                    XrmValue value;
+                    char *type = NULL;
+                    if (XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &value)) {
+                        if (type && strcmp(type, "String") == 0)
+                            xft_dpi = (float)atof(value.addr);
+                    }
+                    XrmDestroyDatabase(db);
+                }
+            }
+            if (xft_dpi > 0.0f)
+                snprintf(dpi_str, sizeof(dpi_str), "physical %.1f, Xft.dpi %.0f",
+                         phys_dpi, xft_dpi);
+            else
+                snprintf(dpi_str, sizeof(dpi_str), "physical %.1f, Xft.dpi (unset)",
+                         phys_dpi);
+            out->display_dpi = dpi_str;
+        }
+    }
+#elif defined(__APPLE__)
+    out->display_session = "macOS";
+#elif defined(_WIN32)
+    out->display_session = "windows";
 #endif
 
     return true;

@@ -49,12 +49,12 @@ typedef struct
     const char *font_path;
     const char *hinting;
 
-    // Display / scaling info (Linux/X11 only, NULL on other platforms)
-    const char *display_session;  // "wayland", "x11", or NULL
-    const char *display_xwayland; // "yes" / "no" / NULL
-    const char *display_screen;   // "3072x1728 px, 812x457 mm" or NULL
+    // Display / scaling info (all platforms, NULL if unavailable)
+    const char *display_session;  // "wayland", "x11", "macOS", "windows", or NULL
+    const char *display_xwayland; // "yes" / "no" / NULL (Linux only)
+    const char *display_screen;   // "3072x1728 px (Display Name)" or NULL
     const char *display_dpi;      // "physical 96.1, Xft.dpi 192" or NULL
-    const char *display_scale;    // "sapp_dpi_scale 2.00, high_dpi true" or NULL
+    const char *display_scale;    // "content 2.00, window 2.00" or NULL
     const char *display_physical; // "1920x1080, 309x174 mm (eDP-1)" or NULL
 } PorttyDiag;
 
