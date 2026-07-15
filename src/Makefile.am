@@ -67,7 +67,7 @@ endif
 if BACKEND_SOKOL
 portty_SOURCES = main_sokol.c $(PORTTY_COMMON_SRC) \
     backend_sokol.c rend_sokol_atlas.c
-portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) $(SOKOL_CFLAGS) -I$(top_srcdir) \
+portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) -I$(top_srcdir)/third_party -I$(top_srcdir) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
 portty_LDADD = $(PORTTY_COMMON_LDADD)
 endif
