@@ -163,10 +163,12 @@ if HOST_MACOS
 if BACKEND_SDL3
 portty_LDFLAGS = -framework CoreText -framework CoreFoundation \
     -framework GameController -framework CoreHaptics \
-    -framework CoreMotion -framework CoreMedia
+    -framework CoreMotion -framework CoreMedia \
+    -framework ApplicationServices
 else
 portty_LDFLAGS = -framework AppKit -framework QuartzCore -framework Metal \
-    -framework CoreText -framework CoreFoundation
+    -framework CoreText -framework CoreFoundation \
+    -framework ApplicationServices
 endif
 else
 portty_LDFLAGS =
