@@ -20,7 +20,7 @@
 
 const char *display_info_get_physical(void)
 {
-    static char buf[256];
+    static char buf[512];
 
 #if defined(_WIN32)
     // Windows: use GetMonitorInfo + GetDeviceCaps for physical mm
@@ -70,7 +70,7 @@ const char *display_info_get_physical(void)
     struct dirent *ent;
     int found_w = 0, found_h = 0;
     int found_mm_w = 0, found_mm_h = 0;
-    char found_name[64] = "";
+    char found_name[256] = "";
 
     while ((ent = readdir(dir)) != NULL) {
         if (strncmp(ent->d_name, "card", 4) != 0)
@@ -79,7 +79,7 @@ const char *display_info_get_physical(void)
         if (!strchr(ent->d_name + 4, '-'))
             continue;
 
-        char path[256];
+        char path[512];
 
         // Check if enabled
         snprintf(path, sizeof(path), "/sys/class/drm/%s/enabled", ent->d_name);

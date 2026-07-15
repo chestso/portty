@@ -1748,7 +1748,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         }
         // Lottie: upload vertex buffer once, then render both layers
         int lottie_bg_count = 0;
-        int lottie_fg_count = 0;
         if (d->lottie_pip_created && terminal_lottie_count(term) > 0) {
             int anim_count = 0;
             const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
@@ -1782,7 +1781,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         }
         // Pass 4: draw foreground lottie (on top of everything)
         if (lottie_bg_count >= 0 && d->lottie_pip_created && terminal_lottie_count(term) > 0)
-            lottie_fg_count = sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
+            (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
     }
 
     // Screenshot automation: defer to after sg_commit (glReadPixels inside
@@ -2420,6 +2419,7 @@ PorttyBackend backend_sokol = {
 
 static void sokol_debug_screendump(SokolData *d, const char *path)
 {
+    (void)d;
     int ss_w = (int)sapp_width();
     int ss_h = (int)sapp_height();
     uint8_t *pixels = malloc((size_t)ss_w * ss_h * 4);

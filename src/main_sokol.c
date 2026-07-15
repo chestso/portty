@@ -130,7 +130,6 @@ sapp_desc sokol_main(int argc, char *argv[])
     int opt;
     int list_fonts = 0;
     char *demo_text = NULL;
-    const char *font_name = NULL;
     const char *colr_debug_path = NULL;
     char **exec_argv = NULL;
     const float font_size = 12.0f;
@@ -160,8 +159,6 @@ sapp_desc sokol_main(int argc, char *argv[])
 
     if (conf->verbose == 1)
         verbose = 1;
-    if (conf->font)
-        font_name = conf->font;
     if (conf->cols > 0)
         init_cols = conf->cols;
     if (conf->rows > 0)
@@ -194,7 +191,6 @@ sapp_desc sokol_main(int argc, char *argv[])
             break;
         case 'f':
             conf->font = optarg;
-            font_name = optarg;
             break;
         case 'L':
             list_fonts = 1;
