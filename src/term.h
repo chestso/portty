@@ -356,6 +356,7 @@ bool terminal_get_line_continuation(TerminalBackend *term, int row);
 // Selection API
 void terminal_selection_start(TerminalBackend *term, int row, int col, TerminalSelectMode mode);
 void terminal_selection_update(TerminalBackend *term, int row, int col);
+void terminal_selection_extend(TerminalBackend *term, int row, int col);
 void terminal_selection_clear(TerminalBackend *term);
 bool terminal_selection_active(TerminalBackend *term);
 bool terminal_cell_in_selection(TerminalBackend *term, int row, int col);

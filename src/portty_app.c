@@ -601,6 +601,10 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
         } else if (clicks == 2) {
             app->drag_pending = false;
             terminal_selection_start(app->term, unified_row, display_col, TERM_SELECT_WORD);
+        } else if (shift_held && terminal_selection_active(app->term)) {
+            app->drag_pending = false;
+            terminal_selection_extend(app->term, unified_row, display_col);
+            terminal_mark_dirty(app->term);
         } else if (terminal_selection_active(app->term)) {
             app->drag_pending = false;
             terminal_selection_clear(app->term);

@@ -613,6 +613,42 @@ void terminal_selection_update(TerminalBackend *term, int row, int col)
     }
 }
 
+void terminal_selection_extend(TerminalBackend *term, int row, int col)
+{
+    if (!term || !term->selection.active)
+        return;
+
+    TerminalSelection *sel = &term->selection;
+    TerminalPos click = { row, col };
+
+    int cmp_start = selpos_cmp(click, sel->start);
+    int cmp_end = selpos_cmp(click, sel->end);
+
+    if (cmp_start <= 0) {
+        sel->start = click;
+        sel->anchor = sel->end;
+    } else if (cmp_end >= 0) {
+        sel->end = click;
+        sel->anchor = sel->start;
+    } else {
+        int d_start = (click.row - sel->start.row) * 1000000 + (click.col - sel->start.col);
+        int d_end = (sel->end.row - click.row) * 1000000 + (sel->end.col - click.col);
+        if (d_start <= d_end) {
+            sel->start = click;
+            sel->anchor = sel->end;
+        } else {
+            sel->end = click;
+            sel->anchor = sel->start;
+        }
+    }
+
+    if (selpos_cmp(sel->start, sel->end) > 0) {
+        TerminalPos tmp = sel->start;
+        sel->start = sel->end;
+        sel->end = tmp;
+    }
+}
+
 bool terminal_cell_in_selection(TerminalBackend *term, int row, int col)
 {
     if (!term || !term->selection.active)
