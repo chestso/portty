@@ -48,8 +48,14 @@ float portty_text_contrast = 0.0f;
 bool portty_notification_transparent = false;
 
 /* ASan/UBSan runtime defaults. */
-#if defined(__SANITIZE_ADDRESS__) || \
-    (defined(__has_feature) && __has_feature(address_sanitizer))
+#if defined(__SANITIZE_ADDRESS__)
+#define PORTTY_HAS_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PORTTY_HAS_ASAN 1
+#endif
+#endif
+#ifdef PORTTY_HAS_ASAN
 const char *__asan_default_options(void)
 {
     return "abort_on_error=1:disable_coredump=0:detect_leaks=0:"
