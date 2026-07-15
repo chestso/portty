@@ -127,7 +127,7 @@ AS_CASE([$portty_backend],
       ],
       [*mingw*|*msys*], [
         AC_DEFINE([SOKOL_D3D11], [1], [Use Sokol D3D11 backend])
-        PLATFORM_LIBS="-ld3d11 -ldxgi -lkernel32 -luser32 -lshell32 -lole32 -ladvapi32 -ldwrite -lgdi32 -ldwmapi -lwinpthread"
+        PLATFORM_LIBS="-ld3d11 -ldxgi -ldxguid -lkernel32 -luser32 -lshell32 -lole32 -ladvapi32 -ldwrite -lgdi32 -ldwmapi -lwinpthread"
       ],
       [*darwin*], [
         AC_DEFINE([SOKOL_METAL], [1], [Use Sokol Metal backend])
