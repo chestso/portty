@@ -32,7 +32,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: chestso/coffer
-          ref: v0.1.3
+          ref: v0.1.4
           path: coffer
           fetch-depth: 0
 
