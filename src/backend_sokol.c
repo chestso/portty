@@ -28,9 +28,14 @@
 #include "term.h"
 #include "timer.h"
 #include "unicode.h"
+#ifdef _WIN32
+#include <pthread.h>
+#include <io.h>
+#else
 #include <pthread.h>
 #include <poll.h>
 #include <unistd.h>
+#endif
 #include <errno.h>
 #include <signal.h>
 #include <time.h>
@@ -149,7 +154,11 @@ typedef struct
     // PTY reader thread
     pthread_t pty_thread;
     bool pty_thread_running;
+#ifndef _WIN32
     int wakeup_pipe[2]; // [0]=read, [1]=write
+#else
+    HANDLE wakeup_event;
+#endif
     pthread_mutex_t pty_queue_mtx;
     PtyDataNode *pty_queue_head;
     PtyDataNode *pty_queue_tail;
@@ -266,17 +275,29 @@ static void sokol_destroy(PorttyBackend *self)
     // Stop PTY reader thread
     if (d->pty_thread_running) {
         d->pty_thread_running = false;
+#ifdef _WIN32
+        if (d->wakeup_event)
+            SetEvent(d->wakeup_event);
+#else
         if (d->wakeup_pipe[1] >= 0) {
             char c = 1;
             (void)write(d->wakeup_pipe[1], &c, 1);
         }
+#endif
         pthread_join(d->pty_thread, NULL);
         d->pty_thread_running = false;
     }
+#ifndef _WIN32
     if (d->wakeup_pipe[0] >= 0)
         close(d->wakeup_pipe[0]);
     if (d->wakeup_pipe[1] >= 0)
         close(d->wakeup_pipe[1]);
+#else
+    if (d->wakeup_event) {
+        CloseHandle(d->wakeup_event);
+        d->wakeup_event = NULL;
+    }
+#endif
 
     // Free pending PTY data
     PtyDataNode *node = d->pty_queue_head;
@@ -390,6 +411,72 @@ static bool sokol_clipboard_paste_async(PorttyBackend *self,
 
 // ── PTY thread ───────────────────────────────────────────────────────────
 
+#ifdef _WIN32
+static void *sokol_pty_reader_thread(void *arg)
+{
+    SokolData *d = (SokolData *)arg;
+    char buf[SOKOL_PTY_BUF_SIZE];
+
+    vlog("sokol_pty_reader_thread: started (W32)\n");
+
+    HANDLE hProcess = (HANDLE)pty_get_process_handle(d->pty);
+
+    while (d->pty_thread_running) {
+        if (d->pty_paused) {
+            HANDLE wait_h[2] = { d->wakeup_event, hProcess };
+            DWORD wr = WaitForMultipleObjects(2, wait_h, FALSE, INFINITE);
+            ResetEvent(d->wakeup_event);
+            if (wr == WAIT_OBJECT_0) {
+                if (!d->pty_thread_running)
+                    break;
+                continue;
+            }
+            if (wr == WAIT_OBJECT_0 + 1) {
+                vlog("sokol_pty_reader_thread: child process exited\n");
+                break;
+            }
+            break;
+        }
+
+        ssize_t n = pty_read(d->pty, buf, sizeof(buf));
+        if (n > 0) {
+            PtyDataNode *node = malloc(sizeof(PtyDataNode) + n);
+            if (node) {
+                node->next = NULL;
+                node->len = (size_t)n;
+                memcpy(node->data, buf, n);
+                pthread_mutex_lock(&d->pty_queue_mtx);
+                if (d->pty_queue_tail)
+                    d->pty_queue_tail->next = node;
+                else
+                    d->pty_queue_head = node;
+                d->pty_queue_tail = node;
+                pthread_mutex_unlock(&d->pty_queue_mtx);
+            }
+        } else if (n == 0) {
+            break;
+        } else {
+            DWORD err = GetLastError();
+            if (err == ERROR_BROKEN_PIPE) {
+                vlog("sokol_pty_reader_thread: pipe closed\n");
+            } else {
+                vlog("sokol_pty_reader_thread: read error: %lu\n", err);
+            }
+            break;
+        }
+
+        if (!pty_is_running(d->pty)) {
+            vlog("sokol_pty_reader_thread: child exited after read\n");
+            break;
+        }
+    }
+
+    pthread_mutex_lock(&d->pty_queue_mtx);
+    d->pty_closed = true;
+    pthread_mutex_unlock(&d->pty_queue_mtx);
+    return NULL;
+}
+#else
 static void *sokol_pty_reader_thread(void *arg)
 {
     SokolData *d = (SokolData *)arg;
@@ -453,6 +540,7 @@ static void *sokol_pty_reader_thread(void *arg)
     pthread_mutex_unlock(&d->pty_queue_mtx);
     return NULL;
 }
+#endif
 
 static void sokol_drain_pty(SokolData *d)
 {
@@ -514,18 +602,29 @@ static bool sokol_register_pty(PorttyBackend *self, PtyContext *pty)
         return false;
     d->pty = pty;
 
+#ifdef _WIN32
+    d->wakeup_event = CreateEventW(NULL, TRUE, FALSE, NULL);
+    if (!d->wakeup_event)
+        return false;
+#else
     if (pipe(d->wakeup_pipe) != 0) {
         d->wakeup_pipe[0] = d->wakeup_pipe[1] = -1;
         return false;
     }
+#endif
 
     d->pty_thread_running = true;
     int rc = pthread_create(&d->pty_thread, NULL, sokol_pty_reader_thread, d);
     if (rc != 0) {
         d->pty_thread_running = false;
+#ifdef _WIN32
+        CloseHandle(d->wakeup_event);
+        d->wakeup_event = NULL;
+#else
         close(d->wakeup_pipe[0]);
         close(d->wakeup_pipe[1]);
         d->wakeup_pipe[0] = d->wakeup_pipe[1] = -1;
+#endif
         return false;
     }
     vlog("sokol_register_pty: reader thread started\n");
