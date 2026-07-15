@@ -93,6 +93,7 @@ enum
 
 #define SOKOL_LOTTIE_CACHE_MAX 64
 #define SOKOL_LOTTIE_TICK_MS   16
+#define SOKOL_SIXEL_CACHE_MAX  256
 
 typedef struct
 {
@@ -102,6 +103,15 @@ typedef struct
     uint32_t version;
     int w, h;
 } SokolLottieCacheEntry;
+
+typedef struct
+{
+    sg_image image;
+    sg_view view;
+    uint64_t id;
+    uint32_t version;
+    int w, h;
+} SokolSixelCacheEntry;
 
 typedef struct PtyDataNode
 {
@@ -200,6 +210,11 @@ typedef struct
     sg_buffer lottie_vbuf;
     sg_sampler lottie_sampler;
     bool lottie_pip_created;
+    // Sixel image rendering
+    SokolSixelCacheEntry sixel_cache[SOKOL_SIXEL_CACHE_MAX];
+    int sixel_cache_count;
+    sg_buffer sixel_vbuf;
+    bool sixel_vbuf_created;
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
@@ -349,6 +364,17 @@ static void sokol_destroy(PorttyBackend *self)
         sg_destroy_buffer(d->lottie_vbuf);
         sg_destroy_sampler(d->lottie_sampler);
     }
+
+    // Destroy sixel cache and vbuf
+    for (int i = 0; i < d->sixel_cache_count; i++) {
+        if (d->sixel_cache[i].image.id != SG_INVALID_ID)
+            sg_destroy_image(d->sixel_cache[i].image);
+        if (d->sixel_cache[i].view.id != SG_INVALID_ID)
+            sg_destroy_view(d->sixel_cache[i].view);
+    }
+    d->sixel_cache_count = 0;
+    if (d->sixel_vbuf_created)
+        sg_destroy_buffer(d->sixel_vbuf);
 
     if (d->tex_created)
         sg_destroy_image(d->tex);
@@ -858,6 +884,8 @@ static GlyphVertex s_glyph_verts[SOKOL_MAX_VERTICES];
 
 static GlyphVertex s_lottie_verts[SOKOL_MAX_LOTTIE_VERTICES];
 
+#define SOKOL_MAX_SIXEL_VERTICES 4096
+
 static void sokol_ensure_lottie_pipeline(SokolData *d)
 {
     if (d->lottie_pip_created)
@@ -1150,6 +1178,215 @@ static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
     }
 
     return vert_base - vert_offset;
+}
+
+// --- Sixel image cache and rendering ---
+
+static void sixel_cache_reconcile(SokolData *d, const CfrSixel *imgs, int count)
+{
+    for (int i = 0; i < d->sixel_cache_count;) {
+        bool live = false;
+        for (int j = 0; j < count; j++) {
+            if (imgs[j].id == d->sixel_cache[i].id) {
+                live = true;
+                break;
+            }
+        }
+        if (live) {
+            i++;
+        } else {
+            if (d->sixel_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->sixel_cache[i].image);
+            if (d->sixel_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->sixel_cache[i].view);
+            d->sixel_cache[i] = d->sixel_cache[--d->sixel_cache_count];
+        }
+    }
+}
+
+static int sixel_get_texture(SokolData *d, const CfrSixel *img)
+{
+    for (int i = 0; i < d->sixel_cache_count; i++) {
+        if (d->sixel_cache[i].id != img->id)
+            continue;
+        if (d->sixel_cache[i].w != img->width_px ||
+            d->sixel_cache[i].h != img->height_px) {
+            if (d->sixel_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->sixel_cache[i].image);
+            if (d->sixel_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->sixel_cache[i].view);
+            d->sixel_cache[i].image.id = SG_INVALID_ID;
+            d->sixel_cache[i].view.id = SG_INVALID_ID;
+        } else if (d->sixel_cache[i].version != img->version) {
+            sg_update_image(d->sixel_cache[i].image, &(sg_image_data){
+                                                         .mip_levels[0] = {
+                                                             .ptr = (void *)img->rgba,
+                                                             .size = (size_t)img->width_px * img->height_px * 4,
+                                                         },
+                                                     });
+            d->sixel_cache[i].version = img->version;
+            return i;
+        } else {
+            return i;
+        }
+        d->sixel_cache[i].image = sg_make_image(&(sg_image_desc){
+            .width = img->width_px,
+            .height = img->height_px,
+            .pixel_format = SG_PIXELFORMAT_RGBA8,
+            .usage.dynamic_update = true,
+            .label = "sokol-sixel",
+        });
+        d->sixel_cache[i].view = sg_make_view(&(sg_view_desc){
+            .texture.image = d->sixel_cache[i].image,
+            .label = "sokol-sixel-view",
+        });
+        sg_update_image(d->sixel_cache[i].image, &(sg_image_data){
+                                                     .mip_levels[0] = {
+                                                         .ptr = (void *)img->rgba,
+                                                         .size = (size_t)img->width_px * img->height_px * 4,
+                                                     },
+                                                 });
+        d->sixel_cache[i].version = img->version;
+        d->sixel_cache[i].w = img->width_px;
+        d->sixel_cache[i].h = img->height_px;
+        return i;
+    }
+
+    if (d->sixel_cache_count >= SOKOL_SIXEL_CACHE_MAX)
+        return -1;
+
+    sg_image img_obj = sg_make_image(&(sg_image_desc){
+        .width = img->width_px,
+        .height = img->height_px,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.dynamic_update = true,
+        .label = "sokol-sixel",
+    });
+    sg_update_image(img_obj, &(sg_image_data){
+                                 .mip_levels[0] = {
+                                     .ptr = (void *)img->rgba,
+                                     .size = (size_t)img->width_px * img->height_px * 4,
+                                 },
+                             });
+    sg_view view = sg_make_view(&(sg_view_desc){
+        .texture.image = img_obj,
+        .label = "sokol-sixel-view",
+    });
+    int n = d->sixel_cache_count++;
+    d->sixel_cache[n].image = img_obj;
+    d->sixel_cache[n].view = view;
+    d->sixel_cache[n].id = img->id;
+    d->sixel_cache[n].version = img->version;
+    d->sixel_cache[n].w = img->width_px;
+    d->sixel_cache[n].h = img->height_px;
+    return n;
+}
+
+static void sokol_ensure_sixel_vbuf(SokolData *d)
+{
+    if (d->sixel_vbuf_created)
+        return;
+    d->sixel_vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .size = SOKOL_MAX_SIXEL_VERTICES * sizeof(GlyphVertex),
+        .usage.dynamic_update = true,
+        .label = "sokol-sixel-vbuf",
+    });
+    d->sixel_vbuf_created = true;
+}
+
+static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
+{
+    int count = 0;
+    const CfrSixel *imgs = terminal_get_sixels(term, &count);
+    sixel_cache_reconcile(d, imgs, count);
+    if (count == 0)
+        return;
+
+    int cell_w = d->cell_w;
+    int cell_h = d->cell_h;
+    float scale = d->content_scale > 0.0f ? d->content_scale : 1.0f;
+    int win_w = (int)sapp_width();
+    int win_h = (int)sapp_height();
+    int scroll_offset = d->scroll.scroll_offset;
+    float uniforms[2] = { (float)win_w, (float)win_h };
+    uint8_t full_op[4] = { 255, 255, 255, 255 };
+
+    static GlyphVertex sixel_verts[SOKOL_MAX_SIXEL_VERTICES];
+    int vert_count = 0;
+
+    // Pass 1: build all vertices and ensure textures are cached
+    for (int i = 0; i < count; i++) {
+        const CfrSixel *img = &imgs[i];
+
+        int screen_row = img->row + scroll_offset;
+        int px = img->col * cell_w;
+        int py = screen_row * cell_h;
+        int scaled_w = (int)(img->width_px * scale);
+        int scaled_h = (int)(img->height_px * scale);
+
+        if (py + scaled_h <= 0 || py >= win_h)
+            continue;
+        if (px + scaled_w <= 0 || px >= win_w)
+            continue;
+        if (vert_count + 6 > SOKOL_MAX_SIXEL_VERTICES)
+            break;
+
+        float x0 = (float)px;
+        float y0 = (float)py;
+        float x1 = x0 + (float)scaled_w;
+        float y1 = y0 + (float)scaled_h;
+
+        GlyphVertex *q = &sixel_verts[vert_count];
+        q[0] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
+        q[1] = (GlyphVertex){ x1, y0, 1.0f, 0.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
+        q[2] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
+        q[3] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
+        q[4] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
+        q[5] = (GlyphVertex){ x0, y1, 0.0f, 1.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
+
+        vert_count += 6;
+    }
+
+    if (vert_count == 0)
+        return;
+
+    // Upload vertex buffer once
+    sg_update_buffer(d->sixel_vbuf, &(sg_range){
+                                        .ptr = sixel_verts,
+                                        .size = (size_t)vert_count * sizeof(GlyphVertex),
+                                    });
+
+    // Pass 2: draw each image's 6 verts with its own texture
+    int vert_offset = 0;
+    for (int i = 0; i < count; i++) {
+        const CfrSixel *img = &imgs[i];
+
+        int screen_row = img->row + scroll_offset;
+        int px = img->col * cell_w;
+        int py = screen_row * cell_h;
+        int scaled_w = (int)(img->width_px * scale);
+        int scaled_h = (int)(img->height_px * scale);
+
+        if (py + scaled_h <= 0 || py >= win_h)
+            continue;
+        if (px + scaled_w <= 0 || px >= win_w)
+            continue;
+        if (vert_offset + 6 > vert_count)
+            break;
+
+        int cache_idx = sixel_get_texture(d, img);
+        if (cache_idx >= 0 && d->lottie_pip_created) {
+            sg_apply_pipeline(d->lottie_pip);
+            sg_apply_bindings(&(sg_bindings){
+                .vertex_buffers[0] = d->sixel_vbuf,
+                .views[0] = d->sixel_cache[cache_idx].view,
+                .samplers[0] = d->lottie_sampler,
+            });
+            sg_apply_uniforms(0, &SG_RANGE(uniforms));
+            sg_draw(vert_offset, 6, 1);
+        }
+        vert_offset += 6;
+    }
 }
 
 static void sokol_ensure_glyph_pipeline(SokolData *d)
@@ -1890,6 +2127,11 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         // Pass 4: draw foreground lottie (on top of everything)
         if (lottie_bg_count >= 0 && d->lottie_pip_created && terminal_lottie_count(term) > 0)
             (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
+        // Pass 5: draw sixel images (on top of text and lottie)
+        if (d->lottie_pip_created) {
+            sokol_ensure_sixel_vbuf(d);
+            sokol_render_sixel_images(d, term);
+        }
     }
 
     // Screenshot automation: defer to after sg_commit (glReadPixels inside
@@ -2701,6 +2943,7 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     terminal_get_dimensions(app->term, &term_rows, &term_cols);
     if (self->get_cell_size(self, &cell_w, &cell_h)) {
         terminal_set_cell_px(app->term, cell_w, cell_h);
+        terminal_set_content_scale(app->term, d->content_scale > 0.0f ? d->content_scale : 1.0f);
         win_w = term_cols * cell_w;
         win_h = term_rows * cell_h;
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);

@@ -771,6 +771,12 @@ void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
         term->set_cell_px(term, cell_w, cell_h);
 }
 
+void terminal_set_content_scale(TerminalBackend *term, float scale)
+{
+    if (term && term->set_content_scale)
+        term->set_content_scale(term, scale);
+}
+
 const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count)
 {
     if (count)

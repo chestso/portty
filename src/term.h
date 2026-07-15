@@ -205,6 +205,7 @@ struct TerminalBackend
     // the pixel size of a character cell so it can place images in rows.
     const CfrSixel *(*get_sixels)(TerminalBackend *term, int *count);
     void (*set_cell_px)(TerminalBackend *term, int cell_w, int cell_h);
+    void (*set_content_scale)(TerminalBackend *term, float scale);
 
     // Lottie animations (owned by the VT engine). Same ownership model as
     // sixel: engine owns pixel data, host owns GPU texture cache.
@@ -404,6 +405,7 @@ int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_c
 // tells the engine the cell pixel size for row placement.
 const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count);
 void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h);
+void terminal_set_content_scale(TerminalBackend *term, float scale);
 
 // Lottie animation API. Same ownership model as sixel.
 const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count);

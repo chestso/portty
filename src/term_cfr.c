@@ -578,6 +578,11 @@ static void cfr_back_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
     CfrBackendData *d = term->backend_data;
     cfr_set_cell_pixels(d->vt, cell_w, cell_h);
 }
+static void cfr_back_set_content_scale(TerminalBackend *term, float scale)
+{
+    CfrBackendData *d = term->backend_data;
+    cfr_set_content_scale(d->vt, scale);
+}
 static bool cfr_back_get_cursor_blink(TerminalBackend *term)
 {
     CfrBackendData *d = term->backend_data;
@@ -960,6 +965,7 @@ TerminalBackend terminal_backend_cfr = {
     .set_scrollback_size = cfr_back_set_scrollback_size,
     .get_sixels = cfr_back_get_sixels,
     .set_cell_px = cfr_back_set_cell_px,
+    .set_content_scale = cfr_back_set_content_scale,
     .get_lotties = cfr_back_get_lotties,
     .get_lottie_placements = cfr_back_get_lottie_placements,
     .lottie_tick = cfr_back_lottie_tick,

@@ -384,6 +384,7 @@ int main(int argc, char *argv[])
     int win_w = 800, win_h = 600;
     if (backend.get_cell_size(&backend, &cell_w, &cell_h)) {
         terminal_set_cell_px(term, cell_w, cell_h);
+        terminal_set_content_scale(term, backend.get_display_scale(&backend));
         win_w = init_cols * cell_w;
         win_h = init_rows * cell_h;
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);

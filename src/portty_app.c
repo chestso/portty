@@ -428,6 +428,7 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
     int cell_w, cell_h;
     if (app_get_cell_size(app, &cell_w, &cell_h)) {
         terminal_set_cell_px(app->term, cell_w, cell_h);
+        terminal_set_content_scale(app->term, app->backend->get_display_scale(app->backend));
         int cols = pixel_w / cell_w;
         int rows = pixel_h / cell_h;
         if (cols > 0 && rows > 0) {
