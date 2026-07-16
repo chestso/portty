@@ -327,9 +327,6 @@ macOS only:
 
 - Core Text + Core Foundation (system frameworks, always available; SDL3 also links GameController, CoreHaptics, CoreMotion, and CoreMedia)
 
-
-
-
 ## plotty — Lottie Player
 
 [plotty](contrib/plotty) is a Python TUI application that plays Lottie animations in portty using the APC protocol. It provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling.
@@ -371,8 +368,6 @@ portty -- plotty animation.json
 | `[`/`]` | Opacity -/+ 10%     |
 | `?`     | Toggle help panel   |
 | `q`     | Quit                |
-
-
 
 ## Author
 
