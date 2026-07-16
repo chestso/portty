@@ -438,3 +438,163 @@ is black. This is a subtle OpenGL rasterization/sampling difference between SDL3
   three-pass draw calls
 - `src/rend_boxdraw.c` — shared procedural box-drawing bitmap generation
   (unchanged; modifications here affect SDL3 too)
+
+---
+
+## 6. Unimplemented Terminfo Capabilities
+
+These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
+but are not yet fully implemented. coffer now has explicit case handlers (no
+more silent `default: break` fallthrough) with logging for unimplemented
+sequences. portty renders none of these yet.
+
+### Stateful (parsed and stored in coffer, renderer noop)
+
+These follow the blink pattern: `CFR_ATTR_BLINK` is parsed and stored in
+coffer, portty maps it to `TerminalCellAttr.blink`, but neither renderer reads
+it.
+
+| Capability                   | Sequence    | coffer status                                               | portty renderer                                               |
+| ---------------------------- | ----------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
+| `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Noop (not read by either backend)                             |
+| `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Noop (not read by either backend)                             |
+| `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Noop (not read by either backend)                             |
+| `flash` (DECSCNM, ?5)        | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Noop (screen-level reverse not handled; per-cell SGR 7 works) |
+| `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                          |
+| `smglr`/`mgc` (margins, ?69) | `\E[?69h`   | `CFR_MODE_LEFT_RIGHT_MARGINS` tracked, logged once          | Noop                                                          |
+
+### Full implementation design for left/right margins (?69)
+
+DECSET ?69 enables left/right margin support via DECSLRM (`CSI Pl;Pr s`).
+Full implementation requires:
+
+- **New fields in CfrTerm:** `int margin_left`, `margin_right` (default 0 and
+  `cols - 1`).
+- **DECSLRM dispatch** (`CSI Pl;Pr s` with `?69`): Parse and validate left/right
+  margins. Only act when `CFR_MODE_LEFT_RIGHT_MARGINS` is on.
+- **Print path:** Autowrap checks against `margin_right` instead of `cols - 1`.
+- **Cursor movement:** Clamp cursor column to `[margin_left, margin_right]`.
+- **Erase operations:** `EL` (erase in line) and `ED` (erase in display)
+  respect left/right margins when origin mode + margins are on.
+- **Scroll operations:** `IL`/`DL`/`SU`/`SD` respect all four margins.
+- ** DECSTBM interaction:** Top/bottom margins (`scroll_top`/`scroll_bottom`)
+  already work; left/right would need similar clamping in the same code paths.
+- ** DECSET ?69l (reset):** Restore margins to full width.
+- **Origin mode (DECOM):** When both DECOM and ?69 are on, cursor coordinates
+  are relative to the top-left of the margin region.
+
+### Noop + log (no state to track)
+
+| Capability                | Sequence    | coffer status                        |
+| ------------------------- | ----------- | ------------------------------------ |
+| `mc0`/`mc4`/`mc5` (CSI i) | `\E[i` etc. | Logged once per CfrTerm, then silent |
+| `meml` (ESC l)            | `\El`       | Logged once per CfrTerm, then silent |
+| `memu` (ESC m)            | `\Em`       | Logged once per CfrTerm, then silent |
+| `initc` (OSC 4)           | `\E]4;...`  | Logged once per CfrTerm, then silent |
+| `oc` (OSC 104)            | `\E]104`    | Logged once per CfrTerm, then silent |
+
+### Fully implemented in coffer
+
+| Capability         | Sequence    | coffer status                                        |
+| ------------------ | ----------- | ---------------------------------------------------- |
+| `rep` (REP, CSI b) | `\E[%p1%db` | Fully implemented: repeats last printed char N times |
+
+### Backend-specific rendering gaps
+
+Some attributes are parsed and stored by coffer but only rendered by one
+backend. These are not terminfo concerns (both backends handle the same VT
+input), but are important to track for visual parity.
+
+**Rendered by SDL3 only (not Sokol):**
+
+| Attribute                                                   | SDL3                  | Sokol           |
+| ----------------------------------------------------------- | --------------------- | --------------- |
+| underline (5 styles: single, double, curly, dotted, dashed) | `rend_sdl3.c:124-234` | Not implemented |
+| strikethrough                                               | `rend_sdl3.c:240`     | Not implemented |
+| `ul_color` (underline color)                                | `rend_sdl3.c:1051`    | Not implemented |
+
+**Rendered differently between backends:**
+
+| Attribute       | SDL3                                    | Sokol                                                    |
+| --------------- | --------------------------------------- | -------------------------------------------------------- |
+| reverse (SGR 7) | Pre-swaps fg/bg in `term_cfr.c:511-516` | Reads `attrs.reverse` directly at `backend_sokol.c:1694` |
+
+**Not rendered by either backend:**
+
+| Attribute                    | Stored in `TerminalCellAttr` | SDL3        | Sokol       |
+| ---------------------------- | ---------------------------- | ----------- | ----------- |
+| blink (SGR 5)                | `blink:1`                    | Not read    | Not read    |
+| dim (SGR 2)                  | `dim:1`                      | Not read    | Not read    |
+| invis (SGR 8)                | `invis:1`                    | Not read    | Not read    |
+| font (SGR 10-19)             | `font:4`                     | Not read    | Not read    |
+| dwl (DECDWL)                 | `dwl:1`                      | Not read    | Not read    |
+| dhl (DECDHL)                 | `dhl:2`                      | Not read    | Not read    |
+| DECSCNM (screen reverse, ?5) | N/A (mode, not cell attr)    | Not handled | Not handled |
+
+Note: cursor blink (DECSET ?12) is separate from text blink (SGR 5) and is
+fully implemented in both backends via timer-based cursor visibility toggling.
+
+---
+
+## 7. Popular Unsupported Capabilities
+
+These capabilities are not in the terminfo entry, not inherited, and not
+implemented, but are commonly expected by modern TUIs.
+
+### OSC 11 (set default foreground color)
+
+Not in terminfo, not implemented. Some TUIs query this to detect background
+color for contrast detection. coffer's OSC dispatcher forwards unknown OSCs to
+the generic `callbacks.osc` hook, but portty does not handle OSC 11. Full
+implementation would require parsing `OSC 11 ; ?` queries (responding with the
+current default foreground RGB) and `OSC 11 ; rgb:R/G/B` sets.
+
+### OSC 12 (set default background color)
+
+Not in terminfo, not implemented. Same use as OSC 11 for background color
+detection. Would follow the same parse/respond/set pattern.
+
+### OSC 112 (reset cursor color)
+
+Not in terminfo, not implemented. Resets cursor color to default (same as
+`Cr=\E]112\007` in xterm-256color, which resets cursor color specifically, as
+opposed to OSC 12 which sets it).
+
+### SGR 53 (overline)
+
+Inherited from xterm-256color as an accepted-but-ignored SGR. Would need a
+new `CFR_ATTR_OVERLINE` and renderer support (draw a line above the cell).
+Note: terminfo has no standard cap for overline; it is a SGR-only feature.
+
+### SGR 21 (double underline)
+
+Inherited from xterm-256color as an accepted-but-ignored SGR. Could map to
+underline style 2 (double) which coffer already supports via SGR 4:2.
+Alternatively, add `case 21:` that sets `pen.underline = CFR_UL_DOUBLE`.
+
+### XTVERSION (CSI > q)
+
+Not in terminfo, not implemented. TUIs use this to query the terminal's name
+and version for feature detection. The `RV` cap in xterm-256color sends
+`ESC[>c` but coffer does not respond to `CSI > q` (XTVERSION query). DA2
+(`CSI > c`) IS implemented and responds with `ESC[>1;0;0c`.
+
+### E3 (clear scrollback)
+
+Inherited from xterm-256color as `\E[3J`. coffer handles `CSI 3 J` but routes
+it to the same code path as `CSI 2 J` (clear visible grid only). The
+scrollback buffer is NOT purged. `cfr_scrollback_clear()` exists but is never
+called from the ED path. Fix: call `cfr_scrollback_clear(vt)` in the `case 3:`
+branch of `cfr_erase_in_display()`.
+
+### DECSCA (Select Character Protection, CSI " q)
+
+Not in terminfo, not implemented. Used for protected characters that survive
+erase operations. Would require a per-cell protection attribute and
+modification of all erase operations to check it.
+
+### SGR font selection (10-19)
+
+Parsed and stored in `attrs.font` but no renderer reads it. Full
+implementation would require loading and selecting alternate font faces via
+SGR 10 (primary), 11-19 (alternative fonts).
