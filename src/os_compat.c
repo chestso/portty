@@ -54,6 +54,43 @@ bool os_compat_get_exe_path(char *buf, size_t bufsize)
 #endif
 }
 
+bool os_compat_open_url(const char *url, char *err, size_t errlen)
+{
+    if (!url || !url[0]) {
+        if (err && errlen > 0)
+            snprintf(err, errlen, "empty URL");
+        return false;
+    }
+
+#ifdef _WIN32
+    WCHAR wurl[4096];
+    MultiByteToWideChar(CP_UTF8, 0, url, -1, wurl, 4096);
+    HINSTANCE r = ShellExecuteW(NULL, L"open", wurl, NULL, NULL, SW_SHOWNORMAL);
+    if ((INT_PTR)r > 32)
+        return true;
+    if (err && errlen > 0)
+        snprintf(err, errlen, "ShellExecuteW failed");
+    return false;
+#else
+    pid_t pid = fork();
+    if (pid < 0) {
+        if (err && errlen > 0)
+            snprintf(err, errlen, "fork failed: %s", strerror(errno));
+        return false;
+    }
+    if (pid == 0) {
+        setsid();
+#if defined(__APPLE__)
+        execlp("open", "open", url, (char *)NULL);
+#else
+        execlp("xdg-open", "xdg-open", url, (char *)NULL);
+#endif
+        _exit(1);
+    }
+    return true;
+#endif
+}
+
 bool os_compat_spawn_process(const char *exe_path, const char *cwd)
 {
     if (!exe_path || !exe_path[0])

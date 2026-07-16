@@ -901,15 +901,7 @@ static bool sdl3_open_url(PorttyBackend *self, const char *url,
                           char *err, size_t errlen)
 {
     (void)self;
-    if (!url)
-        return false;
-    if (SDL_OpenURL(url))
-        return true;
-    if (err && errlen > 0) {
-        const char *msg = SDL_GetError();
-        snprintf(err, errlen, "%s", (msg && *msg) ? msg : "unknown error");
-    }
-    return false;
+    return os_compat_open_url(url, err, errlen);
 }
 
 static void sdl3_set_autoscroll(PorttyBackend *self, bool enabled)

@@ -192,6 +192,7 @@ typedef struct
     bool cursor_blink_visible;
     bool has_focus;
     bool linear_ok;
+    PorttyCursor current_cursor;
     // Render scheduler
     RenderMode render_mode;
     double record_fps;
@@ -750,18 +751,24 @@ static bool sokol_get_display_size(PorttyBackend *self, int *w, int *h)
 
 static void sokol_set_cursor(PorttyBackend *self, PorttyCursor shape)
 {
-    (void)self;
-    (void)shape;
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
+    PorttyCursor cursor = (shape == PORTTY_CURSOR_POINTER) ? PORTTY_CURSOR_POINTER
+                                                           : PORTTY_CURSOR_TEXT;
+    if (d->current_cursor == cursor)
+        return;
+    sapp_set_mouse_cursor(cursor == PORTTY_CURSOR_POINTER
+                              ? SAPP_MOUSECURSOR_POINTING_HAND
+                              : SAPP_MOUSECURSOR_IBEAM);
+    d->current_cursor = cursor;
 }
 
 static bool sokol_open_url(PorttyBackend *self, const char *url,
                            char *err, size_t errlen)
 {
     (void)self;
-    (void)url;
-    if (err && errlen)
-        snprintf(err, errlen, "open_url not implemented for Sokol backend");
-    return false;
+    return os_compat_open_url(url, err, errlen);
 }
 
 static void sokol_set_autoscroll(PorttyBackend *self, bool enabled)
