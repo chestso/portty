@@ -139,6 +139,38 @@ bool rend_is_color_font(FontBackend *font, FontStyle style)
     return style == FONT_STYLE_EMOJI || font_style_has_colr(font, style);
 }
 
+bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
+                           bool emoji_font_available, bool emoji_has_glyph)
+{
+    if (!emoji_font_available || cp_count <= 0)
+        return false;
+
+    uint32_t cp0 = cps[0];
+
+    bool has_vs15 = false;
+    bool has_vs16 = false;
+    for (int i = 1; i < cp_count; i++) {
+        if (cps[i] == UNICODE_VARIATION_SELECTOR_15)
+            has_vs15 = true;
+        else if (cps[i] == UNICODE_VARIATION_SELECTOR_16)
+            has_vs16 = true;
+    }
+
+    if (has_vs15 && has_vs16) {
+        return emoji_has_glyph;
+    }
+
+    if (!has_vs15 && (has_vs16 || is_regional_indicator(cp0))) {
+        return true;
+    }
+
+    if (is_emoji_presentation(cp0)) {
+        return emoji_has_glyph;
+    }
+
+    return false;
+}
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================

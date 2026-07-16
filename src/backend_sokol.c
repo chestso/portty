@@ -1827,8 +1827,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 if (!font_has_style(d->font, style))
                     style = FONT_STYLE_NORMAL;
 
-                // Emoji font routing: check VS15/VS16, regional indicators,
-                // and emoji-presentation codepoints. Mirrors the SDL3 path.
+                // Emoji font routing: shared logic in rend_should_use_emoji.
+                // VS15 narrows to 1 cell but does NOT block color emoji routing.
                 uint32_t cps[32];
                 int cp_count;
                 if (cell.grapheme_id == 0) {
@@ -1843,24 +1843,10 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     }
                     cp_count = (int)n;
                 }
-                bool has_vs15 = false;
-                bool has_vs16 = false;
-                for (int i = 1; i < cp_count; i++) {
-                    if (cps[i] == 0xFE0E)
-                        has_vs15 = true;
-                    else if (cps[i] == 0xFE0F)
-                        has_vs16 = true;
-                }
-                bool use_emoji = false;
-                if (!has_vs15 && font_has_style(d->font, FONT_STYLE_EMOJI)) {
-                    uint32_t cp0 = cell.cp;
-                    if (has_vs16 || is_regional_indicator(cp0)) {
-                        use_emoji = true;
-                    } else if (is_emoji_presentation(cp0)) {
-                        use_emoji = font_get_glyph_index(d->font, FONT_STYLE_EMOJI, cp0) != 0;
-                    }
-                }
-                if (use_emoji)
+                bool emoji_available = font_has_style(d->font, FONT_STYLE_EMOJI);
+                bool emoji_has_glyph = emoji_available &&
+                                       font_get_glyph_index(d->font, FONT_STYLE_EMOJI, cell.cp) != 0;
+                if (rend_should_use_emoji(cps, cp_count, emoji_available, emoji_has_glyph))
                     style = FONT_STYLE_EMOJI;
 
                 int avail_w = cell.width * cell_w;
@@ -1894,6 +1880,154 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 if (is_regional) {
                     int side = avail_w < avail_h ? avail_w : avail_h;
                     cache_w = cache_h = side;
+                }
+
+                // Shaped rendering path for multi-codepoint clusters (VS15/VS16,
+                // ZWJ sequences). Mirrors the SDL3 shaped path.
+                if (cp_count > 1 && d->font->render_shaped) {
+                    void *sh_font_data = d->font->font_data[style];
+                    ShapedGlyphs *shaped = font_render_shaped_text(
+                        d->font, style, cps, cp_count,
+                        render_r, render_g, render_b);
+
+                    // .notdef check: if all glyphs are 0, treat as failure
+                    if (shaped) {
+                        bool all_notdef = true;
+                        for (int i = 0; i < shaped->num_glyphs; i++) {
+                            if (shaped->glyph_ids[i] != 0) {
+                                all_notdef = false;
+                                break;
+                            }
+                        }
+                        if (all_notdef) {
+                            free(shaped->glyph_ids);
+                            free(shaped->x_positions);
+                            free(shaped->y_positions);
+                            free(shaped->x_advances);
+                            free(shaped);
+                            shaped = NULL;
+                        }
+                    }
+
+                    // Fallback: if shaped rendering fails with selected style, try NORMAL
+                    if (!shaped && style != FONT_STYLE_NORMAL) {
+                        style = FONT_STYLE_NORMAL;
+                        sh_font_data = d->font->font_data[style];
+                        color_baked = rend_is_color_font(d->font, style);
+                        render_r = color_baked ? fg[0] : 255;
+                        render_g = color_baked ? fg[1] : 255;
+                        render_b = color_baked ? fg[2] : 255;
+                        color_key = color_baked
+                                        ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
+                                        : 0xFFFFFF;
+                        shaped = font_render_shaped_text(
+                            d->font, style, cps, cp_count,
+                            render_r, render_g, render_b);
+                    }
+
+                    // Dynamic fallback: try fontconfig-resolved font
+                    if (!shaped && cp_count > 0) {
+                        const char *fb_path = rend_fallback_lookup(&d->fallback, d->resolve, cps[0]);
+                        if (fb_path && rend_fallback_ensure(&d->fallback, d->font, fb_path,
+                                                            d->font_size, &d->font_options, d->cell_w)) {
+                            style = FONT_STYLE_FALLBACK;
+                            sh_font_data = d->font->font_data[style];
+                            font_set_presentation_width(d->font, style, avail_w);
+                            color_baked = rend_is_color_font(d->font, style);
+                            render_r = color_baked ? fg[0] : 255;
+                            render_g = color_baked ? fg[1] : 255;
+                            render_b = color_baked ? fg[2] : 255;
+                            color_key = color_baked
+                                            ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
+                                            : 0xFFFFFF;
+                            shaped = font_render_shaped_text(
+                                d->font, style, cps, cp_count,
+                                render_r, render_g, render_b);
+                        }
+                    }
+
+                    if (shaped) {
+                        for (int gi = 0; gi < shaped->num_glyphs; gi++) {
+                            uint32_t gid = shaped->glyph_ids[gi];
+                            if (gid == 0)
+                                continue;
+                            uint32_t atlas_gid = (cell.width >= 2) ? (gid | (1u << 29)) : gid;
+                            RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
+                                &d->atlas, sh_font_data, (int)atlas_gid, color_key);
+                            if (!entry) {
+                                GlyphBitmap *gb = font_render_glyph_id(
+                                    d->font, style, gid,
+                                    render_r, render_g, render_b);
+                                if (gb) {
+                                    GlyphBitmap *scaled = NULL;
+                                    if (downscale_glyph) {
+                                        scaled = rend_downscale_bitmap(gb, cache_w, cache_h, height_only_fit);
+                                        bool centered = !height_only_fit;
+                                        gb->centered = centered;
+                                        if (scaled)
+                                            scaled->centered = centered;
+                                        if (height_only_fit) {
+                                            int eff_w = scaled ? scaled->width : gb->width;
+                                            int x_off = (cache_w - eff_w) / 2;
+                                            gb->x_offset = x_off;
+                                            if (scaled)
+                                                scaled->x_offset = x_off;
+                                        }
+                                    }
+                                    uint32_t insert_id = atlas_gid ? atlas_gid
+                                                                   : (uint32_t)gb->glyph_id;
+                                    entry = rend_sokol_atlas_insert(
+                                        &d->atlas, sh_font_data, (int)insert_id, color_key,
+                                        scaled ? scaled : gb, color_baked);
+                                    if (scaled) {
+                                        free(scaled->pixels);
+                                        free(scaled);
+                                    }
+                                    d->font->free_glyph_bitmap(d->font, gb);
+                                } else if (atlas_gid != 0) {
+                                    entry = rend_sokol_atlas_insert_empty(
+                                        &d->atlas, sh_font_data, (int)atlas_gid, color_key);
+                                }
+                            }
+
+                            if (entry && entry->region.w > 0 && entry->region.h > 0 &&
+                                glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                                int gx = (int)cell_x0 + shaped->x_positions[gi] + entry->x_offset;
+                                int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
+                                if (entry->centered) {
+                                    gx = (int)floorf(cell_x0 + ((float)cell_w - (float)entry->region.w) * 0.5f);
+                                    gy = (int)floorf(cell_y0 + ((float)cell_h - (float)entry->region.h) * 0.5f);
+                                }
+
+                                float gx0 = (float)gx;
+                                float gy0 = (float)gy;
+                                float gx1 = gx0 + (float)entry->region.w;
+                                float gy1 = gy0 + (float)entry->region.h;
+
+                                float u0 = (float)entry->region.x / atlas_size;
+                                float v0 = (float)entry->region.y / atlas_size;
+                                float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
+                                float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
+
+                                float u_off = color_baked ? 3.0f : 0.0f;
+
+                                q = &s_glyph_verts[glyph_vert_count];
+                                q[0] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                q[1] = (GlyphVertex){ gx1, gy0, u1 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                q[2] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                q[3] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                q[4] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                q[5] = (GlyphVertex){ gx0, gy1, u0 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                glyph_vert_count += 6;
+                            }
+                        }
+                        free(shaped->glyph_ids);
+                        free(shaped->x_positions);
+                        free(shaped->y_positions);
+                        free(shaped->x_advances);
+                        free(shaped);
+                        goto selection_check;
+                    }
                 }
 
                 uint32_t glyph_id = font_get_glyph_index(d->font, style, cell.cp);

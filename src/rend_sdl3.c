@@ -785,32 +785,10 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             style = FONT_STYLE_ITALIC;
     }
     if (cp_count > 0) {
-        // A codepoint is rendered via the emoji font only when (a) VS16
-        // forces emoji presentation, (b) it is a regional indicator
-        // (definitionally emoji), or (c) is_emoji_presentation(cp) and the
-        // emoji font actually carries the glyph. Text-default symbols
-        // (dingbats etc.) without VS16 stay on the text font when the emoji
-        // font lacks the glyph — avoids the old "route to EMOJI, shape, fall
-        // back to NORMAL while symbol_cell flags still say emoji" round-trip.
-        // VS15 (U+FE0E) forces text presentation regardless.
-        bool has_vs15 = false;
-        bool has_vs16 = false;
-        for (int i = 1; i < cp_count; i++) {
-            if (cps[i] == 0xFE0E)
-                has_vs15 = true;
-            else if (cps[i] == 0xFE0F)
-                has_vs16 = true;
-        }
-        bool use_emoji = false;
-        if (!has_vs15 && font_has_style(data->font, FONT_STYLE_EMOJI)) {
-            uint32_t cp0 = cps[0];
-            if (has_vs16 || is_regional_indicator(cp0)) {
-                use_emoji = true;
-            } else if (is_emoji_presentation(cp0)) {
-                use_emoji = font_get_glyph_index(data->font, FONT_STYLE_EMOJI, cp0) != 0;
-            }
-        }
-        if (use_emoji)
+        bool emoji_available = font_has_style(data->font, FONT_STYLE_EMOJI);
+        bool emoji_has_glyph = emoji_available &&
+                               font_get_glyph_index(data->font, FONT_STYLE_EMOJI, cps[0]) != 0;
+        if (rend_should_use_emoji(cps, cp_count, emoji_available, emoji_has_glyph))
             style = FONT_STYLE_EMOJI;
     }
 
@@ -869,6 +847,26 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     if (cp_count > 1 && data->font->render_shaped) {
         ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count,
                                                        render_r, render_g, render_b);
+
+        // If shaped returned all .notdef glyphs, treat as failure so the
+        // single-glyph fallback (with fontconfig) gets a chance to run.
+        if (shaped) {
+            bool all_notdef = true;
+            for (int i = 0; i < shaped->num_glyphs; i++) {
+                if (shaped->glyph_ids[i] != 0) {
+                    all_notdef = false;
+                    break;
+                }
+            }
+            if (all_notdef) {
+                free(shaped->glyph_ids);
+                free(shaped->x_positions);
+                free(shaped->y_positions);
+                free(shaped->x_advances);
+                free(shaped);
+                shaped = NULL;
+            }
+        }
 
         // Fallback: if shaped rendering fails with selected style, try NORMAL
         if (!shaped && style != FONT_STYLE_NORMAL) {

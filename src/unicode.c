@@ -55,6 +55,17 @@ bool is_skin_tone_modifier(uint32_t cp)
     return (cp >= 0x1F3FB && cp <= 0x1F3FF);
 }
 
+bool unicode_cell_has_vs15(const uint32_t *chars, int max)
+{
+    if (!chars)
+        return false;
+    for (int i = 0; i < max && chars[i] != 0; i++) {
+        if (chars[i] == UNICODE_VARIATION_SELECTOR_15)
+            return true;
+    }
+    return false;
+}
+
 bool unicode_cell_has_vs16(const uint32_t *chars, int max)
 {
     if (!chars)

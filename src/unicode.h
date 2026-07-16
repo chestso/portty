@@ -6,6 +6,7 @@
 
 // Unicode codepoint constants
 #define UNICODE_ZERO_WIDTH_JOINER      0x200D
+#define UNICODE_VARIATION_SELECTOR_15  0xFE0E
 #define UNICODE_VARIATION_SELECTOR_16  0xFE0F
 #define UNICODE_SKIN_TONE_MIN          0x1F3FB
 #define UNICODE_SKIN_TONE_MAX          0x1F3FF
@@ -17,6 +18,10 @@ bool is_emoji_presentation(uint32_t cp);
 bool is_regional_indicator(uint32_t cp);
 bool is_zwj(uint32_t cp);
 bool is_skin_tone_modifier(uint32_t cp);
+
+// Returns true if any codepoint in the cell's chars[] is U+FE0E (VS15).
+// VS15 narrows the cell to 1 column but does NOT block color emoji routing.
+bool unicode_cell_has_vs15(const uint32_t *chars, int max);
 
 // Returns true if any codepoint in the cell's chars[] is U+FE0F (VS16).
 // Used to enforce the "VS16 → 2 cells" rule of the emoji width paradigm.

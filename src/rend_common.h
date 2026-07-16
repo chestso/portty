@@ -51,6 +51,17 @@ bool rend_is_symbol_cell_cp(uint32_t cp);
 // Check if a font style produces color (COLR v1 or emoji) glyphs.
 bool rend_is_color_font(FontBackend *font, FontStyle style);
 
+// Decide whether a codepoint cluster should route to the color emoji font.
+// Returns true if the emoji font should be used. VS15 narrows the cell to
+// 1 column but does NOT block color emoji routing — if the emoji font
+// carries the glyph, portty prefers it (beauty over spec).
+//
+// `cps` is the codepoint array for the cell (base + variation selectors).
+// `cp_count` is the number of codepoints. `has_glyph` should be the result
+// of font_get_glyph_index(font, FONT_STYLE_EMOJI, cps[0]) != 0.
+bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
+                           bool emoji_font_available, bool emoji_has_glyph);
+
 #define REND_ATLAS_HASH_SIZE    8192
 #define REND_ATLAS_TEXTURE_SIZE 2048
 #define REND_ATLAS_MAX_SHELVES  128

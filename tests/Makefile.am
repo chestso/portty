@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend
+check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing
 
 if BACKEND_SDL3
 check_PROGRAMS += test_atlas
@@ -146,5 +146,13 @@ test_debug_script_SOURCES = test_debug_script.c $(TEST_COMMON) $(TERM_STUBS) \
     ../src/portty_debug_script.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
 test_debug_script_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_debug_script_LDADD = $(COFFER_LIBS) -lm
+
+# VS15 emoji routing regression test. Tests rend_should_use_emoji() and
+# unicode_cell_has_vs15() — pure logic, no SDL/coffer dependency, but
+# rend_common.c pulls in font.c (needs font_stubs.c).
+test_vs15_routing_SOURCES = test_vs15_routing.c $(TEST_COMMON) $(TERM_STUBS) \
+    ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+test_vs15_routing_CFLAGS = $(TEST_CFLAGS)
+test_vs15_routing_LDADD = -lm
 
 TESTS = $(check_PROGRAMS)
