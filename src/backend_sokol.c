@@ -91,6 +91,15 @@ enum
     SOKOL_EVENT_LOTTIE_TICK,
 };
 
+// Rendering scheduler mode.  DAMAGE mode only emits GPU work when the
+// terminal reports damage (or a debug/recording action forces a frame).
+// FIXED_FPS mode renders at a fixed frame rate for recording automation.
+typedef enum
+{
+    RENDER_MODE_DAMAGE = 0,
+    RENDER_MODE_FIXED_FPS,
+} RenderMode;
+
 #define SOKOL_LOTTIE_CACHE_MAX 64
 #define SOKOL_LOTTIE_TICK_MS   16
 #define SOKOL_SIXEL_CACHE_MAX  256
@@ -183,6 +192,11 @@ typedef struct
     bool cursor_blink_visible;
     bool has_focus;
     bool linear_ok;
+    // Render scheduler
+    RenderMode render_mode;
+    double record_fps;
+    double record_accumulator_ms;
+    bool capture_this_frame;
     // Mouse selection state
     bool left_button_down;
     int last_mouse_x, last_mouse_y;
@@ -255,6 +269,10 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
     d->cursor_blink_visible = true;
     d->has_focus = true;
     d->linear_ok = true;
+    d->render_mode = RENDER_MODE_DAMAGE;
+    d->record_fps = 0.0;
+    d->record_accumulator_ms = 0.0;
+    d->capture_this_frame = false;
     d->left_button_down = false;
     d->last_mouse_x = 0;
     d->last_mouse_y = 0;
@@ -3158,6 +3176,11 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
                     app->script_path);
     }
 
+    // Ensure the very first frame is rendered.  coffer starts with no damage
+    // pending, so without an explicit mark the window would stay blank until
+    // the next PTY/timer event.
+    terminal_mark_dirty(d->term);
+
     vlog("sokol_finish_setup: complete, win=%dx%d\n", win_w, win_h);
 }
 
@@ -3237,6 +3260,26 @@ static void sokol_poll_timers(SokolData *d)
     }
 }
 
+static bool sokol_should_render(SokolData *d, double elapsed_ms)
+{
+    if (d->render_mode == RENDER_MODE_FIXED_FPS && d->record_fps > 0.0) {
+        d->record_accumulator_ms += elapsed_ms;
+        double frame_ms = 1000.0 / d->record_fps;
+        if (d->record_accumulator_ms >= frame_ms) {
+            d->record_accumulator_ms -= frame_ms;
+            d->capture_this_frame = true;
+            return true;
+        }
+        return false;
+    }
+
+    if (d->debug_pending_screendump || d->debug_pending_verifybuf)
+        return true;
+
+    terminal_flush_damage(d->term);
+    return terminal_needs_redraw(d->term);
+}
+
 static void sokol_frame_cb(void)
 {
     SokolData *d = sokol_data(g_sokol.backend);
@@ -3271,32 +3314,37 @@ static void sokol_frame_cb(void)
             d->debug_script_done = true;
     }
 
-    // Compute cursor visibility: always shown when unfocused or blink off,
-    // otherwise follows the blink toggle.
-    bool cursor_vis = !d->has_focus ||
-                      !terminal_get_cursor_blink(d->term) ||
-                      d->cursor_blink_visible;
+    double elapsed_ms = (double)sapp_frame_duration() * 1000.0;
+    bool should_render = sokol_should_render(d, elapsed_ms);
+    if (should_render) {
+        // Compute cursor visibility: always shown when unfocused or blink off,
+        // otherwise follows the blink toggle.
+        bool cursor_vis = !d->has_focus ||
+                          !terminal_get_cursor_blink(d->term) ||
+                          d->cursor_blink_visible;
 
-    d->self->draw_terminal(d->self, d->term, cursor_vis);
+        d->self->draw_terminal(d->self, d->term, cursor_vis);
 
-    // === Debug script: pre-commit deferred commands ===
-    // screendump must run after sg_end_pass but BEFORE sg_commit (SwapBuffers),
-    // otherwise glReadPixels reads the previous frame's back buffer.
-    if (d->debug_pending_screendump) {
-        d->debug_pending_screendump = false;
-        sokol_debug_screendump(d, d->debug_screendump_path);
-        if (d->screenshot_saved)
-            d->quit_requested = true;
-    }
+        // === Debug script: pre-commit deferred commands ===
+        // screendump must run after sg_end_pass but BEFORE sg_commit (SwapBuffers),
+        // otherwise glReadPixels reads the previous frame's back buffer.
+        if (d->debug_pending_screendump) {
+            d->debug_pending_screendump = false;
+            sokol_debug_screendump(d, d->debug_screendump_path);
+            if (d->screenshot_saved)
+                d->quit_requested = true;
+        }
 
-    d->self->present(d->self);
+        d->self->present(d->self);
+        terminal_clear_redraw(d->term);
 
-    // === Debug script: post-present deferred commands ===
-    if (d->debug_pending_verifybuf) {
-        d->debug_pending_verifybuf = false;
-        sokol_debug_verifybuf(d, d->debug_verify_row,
-                              d->debug_verify_col_start,
-                              d->debug_verify_col_end);
+        // === Debug script: post-present deferred commands ===
+        if (d->debug_pending_verifybuf) {
+            d->debug_pending_verifybuf = false;
+            sokol_debug_verifybuf(d, d->debug_verify_row,
+                                  d->debug_verify_col_start,
+                                  d->debug_verify_col_end);
+        }
     }
 }
 
@@ -3576,12 +3624,15 @@ static void sokol_event_cb(const sapp_event *ev)
     case SAPP_EVENTTYPE_RESIZED:
         portty_app_handle_resize(d->app, ev->framebuffer_width,
                                  ev->framebuffer_height);
+        terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_FOCUSED:
         d->has_focus = true;
+        terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_UNFOCUSED:
         d->has_focus = false;
+        terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_QUIT_REQUESTED:
         d->quit_requested = true;
