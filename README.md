@@ -75,9 +75,9 @@ build/src/portty --demo "Hello, world!"
 | `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                  |
 | `-g COLSxROWS`              | Initial terminal size (default: 80x24)                                      |
 | `-D PREFIX`                 | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only) |
-| `-L` / `--list-fonts`       | List available monospace fonts and exit (Sokol only)                        |
-| `-H S` / `--ft-hinting S`   | FreeType hinting: none/light/normal/mono (default: light; Sokol only)       |
-| `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing; Sokol only) |
+| `-L` / `--list-fonts`       | List available monospace fonts and exit                                     |
+| `-H S` / `--ft-hinting S`   | FreeType hinting: none/light/normal/mono (default: light)                   |
+| `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing)             |
 | `-V` / `--version`          | Print version and exit                                                      |
 | `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                      |
 | `-S FILE` / `--script FILE` | Run debug script FILE (see [Debug Scripting](#debug-scripting))             |
