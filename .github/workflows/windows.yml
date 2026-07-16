@@ -3,9 +3,9 @@ name: Windows
 on:
   push:
     branches: [master]
-    tags: ["v*"]
   pull_request:
     branches: [master]
+  workflow_call:
 
 permissions:
   contents: write
@@ -105,29 +105,3 @@ jobs:
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 1 || 30 }}
 
-  release:
-    name: Publish release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: build-and-test
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download SDL3 artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: portty-windows-x86_64-sdl3
-          path: artifacts/sdl3
-
-      - name: Download Sokol artifact
-        uses: actions/download-artifact@v8
-        with:
-          name: portty-windows-x86_64-sokol
-          path: artifacts/sokol
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v3
-        with:
-          files: |
-            artifacts/sdl3/portty-*-windows-*-sdl3.zip
-            artifacts/sokol/portty-*-windows-*-sokol.zip
-          generate_release_notes: false
-          fail_on_unmatched_files: true

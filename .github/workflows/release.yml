@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build & Test (Linux Sokol)
+    uses: ./.github/workflows/linux-sokol.yml
+
+  build-macos:
+    name: Build & Test (macOS)
+    uses: ./.github/workflows/macos.yml
+
+  build-windows:
+    name: Build & Test (Windows)
+    uses: ./.github/workflows/windows.yml
+
+  release:
+    name: Publish release
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download macOS arm64 SDL3 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-macos-arm64-sdl3
+          path: artifacts/macos-arm64-sdl3
+
+      - name: Download macOS arm64 Sokol artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-macos-arm64-sokol
+          path: artifacts/macos-arm64-sokol
+
+      - name: Download Windows x86_64 SDL3 artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-windows-x86_64-sdl3
+          path: artifacts/windows-x86_64-sdl3
+
+      - name: Download Windows x86_64 Sokol artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-windows-x86_64-sokol
+          path: artifacts/windows-x86_64-sokol
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: |
+            artifacts/macos-arm64-sdl3/portty-*-macos-*-sdl3.zip
+            artifacts/macos-arm64-sokol/portty-*-macos-*-sokol.zip
+            artifacts/windows-x86_64-sdl3/portty-*-windows-*-sdl3.zip
+            artifacts/windows-x86_64-sokol/portty-*-windows-*-sokol.zip
+          generate_release_notes: false
+          fail_on_unmatched_files: true
