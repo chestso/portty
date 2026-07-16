@@ -204,58 +204,103 @@ portty --script debug.txt -- my-shell
 
 ### Script File Format
 
-One command per line. Lines starting with `#` and blank lines are ignored. The `send` command supports `\n`, `\r`, `\t`, `\e` (ESC), and `\\` escape sequences; surrounding double quotes are stripped.
+One command per line. Lines starting with `#` and blank lines are ignored. The `send`/`emit` commands support `\n`, `\r`, `\t`, `\e` (ESC), `\xNN`, and `\\\` escape sequences; surrounding double quotes are stripped.
 
 ### Commands
 
-| Command                                 | Description                                                                        |
-| --------------------------------------- | ---------------------------------------------------------------------------------- |
-| `wait <seconds>`                        | Pause script execution for N seconds (monotonic clock)                             |
-| `send <text>`                           | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \\` escapes.    |
-| `raw <hex bytes>`                       | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)          |
-| `assert-contains <text>`                | Assert the terminal grid contains the given substring (prints PASS/FAIL)           |
-| `assert-not-contains <text>`            | Assert the terminal grid does NOT contain the given substring                      |
-| `screendump <path>`                     | Save the framebuffer to a PNG file (captured after render, before present)         |
-| `dumprow <row>`                         | Print all cells in a terminal row                                                  |
-| `dumpcells <row> <col_start> <col_end>` | Print cells in the given range with codepoint, width, attributes, and fg/bg colors |
-| `dumpverts <row> <col_start> <col_end>` | Dump GPU vertex data for glyphs (Sokol backend only)                               |
-| `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)   |
-| `quit`                                  | Request application quit                                                           |
+| Command                                 | Description                                                                           |
+| --------------------------------------- | ------------------------------------------------------------------------------------- |
+| `wait <seconds>`                        | Pause script execution for N seconds (monotonic clock)                                |
+| `send <text>`                           | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes. |
+| `sendln <text>`                         | Same as `send`, but appends `\r\n` (as if the user pressed Return)                    |
+| `emit <text>`                           | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.    |
+| `raw <hex bytes>`                       | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)             |
+| `emit-raw <hex bytes>`                  | Write raw binary bytes directly to the terminal emulator                              |
+| `assert-contains <text>`                | Assert the terminal grid contains the given substring (prints PASS/FAIL)              |
+| `assert-not-contains <text>`            | Assert the terminal grid does NOT contain the given substring                         |
+| `screendump <path>`                     | Save the framebuffer to a PNG file (captured after render, before present)            |
+| `dumprow <row>`                         | Print all cells in a terminal row                                                     |
+| `dumpcells <row> <col_start> <col_end>` | Print cells in the given range with codepoint, width, attributes, and fg/bg colors    |
+| `dumpverts <row> <col_start> <col_end>` | Dump GPU vertex data for glyphs (Sokol backend only)                                  |
+| `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)      |
+| `quit`                                  | Request application quit                                                              |
 
-### `send` vs `raw`
+### `send` vs `emit`
 
-Both `send` and `raw` write to the **PTY input** (the child process's stdin), not to coffer's terminal emulator. This is the most common source of confusion:
+There are two separate input paths for debug scripts:
 
-- **`send`** writes text with escape expansion (`\n`→CR, `\e`→ESC, etc.). Use it to type shell commands. Append `\n` to execute them.
-- **`raw`** writes literal hex bytes with no expansion. Use it for binary input the shell should receive verbatim.
+- **`send` / `sendln` / `raw`** write to the **PTY input** (the child process's stdin). Use these when you want to simulate a user typing into the shell. The shell must output escape sequences on stdout before coffer sees them.
+- **`emit` / `emit-raw`** write directly to **coffer's terminal emulator**, bypassing the child. Use these when you want to feed VT sequences straight to the terminal without involving the shell.
 
-Neither `send` nor `raw` can directly emit escape sequences that coffer will parse, because the bytes go to the child's stdin — the child must output them on its stdout for coffer to process them. To send escape sequences the terminal will process, have the child print them:
+For `send`, append `\r` or use `sendln` when you want the shell to execute the line:
+
+```
+# Simulate the user typing "echo hello" and pressing Return
+sendln echo hello
+wait 0.5
+assert-contains hello
+```
+
+`send` with `printf` is the right way to make the shell emit terminal escape sequences:
 
 ```
 # Correct: printf outputs the ESC bytes on stdout, coffer parses them
-send printf '\033[?12l'\n
-wait 1
-send printf '\033[?12h'\n
+send printf '\\033[4mSingle\\033[0m'\r
+wait 0.5
+assert-contains Single
+```
 
-# Wrong: raw writes ESC [ ? 1 2 l to stdin; the shell sees them as input,
-# not as terminal control sequences
-raw 1b 5b 3f 31 32 6c
+`emit` is useful when you want to bypass the shell entirely. Escape sequences are expanded by the script parser and fed straight to the VT engine:
+
+```
+emit \e[2J\e[H
+emit \e[4mSingle\e[0m \e[4:2mDouble\e[0m\r\n
+wait 0.5
+assert-contains Single
+assert-contains Double
 ```
 
 Key points:
 
-- Always append `\n` to `send` commands that should be executed by the shell — without it, the text sits on the shell's input line unexecuted.
-- Use `\033` (not `\e`) inside `printf` arguments. `\e` is expanded by the script parser before the shell sees it, so the shell's readline intercepts the raw ESC byte. `\\033` passes the literal string `\033` to the shell, which `printf` then interprets.
-- `raw` is useful for sending non-printable input to the child (e.g. `raw 03` for Ctrl-C, `raw 1a` for Ctrl-Z).
+- Use `send`/`sendln` to simulate user input to the shell; use `emit` to drive the terminal directly.
+- Inside `printf` arguments for `send`, use `\033` (not `\e`).
+- `emit` supports `\e` and `\xNN` for arbitrary bytes; `send` does too, but those bytes go to the child stdin.
+- `raw` / `emit-raw` are useful for binary input (e.g. `raw 03` for Ctrl-C, `raw 1a` for Ctrl-Z).
 
-### Example Script
+### Example Scripts
+
+Drive the terminal directly with `emit`:
 
 ```
-# Type a command and verify the output
-send echo hello\n
+# Run with: portty -S emit_demo.script
 wait 0.5
-assert-contains hello
-screendump /tmp/portty-screenshot.png
+emit \e[2J\e[H
+emit \e[4mSingle underline\e[0m\r\n
+emit \e[4:2mDouble underline\e[0m\r\n
+emit \e[9mStrikethrough\e[0m\r\n
+wait 0.5
+assert-contains Single
+assert-contains Strikethrough
+screendump /tmp/portty-emit.png
+wait 5.0
+quit
+```
+
+Simulate a user typing commands with `send`/`sendln`:
+
+```
+# Run with: portty -S send_demo.script
+wait 0.5
+sendln clear
+wait 0.5
+send printf '\\033[4mSingle\\033[0m\r\n'\r
+wait 0.5
+send printf '\\033[9mStrikethrough\\033[0m\r\n'\r
+wait 0.5
+assert-contains Single
+assert-contains Strikethrough
+screendump /tmp/portty-send.png
+wait 5.0
 quit
 ```
 

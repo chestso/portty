@@ -443,6 +443,24 @@ static void test_parse_send_no_args(void)
     cleanup_tmp(path);
 }
 
+static void test_parse_sendln(void)
+{
+    char *path = write_tmp_script("sendln hello world\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyDebugScript *s = portty_debug_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_debug_script_count(s), 1);
+
+    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, DBG_CMD_SENDLN);
+    ASSERT_STR_EQ(cmd->text, "hello world");
+
+    portty_debug_script_free(s);
+    cleanup_tmp(path);
+}
+
 static void test_parse_dumpcells_missing_args(void)
 {
     char *path = write_tmp_script("dumpcells 5\n");
@@ -527,6 +545,92 @@ static void test_parse_send_carriage_return(void)
     cleanup_tmp(path);
 }
 
+static void test_parse_emit(void)
+{
+    char *path = write_tmp_script("emit \"hello world\"\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyDebugScript *s = portty_debug_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_debug_script_count(s), 1);
+
+    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
+    ASSERT_STR_EQ(cmd->text, "hello world");
+
+    portty_debug_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_emit_escapes(void)
+{
+    char *path = write_tmp_script("emit \\e[4mSingle\\e[0m\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyDebugScript *s = portty_debug_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_debug_script_count(s), 1);
+
+    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
+    ASSERT_NOT_NULL(cmd->text);
+    ASSERT_EQ((int)strlen(cmd->text), 14);
+    ASSERT_EQ(cmd->text[0], '\x1b');
+    ASSERT_EQ(cmd->text[2], '4');
+    ASSERT_EQ(cmd->text[10], '\x1b');
+    ASSERT_EQ(cmd->text[12], '0');
+    ASSERT_EQ(cmd->text[13], 'm');
+
+    portty_debug_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_emit_raw(void)
+{
+    char *path = write_tmp_script("emit-raw 1b 5b 34 6d 1b 5b 30 6d\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyDebugScript *s = portty_debug_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_debug_script_count(s), 1);
+
+    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, DBG_CMD_EMIT_RAW);
+    ASSERT_NOT_NULL(cmd->text);
+    ASSERT_EQ((int)strlen(cmd->text), 8);
+    ASSERT_EQ((uint8_t)cmd->text[0], 0x1b);
+    ASSERT_EQ((uint8_t)cmd->text[2], 0x34);
+
+    portty_debug_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_x_escape(void)
+{
+    char *path = write_tmp_script("emit \\x1b[4mSingle\\x1b[0m\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyDebugScript *s = portty_debug_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_debug_script_count(s), 1);
+
+    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
+    ASSERT_NOT_NULL(cmd->text);
+    ASSERT_EQ(cmd->text[0], '\x1b');
+    ASSERT_EQ(cmd->text[2], '4');
+    ASSERT_EQ(cmd->text[10], '\x1b');
+    ASSERT_EQ(cmd->text[12], '0');
+    ASSERT_EQ(cmd->text[13], 'm');
+
+    portty_debug_script_free(s);
+    cleanup_tmp(path);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -542,6 +646,11 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_raw);
     RUN_TEST(test_parse_raw_no_args);
     RUN_TEST(test_parse_send_no_args);
+    RUN_TEST(test_parse_sendln);
+    RUN_TEST(test_parse_emit);
+    RUN_TEST(test_parse_emit_escapes);
+    RUN_TEST(test_parse_emit_raw);
+    RUN_TEST(test_parse_x_escape);
     RUN_TEST(test_parse_assert_contains);
     RUN_TEST(test_parse_assert_not_contains);
     RUN_TEST(test_parse_screendump);

@@ -1231,6 +1231,8 @@ static void sdl3_run(PorttyBackend *self)
                 .term = term,
                 .pty = d->pty,
                 .scroll_offset = rend_sdl3_get_scroll_offset(rend),
+                .emit_fn = (void (*)(void *, const char *, size_t))portty_app_feed_terminal,
+                .emit_user_data = d->app,
                 .pending_screendump = &d->debug_pending_screendump,
                 .screendump_path_buf = d->debug_screendump_path,
                 .pending_verifybuf = NULL,

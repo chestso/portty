@@ -12,7 +12,10 @@ typedef enum
 {
     DBG_CMD_WAIT,
     DBG_CMD_SEND,
+    DBG_CMD_SENDLN,
     DBG_CMD_RAW,
+    DBG_CMD_EMIT,
+    DBG_CMD_EMIT_RAW,
     DBG_CMD_ASSERT_CONTAINS,
     DBG_CMD_ASSERT_NOT_CONTAINS,
     DBG_CMD_SCREENDUMP,
@@ -80,6 +83,11 @@ typedef struct
     TerminalBackend *term;
     PtyContext *pty;
     int scroll_offset;
+    /* Direct terminal input hook. If set, the emit/emitln/emit-raw commands
+     * feed data straight to the VT engine via terminal_process_input.
+     * NULL means emit is unsupported (warn + skip). */
+    void (*emit_fn)(void *app, const char *data, size_t len);
+    void *emit_user_data;
     /* Deferred action flags — backend points these at its own fields: */
     bool *pending_screendump;
     char *screendump_path_buf; /* backend's destination buffer */

@@ -192,7 +192,7 @@ int main(int argc, char *argv[])
     if (conf.notification_transparency == 1)
         portty_notification_transparent = true;
 
-    while ((opt = getopt_long(argc, argv, "hvVf:g:D:s:S:", long_options, NULL)) != -1) {
+    while ((opt = getopt_long(argc, argv, "hvVf:g:d:D:s:S:", long_options, NULL)) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);

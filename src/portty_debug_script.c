@@ -30,6 +30,17 @@ struct PorttyDebugScript
 
 /* ── Helpers ── */
 
+static int hex_val(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return 0;
+}
+
 static void script_set_error(PorttyDebugScript *s, const char *fmt, ...)
 {
     va_list args;
@@ -93,6 +104,21 @@ static int expand_escapes(char *str, int len)
                 str[out++] = '\x1b';
                 in += 2;
                 break;
+            case 'x':
+            {
+                /* \xNN - exactly two hex digits */
+                if (in + 3 < len && isxdigit((unsigned char)str[in + 2]) &&
+                    isxdigit((unsigned char)str[in + 3])) {
+                    int hi = hex_val(str[in + 2]);
+                    int lo = hex_val(str[in + 3]);
+                    str[out++] = (char)((hi << 4) | lo);
+                    in += 4;
+                } else {
+                    /* malformed: keep backslash and continue */
+                    str[out++] = str[in++];
+                }
+                break;
+            }
             case '\\':
                 str[out++] = '\\';
                 in += 2;
@@ -228,11 +254,18 @@ static bool parse_command(PorttyDebugScript *s, char *line)
         return true;
     }
 
-    if (strcmp(line, "send") == 0) {
+    if (strcmp(line, "send") == 0 || strcmp(line, "sendln") == 0 ||
+        strcmp(line, "emit") == 0) {
         DebugCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_SEND;
+        if (strcmp(line, "emit") == 0) {
+            cmd->type = DBG_CMD_EMIT;
+        } else if (strcmp(line, "sendln") == 0) {
+            cmd->type = DBG_CMD_SENDLN;
+        } else {
+            cmd->type = DBG_CMD_SEND;
+        }
         strip_quotes(args);
         int len = (int)strlen(args);
         len = expand_escapes(args, len);
@@ -243,11 +276,11 @@ static bool parse_command(PorttyDebugScript *s, char *line)
         return true;
     }
 
-    if (strcmp(line, "raw") == 0) {
+    if (strcmp(line, "raw") == 0 || strcmp(line, "emit-raw") == 0) {
         DebugCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_RAW;
+        cmd->type = (strcmp(line, "emit-raw") == 0) ? DBG_CMD_EMIT_RAW : DBG_CMD_RAW;
         int raw_len = 0;
         char *raw = parse_hex_bytes(args, &raw_len);
         if (!raw) {
@@ -571,10 +604,42 @@ void portty_debug_script_step(PorttyDebugScript *script,
         break;
     }
 
+    case DBG_CMD_SENDLN:
+    {
+        if (ctx->pty && cmd->text) {
+            pty_write(ctx->pty, cmd->text, strlen(cmd->text));
+            pty_write(ctx->pty, "\r\n", 2);
+        }
+        (*cmd_index)++;
+        break;
+    }
+
     case DBG_CMD_RAW:
     {
         if (ctx->pty && cmd->text)
             pty_write(ctx->pty, cmd->text, strlen(cmd->text));
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_EMIT:
+    {
+        if (ctx->emit_fn && cmd->text) {
+            ctx->emit_fn(ctx->emit_user_data, cmd->text, strlen(cmd->text));
+        } else {
+            fprintf(stderr, "emit: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_EMIT_RAW:
+    {
+        if (ctx->emit_fn && cmd->text) {
+            ctx->emit_fn(ctx->emit_user_data, cmd->text, strlen(cmd->text));
+        } else {
+            fprintf(stderr, "emit-raw: not supported by this backend\n");
+        }
         (*cmd_index)++;
         break;
     }
