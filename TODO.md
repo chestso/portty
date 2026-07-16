@@ -210,7 +210,6 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ---
 
-
 ## 3. Sokol Backend: 1-Pixel Gap in Diagonal Box-Drawing Characters
 
 ### Problem

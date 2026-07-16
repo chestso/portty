@@ -211,8 +211,8 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | Command                                 | Description                                                                        |
 | --------------------------------------- | ---------------------------------------------------------------------------------- |
 | `wait <seconds>`                        | Pause script execution for N seconds (monotonic clock)                             |
-| `send <text>`                           | Write text to the PTY (supports `\n \r \t \e \\` escapes)                          |
-| `raw <hex bytes>`                       | Write raw binary bytes to the PTY (e.g. `raw 1b 5b 6d` = `ESC [ m`)                |
+| `send <text>`                           | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \\` escapes.    |
+| `raw <hex bytes>`                       | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)          |
 | `assert-contains <text>`                | Assert the terminal grid contains the given substring (prints PASS/FAIL)           |
 | `assert-not-contains <text>`            | Assert the terminal grid does NOT contain the given substring                      |
 | `screendump <path>`                     | Save the framebuffer to a PNG file (captured after render, before present)         |
@@ -221,6 +221,32 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `dumpverts <row> <col_start> <col_end>` | Dump GPU vertex data for glyphs (Sokol backend only)                               |
 | `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)   |
 | `quit`                                  | Request application quit                                                           |
+
+### `send` vs `raw`
+
+Both `send` and `raw` write to the **PTY input** (the child process's stdin), not to coffer's terminal emulator. This is the most common source of confusion:
+
+- **`send`** writes text with escape expansion (`\n`→CR, `\e`→ESC, etc.). Use it to type shell commands. Append `\n` to execute them.
+- **`raw`** writes literal hex bytes with no expansion. Use it for binary input the shell should receive verbatim.
+
+Neither `send` nor `raw` can directly emit escape sequences that coffer will parse, because the bytes go to the child's stdin — the child must output them on its stdout for coffer to process them. To send escape sequences the terminal will process, have the child print them:
+
+```
+# Correct: printf outputs the ESC bytes on stdout, coffer parses them
+send printf '\033[?12l'\n
+wait 1
+send printf '\033[?12h'\n
+
+# Wrong: raw writes ESC [ ? 1 2 l to stdin; the shell sees them as input,
+# not as terminal control sequences
+raw 1b 5b 3f 31 32 6c
+```
+
+Key points:
+
+- Always append `\n` to `send` commands that should be executed by the shell — without it, the text sits on the shell's input line unexecuted.
+- Use `\033` (not `\e`) inside `printf` arguments. `\e` is expanded by the script parser before the shell sees it, so the shell's readline intercepts the raw ESC byte. `\\033` passes the literal string `\033` to the shell, which `printf` then interprets.
+- `raw` is useful for sending non-printable input to the child (e.g. `raw 03` for Ctrl-C, `raw 1a` for Ctrl-Z).
 
 ### Example Script
 

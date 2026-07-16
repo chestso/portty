@@ -1,5 +1,6 @@
 portty-vty-256color|portty-256color|portty|Portty Terminal Emulator,
     use=xterm-256color,
+    cnorm=\E[?12h\E[?25h,
     Tc,
     hs,
     tsl=\E]2;,
