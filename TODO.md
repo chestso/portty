@@ -210,31 +210,8 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ---
 
-## 3. VS15 Blank-Glyph Bug
 
-### Problem
-
-When VS15 (U+FE0E, text presentation selector) follows an emoji-default codepoint,
-the cell width is correctly set to 1 by coffer (`width.c:572`: VS15 → 1 cell), but
-the glyph is blank — nothing is rendered.
-
-### Root Cause
-
-`rend_sdl3.c:1809`: `if (!has_vs15 && ...)` completely blocks emoji font routing when
-VS15 is present. The code then falls through to `FONT_STYLE_NORMAL`, but the
-monospace/text font typically has no glyph for emoji-default codepoints (e.g. ⚡ U+26A1,
-⚽ U+26BD). The shaped rendering path and single-glyph fallback both fail to find a
-glyph, and fontconfig fallback may not cover these codepoints either. Result: blank cell.
-
-### Fix
-
-After VS15 routes to text font and the text font lacks the glyph, fall back to the
-emoji font with text semantics (1-cell width, monochrome if possible). VS15 should
-control presentation style, not make the glyph unreachable.
-
----
-
-## 4. Sokol Backend: 1-Pixel Gap in Diagonal Box-Drawing Characters
+## 3. Sokol Backend: 1-Pixel Gap in Diagonal Box-Drawing Characters
 
 ### Problem
 
@@ -283,7 +260,7 @@ is black. This is a subtle OpenGL rasterization/sampling difference between SDL3
 
 ---
 
-## 5. Unimplemented Terminfo Capabilities
+## 4. Unimplemented Terminfo Capabilities
 
 These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
 but are not yet fully implemented. coffer now has explicit case handlers (no
@@ -378,7 +355,7 @@ fully implemented in both backends via timer-based cursor visibility toggling.
 
 ---
 
-## 6. Popular Unsupported Capabilities
+## 5. Popular Unsupported Capabilities
 
 These capabilities are not in the terminfo entry, not inherited, and not
 implemented, but are commonly expected by modern TUIs.
