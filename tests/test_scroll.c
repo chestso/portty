@@ -83,6 +83,7 @@ typedef struct
  */
 static ScrollResult scroll_dispatch(const ScrollCtx *ctx, int ticks)
 {
+    (void)ticks;
     if (ctx->pager_active)
         return SCROLL_RESULT_PAGER;
 

@@ -27,15 +27,6 @@ static bool px_set(const GlyphBitmap *bmp, int x, int y)
     return bmp->pixels[(y * bmp->width + x) * 4 + 3] > 0;
 }
 
-static int row_count(const GlyphBitmap *bmp, int y, int x0, int x1)
-{
-    int count = 0;
-    for (int x = x0; x <= x1; x++)
-        if (px_set(bmp, x, y))
-            count++;
-    return count;
-}
-
 static int col_count(const GlyphBitmap *bmp, int x, int y0, int y1)
 {
     int count = 0;
@@ -186,7 +177,6 @@ static void test_rounded_corner_stub_alignment(void)
  * drawn pixels (i.e. the curve is not degenerate). */
 static void test_rounded_corner_arc_present(void)
 {
-    int cx = CELL_W / 2;
     int cy = CELL_H / 2;
 
     /* ╭: arc curves from vertical stub to top-right of cell */
@@ -238,7 +228,6 @@ static void test_rounded_corner_arc_present(void)
  * the straight corner's vertical line. */
 static void test_rounded_matches_straight_direction(void)
 {
-    int cx = CELL_W / 2;
     int cy = CELL_H / 2;
 
     /* ┌: find the vertical line column */

@@ -94,6 +94,8 @@ static void test_multiple_timers_sorted_by_slot(void)
 
     TimerId a = timer_add(mgr, 50, 10, NULL);
     TimerId b = timer_add(mgr, 50, 11, NULL);
+    (void)a;
+    (void)b;
 
     TimerEvent events[4];
     size_t n = timer_poll(mgr, 50, events, 4);
