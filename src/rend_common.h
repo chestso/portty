@@ -196,6 +196,15 @@ GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
 #define BOXDRAW_FONT_DATA ((void *)(intptr_t)1)
 
 // =============================================================================
+// Close "×" bitmap helper — shared between SDL3 and Sokol backends
+// =============================================================================
+
+// Fill a `size`×`size` RGBA buffer with an anti-aliased white "×".
+// The bitmap is white (255,255,255) with alpha coverage in the A channel;
+// callers tint it via their renderer. `buf` must hold `size*size*4` bytes.
+void rend_make_close_x_bitmap(uint8_t *buf, int size);
+
+// =============================================================================
 // Fallback font resolution — GPU-agnostic
 // =============================================================================
 

@@ -26,6 +26,7 @@
 #include "rend_sokol_atlas.h"
 #include "rend_common.h"
 #include "term.h"
+#include "term_cfr.h"
 #include "timer.h"
 #include "unicode.h"
 #ifdef _WIN32
@@ -230,6 +231,18 @@ typedef struct
     int sixel_cache_count;
     sg_buffer sixel_vbuf;
     bool sixel_vbuf_created;
+    // Notification panel — PTY-less coffer terminal overlay
+    TerminalBackend *notif_term;
+    bool notif_active;
+    bool notif_close_hover;
+    int notif_level;
+    int notif_x, notif_y;
+    int notif_w, notif_h;
+    int notif_rows, notif_cols;
+    int notif_close_size;
+    float notif_close_x, notif_close_y;
+    char *notif_title;
+    char *notif_body;
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
@@ -414,6 +427,13 @@ static void sokol_destroy(PorttyBackend *self)
         d->resolve = NULL;
     }
     free(d->font_path);
+    free(d->notif_title);
+    free(d->notif_body);
+    if (d->notif_term) {
+        terminal_destroy(d->notif_term);
+        free(d->notif_term);
+        d->notif_term = NULL;
+    }
     sg_shutdown();
     free(d->working_dir);
     free(d->exe_path);
@@ -830,18 +850,41 @@ static char *sokol_get_default_font(PorttyBackend *self)
 
 // ── Notifications & link hints ────────────────────────────────────────────
 
+static void sokol_notif_rebuild(SokolData *d);
+
 static void sokol_notify(PorttyBackend *self, const char *title,
                          const char *body, PorttyNotifyLevel level)
 {
-    (void)self;
-    (void)title;
-    (void)body;
-    (void)level;
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
+    free(d->notif_title);
+    free(d->notif_body);
+    d->notif_title = title ? strdup(title) : NULL;
+    d->notif_body = body ? strdup(body) : NULL;
+    d->notif_level = (int)level;
+    d->notif_close_hover = false;
+    sokol_notif_rebuild(d);
+    d->notif_active = (d->notif_term != NULL);
+    if (d->notif_active && d->term)
+        terminal_mark_dirty(d->term);
 }
 
 static void sokol_notify_dismiss(PorttyBackend *self)
 {
-    (void)self;
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
+    if (d->notif_term) {
+        terminal_destroy(d->notif_term);
+        free(d->notif_term);
+        d->notif_term = NULL;
+    }
+    d->notif_active = false;
+    d->notif_close_hover = false;
+    d->notif_h = 0;
+    if (d->term)
+        terminal_mark_dirty(d->term);
 }
 
 static void sokol_set_link_hint(PorttyBackend *self, const char *url,
@@ -854,17 +897,29 @@ static void sokol_set_link_hint(PorttyBackend *self, const char *url,
 
 static int sokol_notification_hit(PorttyBackend *self, int px, int py)
 {
-    (void)self;
-    (void)px;
-    (void)py;
-    return 0;
+    SokolData *d = sokol_data(self);
+    if (!d || !d->notif_active || d->notif_h <= 0)
+        return 0;
+    if (px < d->notif_x || px >= d->notif_x + d->notif_w ||
+        py < d->notif_y || py >= d->notif_y + d->notif_h)
+        return 0;
+    if (px >= d->notif_close_x && px < d->notif_close_x + d->notif_close_size &&
+        py >= d->notif_close_y && py < d->notif_close_y + d->notif_close_size)
+        return 2;
+    return 1;
 }
 
 static bool sokol_set_notification_hover(PorttyBackend *self, bool hovered)
 {
-    (void)self;
-    (void)hovered;
-    return false;
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return false;
+    if (!d->notif_active)
+        hovered = false;
+    if (d->notif_close_hover == hovered)
+        return false;
+    d->notif_close_hover = hovered;
+    return true;
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
@@ -1900,17 +1955,76 @@ static void sokol_draw_strikethrough(SokolData *d, int row, int vis_start,
                          (float)(strike_y + thickness), color);
 }
 
-static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
-                                bool cursor_visible)
+// Reserved glyph ID for the notification panel close "×" under the
+// box-drawing font-data slot. Real box-drawing codepoints are > 0.
+#define NOTIF_CLOSE_GLYPH_ID 0
+
+static void sokol_emit_notif_close(SokolData *d, int *glyph_vert_count)
 {
-    SokolData *d = sokol_data(self);
-    if (!d || !term)
+    if (d->notif_close_size <= 0 || !glyph_vert_count)
         return;
 
-    // If overlay is active, render the overlay terminal instead
-    if (d->scroll.overlay)
-        term = d->scroll.overlay;
+    RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
+        &d->atlas, BOXDRAW_FONT_DATA, NOTIF_CLOSE_GLYPH_ID, 0);
+    if (!entry) {
+        int size = d->notif_close_size;
+        uint8_t *close_buf = calloc((size_t)size * size, 4);
+        if (!close_buf)
+            return;
+        rend_make_close_x_bitmap(close_buf, size);
+        GlyphBitmap gb = {
+            .pixels = close_buf,
+            .width = size,
+            .height = size,
+            .x_offset = 0,
+            .y_offset = 0,
+            .advance = size,
+            .centered = false,
+        };
+        entry = rend_sokol_atlas_insert(
+            &d->atlas, BOXDRAW_FONT_DATA, NOTIF_CLOSE_GLYPH_ID, 0, &gb, false);
+        free(close_buf);
+        if (!entry)
+            return;
+    }
 
+    if (entry->region.w <= 0 || entry->region.h <= 0)
+        return;
+
+    uint8_t lum = d->notif_close_hover ? 245 : 170;
+    uint8_t fg[4] = { lum, lum, lum, 255 };
+    uint8_t bg[4] = { 38, 38, 44, 255 };
+
+    float cx0 = d->notif_close_x;
+    float cy0 = d->notif_close_y;
+    float cx1 = cx0 + (float)entry->region.w;
+    float cy1 = cy0 + (float)entry->region.h;
+
+    float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
+    float u0 = (float)entry->region.x / atlas_size;
+    float v0 = (float)entry->region.y / atlas_size;
+    float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
+    float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
+
+    if (*glyph_vert_count + 6 > SOKOL_MAX_VERTICES)
+        return;
+    GlyphVertex *q = &s_glyph_verts[*glyph_vert_count];
+    q[0] = (GlyphVertex){ cx0, cy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[1] = (GlyphVertex){ cx1, cy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[2] = (GlyphVertex){ cx1, cy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[3] = (GlyphVertex){ cx0, cy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[4] = (GlyphVertex){ cx1, cy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[5] = (GlyphVertex){ cx0, cy1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    *glyph_vert_count += 6;
+}
+
+static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
+                                        int origin_x, int origin_y,
+                                        bool cursor_visible, int scroll_offset,
+                                        int *vert_count, int *glyph_vert_count,
+                                        int *sel_vert_count,
+                                        GlyphVertex *sel_verts)
+{
     int rows, cols;
     terminal_get_dimensions(term, &rows, &cols);
     if (rows <= 0 || cols <= 0)
@@ -1921,43 +2035,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     if (cell_w <= 0 || cell_h <= 0)
         return;
 
-    // Use the actual framebuffer dimensions (sapp_width/height return
-    // physical pixels on all platforms).
-    int win_w = (int)sapp_width();
-    int win_h = (int)sapp_height();
-    if (win_w <= 0 || win_h <= 0) {
-        win_w = cols * cell_w;
-        win_h = rows * cell_h;
-    }
-
-    // Ensure atlas is initialized
-    if (!d->atlas.texture_created) {
-        if (!rend_sokol_atlas_init(&d->atlas, d->linear_ok))
-            return;
-    }
-
-    // Ensure glyph pipeline is created
-    sokol_ensure_glyph_pipeline(d);
-    sokol_ensure_lottie_pipeline(d);
-
-    rend_sokol_atlas_begin_frame(&d->atlas);
-
-    // Build vertex data (using file-scope arrays for debug access)
-    static GlyphVertex sel_verts[SOKOL_MAX_VERTICES];
-    int vert_count = 0;       // bg quads in s_frame_verts
-    int glyph_vert_count = 0; // glyph/cursor quads in s_glyph_verts
-    int sel_vert_count = 0;
     float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
-    int scroll_offset = d->scroll.scroll_offset;
+    bool track_index = (term != d->notif_term);
 
-    memset(s_vert_index, -1, sizeof(s_vert_index));
-
-    for (int row = 0; row < rows && vert_count + 12 <= SOKOL_MAX_VERTICES; row++) {
+    for (int row = 0; row < rows && *vert_count + 12 <= SOKOL_MAX_VERTICES; row++) {
         int unified_row = rend_display_row_to_unified(scroll_offset, row);
-        for (int col = 0; col < cols && vert_count + 12 <= SOKOL_MAX_VERTICES; col++) {
+        for (int col = 0; col < cols && *vert_count + 12 <= SOKOL_MAX_VERTICES; col++) {
             TerminalCell cell;
             if (unified_row < 0) {
-                // Scrollback row
                 if (terminal_get_scrollback_cell(term, -unified_row - 1, col, &cell) != 0)
                     continue;
             } else {
@@ -1965,48 +2050,39 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     continue;
             }
             if (cell.width == 0) {
-                // Empty/continuation cell — still draw cursor if positioned here
                 if (cursor_visible && scroll_offset == 0 &&
-                    terminal_get_cursor_visible(term) && vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                    terminal_get_cursor_visible(term) && *vert_count + 6 <= SOKOL_MAX_VERTICES) {
                     TerminalPos cp = terminal_get_cursor_pos(term);
                     if (cp.row == row && cp.col == col &&
-                        glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
-                        float cx0 = (float)(col * cell_w);
-                        float cy0 = (float)(row * cell_h);
+                        *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                        float cx0 = (float)(origin_x + col * cell_w);
+                        float cy0 = (float)(origin_y + row * cell_h);
                         float cx1 = cx0 + (float)cell_w;
                         float cy1 = cy0 + (float)cell_h;
                         uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G,
                                           CURSOR_COLOR_B, CURSOR_COLOR_A };
                         float cu0 = -(0.0f + 2.0f);
                         float cu1 = -(1.0f + 2.0f);
-                        GlyphVertex *q = &s_glyph_verts[glyph_vert_count];
+                        GlyphVertex *q = &s_glyph_verts[*glyph_vert_count];
                         q[0] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[1] = (GlyphVertex){ cx1, cy0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[2] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[3] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[4] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                         q[5] = (GlyphVertex){ cx0, cy1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        glyph_vert_count += 6;
+                        *glyph_vert_count += 6;
                     }
                 }
-                continue; // continuation cell
+                continue;
             }
 
-            // Determine colors
             uint8_t fg[4], bg[4];
             bool rev = cell.attrs.reverse;
             cell_color(cell.fg, true, rev, fg);
             cell_color(cell.bg, false, rev, bg);
 
-            // Selection highlight: collect overlay quads to draw after glyphs
             bool in_sel = terminal_cell_in_selection(term, unified_row, col);
 
-            // Cursor: render as a dedicated overlay quad after the bg/glyph.
-            // We use a fixed cursor color (matching SDL3) instead of fg/bg swap
-            // because the bg quad samples the atlas at a zero-coverage UV, and
-            // swapping would make the cursor cell's bg = original fg (light).
-            // A dedicated overlay with cursor_color for both fg and bg ensures
-            // the shader outputs cursor_color regardless of atlas coverage.
             bool is_cursor = false;
             if (cursor_visible && scroll_offset == 0 &&
                 terminal_get_cursor_visible(term)) {
@@ -2016,50 +2092,40 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 }
             }
 
-            float cell_x0 = (float)(col * cell_w);
-            float cell_y0 = (float)(row * cell_h);
+            float cell_x0 = (float)(origin_x + col * cell_w);
+            float cell_y0 = (float)(origin_y + row * cell_h);
             float cell_x1 = cell_x0 + (float)(cell.width * cell_w);
             float cell_y1 = cell_y0 + (float)cell_h;
 
-            // Always emit a full-cell background quad.
-            // UV uses x=2.0 to signal a bg-only quad (zero coverage) to
-            // the fragment shader, which checks v_uv.x >= 2.0 and sets
-            // coverage=0. This avoids relying on a specific atlas texel
-            // being zero.
             float bg_u = 2.0f;
             float bg_v = 0.0f;
-            s_vert_index[row][col] = vert_count;
-            GlyphVertex *q = &s_frame_verts[vert_count];
+            if (track_index)
+                s_vert_index[row][col] = *vert_count;
+            GlyphVertex *q = &s_frame_verts[*vert_count];
             q[0] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[1] = (GlyphVertex){ cell_x1, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[2] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[3] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[4] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
             q[5] = (GlyphVertex){ cell_x0, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            vert_count += 6;
+            *vert_count += 6;
 
-            // Cursor overlay: draw a solid cursor-color quad on top of the bg.
-            // UVs encode local cell position (negative u = cursor mode) so the
-            // fragment shader can clip rounded corners.
-            if (is_cursor && glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+            if (is_cursor && *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                 uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G,
                                   CURSOR_COLOR_B, CURSOR_COLOR_A };
                 float cu0 = -(0.0f + 2.0f);
                 float cu1 = -(1.0f + 2.0f);
-                q = &s_glyph_verts[glyph_vert_count];
+                q = &s_glyph_verts[*glyph_vert_count];
                 q[0] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[1] = (GlyphVertex){ cell_x1, cell_y0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[2] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[3] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[4] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
                 q[5] = (GlyphVertex){ cell_x0, cell_y1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                glyph_vert_count += 6;
+                *glyph_vert_count += 6;
             }
 
-            // Overlay glyph quad on top (only if there's a glyph and not cursor)
             if (cell.cp != 0 && cell.cp != 0x20 && !is_cursor) {
-                // Procedural box drawing / block elements — render to pixel
-                // buffer and cache in the atlas like a regular font glyph.
                 if (rend_boxdraw_is_supported(cell.cp)) {
                     uint32_t bd_cp = cell.cp;
                     uint32_t color_key = 0;
@@ -2085,7 +2151,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
                     if (bd_entry && bd_entry->region.w > 0 &&
                         bd_entry->region.h > 0 &&
-                        glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                        *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                         float gx0, gy0, gx1, gy1;
                         if (bd_entry->centered) {
                             gx0 = cell_x0 +
@@ -2104,14 +2170,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                         float u1 = (float)(bd_entry->region.x + bd_entry->region.w) / atlas_size;
                         float v1 = (float)(bd_entry->region.y + bd_entry->region.h) / atlas_size;
 
-                        q = &s_glyph_verts[glyph_vert_count];
+                        q = &s_glyph_verts[*glyph_vert_count];
                         q[0] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                         q[1] = (GlyphVertex){ gx1, gy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                         q[2] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                         q[3] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                         q[4] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                         q[5] = (GlyphVertex){ gx0, gy1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                        glyph_vert_count += 6;
+                        *glyph_vert_count += 6;
                     }
                     goto selection_check;
                 }
@@ -2130,8 +2196,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 if (!font_has_style(d->font, style))
                     style = FONT_STYLE_NORMAL;
 
-                // Emoji font routing: shared logic in rend_should_use_emoji.
-                // VS15 narrows to 1 cell but does NOT block color emoji routing.
                 uint32_t cps[32];
                 int cp_count;
                 if (cell.grapheme_id == 0) {
@@ -2155,12 +2219,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 int avail_w = cell.width * cell_w;
                 int avail_h = cell_h;
 
-                // Tell the font backend the pixel budget for this glyph so
-                // oversized glyphs get scaled.
                 for (int s = 0; s < FONT_STYLE_COUNT; s++)
                     font_set_presentation_width(d->font, s, avail_w);
 
-                // Emoji: prefer square aspect ratio.
                 if (style == FONT_STYLE_EMOJI && avail_h < avail_w)
                     avail_w = avail_h;
 
@@ -2185,15 +2246,12 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     cache_w = cache_h = side;
                 }
 
-                // Shaped rendering path for multi-codepoint clusters (VS15/VS16,
-                // ZWJ sequences). Mirrors the SDL3 shaped path.
                 if (cp_count > 1 && d->font->render_shaped) {
                     void *sh_font_data = d->font->font_data[style];
                     ShapedGlyphs *shaped = font_render_shaped_text(
                         d->font, style, cps, cp_count,
                         render_r, render_g, render_b);
 
-                    // .notdef check: if all glyphs are 0, treat as failure
                     if (shaped) {
                         bool all_notdef = true;
                         for (int i = 0; i < shaped->num_glyphs; i++) {
@@ -2212,7 +2270,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                         }
                     }
 
-                    // Fallback: if shaped rendering fails with selected style, try NORMAL
                     if (!shaped && style != FONT_STYLE_NORMAL) {
                         style = FONT_STYLE_NORMAL;
                         sh_font_data = d->font->font_data[style];
@@ -2228,7 +2285,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                             render_r, render_g, render_b);
                     }
 
-                    // Dynamic fallback: try fontconfig-resolved font
                     if (!shaped && cp_count > 0) {
                         const char *fb_path = rend_fallback_lookup(&d->fallback, d->resolve, cps[0]);
                         if (fb_path && rend_fallback_ensure(&d->fallback, d->font, fb_path,
@@ -2294,7 +2350,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                             }
 
                             if (entry && entry->region.w > 0 && entry->region.h > 0 &&
-                                glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                                *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                                 int gx = (int)cell_x0 + shaped->x_positions[gi] + entry->x_offset;
                                 int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
                                 if (entry->centered) {
@@ -2314,14 +2370,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
                                 float u_off = color_baked ? 3.0f : 0.0f;
 
-                                q = &s_glyph_verts[glyph_vert_count];
+                                q = &s_glyph_verts[*glyph_vert_count];
                                 q[0] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                                 q[1] = (GlyphVertex){ gx1, gy0, u1 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                                 q[2] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                                 q[3] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                                 q[4] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                                 q[5] = (GlyphVertex){ gx0, gy1, u0 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                                glyph_vert_count += 6;
+                                *glyph_vert_count += 6;
                             }
                         }
                         free(shaped->glyph_ids);
@@ -2335,7 +2391,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
                 uint32_t glyph_id = font_get_glyph_index(d->font, style, cell.cp);
 
-                // Fallback: if glyph not found in selected style, try NORMAL
                 void *font_data = d->font->font_data[style];
                 if (glyph_id == 0 && style != FONT_STYLE_NORMAL) {
                     style = FONT_STYLE_NORMAL;
@@ -2350,7 +2405,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     glyph_id = font_get_glyph_index(d->font, style, cell.cp);
                 }
 
-                // Dynamic fallback: if still missing, query font resolver
                 if (glyph_id == 0) {
                     const char *fb_path = rend_fallback_lookup(&d->fallback, d->resolve, cell.cp);
                     if (fb_path && rend_fallback_ensure(&d->fallback, d->font, fb_path,
@@ -2369,8 +2423,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     }
                 }
 
-                // Tag glyph_index so glyphs at different presentation widths
-                // get separate atlas entries.
                 uint32_t atlas_glyph_id = glyph_id;
                 if (cell.width >= 2 && atlas_glyph_id != 0)
                     atlas_glyph_id |= (1u << 29);
@@ -2384,7 +2436,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     GlyphBitmap *bmp = font_render_glyphs(
                         d->font, style, &cell.cp, 1, render_r, render_g, render_b);
                     if (bmp) {
-                        // Downscale if needed (symbol/emoji overflow)
                         GlyphBitmap *scaled = NULL;
                         if (downscale_glyph) {
                             scaled = rend_downscale_bitmap(bmp, cache_w, cache_h, height_only_fit);
@@ -2417,7 +2468,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 }
 
                 if (entry && entry->region.w > 0 && entry->region.h > 0 &&
-                    glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                    *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                     int gx = (int)cell_x0 + entry->x_offset;
                     int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
                     if (entry->centered) {
@@ -2435,40 +2486,106 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
                     float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
 
-                    // For color-baked glyphs, offset u by 3.0 so the
-                    // fragment shader uses the color path (texel.rgb)
-                    // instead of coverage-only (texel.a).
                     float u_off = color_baked ? 3.0f : 0.0f;
 
-                    q = &s_glyph_verts[glyph_vert_count];
+                    q = &s_glyph_verts[*glyph_vert_count];
                     q[0] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[1] = (GlyphVertex){ gx1, gy0, u1 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[2] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[3] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[4] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
                     q[5] = (GlyphVertex){ gx0, gy1, u0 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    glyph_vert_count += 6;
+                    *glyph_vert_count += 6;
                 }
             }
 
         selection_check:
-            // Selection overlay: record cell geometry for a semi-transparent
-            // overlay quad drawn after all glyphs. Collected in sel_verts[]
-            // and appended to the buffer after the glyph loop so only one
-            // sg_update_buffer call is needed per frame.
-            if (in_sel && sel_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+            if (in_sel && *sel_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                 uint8_t sc[4] = { SELECTION_COLOR_R, SELECTION_COLOR_G,
                                   SELECTION_COLOR_B, SELECTION_COLOR_A };
-                GlyphVertex *sq = &sel_verts[sel_vert_count];
+                GlyphVertex *sq = &sel_verts[*sel_vert_count];
                 sq[0] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
                 sq[1] = (GlyphVertex){ cell_x1, cell_y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
                 sq[2] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
                 sq[3] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
                 sq[4] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
                 sq[5] = (GlyphVertex){ cell_x0, cell_y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                sel_vert_count += 6;
+                *sel_vert_count += 6;
             }
         }
+    }
+}
+
+static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
+                                bool cursor_visible)
+{
+    SokolData *d = sokol_data(self);
+    if (!d || !term)
+        return;
+
+    // If overlay is active, render the overlay terminal instead
+    if (d->scroll.overlay)
+        term = d->scroll.overlay;
+
+    int rows, cols;
+    terminal_get_dimensions(term, &rows, &cols);
+    if (rows <= 0 || cols <= 0)
+        return;
+
+    int cell_w = d->cell_w;
+    int cell_h = d->cell_h;
+    if (cell_w <= 0 || cell_h <= 0)
+        return;
+
+    // Use the actual framebuffer dimensions (sapp_width/height return
+    // physical pixels on all platforms).
+    int win_w = (int)sapp_width();
+    int win_h = (int)sapp_height();
+    if (win_w <= 0 || win_h <= 0) {
+        win_w = cols * cell_w;
+        win_h = rows * cell_h;
+    }
+
+    // Ensure atlas is initialized
+    if (!d->atlas.texture_created) {
+        if (!rend_sokol_atlas_init(&d->atlas, d->linear_ok))
+            return;
+    }
+
+    // Ensure glyph pipeline is created
+    sokol_ensure_glyph_pipeline(d);
+    sokol_ensure_lottie_pipeline(d);
+
+    rend_sokol_atlas_begin_frame(&d->atlas);
+
+    // Build vertex data (using file-scope arrays for debug access)
+    static GlyphVertex sel_verts[SOKOL_MAX_VERTICES];
+    int vert_count = 0;       // bg quads in s_frame_verts
+    int glyph_vert_count = 0; // glyph/cursor quads in s_glyph_verts
+    int sel_vert_count = 0;
+    int scroll_offset = d->scroll.scroll_offset;
+
+    memset(s_vert_index, -1, sizeof(s_vert_index));
+
+    sokol_render_terminal_cells(d, term, 0, 0, cursor_visible, scroll_offset,
+                                &vert_count, &glyph_vert_count, &sel_vert_count,
+                                sel_verts);
+
+    // Notification panel cells (composited on top of primary terminal).
+    // Rendered into the same vertex arrays so the panel shares the bg/glyph
+    // passes with the primary terminal.
+    if (d->notif_active && d->notif_term) {
+        float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
+        int pad = (int)(10.0f * scale + 0.5f);
+        int accent_w = (int)(4.0f * scale + 0.5f);
+        int gap = (int)(8.0f * scale + 0.5f);
+        int text_x = pad + accent_w + gap;
+
+        sokol_render_terminal_cells(d, d->notif_term,
+                                    d->notif_x + text_x, d->notif_y + pad,
+                                    false, 0,
+                                    &vert_count, &glyph_vert_count,
+                                    &sel_vert_count, sel_verts);
     }
 
     // Decoration pass: coalesce underlines and strikethroughs by style and
@@ -2602,6 +2719,40 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                          vis_run_end, run_color);
             }
         }
+    }
+
+    // Notification panel decoration: accent stripe goes into the decoration
+    // buffer; close button goes into the glyph buffer. Both must be emitted
+    // before the glyph/decoration buffers are appended to the frame buffer.
+    if (d->notif_active && d->notif_term) {
+        float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
+        int pad = (int)(10.0f * scale + 0.5f);
+        int accent_w = (int)(4.0f * scale + 0.5f);
+
+        uint8_t ac[4] = { 0, 0, 0, 255 };
+        switch (d->notif_level) {
+        case 2:
+            ac[0] = 224;
+            ac[1] = 27;
+            ac[2] = 36;
+            break;
+        case 1:
+            ac[0] = 245;
+            ac[1] = 194;
+            ac[2] = 17;
+            break;
+        default:
+            ac[0] = 98;
+            ac[1] = 160;
+            ac[2] = 234;
+            break;
+        }
+        sokol_deco_emit_quad(
+            (float)(d->notif_x + pad), (float)(d->notif_y + pad),
+            (float)(d->notif_x + pad + accent_w), (float)(d->notif_y + d->notif_h - pad),
+            ac);
+
+        sokol_emit_notif_close(d, &glyph_vert_count);
     }
 
     // Append glyph quads after bg quads, then selection overlay quads.
@@ -2756,14 +2907,15 @@ static void sokol_present(PorttyBackend *self)
 
 static void sokol_resize(PorttyBackend *self, int w, int h)
 {
-    (void)self;
     (void)w;
     (void)h;
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
     // Sokol handles the GL swapchain internally via sglue_swapchain().
-    // The viewport is set by the cell-based resolution uniform in
-    // sokol_draw_terminal, which uses sapp_width()/sapp_height().
-    // No explicit GL viewport call is needed — sokol_gfx sets it from
-    // the swapchain dimensions in sg_begin_pass().
+    // Rebuild notification panel at new width.
+    if (d->notif_active && (d->notif_title || d->notif_body))
+        sokol_notif_rebuild(d);
 }
 
 static bool sokol_get_cell_size(PorttyBackend *self, int *cw, int *ch)
@@ -3625,6 +3777,102 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     terminal_mark_dirty(d->term);
 
     vlog("sokol_finish_setup: complete, win=%dx%d\n", win_w, win_h);
+}
+
+// ── Notification panel ───────────────────────────────────────────────────
+
+static char *sokol_notif_build_ansi(SokolData *d)
+{
+    char *buf = NULL;
+    size_t cap = 0;
+    FILE *fp = open_memstream(&buf, &cap);
+    if (!fp)
+        return NULL;
+
+    // Set panel background color on every cell.
+    // Do NOT use \x1b[0m (full reset) — it clears bg to default (black).
+    // Use targeted resets: \x1b[22m (normal intensity), \x1b[39m (default fg).
+    const char *panel_bg = "\x1b[48;2;38;38;44m";
+
+    // Title (bold, bright white on panel bg)
+    if (d->notif_title) {
+        fprintf(fp, "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
+                panel_bg, d->notif_title);
+    }
+    // Body (normal, dim gray on panel bg)
+    if (d->notif_body) {
+        if (d->notif_title)
+            fprintf(fp, "\r\n%s", panel_bg);
+        else
+            fprintf(fp, "%s", panel_bg);
+        fprintf(fp, "\x1b[38;2;190;190;198m%s\x1b[39m", d->notif_body);
+    }
+    fclose(fp);
+    return buf;
+}
+
+static void sokol_notif_rebuild(SokolData *d)
+{
+    if (d->notif_term) {
+        terminal_destroy(d->notif_term);
+        free(d->notif_term);
+        d->notif_term = NULL;
+    }
+    d->notif_active = false;
+    d->notif_h = 0;
+
+    if (!d->notif_title && !d->notif_body)
+        return;
+    if (!d->font || d->cell_w <= 0 || d->cell_h <= 0)
+        return;
+
+    int win_w = (int)sapp_width();
+    if (win_w <= 0)
+        return;
+
+    float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
+    int pad = (int)(10.0f * scale + 0.5f);
+    int accent_w = (int)(4.0f * scale + 0.5f);
+    int gap = (int)(8.0f * scale + 0.5f);
+    int close_size = d->cell_h;
+    int text_w = win_w - 2 * pad - accent_w - gap - close_size - pad;
+    int notif_cols = text_w > 0 ? text_w / d->cell_w : 1;
+    if (notif_cols < 1)
+        notif_cols = 1;
+
+    char *ansi = sokol_notif_build_ansi(d);
+    if (!ansi)
+        return;
+
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = notif_cols;
+    cfg.rows = 32;
+    cfg.cell_w_px = d->cell_w;
+    cfg.cell_h_px = d->cell_h;
+    d->notif_term = term_cfr_new(&cfg);
+    if (!d->notif_term) {
+        free(ansi);
+        return;
+    }
+
+    terminal_process_input(d->notif_term, ansi, strlen(ansi));
+    free(ansi);
+
+    TerminalPos pos = terminal_get_cursor_pos(d->notif_term);
+    int n_rows = pos.row + 1;
+    if (n_rows < 1)
+        n_rows = 1;
+
+    d->notif_cols = notif_cols;
+    d->notif_rows = n_rows;
+    d->notif_w = win_w;
+    d->notif_h = pad * 2 + n_rows * d->cell_h;
+    d->notif_x = 0;
+    d->notif_y = 0;
+    d->notif_close_size = close_size;
+    d->notif_close_x = (float)(d->notif_x + win_w - pad - close_size);
+    d->notif_close_y = (float)(d->notif_y + pad + (n_rows * d->cell_h - close_size) / 2);
+    d->notif_active = true;
 }
 
 static void sokol_init_cb(void)

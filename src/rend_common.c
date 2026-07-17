@@ -1306,3 +1306,55 @@ void rend_format_gpu_driver(char *buf, size_t bufsz,
     else
         snprintf(buf, bufsz, "%s", driver_name);
 }
+
+// =============================================================================
+// Close "×" bitmap helper — shared between SDL3 and Sokol backends
+// =============================================================================
+
+// Shortest distance from point (px,py) to the segment (ax,ay)-(bx,by).
+static float seg_distance(float px, float py, float ax, float ay, float bx,
+                          float by)
+{
+    float vx = bx - ax, vy = by - ay;
+    float wx = px - ax, wy = py - ay;
+    float c2 = vx * vx + vy * vy;
+    float t = c2 > 0.0f ? (vx * wx + vy * wy) / c2 : 0.0f;
+    if (t < 0.0f)
+        t = 0.0f;
+    else if (t > 1.0f)
+        t = 1.0f;
+    float dx = px - (ax + t * vx), dy = py - (ay + t * vy);
+    return sqrtf(dx * dx + dy * dy);
+}
+
+void rend_make_close_x_bitmap(uint8_t *buf, int size)
+{
+    if (!buf || size <= 0)
+        return;
+
+    float inset = (float)size * 0.30f;
+    float lo = inset, hi = (float)size - inset;
+    float hw = (float)size * 0.06f; // half stroke width
+    if (hw < 0.75f)
+        hw = 0.75f;
+
+    for (int y = 0; y < size; y++) {
+        for (int x = 0; x < size; x++) {
+            float px = (float)x + 0.5f, py = (float)y + 0.5f;
+            float d = seg_distance(px, py, lo, lo, hi, hi);  // top-left -> bottom-right
+            float d2 = seg_distance(px, py, hi, lo, lo, hi); // top-right -> bottom-left
+            if (d2 < d)
+                d = d2;
+            float cov = hw + 0.5f - d; // 1px anti-aliased edge band
+            if (cov < 0.0f)
+                cov = 0.0f;
+            else if (cov > 1.0f)
+                cov = 1.0f;
+            uint8_t *p = buf + ((size_t)y * size + x) * 4;
+            p[0] = 255;
+            p[1] = 255;
+            p[2] = 255;
+            p[3] = (uint8_t)(cov * 255.0f + 0.5f);
+        }
+    }
+}
