@@ -270,9 +270,17 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
         char url[4096];
         size_t n = terminal_cell_get_hyperlink(app->term, link_row, link_col, url,
                                                sizeof(url));
-        app->backend->set_link_hint(app->backend, n > 0 ? url : NULL, py);
+        int cell_w, cell_h;
+        int anchor_py = py;
+        if (app_get_cell_size(app, &cell_w, &cell_h) && cell_h > 0) {
+            int display_row = py / cell_h;
+            if (display_row < 0)
+                display_row = 0;
+            anchor_py = display_row * cell_h;
+        }
+        app->backend->set_link_hint(app->backend, n > 0 ? url : NULL, anchor_py);
     } else {
-        app->backend->set_link_hint(app->backend, NULL, py);
+        app->backend->set_link_hint(app->backend, NULL, 0);
     }
     return true;
 }

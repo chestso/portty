@@ -243,6 +243,13 @@ typedef struct
     float notif_close_x, notif_close_y;
     char *notif_title;
     char *notif_body;
+
+    // Hover link hint panel — second instance of the same panel system
+    TerminalBackend *hint_term;
+    bool hint_active;
+    char *hint_text;
+    int hint_anchor_py;
+    int hint_h;
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
@@ -433,6 +440,12 @@ static void sokol_destroy(PorttyBackend *self)
         terminal_destroy(d->notif_term);
         free(d->notif_term);
         d->notif_term = NULL;
+    }
+    free(d->hint_text);
+    if (d->hint_term) {
+        terminal_destroy(d->hint_term);
+        free(d->hint_term);
+        d->hint_term = NULL;
     }
     sg_shutdown();
     free(d->working_dir);
@@ -887,12 +900,140 @@ static void sokol_notify_dismiss(PorttyBackend *self)
         terminal_mark_dirty(d->term);
 }
 
+static void sokol_notif_rebuild(SokolData *d);
+
+static char *sokol_hint_build_ansi(SokolData *d)
+{
+    char *buf = NULL;
+    size_t cap = 0;
+    FILE *fp = open_memstream(&buf, &cap);
+    if (!fp)
+        return NULL;
+
+    const char *panel_bg = "\x1b[48;2;38;38;44m";
+    fprintf(fp, "%s\x1b[38;2;210;210;220m%s\x1b[39m",
+            panel_bg, d->hint_text ? d->hint_text : "");
+    fclose(fp);
+    return buf;
+}
+
+static void sokol_hint_rebuild(SokolData *d)
+{
+    if (d->hint_term) {
+        terminal_destroy(d->hint_term);
+        free(d->hint_term);
+        d->hint_term = NULL;
+    }
+    d->hint_active = false;
+    d->hint_h = 0;
+
+    if (!d->hint_text || !d->hint_text[0] || !d->font || d->cell_w <= 0 || d->cell_h <= 0)
+        return;
+
+    int win_w = (int)sapp_width();
+    if (win_w <= 0)
+        return;
+
+    float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
+    int pad = (int)(10.0f * scale + 0.5f);
+    int max_cols = win_w > 2 * pad ? (win_w - 2 * pad) / d->cell_w : 1;
+    if (max_cols < 1)
+        max_cols = 1;
+
+    char *ansi = sokol_hint_build_ansi(d);
+    if (!ansi)
+        return;
+
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = max_cols;
+    cfg.rows = 32;
+    cfg.cell_w_px = d->cell_w;
+    cfg.cell_h_px = d->cell_h;
+    d->hint_term = term_cfr_new(&cfg);
+    if (!d->hint_term) {
+        free(ansi);
+        return;
+    }
+
+    terminal_process_input(d->hint_term, ansi, strlen(ansi));
+    free(ansi);
+
+    TerminalPos pos = terminal_get_cursor_pos(d->hint_term);
+    int n_rows = pos.row + 1;
+    if (n_rows < 1)
+        n_rows = 1;
+
+    d->hint_h = pad * 2 + n_rows * d->cell_h;
+    d->hint_active = true;
+}
+
+static int sokol_hint_compute_y(SokolData *d, int anchor_py, int win_h)
+{
+    if (win_h <= 0 || d->hint_h <= 0)
+        return 0;
+
+    bool top_half = anchor_py + d->cell_h / 2 < win_h / 2;
+    int y;
+    if (top_half)
+        y = anchor_py + d->cell_h;
+    else
+        y = anchor_py - d->hint_h;
+
+    int notif_bottom = d->notif_active && d->notif_h > 0 ? d->notif_h : 0;
+
+    if (y < notif_bottom && y + d->hint_h > 0) {
+        int flipped = top_half ? anchor_py - d->hint_h : anchor_py + d->cell_h;
+        if (flipped >= notif_bottom && flipped + d->hint_h <= win_h)
+            y = flipped;
+        else if (flipped + d->hint_h <= win_h && notif_bottom == 0)
+            y = flipped;
+    }
+
+    if (y < notif_bottom)
+        y = notif_bottom;
+    if (y + d->hint_h > win_h)
+        y = win_h - d->hint_h;
+    if (y < 0)
+        y = 0;
+
+    return y;
+}
+
 static void sokol_set_link_hint(PorttyBackend *self, const char *url,
                                 int anchor_py)
 {
-    (void)self;
-    (void)url;
-    (void)anchor_py;
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
+
+    if (!url || !url[0]) {
+        if (d->hint_term) {
+            terminal_destroy(d->hint_term);
+            free(d->hint_term);
+            d->hint_term = NULL;
+        }
+        free(d->hint_text);
+        d->hint_text = NULL;
+        d->hint_active = false;
+        d->hint_h = 0;
+        if (d->term)
+            terminal_mark_dirty(d->term);
+        return;
+    }
+
+    if (d->hint_active && d->hint_text && strcmp(d->hint_text, url) == 0) {
+        d->hint_anchor_py = anchor_py;
+        if (d->term)
+            terminal_mark_dirty(d->term);
+        return;
+    }
+
+    free(d->hint_text);
+    d->hint_text = strdup(url);
+    d->hint_anchor_py = anchor_py;
+    sokol_hint_rebuild(d);
+    if (d->term)
+        terminal_mark_dirty(d->term);
 }
 
 static int sokol_notification_hit(PorttyBackend *self, int px, int py)
@@ -2588,6 +2729,35 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                     &sel_vert_count, sel_verts);
     }
 
+    // Hover link hint panel cells (second instance of the same panel system).
+    if (d->hint_active && d->hint_term && d->hint_h > 0) {
+        float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
+        int pad = (int)(10.0f * scale + 0.5f);
+        int win_w = (int)sapp_width();
+        int win_h = (int)sapp_height();
+        int y = sokol_hint_compute_y(d, d->hint_anchor_py, win_h);
+
+        // Full-width panel background: emit as a regular bg quad so it is
+        // drawn in the bg pass, before the hint text glyph quads.
+        if (vert_count + 6 <= SOKOL_MAX_VERTICES) {
+            uint8_t bg[4] = { 38, 38, 44, 255 };
+            GlyphVertex *q = &s_frame_verts[vert_count];
+            q[0] = (GlyphVertex){ 0.0f, (float)y, 2.0f, 0.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            q[1] = (GlyphVertex){ (float)win_w, (float)y, 2.0f, 0.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            q[2] = (GlyphVertex){ (float)win_w, (float)(y + d->hint_h), 2.0f, 1.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            q[3] = (GlyphVertex){ 0.0f, (float)y, 2.0f, 0.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            q[4] = (GlyphVertex){ (float)win_w, (float)(y + d->hint_h), 2.0f, 1.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            q[5] = (GlyphVertex){ 0.0f, (float)(y + d->hint_h), 2.0f, 1.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            vert_count += 6;
+        }
+
+        sokol_render_terminal_cells(d, d->hint_term,
+                                    pad, y + pad,
+                                    false, 0,
+                                    &vert_count, &glyph_vert_count,
+                                    &sel_vert_count, sel_verts);
+    }
+
     // Decoration pass: coalesce underlines and strikethroughs by style and
     // color, and emit them into s_deco_verts for alpha-blended rendering.
     s_deco_vert_count = 0;
@@ -2916,6 +3086,9 @@ static void sokol_resize(PorttyBackend *self, int w, int h)
     // Rebuild notification panel at new width.
     if (d->notif_active && (d->notif_title || d->notif_body))
         sokol_notif_rebuild(d);
+    // Rebuild hover link hint panel at new width.
+    if (d->hint_active)
+        sokol_hint_rebuild(d);
 }
 
 static bool sokol_get_cell_size(PorttyBackend *self, int *cw, int *ch)
@@ -3560,6 +3733,20 @@ static void sokol_debug_screendump(SokolData *d, const char *path)
 #endif
 }
 
+static void sokol_debug_mousemove(void *app, int x, int y)
+{
+    PorttyApp *p = (PorttyApp *)app;
+    portty_app_handle_mouse(p, x, y, 0, false, 0, 0);
+    portty_app_revalidate_hover(p, x, y);
+}
+
+static void sokol_debug_notify(void *backend, const char *title,
+                               const char *body)
+{
+    PorttyBackend *self = (PorttyBackend *)backend;
+    sokol_notify(self, title, body, PORTTY_NOTIFY_INFO);
+}
+
 static void sokol_debug_dumpverts(int row, int col_start, int col_end)
 {
     for (int col = col_start; col <= col_end; col++) {
@@ -4001,6 +4188,10 @@ static void sokol_frame_cb(void)
             .verify_col_start = &d->debug_verify_col_start,
             .verify_col_end = &d->debug_verify_col_end,
             .dumpverts_fn = sokol_debug_dumpverts,
+            .mousemove_fn = sokol_debug_mousemove,
+            .mousemove_user_data = g_sokol.app,
+            .notify_fn = sokol_debug_notify,
+            .notify_user_data = g_sokol.backend,
         };
         portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
         if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))

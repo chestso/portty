@@ -23,6 +23,8 @@ typedef enum
     DBG_CMD_DUMPCELLS,
     DBG_CMD_DUMPVERTS,
     DBG_CMD_VERIFYBUF,
+    DBG_CMD_NOTIFY,
+    DBG_CMD_MOUSEMOVE,
     DBG_CMD_QUIT,
 } DebugCmdType;
 
@@ -39,6 +41,12 @@ typedef struct
     int col_end;
     /* SCREENDUMP */
     char path[512];
+    /* MOUSEMOVE */
+    int mouse_x;
+    int mouse_y;
+    /* NOTIFY */
+    char notify_title[128];
+    char notify_body[256];
 } DebugCmd;
 
 typedef struct PorttyDebugScript PorttyDebugScript;
@@ -95,6 +103,12 @@ typedef struct
     int *verify_row, *verify_col_start, *verify_col_end;
     /* Vertex dump callback (Sokol only, NULL on SDL3) */
     void (*dumpverts_fn)(int row, int col_start, int col_end);
+    /* Mouse move callback (NULL if unsupported) */
+    void (*mousemove_fn)(void *app, int x, int y);
+    void *mousemove_user_data;
+    /* Notification callback (NULL if unsupported) */
+    void (*notify_fn)(void *backend, const char *title, const char *body);
+    void *notify_user_data;
 } DebugExecCtx;
 
 /* Execute one script step. Called each frame by the backend's main loop.

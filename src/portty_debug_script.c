@@ -382,6 +382,38 @@ static bool parse_command(PorttyDebugScript *s, char *line)
         return true;
     }
 
+    if (strcmp(line, "notify") == 0) {
+        DebugCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = DBG_CMD_NOTIFY;
+        strip_quotes(args);
+        char *sep = strstr(args, "\" \"");
+        if (sep) {
+            *sep = '\0';
+            snprintf(cmd->notify_title, sizeof(cmd->notify_title), "%s", args + 1);
+            snprintf(cmd->notify_body, sizeof(cmd->notify_body), "%s", sep + 3);
+            cmd->notify_title[strlen(cmd->notify_title) - 1] = '\0';
+            cmd->notify_body[strlen(cmd->notify_body) - 1] = '\0';
+        } else {
+            snprintf(cmd->notify_title, sizeof(cmd->notify_title), "%s", args);
+            cmd->notify_body[0] = '\0';
+        }
+        return true;
+    }
+
+    if (strcmp(line, "mousemove") == 0) {
+        DebugCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = DBG_CMD_MOUSEMOVE;
+        if (sscanf(args, "%d %d", &cmd->mouse_x, &cmd->mouse_y) != 2) {
+            script_set_error(s, "mousemove: requires x y");
+            return false;
+        }
+        return true;
+    }
+
     if (strcmp(line, "quit") == 0) {
         DebugCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -732,6 +764,31 @@ void portty_debug_script_step(PorttyDebugScript *script,
             *ctx->verify_col_end = cmd->col_end;
         } else {
             fprintf(stderr, "verifybuf: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_NOTIFY:
+    {
+        if (ctx->notify_fn) {
+            ctx->notify_fn(ctx->notify_user_data,
+                           cmd->notify_title[0] ? cmd->notify_title : "",
+                           cmd->notify_body[0] ? cmd->notify_body : "");
+        } else {
+            fprintf(stderr, "notify: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_MOUSEMOVE:
+    {
+        if (ctx->mousemove_fn) {
+            ctx->mousemove_fn(ctx->mousemove_user_data,
+                              cmd->mouse_x, cmd->mouse_y);
+        } else {
+            fprintf(stderr, "mousemove: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

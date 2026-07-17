@@ -142,6 +142,8 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `dumpcells <row> <col_start> <col_end>` | Print cells in the given range with codepoint, width, attributes, and fg/bg colors    |
 | `dumpverts <row> <col_start> <col_end>` | Dump GPU vertex data for glyphs (Sokol backend only)                                  |
 | `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)      |
+| `mousemove <x> <y>`                     | Simulate a mouse move to logical pixel coordinates (Sokol backend only)               |
+| `notify ["title"] ["body"]`             | Show a transient notification panel (Sokol backend only)                              |
 | `quit`                                  | Request application quit                                                              |
 
 ### `send` vs `emit`
@@ -223,9 +225,33 @@ wait 5.0
 quit
 ```
 
+### Mouse and notification commands (Sokol backend only)
+
+`mousemove` simulates a mouse move to the given **logical** pixel coordinates. This is useful for testing hover states (such as OSC-8 hyperlink previews) without a real mouse or window server. Coordinates are in the same logical pixel space the app uses for cell math, so they are unaffected by HiDPI content scaling.
+
+`notify` shows a transient top notification panel. With one argument it sets the title and leaves the body empty; with `"title" "body"` it sets both. The title and body must each be wrapped in double quotes and separated by a space.
+
+Show a notification and then hover an OSC-8 hyperlink to capture the hover preview:
+
+```
+# Run with: portty -S hover_demo.script
+wait 0.5
+emit \e[2J\e[H
+emit \e]8;;https://example.com/some-long-url-path\e\\Hover me\e]8;;\e\\\r\n
+wait 0.5
+notify "Demo" "Notification body text"
+wait 0.5
+# Hover over the "Hover me" link (adjust x/y to match your layout)
+mousemove 200 40
+wait 1.0
+screendump /tmp/portty-hover.png
+wait 5.0
+quit
+```
+
 ### Backend Support
 
-The Sokol backend supports all commands. The SDL3 backend supports all commands except `dumpverts` and `verifybuf` (GPU-specific), which print "not supported by this backend" and skip.
+The Sokol backend supports all commands. The SDL3 backend supports all commands except `dumpverts`, `verifybuf`, `mousemove`, and `notify` (Sokol-specific), which print "not supported by this backend" and skip.
 
 ## Configuration
 
