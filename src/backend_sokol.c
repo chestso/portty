@@ -58,6 +58,7 @@
 #include <sokol/sokol_glue.h>
 #include <sokol/sokol_log.h>
 #include <sokol/sokol_time.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -83,6 +84,69 @@
 
 #define SOKOL_PTY_BUF_SIZE 8192
 #define EMOJI_FONT_SCALE   4.0f
+
+// Portable string builder used in place of open_memstream(), which is not
+// available on Windows (MSYS2/MinGW).
+typedef struct
+{
+    char *buf;
+    size_t len;
+    size_t cap;
+} SokolStrBuf;
+
+static bool sokol_strbuf_init(SokolStrBuf *sb)
+{
+    sb->buf = malloc(64);
+    if (!sb->buf)
+        return false;
+    sb->buf[0] = '\0';
+    sb->len = 0;
+    sb->cap = 64;
+    return true;
+}
+
+static bool sokol_strbuf_appendf(SokolStrBuf *sb, const char *fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+    int n = vsnprintf(NULL, 0, fmt, ap);
+    va_end(ap);
+    if (n < 0)
+        return false;
+    size_t need = (size_t)n + 1;
+    if (sb->len + need > sb->cap) {
+        size_t new_cap = sb->cap * 2;
+        while (new_cap < sb->len + need)
+            new_cap *= 2;
+        char *p = realloc(sb->buf, new_cap);
+        if (!p)
+            return false;
+        sb->buf = p;
+        sb->cap = new_cap;
+    }
+    va_start(ap, fmt);
+    vsnprintf(sb->buf + sb->len, need, fmt, ap);
+    va_end(ap);
+    sb->len += (size_t)n;
+    return true;
+}
+
+static char *sokol_strbuf_finish(SokolStrBuf *sb)
+{
+    char *out = sb->buf;
+    sb->buf = NULL;
+    sb->len = 0;
+    sb->cap = 0;
+    return out;
+}
+
+static void sokol_strbuf_free(SokolStrBuf *sb)
+{
+    free(sb->buf);
+    sb->buf = NULL;
+    sb->len = 0;
+    sb->cap = 0;
+}
 
 // Event codes for the poll-based timer system (mirrors SDL3 platform layer)
 enum
@@ -904,17 +968,17 @@ static void sokol_notif_rebuild(SokolData *d);
 
 static char *sokol_hint_build_ansi(SokolData *d)
 {
-    char *buf = NULL;
-    size_t cap = 0;
-    FILE *fp = open_memstream(&buf, &cap);
-    if (!fp)
+    SokolStrBuf sb;
+    if (!sokol_strbuf_init(&sb))
         return NULL;
 
     const char *panel_bg = "\x1b[48;2;38;38;44m";
-    fprintf(fp, "%s\x1b[38;2;210;210;220m%s\x1b[39m",
-            panel_bg, d->hint_text ? d->hint_text : "");
-    fclose(fp);
-    return buf;
+    if (!sokol_strbuf_appendf(&sb, "%s\x1b[38;2;210;210;220m%s\x1b[39m",
+                              panel_bg, d->hint_text ? d->hint_text : "")) {
+        sokol_strbuf_free(&sb);
+        return NULL;
+    }
+    return sokol_strbuf_finish(&sb);
 }
 
 static void sokol_hint_rebuild(SokolData *d)
@@ -3970,10 +4034,8 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
 
 static char *sokol_notif_build_ansi(SokolData *d)
 {
-    char *buf = NULL;
-    size_t cap = 0;
-    FILE *fp = open_memstream(&buf, &cap);
-    if (!fp)
+    SokolStrBuf sb;
+    if (!sokol_strbuf_init(&sb))
         return NULL;
 
     // Set panel background color on every cell.
@@ -3983,19 +4045,33 @@ static char *sokol_notif_build_ansi(SokolData *d)
 
     // Title (bold, bright white on panel bg)
     if (d->notif_title) {
-        fprintf(fp, "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
-                panel_bg, d->notif_title);
+        if (!sokol_strbuf_appendf(&sb,
+                                  "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
+                                  panel_bg, d->notif_title)) {
+            sokol_strbuf_free(&sb);
+            return NULL;
+        }
     }
     // Body (normal, dim gray on panel bg)
     if (d->notif_body) {
-        if (d->notif_title)
-            fprintf(fp, "\r\n%s", panel_bg);
-        else
-            fprintf(fp, "%s", panel_bg);
-        fprintf(fp, "\x1b[38;2;190;190;198m%s\x1b[39m", d->notif_body);
+        if (d->notif_title) {
+            if (!sokol_strbuf_appendf(&sb, "\r\n%s", panel_bg)) {
+                sokol_strbuf_free(&sb);
+                return NULL;
+            }
+        } else {
+            if (!sokol_strbuf_appendf(&sb, "%s", panel_bg)) {
+                sokol_strbuf_free(&sb);
+                return NULL;
+            }
+        }
+        if (!sokol_strbuf_appendf(&sb, "\x1b[38;2;190;190;198m%s\x1b[39m",
+                                  d->notif_body)) {
+            sokol_strbuf_free(&sb);
+            return NULL;
+        }
     }
-    fclose(fp);
-    return buf;
+    return sokol_strbuf_finish(&sb);
 }
 
 static void sokol_notif_rebuild(SokolData *d)
