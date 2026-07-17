@@ -4,7 +4,6 @@
 
 #include "portty_version.h"
 
-#include "backend_sdl3.h"
 #include "common.h"
 #include "font_ft_internal.h"
 #include "font_resolve.h"
@@ -38,6 +37,14 @@
 #include <unistd.h>
 #endif
 
+#if defined(PORTTY_BACKEND_SOKOL)
+#include "backend_sokol.h"
+#elif defined(PORTTY_BACKEND_SDL3)
+#include "backend_sdl3.h"
+#else
+#error "No backend selected; define PORTTY_BACKEND_SDL3 or PORTTY_BACKEND_SOKOL"
+#endif
+
 #define DEFAULT_COLS 80
 #define DEFAULT_ROWS 24
 
@@ -48,8 +55,14 @@ float portty_text_contrast = 0.0f;
 bool portty_notification_transparent = false;
 
 /* ASan/UBSan runtime defaults. */
-#if defined(__SANITIZE_ADDRESS__) || \
-    (defined(__has_feature) && __has_feature(address_sanitizer))
+#if defined(__SANITIZE_ADDRESS__)
+#define PORTTY_HAS_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define PORTTY_HAS_ASAN 1
+#endif
+#endif
+#ifdef PORTTY_HAS_ASAN
 const char *__asan_default_options(void)
 {
     return "abort_on_error=1:disable_coredump=0:detect_leaks=0:"
@@ -113,6 +126,7 @@ static void print_usage(const char *progname)
     printf("  -H none|light|normal|mono  Set FreeType hinting target\n");
     printf("  -s LINES              Set scrollback buffer size in lines\n");
     printf("  -d TEXT               Demo mode: feed TEXT into the terminal\n");
+    printf("  -S, --script FILE     Run debug script FILE (see docs/debug-infrastructure-design.md)\n");
 }
 
 static void print_version(void)
@@ -120,33 +134,36 @@ static void print_version(void)
     printf("portty %s\n", PORTTY_VERSION);
 }
 
-int main(int argc, char *argv[])
+typedef struct
 {
-#ifdef _WIN32
-    bool console_attached = false;
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
-        freopen("CONOUT$", "w", stdout);
-        freopen("CONOUT$", "w", stderr);
-        fflush(stdout);
-        fflush(stderr);
-        console_attached = true;
-    }
-#endif
-
     int opt;
-    int list_fonts = 0;
-    int ft_hint_target = FT_LOAD_TARGET_LIGHT;
-    char *demo_text = NULL;
-    const char *font_name = NULL;
-    int font_from_flag = 0;
-    const char *font_source = NULL;
-    const char *colr_debug_path = NULL;
-    char **exec_argv = NULL;
-    const float font_size = 12.0f;
-    int init_cols = DEFAULT_COLS;
-    int init_rows = DEFAULT_ROWS;
-    int init_scrollback = -1;
+    int list_fonts;
+    int ft_hint_target;
+    char *demo_text;
+    const char *font_name;
+    int font_from_flag;
+    const char *font_source;
+    const char *colr_debug_path;
+    char **exec_argv;
+    const float font_size;
+    int init_cols;
+    int init_rows;
+    int init_scrollback;
+    const char *script_path;
+} PorttyArgs;
 
+static void portty_args_init(PorttyArgs *args)
+{
+    memset(args, 0, sizeof(*args));
+    args->ft_hint_target = FT_LOAD_TARGET_LIGHT;
+    *(float *)&args->font_size = 12.0f;
+    args->init_cols = DEFAULT_COLS;
+    args->init_rows = DEFAULT_ROWS;
+    args->init_scrollback = -1;
+}
+
+static int parse_args(PorttyArgs *args, int argc, char *argv[])
+{
     static struct option long_options[] = {
         { "help", no_argument, NULL, 'h' },
         { "version", no_argument, NULL, 'V' },
@@ -154,37 +171,12 @@ int main(int argc, char *argv[])
         { "ft-hinting", required_argument, NULL, 'H' },
         { "demo", required_argument, NULL, 'd' },
         { "scrollback", required_argument, NULL, 's' },
+        { "script", required_argument, NULL, 'S' },
         { NULL, 0, NULL, 0 }
     };
 
-    PorttyConf conf;
-    portty_conf_init(&conf);
-    portty_conf_load(&conf);
-
-    if (conf.verbose == 1)
-        verbose = 1;
-    if (conf.font)
-        font_name = conf.font;
-    if (conf.cols > 0)
-        init_cols = conf.cols;
-    if (conf.rows > 0)
-        init_rows = conf.rows;
-    if (conf.hinting != PORTTY_HINT_UNSET) {
-        static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
-                                        FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
-        ft_hint_target = hint_map[conf.hinting];
-    }
-    if (conf.scrollback >= 0)
-        init_scrollback = conf.scrollback;
-    if (conf.text_gamma > 0.0f)
-        portty_text_gamma = conf.text_gamma;
-    if (conf.text_contrast >= 0.0f)
-        portty_text_contrast = conf.text_contrast;
-    if (conf.notification_transparency == 1)
-        portty_notification_transparent = true;
-
-    while ((opt = getopt_long(argc, argv, "hvVf:g:D:s:", long_options, NULL)) != -1) {
-        switch (opt) {
+    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:", long_options, NULL)) != -1) {
+        switch (args->opt) {
         case 'h':
             print_usage(argv[0]);
             return 0;
@@ -195,24 +187,27 @@ int main(int argc, char *argv[])
             verbose = 1;
             break;
         case 'd':
-            demo_text = optarg;
+            args->demo_text = optarg;
+            break;
+        case 'S':
+            args->script_path = optarg;
             break;
         case 'f':
-            font_name = optarg;
-            font_from_flag = 1;
+            args->font_name = optarg;
+            args->font_from_flag = 1;
             break;
         case 'L':
-            list_fonts = 1;
+            args->list_fonts = 1;
             break;
         case 'H':
             if (strcmp(optarg, "none") == 0) {
-                ft_hint_target = FT_LOAD_NO_HINTING;
+                args->ft_hint_target = FT_LOAD_NO_HINTING;
             } else if (strcmp(optarg, "light") == 0) {
-                ft_hint_target = FT_LOAD_TARGET_LIGHT;
+                args->ft_hint_target = FT_LOAD_TARGET_LIGHT;
             } else if (strcmp(optarg, "normal") == 0) {
-                ft_hint_target = FT_LOAD_TARGET_NORMAL;
+                args->ft_hint_target = FT_LOAD_TARGET_NORMAL;
             } else if (strcmp(optarg, "mono") == 0) {
-                ft_hint_target = FT_LOAD_TARGET_MONO;
+                args->ft_hint_target = FT_LOAD_TARGET_MONO;
             } else {
                 fprintf(stderr, "ERROR: Invalid hinting target: %s\n", optarg);
                 return 1;
@@ -222,17 +217,14 @@ int main(int argc, char *argv[])
         {
             int w = 0, h = 0;
             if (sscanf(optarg, "%dx%d", &w, &h) == 2 && w > 0 && h > 0) {
-                init_cols = w;
-                init_rows = h;
+                args->init_cols = w;
+                args->init_rows = h;
             } else {
                 fprintf(stderr, "ERROR: Invalid geometry: %s\n", optarg);
                 return 1;
             }
             break;
         }
-        case 'D':
-            colr_debug_path = optarg;
-            break;
         case 's':
         {
             char *end = NULL;
@@ -241,7 +233,7 @@ int main(int argc, char *argv[])
                 fprintf(stderr, "ERROR: Invalid scrollback: %s\n", optarg);
                 return 1;
             }
-            init_scrollback = (int)n;
+            args->init_scrollback = (int)n;
             break;
         }
         case '?':
@@ -250,13 +242,18 @@ int main(int argc, char *argv[])
         }
     }
 
+    return -1;
+}
+
+static void resolve_exec_argv(PorttyArgs *args, PorttyConf *conf, int argc, char *argv[])
+{
     if (optind < argc) {
-        exec_argv = &argv[optind];
-    } else if (conf.shell) {
-        char *shell_copy = strdup(conf.shell);
+        args->exec_argv = &argv[optind];
+    } else if (conf->shell) {
+        char *shell_copy = strdup(conf->shell);
         if (!shell_copy) {
             fprintf(stderr, "ERROR: Out of memory\n");
-            return 1;
+            exit(1);
         }
         char *tokens[64];
         int ntok = 0;
@@ -271,55 +268,80 @@ int main(int argc, char *argv[])
         if (!shell_argv) {
             free(shell_copy);
             fprintf(stderr, "ERROR: Out of memory\n");
-            return 1;
+            exit(1);
         }
         for (int i = 0; i < ntok; i++)
             shell_argv[i] = strdup(tokens[i]);
         shell_argv[ntok] = NULL;
         free(shell_copy);
-        exec_argv = shell_argv;
+        args->exec_argv = shell_argv;
     }
+}
 
-    if (list_fonts) {
-        FontResolveBackend *resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
-        if (!resolve) {
-            fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
-            return 1;
-        }
-        font_resolve_list_monospace(resolve);
-        font_resolve_destroy(resolve);
-        return 0;
+static void apply_conf_to_args(PorttyArgs *args, PorttyConf *conf)
+{
+    if (conf->verbose == 1)
+        verbose = 1;
+    if (conf->font && !args->font_name)
+        args->font_name = conf->font;
+    if (conf->cols > 0)
+        args->init_cols = conf->cols;
+    if (conf->rows > 0)
+        args->init_rows = conf->rows;
+    if (conf->hinting != PORTTY_HINT_UNSET) {
+        static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
+                                        FT_LOAD_TARGET_NORMAL, FT_LOAD_TARGET_MONO };
+        args->ft_hint_target = hint_map[conf->hinting];
     }
+    if (conf->scrollback >= 0)
+        args->init_scrollback = conf->scrollback;
+    if (conf->text_gamma > 0.0f)
+        portty_text_gamma = conf->text_gamma;
+    if (conf->text_contrast >= 0.0f)
+        portty_text_contrast = conf->text_contrast;
+    if (conf->notification_transparency == 1)
+        portty_notification_transparent = true;
+}
 
-    if (colr_debug_path) {
-        colr_set_debug_prefix(colr_debug_path);
-        vlog("COLR layer debug enabled, prefix: %s\n", colr_debug_path);
-    }
-
+static TerminalBackend *create_terminal(PorttyArgs *args)
+{
     TerminalBackend *vt_backend = &terminal_backend_cfr;
     CfrConfig cfg = CFR_CONFIG_DEFAULTS;
-    cfg.rows = init_rows;
-    cfg.cols = init_cols;
+    cfg.rows = args->init_rows;
+    cfg.cols = args->init_cols;
     cfg.cell_w_px = 10;
     cfg.cell_h_px = 20;
     cfg.reflow = true;
     TerminalBackend *term = terminal_init(vt_backend, &cfg);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
-        return 1;
+        return NULL;
     }
+    return term;
+}
 
-    if (conf.word_chars)
-        terminal_selection_set_word_chars(term, conf.word_chars);
-    if (init_scrollback >= 0)
-        terminal_set_scrollback_size(term, init_scrollback);
+#if defined(PORTTY_BACKEND_SDL3)
+static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
+{
+    TerminalBackend *term = create_terminal(args);
+    if (!term)
+        return 1;
+
+    if (conf->word_chars)
+        terminal_selection_set_word_chars(term, conf->word_chars);
+    if (args->init_scrollback >= 0)
+        terminal_set_scrollback_size(term, args->init_scrollback);
 
     PorttyBackend backend = backend_sdl3;
     PorttyApp app = {
         .term = term,
-        .conf = &conf,
-        .font_source = font_source,
+        .conf = conf,
+        .font_source = args->font_source,
         .backend = &backend,
+        .demo_text = args->demo_text,
+        .exec_argv = args->exec_argv,
+        .font_size = args->font_size,
+        .script_path = args->script_path,
     };
     backend.data = &app;
 
@@ -332,30 +354,30 @@ int main(int argc, char *argv[])
     pty_signal_init();
 
     char *desktop_font = NULL;
-    if (!font_name) {
+    if (!args->font_name) {
         desktop_font = backend.get_default_font(&backend);
         if (desktop_font)
-            font_name = desktop_font;
+            args->font_name = desktop_font;
     }
-    if (font_from_flag)
-        font_source = "-f flag";
-    else if (conf.font)
-        font_source = "config file";
+    if (args->font_from_flag)
+        args->font_source = "-f flag";
+    else if (conf->font)
+        args->font_source = "config file";
     else if (desktop_font)
-        font_source = "desktop default";
+        args->font_source = "desktop default";
     else
 #ifdef _WIN32
-        font_source = "system default (no console font set)";
+        args->font_source = "system default (no console font set)";
 #else
-        font_source = "fontconfig generic (no desktop default)";
+        args->font_source = "fontconfig generic (no desktop default)";
 #endif
-    app.font_source = font_source;
+    app.font_source = args->font_source;
 
     float display_scale = backend.get_display_scale(&backend);
     if (display_scale > 0.0f)
         backend.set_content_scale(&backend, display_scale);
 
-    if (backend.load_fonts(&backend, font_size, font_name, ft_hint_target) < 0) {
+    if (backend.load_fonts(&backend, args->font_size, args->font_name, args->ft_hint_target) < 0) {
         fprintf(stderr, "Failed to load fonts\n");
         free(desktop_font);
         backend.destroy(&backend);
@@ -368,8 +390,9 @@ int main(int argc, char *argv[])
     int win_w = 800, win_h = 600;
     if (backend.get_cell_size(&backend, &cell_w, &cell_h)) {
         terminal_set_cell_px(term, cell_w, cell_h);
-        win_w = init_cols * cell_w;
-        win_h = init_rows * cell_h;
+        terminal_set_content_scale(term, backend.get_display_scale(&backend));
+        win_w = args->init_cols * cell_w;
+        win_h = args->init_rows * cell_h;
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);
 
         int disp_w, disp_h;
@@ -379,26 +402,28 @@ int main(int argc, char *argv[])
                     win_w = disp_w;
                 if (win_h > disp_h)
                     win_h = disp_h;
-                init_cols = win_w / cell_w;
-                init_rows = win_h / cell_h;
-                if (init_cols < 1)
-                    init_cols = 1;
-                if (init_rows < 1)
-                    init_rows = 1;
-                win_w = init_cols * cell_w;
-                win_h = init_rows * cell_h;
-                terminal_resize(term, init_cols, init_rows);
+                args->init_cols = win_w / cell_w;
+                args->init_rows = win_h / cell_h;
+                if (args->init_cols < 1)
+                    args->init_cols = 1;
+                if (args->init_rows < 1)
+                    args->init_rows = 1;
+                win_w = args->init_cols * cell_w;
+                win_h = args->init_rows * cell_h;
+                terminal_resize(term, args->init_cols, args->init_rows);
             }
         }
     }
     backend.set_window_size(&backend, win_w, win_h);
     backend.resize(&backend, win_w, win_h);
+    if (backend.show_window)
+        backend.show_window(&backend);
 
     PtyContext *pty = NULL;
-    if (demo_text) {
-        terminal_process_input(term, demo_text, strlen(demo_text));
+    if (args->demo_text) {
+        terminal_process_input(term, args->demo_text, strlen(args->demo_text));
     } else {
-        pty = pty_create(init_rows, init_cols, exec_argv);
+        pty = pty_create(args->init_rows, args->init_cols, args->exec_argv);
         if (!pty) {
             fprintf(stderr, "ERROR: Failed to create PTY\n");
             backend.destroy(&backend);
@@ -417,7 +442,7 @@ int main(int argc, char *argv[])
 
     term->exe_path = backend.get_exe_path(&backend);
 
-    terminal_set_output_callback(term, portty_app_term_output_to_pty, pty);
+    terminal_set_output_callback(term, portty_app_term_output_to_pty, &app);
     terminal_set_selection_callback(term, portty_app_selection_change, &app);
     terminal_set_clipboard_set_callback(term, portty_app_clipboard_set, &app);
     terminal_set_cwd_callback(term, portty_app_cwd_change, &app);
@@ -432,6 +457,106 @@ int main(int argc, char *argv[])
     pty_signal_cleanup();
     backend.destroy(&backend);
     terminal_destroy(term);
+
+    return 0;
+}
+#endif
+
+#if defined(PORTTY_BACKEND_SOKOL)
+static sapp_desc portty_run_sokol(PorttyArgs *args, PorttyConf *conf)
+{
+    TerminalBackend *term = create_terminal(args);
+    if (!term) {
+        return (sapp_desc){ 0 };
+    }
+
+    if (conf->word_chars)
+        terminal_selection_set_word_chars(term, conf->word_chars);
+    if (args->init_scrollback >= 0)
+        terminal_set_scrollback_size(term, args->init_scrollback);
+
+    PorttyBackend *backend = calloc(1, sizeof(*backend));
+    if (!backend) {
+        fprintf(stderr, "ERROR: Out of memory\n");
+        terminal_destroy(term);
+        return (sapp_desc){ 0 };
+    }
+    *backend = backend_sokol;
+
+    PorttyApp *app = calloc(1, sizeof(*app));
+    if (!app) {
+        fprintf(stderr, "ERROR: Out of memory\n");
+        free(backend);
+        terminal_destroy(term);
+        return (sapp_desc){ 0 };
+    }
+    app->term = term;
+    app->conf = conf;
+    app->backend = backend;
+    app->demo_text = args->demo_text;
+    app->exec_argv = args->exec_argv;
+    app->font_size = args->font_size;
+    app->script_path = args->script_path;
+    backend->data = app;
+
+    return backend_sokol_desc(app, backend, "portty", 800, 600);
+}
+#endif
+
+#if defined(PORTTY_BACKEND_SDL3)
+int main(int argc, char *argv[])
+{
+#ifdef _WIN32
+    bool console_attached = false;
+    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
+        freopen("CONOUT$", "w", stdout);
+        freopen("CONOUT$", "w", stderr);
+        fflush(stdout);
+        fflush(stderr);
+        console_attached = true;
+    }
+#endif
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    portty_conf_load(&conf);
+
+    PorttyArgs args;
+    portty_args_init(&args);
+    apply_conf_to_args(&args, &conf);
+
+    int ret = parse_args(&args, argc, argv);
+    if (ret >= 0) {
+        portty_conf_free(&conf);
+#ifdef _WIN32
+        if (console_attached)
+            FreeConsole();
+#endif
+        return ret;
+    }
+
+    resolve_exec_argv(&args, &conf, argc, argv);
+
+    if (args.list_fonts) {
+        FontResolveBackend *resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
+        if (!resolve) {
+            fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
+            portty_conf_free(&conf);
+            return 1;
+        }
+        font_resolve_list_monospace(resolve);
+        font_resolve_destroy(resolve);
+        portty_conf_free(&conf);
+        return 0;
+    }
+
+    if (args.colr_debug_path) {
+        colr_set_debug_prefix(args.colr_debug_path);
+        vlog("COLR layer debug enabled, prefix: %s\n", args.colr_debug_path);
+    }
+
+    ret = portty_run_sdl3(&args, &conf);
+
     portty_conf_free(&conf);
 
 #ifdef _WIN32
@@ -439,5 +564,54 @@ int main(int argc, char *argv[])
         FreeConsole();
 #endif
 
-    return 0;
+    return ret;
 }
+#endif
+
+#if defined(PORTTY_BACKEND_SOKOL)
+sapp_desc sokol_main(int argc, char *argv[])
+{
+    PorttyConf *conf = malloc(sizeof(PorttyConf));
+    if (!conf) {
+        fprintf(stderr, "ERROR: Out of memory\n");
+        return (sapp_desc){ 0 };
+    }
+    portty_conf_init(conf);
+    portty_conf_load(conf);
+
+    PorttyArgs args;
+    portty_args_init(&args);
+    apply_conf_to_args(&args, conf);
+
+    int ret = parse_args(&args, argc, argv);
+    if (ret >= 0) {
+        portty_conf_free(conf);
+        free(conf);
+        exit(ret);
+    }
+
+    resolve_exec_argv(&args, conf, argc, argv);
+
+    if (args.list_fonts) {
+        FontResolveBackend *resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
+        if (!resolve) {
+            fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
+            portty_conf_free(conf);
+            free(conf);
+            return (sapp_desc){ 0 };
+        }
+        font_resolve_list_monospace(resolve);
+        font_resolve_destroy(resolve);
+        portty_conf_free(conf);
+        free(conf);
+        return (sapp_desc){ 0 };
+    }
+
+    if (args.colr_debug_path) {
+        colr_set_debug_prefix(args.colr_debug_path);
+        vlog("COLR layer debug enabled, prefix: %s\n", args.colr_debug_path);
+    }
+
+    return portty_run_sokol(&args, conf);
+}
+#endif
