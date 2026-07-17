@@ -295,6 +295,9 @@ typedef struct
     int sixel_cache_count;
     sg_buffer sixel_vbuf;
     bool sixel_vbuf_created;
+    // Window title state
+    char *last_title;
+
     // Notification panel — PTY-less coffer terminal overlay
     TerminalBackend *notif_term;
     bool notif_active;
@@ -498,6 +501,7 @@ static void sokol_destroy(PorttyBackend *self)
         d->resolve = NULL;
     }
     free(d->font_path);
+    free(d->last_title);
     free(d->notif_title);
     free(d->notif_body);
     if (d->notif_term) {
@@ -734,6 +738,9 @@ static void sokol_drain_pty(SokolData *d)
 
     terminal_flush_damage(d->term);
 
+    // Update window title after PTY data, mirroring SDL3 backend.
+    d->self->set_window_title(d->self, terminal_get_title(d->term));
+
     // Start lottie tick timer if animations are active
     if (d->lottie_timer == TIMER_INVALID && terminal_lottie_count(d->term) > 0) {
         d->lottie_timer = timer_add(d->timers, SOKOL_LOTTIE_TICK_MS,
@@ -802,8 +809,18 @@ static void sokol_resume_pty(PorttyBackend *self)
 
 static void sokol_set_window_title(PorttyBackend *self, const char *title)
 {
-    (void)self;
-    sapp_set_window_title(title);
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
+    // Title dedup
+    if (d->last_title && title && strcmp(d->last_title, title) == 0)
+        return;
+    if (!d->last_title && !title)
+        return;
+    free(d->last_title);
+    d->last_title = title ? strdup(title) : NULL;
+    sapp_set_window_title(title ? title : "portty");
+    vlog("Window title set to: %s\n", title ? title : "(default)");
 }
 
 static void sokol_set_window_size(PorttyBackend *self, int width, int height)
