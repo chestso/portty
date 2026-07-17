@@ -1,0 +1,4 @@
+OSC 8 hyperlink with styled label
+
+]8;;https://chest.so\[38;5;213mChest[0m[38;5;51m.so[0m]8;;\
+[37mThis text should be covered by the hover panel background[0m

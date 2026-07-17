@@ -2811,26 +2811,20 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     }
 
     // Hover link hint panel cells (second instance of the same panel system).
+    // The panel text is rendered through sokol_render_terminal_cells below,
+    // which appends both bg and glyph quads to the shared arrays. The full-width
+    // panel background is emitted separately into the decoration buffer so it is
+    // alpha-blended *after* the terminal grid glyphs, matching the SDL3 backend
+    // where the hint texture is drawn on top of the finished terminal frame.
+    int hint_bg_y = 0;
+    bool hint_bg_valid = false;
+    int hint_glyph_start = glyph_vert_count;
     if (d->hint_active && d->hint_term && d->hint_h > 0) {
         float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
         int pad = (int)(10.0f * scale + 0.5f);
-        int win_w = (int)sapp_width();
-        int win_h = (int)sapp_height();
         int y = sokol_hint_compute_y(d, d->hint_anchor_py, win_h);
-
-        // Full-width panel background: emit as a regular bg quad so it is
-        // drawn in the bg pass, before the hint text glyph quads.
-        if (vert_count + 6 <= SOKOL_MAX_VERTICES) {
-            uint8_t bg[4] = { 38, 38, 44, 255 };
-            GlyphVertex *q = &s_frame_verts[vert_count];
-            q[0] = (GlyphVertex){ 0.0f, (float)y, 2.0f, 0.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[1] = (GlyphVertex){ (float)win_w, (float)y, 2.0f, 0.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[2] = (GlyphVertex){ (float)win_w, (float)(y + d->hint_h), 2.0f, 1.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[3] = (GlyphVertex){ 0.0f, (float)y, 2.0f, 0.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[4] = (GlyphVertex){ (float)win_w, (float)(y + d->hint_h), 2.0f, 1.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[5] = (GlyphVertex){ 0.0f, (float)(y + d->hint_h), 2.0f, 1.0f, { bg[0], bg[1], bg[2], bg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            vert_count += 6;
-        }
+        hint_bg_y = y;
+        hint_bg_valid = true;
 
         sokol_render_terminal_cells(d, d->hint_term,
                                     pad, y + pad,
@@ -3006,6 +3000,20 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         sokol_emit_notif_close(d, &glyph_vert_count);
     }
 
+    // Hover link hint panel background: emit last into the decoration buffer
+    // so it is drawn after the terminal frame (background, glyphs, underlines,
+    // and selection) but before the panel text glyphs. This matches the SDL3
+    // backend where the hint texture is drawn on top of the finished terminal
+    // frame, and keeps the panel text visible on top of its own background.
+    int hint_deco_start = s_deco_vert_count;
+    int hint_deco_count = 0;
+    if (hint_bg_valid) {
+        uint8_t bg[4] = { 38, 38, 44, 255 };
+        sokol_deco_emit_quad(0.0f, (float)hint_bg_y,
+                             (float)win_w, (float)(hint_bg_y + d->hint_h), bg);
+        hint_deco_count = 6;
+    }
+
     // Append glyph quads after bg quads, then selection overlay quads.
     // Two-pass rendering: all bg quads are drawn first (vertices 0..bg_count),
     // then all glyph/cursor quads on top (vertices bg_count..glyph_end).
@@ -3031,13 +3039,11 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     // Append decoration quads after selection quads. They are drawn with
     // the selection pipeline (alpha-blended) between glyphs and selections.
     int deco_vert_start = vert_count;
-    int deco_count = 0;
     if (s_deco_vert_count > 0 &&
         vert_count + s_deco_vert_count <= SOKOL_MAX_VERTICES) {
         memcpy(&s_frame_verts[vert_count], s_deco_verts,
                (size_t)s_deco_vert_count * sizeof(GlyphVertex));
         vert_count += s_deco_vert_count;
-        deco_count = s_deco_vert_count;
     }
 
     // Flush atlas dirty regions to GPU
@@ -3095,13 +3101,17 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             // Draw background lottie (between bg and glyph quads)
             lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
         }
-        // Pass 2: draw all glyph/cursor quads on top (opaque, replace)
-        int glyph_count = glyph_end - glyph_vert_start;
-        if (glyph_count > 0) {
-            sg_draw(glyph_vert_start, glyph_count, 1);
+        // Pass 2: draw terminal grid glyph/cursor quads (opaque, replace)
+        int terminal_glyph_count = hint_glyph_start;
+        if (terminal_glyph_count > 0) {
+            sg_draw(glyph_vert_start, terminal_glyph_count, 1);
         }
-        // Pass 3: draw decoration quads (alpha-blended, on top of glyphs)
-        if (deco_count > 0 && d->sel_pip_created) {
+        // Pass 3: draw decoration quads (alpha-blended, on top of terminal
+        // glyphs). This includes underlines, strikethroughs, and the
+        // notification accent stripe, but excludes the hover hint panel
+        // background which is drawn later.
+        int deco_main_count = hint_deco_start;
+        if (deco_main_count > 0 && d->sel_pip_created) {
             sg_apply_pipeline(d->sel_pip);
             sg_apply_bindings(&(sg_bindings){
                 .vertex_buffers[0] = d->glyph_vbuf,
@@ -3109,7 +3119,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 .samplers[0] = d->atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(deco_vert_start, deco_count, 1);
+            sg_draw(deco_vert_start, deco_main_count, 1);
         }
         // Pass 4: draw selection overlay quads (alpha-blended, on top of
         // decorations so selected text remains readable).
@@ -3124,7 +3134,32 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(sel_vert_start, sel_count, 1);
         }
-        // Pass 5: draw foreground lottie (on top of everything)
+        // Pass 5: draw hover hint panel background (alpha-blended, on top of
+        // the finished terminal frame but behind the panel text).
+        if (hint_deco_count > 0 && d->sel_pip_created) {
+            sg_apply_pipeline(d->sel_pip);
+            sg_apply_bindings(&(sg_bindings){
+                .vertex_buffers[0] = d->glyph_vbuf,
+                .views[0] = d->atlas.texture_view,
+                .samplers[0] = d->atlas.sampler,
+            });
+            sg_apply_uniforms(0, &SG_RANGE(uniforms));
+            sg_draw(deco_vert_start + hint_deco_start, hint_deco_count, 1);
+        }
+        // Pass 6: draw hover hint panel text glyphs (opaque, replace) on top of
+        // the panel background.
+        int hint_glyph_count = glyph_end - (glyph_vert_start + hint_glyph_start);
+        if (hint_glyph_count > 0) {
+            sg_apply_pipeline(d->glyph_pip);
+            sg_apply_bindings(&(sg_bindings){
+                .vertex_buffers[0] = d->glyph_vbuf,
+                .views[0] = d->atlas.texture_view,
+                .samplers[0] = d->atlas.sampler,
+            });
+            sg_apply_uniforms(0, &SG_RANGE(uniforms));
+            sg_draw(glyph_vert_start + hint_glyph_start, hint_glyph_count, 1);
+        }
+        // Pass 7: draw foreground lottie (on top of everything)
         if (lottie_bg_count >= 0 && d->lottie_pip_created && terminal_lottie_count(term) > 0)
             (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
         // Pass 5: draw sixel images (on top of text and lottie)
@@ -3818,7 +3853,8 @@ static void sokol_debug_mousemove(void *app, int x, int y)
 {
     PorttyApp *p = (PorttyApp *)app;
     portty_app_handle_mouse(p, x, y, 0, false, 0, 0);
-    portty_app_revalidate_hover(p, x, y);
+    if (portty_app_revalidate_hover(p, x, y))
+        terminal_mark_dirty(p->term);
 }
 
 static void sokol_debug_notify(void *backend, const char *title,
