@@ -210,49 +210,111 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ---
 
-## 3. Sokol Backend: 1-Pixel Gap in Diagonal Box-Drawing Characters
+## 3. Sokol Backend: Diagonal Box-Drawing Seams
 
-### Problem
+### Diagonal Box-Drawing Padding Explained
 
-### Diagonal Box-Drawing Seams (SOLVED)
+#### The Problem
 
-Diagonal box-drawing characters (╱ U+2571, ╲ U+2572, ╳ U+2573) showed a 1-pixel
-gap at row seams in the Sokol backend. The same characters rendered seamlessly in
-the SDL3 backend.
+When diagonal box-drawing characters (╱ U+2571, ╲ U+2572, ╳ U+2573) are stacked vertically in a terminal, a visible brightness dip appears at every row boundary. Measured on a 20×44 cell (≈192 DPI):
 
-### Root Cause
+```
+y=42: avg_R=2.25   ← normal
+y=43: avg_R=0.96   ← 57% drop
+y=44: avg_R=1.41   ← row boundary
+y=45: avg_R=1.71   ← recovery
+```
 
-The diagonal bitmaps are rendered with 1px padding on all sides to give the
-Xiaolin Wu anti-aliased line endpoints room to extend beyond cell corners. The
-Sokol backend was centering these padded bitmaps _within_ the cell bounds,
-so the 1px overhang didn't extend beyond the cell edge, leaving gaps between rows.
+This happens because the anti-aliased line converges toward a corner of the cell, leaving fewer lit pixels near the edge.
 
-### Solution
+#### What "Padding" Means
 
-Modified the centered glyph placement logic in `backend_sokol.c` to detect when
-a bitmap has padding (region > cell) and extend the quad geometry beyond cell
-bounds by the padding amount. This allows the 1px overhang to fill the half-pixel
-gap at row boundaries, matching SDL3's behavior.
+Each diagonal glyph is rendered into a bitmap slightly larger than the cell. For a 20×44 cell with `pad=1`, the bitmap is 22×46 — one extra pixel on each side:
 
-### Context
+```
+┌──────────────────────┐ ← padding (1px)
+│ ┌──────────────────┐ │
+│ │   visible cell   │ │
+│ │     (20×44)      │ │
+│ └──────────────────┘ │
+└──────────────────────┘ ← padding (1px)
+      22×46 bitmap
+```
 
-The Sokol backend now has procedural box-drawing support (intercepting
-`rend_boxdraw_is_supported()` before the font fallback path) and two-pass
-rendering (backgrounds first, then glyphs on top), bringing it to feature parity
-with SDL3 for box-drawing.
+The backend places this bitmap offset by `-pad` so it extends 1px beyond the cell boundary. This overhang lets AA pixels from one cell bleed into its neighbor's area.
 
-### Original Investigation Notes
+#### What "Overhang" Means
 
-- Confirmed bitmap alpha at seam = 191 (non-zero)
-- Confirmed quad geometry covers the seam pixel
-- Confirmed UV mapping is correct
-- Gap exists without bg quads (not a draw-order issue)
-- SDL3 renders the same bitmap seamlessly
-- The fix: extend padded bitmaps beyond cell bounds in Sokol backend
+Overhang is the portion of a glyph's bitmap that extends **outside** its assigned cell rectangle and paints into neighboring cells' areas. It happens because the bitmap is larger than the cell and is placed with a negative offset:
+
+```
+         cell N              cell N+1
+    ┌──────────────┐     ┌──────────────┐
+    │              │     │              │
+    │   ╱╱╱╱╱╱╱   │     │   ╱╱╱╱╱╱╱   │
+    │ ╱╱╱╱╱╱╱╱╱╱╱│╱╱╱╱╱│╱╱╱╱╱╱╱╱╱╱╱ │
+    │╱╱╱╱╱╱╱╱╱╱╱╱│╱╱╱╱╱│╱╱╱╱╱╱╱╱╱╱╱╱│
+    ├──────────────┤←boundary──────────┤
+    │▓▓▓▓▓▓▓▓▓▓▓▓▓│                     ← overhang from cell N
+    │              │▓▓▓▓▓▓▓▓▓▓▓▓▓       ← overhang from cell N+1
+    │              │                     (extends upward into cell N)
+    └──────────────┘     └──────────────┘
+         ▲                      ▲
+    bitmap placed at        bitmap placed at
+    cell_x - pad            cell_x - pad
+```
+
+Without overhang, each cell's diagonal would be clipped exactly at the cell edge. The last scanline of a ╱ near the bottom-left corner would have only a single pixel at x=0, then nothing — creating a hard brightness drop. With overhang, the adjacent cell's bitmap paints its top-right corner pixels into this cell's bottom area (and vice versa), filling in some of the gap.
+
+The overhang is invisible for non-diagonal glyphs because their bitmaps are exactly cell-sized (`pad=0`). Only diagonals use `pad > 0`, making them the only glyphs that intentionally paint outside their cell bounds.
+
+#### Why Pad Should Scale With DPI (But Can't)
+
+Cell dimensions scale with display DPI, and so does line thickness (`w/5`):
+
+| DPI | Cell Size | Thickness | Pad | Ratio |
+| --- | --------- | --------- | --- | ----- |
+| 96  | 10×22     | 2         | 1   | 0.50  |
+| 144 | 15×33     | 3         | 1   | 0.33  |
+| 192 | 20×44     | 4         | 1   | 0.25  |
+| 288 | 30×66     | 6         | 1   | 0.17  |
+
+In theory, pad should scale proportionally to thickness so the overhang remains effective relative to the line width. At high DPI the ratio drops from 0.5 to 0.17, meaning the 1px overhang covers a shrinking fraction of the line's AA spread.
+
+In practice, increasing pad makes the seam **worse**. The diagonal exits through a corner, so near that corner the line occupies only 1-2 pixels horizontally. Larger padding pushes those pixels further into the overhang zone (outside the visible cell), leaving the visible area emptier near the boundary. This is true regardless of whether lines are drawn to bitmap corners or extrapolated from cell corners — the geometry is fundamentally hostile to scaling pad.
+
+Pad is therefore pinned at 1 as the least-bad option: it provides some overhang benefit without making the corner-exit problem worse. Fixing the seam properly likely requires a different approach entirely (e.g., drawing across cell boundaries at render time rather than baking overhang into the glyph bitmap).
+
+#### Why Simply Increasing Pad Doesn't Work
+
+Two approaches were tried:
+
+##### Approach A: Bitmap-corner-to-bitmap-corner with larger pad
+
+Lines drawn from `(0, bmp_h-1)` to `(bmp_w-1, 0)`. With pad=2, the line near the bottom of the visible cell is at bitmap x≈0.5, which maps to screen x ≈ cell_x0 - 1.5 — mostly in the overhang, not the visible cell. **Result: worse gap** because the line exits the visible area too early.
+
+##### Approach B: Cell-corner-to-cell-corner with extrapolation
+
+Lines drawn through cell corners `(pad, pad+h)` to `(pad+w, pad)`, extrapolated to bitmap edges. Same problem: near the cell corner, the line is in the padding zone rather than the visible area. **Result: worse gap.**
+
+##### Root cause
+
+The ╱ character exits through the bottom-left corner. Near that corner, regardless of padding strategy, the line occupies only 1-2 pixels horizontally. More padding pushes those pixels further into the overhang zone, making the visible cell area emptier near the boundary.
+
+#### Current State
+
+- `pad = 1` (fixed, does not scale with DPI)
+- Lines drawn bitmap-corner to bitmap-corner
+- Backend offsets placement by `-pad` for overhang
+- Produces a measurable but small brightness dip at row boundaries
+- Adjacent cells' overhangs partially compensate for each other
+- At higher DPI, the dip may become more visible as the pad/thickness ratio decreases
 
 ### Affected Files
 
 - `src/backend_sokol.c` — centered glyph placement logic for padded bitmaps
+- `src/rend_boxdraw.c` — diagonal bitmap rendering with padding
+- `src/rend_sdl3_boxdraw.c` — same for SDL3 backend
 - `tests/diagonal_seam.txt` — visual test script for seam verification
 
 ---

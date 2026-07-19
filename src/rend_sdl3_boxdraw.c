@@ -787,27 +787,29 @@ static void draw_rounded_corner(BoxDrawCtx *ctx, uint32_t cp,
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
 // Uses anti-aliased line rendering with thickness matching the light line width.
 //
-// The bitmap is padded by 1px on every side so the Xiaolin Wu AA endpoints
-// — which sit exactly on the cell corners — have a full pixel of room
-// instead of being half-clipped at the bitmap edge.  This eliminates the
-// faded half-pixel seam that appeared at every row boundary when cells
-// were stacked.
+// The bitmap is padded on every side so the Xiaolin Wu AA endpoints have
+// room to spread beyond the cell boundary.  Lines extend to the bitmap
+// edges for continuous coverage at row boundaries when cells are stacked.
 static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
-                                int x, int y, int w, int h,
+                                int cell_w, int cell_h,
+                                int pad_x, int pad_y,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
-    int thickness = w / 5;
+    int thickness = cell_w / 5;
     if (thickness < 1)
         thickness = 1;
 
     ctx_set_blend(ctx, true);
 
+    int bmp_w = cell_w + pad_x * 2;
+    int bmp_h = cell_h + pad_y * 2;
+
     // Draw bottom-left to top-right diagonal (╱)
     if (cp == 0x2571 || cp == 0x2573) {
-        float x0 = (float)x;
-        float y0 = (float)(y + h);
-        float x1 = (float)(x + w);
-        float y1 = (float)y;
+        float x0 = 0.0f;
+        float y0 = (float)(bmp_h - 1);
+        float x1 = (float)(bmp_w - 1);
+        float y1 = 0.0f;
         for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
             draw_aa_line(ctx, x0 + (float)i, y0, x1 + (float)i, y1,
                          r, g, b);
@@ -815,10 +817,10 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
 
     // Draw top-left to bottom-right diagonal (╲)
     if (cp == 0x2572 || cp == 0x2573) {
-        float x0 = (float)x;
-        float y0 = (float)y;
-        float x1 = (float)(x + w);
-        float y1 = (float)(y + h);
+        float x0 = 0.0f;
+        float y0 = 0.0f;
+        float x1 = (float)(bmp_w - 1);
+        float y1 = (float)(bmp_h - 1);
         for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
             draw_aa_line(ctx, x0 + (float)i, y0, x1 + (float)i, y1,
                          r, g, b);
@@ -840,7 +842,7 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
     if (cp >= 0x256D && cp <= 0x2570) {
         draw_rounded_corner(ctx, cp, 0, 0, cell_w, cell_h, r, g, b);
     } else if (cp >= 0x2571 && cp <= 0x2573) {
-        draw_diagonal_lines(ctx, cp, pad_x, pad_y, cell_w, cell_h, r, g, b);
+        draw_diagonal_lines(ctx, cp, cell_w, cell_h, pad_x, pad_y, r, g, b);
     } else if (cp >= 0x2500 && cp <= 0x257F) {
         uint8_t enc = get_box_encoding(cp);
         if (enc != 0)
@@ -854,9 +856,9 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
 // The bitmap is cell-sized (w×h) with centered=true, RGBA pixels,
 // and is intended to be inserted into the texture atlas like a font glyph.
 //
-// Diagonal characters (U+2571-U+2573) get a 1px padding on every side so
-// the AA line endpoints have a full pixel of room instead of being
-// half-clipped at the cell edge.  The 1px overhang fills the half-pixel
+// Diagonal characters (U+2571-U+2573) get padding proportional to line
+// thickness on every side so the AA line endpoints have room to spread
+// instead of being clipped at the cell edge.  The overhang fills the
 // gap at row boundaries, producing seamless stripes when cells are stacked.
 GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                       uint8_t r, uint8_t g, uint8_t b)
