@@ -309,6 +309,139 @@ static void test_rounded_corner_large_cell(void)
     free_bmp(bmp);
 }
 
+/* Test: diagonal bitmaps (╱╲╳) have 10% proportional margins.
+ * Bitmap size should be cell_w * 1.2 x cell_h * 1.2 (cell + 2 * 10% margin). */
+static void test_diagonal_proportional_margins(void)
+{
+    int cell_w = 32, cell_h = 96;
+
+    /* ╱ U+2571 */
+    GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+
+    int expected_margin_x = (int)roundf((float)cell_w * 0.10f);
+    int expected_margin_y = (int)roundf((float)cell_h * 0.10f);
+    int expected_w = cell_w + 2 * expected_margin_x;
+    int expected_h = cell_h + 2 * expected_margin_y;
+
+    ASSERT_EQ(bmp->width, expected_w);
+    ASSERT_EQ(bmp->height, expected_h);
+    free_bmp(bmp);
+
+    /* ╲ U+2572 */
+    bmp = rend_boxdraw_render(0x2572, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(bmp->width, expected_w);
+    ASSERT_EQ(bmp->height, expected_h);
+    free_bmp(bmp);
+
+    /* ╳ U+2573 */
+    bmp = rend_boxdraw_render(0x2573, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(bmp->width, expected_w);
+    ASSERT_EQ(bmp->height, expected_h);
+    free_bmp(bmp);
+}
+
+/* Test: diagonal lines reach bitmap corners for seamless tiling.
+ * When cells are stacked, the overhang from adjacent cells should meet
+ * at the cell boundary. Lines must reach the bitmap edges. */
+static void test_diagonal_lines_reach_bitmap_corners(void)
+{
+    int cell_w = 32, cell_h = 96;
+    int margin_x = (int)roundf((float)cell_w * 0.10f);
+    int margin_y = (int)roundf((float)cell_h * 0.10f);
+    int bmp_w = cell_w + 2 * margin_x;
+    int bmp_h = cell_h + 2 * margin_y;
+
+    /* ╱ U+2571: bottom-left to top-right */
+    GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+
+    /* Check that line reaches near bottom-left corner */
+    bool bottom_left_touched = false;
+    for (int dx = 0; dx < 5 && !bottom_left_touched; dx++) {
+        for (int dy = 0; dy < 5 && !bottom_left_touched; dy++) {
+            if (px_set(bmp, dx, bmp_h - 1 - dy))
+                bottom_left_touched = true;
+        }
+    }
+    ASSERT_TRUE(bottom_left_touched);
+
+    /* Check that line reaches near top-right corner */
+    bool top_right_touched = false;
+    for (int dx = 0; dx < 5 && !top_right_touched; dx++) {
+        for (int dy = 0; dy < 5 && !top_right_touched; dy++) {
+            if (px_set(bmp, bmp_w - 1 - dx, dy))
+                top_right_touched = true;
+        }
+    }
+    ASSERT_TRUE(top_right_touched);
+    free_bmp(bmp);
+
+    /* ╲ U+2572: top-left to bottom-right */
+    bmp = rend_boxdraw_render(0x2572, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+
+    /* Check that line reaches near top-left corner */
+    bool top_left_touched = false;
+    for (int dx = 0; dx < 5 && !top_left_touched; dx++) {
+        for (int dy = 0; dy < 5 && !top_left_touched; dy++) {
+            if (px_set(bmp, dx, dy))
+                top_left_touched = true;
+        }
+    }
+    ASSERT_TRUE(top_left_touched);
+
+    /* Check that line reaches near bottom-right corner */
+    bool bottom_right_touched = false;
+    for (int dx = 0; dx < 5 && !bottom_right_touched; dx++) {
+        for (int dy = 0; dy < 5 && !bottom_right_touched; dy++) {
+            if (px_set(bmp, bmp_w - 1 - dx, bmp_h - 1 - dy))
+                bottom_right_touched = true;
+        }
+    }
+    ASSERT_TRUE(bottom_right_touched);
+    free_bmp(bmp);
+}
+
+/* Test: diagonal bitmaps scale margins proportionally at different cell sizes.
+ * 10% margin should work at various DPI/font sizes. */
+static void test_diagonal_margins_scale_with_cell_size(void)
+{
+    /* Small cell (low DPI) */
+    int cell_w = 10, cell_h = 22;
+    GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+    int margin_x = (int)roundf((float)cell_w * 0.10f);
+    int margin_y = (int)roundf((float)cell_h * 0.10f);
+    ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
+    ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
+    free_bmp(bmp);
+
+    /* Medium cell (medium DPI) */
+    cell_w = 20;
+    cell_h = 44;
+    bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+    margin_x = (int)roundf((float)cell_w * 0.10f);
+    margin_y = (int)roundf((float)cell_h * 0.10f);
+    ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
+    ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
+    free_bmp(bmp);
+
+    /* Large cell (high DPI) */
+    cell_w = 40;
+    cell_h = 88;
+    bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+    margin_x = (int)roundf((float)cell_w * 0.10f);
+    margin_y = (int)roundf((float)cell_h * 0.10f);
+    ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
+    ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
+    free_bmp(bmp);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -323,6 +456,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_horizontal_line_spans_cell);
     RUN_TEST(test_vertical_line_spans_cell);
     RUN_TEST(test_rounded_corner_large_cell);
+    RUN_TEST(test_diagonal_proportional_margins);
+    RUN_TEST(test_diagonal_lines_reach_bitmap_corners);
+    RUN_TEST(test_diagonal_margins_scale_with_cell_size);
 
     TEST_SUMMARY();
 }

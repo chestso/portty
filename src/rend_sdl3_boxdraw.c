@@ -795,7 +795,7 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int pad_x, int pad_y,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
-    int thickness = cell_w / 5;
+    int thickness = (int)roundf((float)cell_w * 0.20f);
     if (thickness < 1)
         thickness = 1;
 
@@ -856,17 +856,18 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
 // The bitmap is cell-sized (w×h) with centered=true, RGBA pixels,
 // and is intended to be inserted into the texture atlas like a font glyph.
 //
-// Diagonal characters (U+2571-U+2573) get padding proportional to line
-// thickness on every side so the AA line endpoints have room to spread
-// instead of being clipped at the cell edge.  The overhang fills the
-// gap at row boundaries, producing seamless stripes when cells are stacked.
+// Diagonal characters (U+2571-U+2573) get 25% proportional margins on all
+// sides. This ensures lines drawn across margin bounds connect seamlessly
+// when cells are tiled. Lines extend to bitmap corners for continuous
+// coverage at row boundaries.
 GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                       uint8_t r, uint8_t g, uint8_t b)
 {
     bool is_diagonal = (cp >= 0x2571 && cp <= 0x2573);
-    int pad = is_diagonal ? 1 : 0;
-    int bmp_w = cell_w + pad * 2;
-    int bmp_h = cell_h + pad * 2;
+    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.10f) : 0; // 10% horizontal margin
+    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.10f) : 0; // 10% vertical margin
+    int bmp_w = cell_w + margin_x * 2;
+    int bmp_h = cell_h + margin_y * 2;
 
     GlyphBitmap *bmp = malloc(sizeof(GlyphBitmap));
     if (!bmp)
@@ -895,6 +896,6 @@ GlyphBitmap *rend_sdl3_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
         .blend = false,
     };
 
-    boxdraw_render_to_ctx(&ctx, cp, cell_w, cell_h, pad, pad, r, g, b);
+    boxdraw_render_to_ctx(&ctx, cp, cell_w, cell_h, margin_x, margin_y, r, g, b);
     return bmp;
 }
