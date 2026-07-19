@@ -2377,10 +2377,22 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                         float gx0, gy0, gx1, gy1;
                         if (bd_entry->centered) {
                             int glyph_w = cell.width * cell_w;
-                            gx0 = cell_x0 +
-                                  ((float)glyph_w - (float)bd_entry->region.w) * 0.5f;
-                            gy0 = cell_y0 +
-                                  ((float)cell_h - (float)bd_entry->region.h) * 0.5f;
+                            // For padded bitmaps (diagonals with region > cell), extend
+                            // beyond cell bounds so overhang fills row-boundary gaps.
+                            // For normal centered glyphs (region <= cell), center within.
+                            int pad_x = (bd_entry->region.w - glyph_w) / 2;
+                            int pad_y = (bd_entry->region.h - cell_h) / 2;
+                            if (pad_x > 0 || pad_y > 0) {
+                                // Bitmap has padding - extend beyond cell bounds
+                                gx0 = (float)cell_x0 - (float)pad_x;
+                                gy0 = (float)cell_y0 - (float)pad_y;
+                            } else {
+                                // Normal centered glyph (emoji, symbol) - center within cell
+                                gx0 = (float)cell_x0 +
+                                      ((float)glyph_w - (float)bd_entry->region.w) * 0.5f;
+                                gy0 = (float)cell_y0 +
+                                      ((float)cell_h - (float)bd_entry->region.h) * 0.5f;
+                            }
                         } else {
                             gx0 = (float)cell_x0;
                             gy0 = (float)cell_y0;

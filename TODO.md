@@ -214,48 +214,46 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ### Problem
 
-Diagonal box-drawing characters (╱ U+2571, ╲ U+2572, ╳ U+2573) show a 1-pixel
-gap at row seams in the Sokol backend. The same characters render seamlessly in
-the SDL3 backend. Block elements (█ ▀ ▄) and regular box-drawing characters
-(─ │ ┌ ┐ └ ┘) render seamlessly in both backends.
+### Diagonal Box-Drawing Seams (SOLVED)
+
+Diagonal box-drawing characters (╱ U+2571, ╲ U+2572, ╳ U+2573) showed a 1-pixel
+gap at row seams in the Sokol backend. The same characters rendered seamlessly in
+the SDL3 backend.
+
+### Root Cause
+
+The diagonal bitmaps are rendered with 1px padding on all sides to give the
+Xiaolin Wu anti-aliased line endpoints room to extend beyond cell corners. The
+Sokol backend was centering these padded bitmaps _within_ the cell bounds,
+so the 1px overhang didn't extend beyond the cell edge, leaving gaps between rows.
+
+### Solution
+
+Modified the centered glyph placement logic in `backend_sokol.c` to detect when
+a bitmap has padding (region > cell) and extend the quad geometry beyond cell
+bounds by the padding amount. This allows the 1px overhang to fill the half-pixel
+gap at row boundaries, matching SDL3's behavior.
 
 ### Context
 
 The Sokol backend now has procedural box-drawing support (intercepting
 `rend_boxdraw_is_supported()` before the font fallback path) and two-pass
 rendering (backgrounds first, then glyphs on top), bringing it to feature parity
-with SDL3 for box-drawing. The remaining 1-pixel gap is a rasterization issue,
-not a draw-order issue — it persists even when drawing ONLY glyph quads with no
-background quads at all.
+with SDL3 for box-drawing.
 
-### Root Cause (Unresolved)
-
-The bitmap pixel at the seam position has non-zero alpha (191), the UV mapping
-appears correct, and the quad geometry covers the pixel — but the rendered output
-is black. This is a subtle OpenGL rasterization/sampling difference between SDL3's
-`SDL_RenderTexture` and Sokol's raw quad rendering. Likely candidates:
-
-- OpenGL pixel ownership test / viewport / scissor setup differences
-- Edge rasterization convention at the bottom of glyph quads
-- Texture wrap mode (currently NEAREST, no explicit clamp)
-
-### Investigation Notes
+### Original Investigation Notes
 
 - Confirmed bitmap alpha at seam = 191 (non-zero)
 - Confirmed quad geometry covers the seam pixel
 - Confirmed UV mapping is correct
 - Gap exists without bg quads (not a draw-order issue)
 - SDL3 renders the same bitmap seamlessly
-- Changes to `rend_boxdraw.c` (padding, line extensions, solid endpoints) were
-  tried and reverted — they either didn't help or made things worse, and they
-  affect shared code used by SDL3
+- The fix: extend padded bitmaps beyond cell bounds in Sokol backend
 
 ### Affected Files
 
-- `src/backend_sokol.c` — glyph vertex setup, quad geometry, UV mapping,
-  three-pass draw calls
-- `src/rend_boxdraw.c` — shared procedural box-drawing bitmap generation
-  (unchanged; modifications here affect SDL3 too)
+- `src/backend_sokol.c` — centered glyph placement logic for padded bitmaps
+- `tests/diagonal_seam.txt` — visual test script for seam verification
 
 ---
 
