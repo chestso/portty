@@ -2376,8 +2376,9 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                         *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                         float gx0, gy0, gx1, gy1;
                         if (bd_entry->centered) {
+                            int glyph_w = cell.width * cell_w;
                             gx0 = cell_x0 +
-                                  ((float)cell_w - (float)bd_entry->region.w) * 0.5f;
+                                  ((float)glyph_w - (float)bd_entry->region.w) * 0.5f;
                             gy0 = cell_y0 +
                                   ((float)cell_h - (float)bd_entry->region.h) * 0.5f;
                         } else {
@@ -2576,7 +2577,8 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                 int gx = (int)cell_x0 + shaped->x_positions[gi] + entry->x_offset;
                                 int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
                                 if (entry->centered) {
-                                    gx = (int)floorf(cell_x0 + ((float)cell_w - (float)entry->region.w) * 0.5f);
+                                    int glyph_w = cell.width * cell_w;
+                                    gx = (int)floorf(cell_x0 + ((float)glyph_w - (float)entry->region.w) * 0.5f);
                                     gy = (int)floorf(cell_y0 + ((float)cell_h - (float)entry->region.h) * 0.5f);
                                 }
 
@@ -2694,7 +2696,8 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                     int gx = (int)cell_x0 + entry->x_offset;
                     int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
                     if (entry->centered) {
-                        gx = (int)floorf(cell_x0 + ((float)cell_w - (float)entry->region.w) * 0.5f);
+                        int glyph_w = cell.width * cell_w;
+                        gx = (int)floorf(cell_x0 + ((float)glyph_w - (float)entry->region.w) * 0.5f);
                         gy = (int)floorf(cell_y0 + ((float)cell_h - (float)entry->region.h) * 0.5f);
                     }
 
@@ -3431,7 +3434,8 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
                     int gx = (int)x0 + entry->x_offset;
                     int gy = (int)y0 + d->font_ascent - entry->y_offset;
                     if (entry->centered) {
-                        gx = (int)x0 + (cell_w - entry->region.w) / 2;
+                        int glyph_w = cell.width * cell_w;
+                        gx = (int)x0 + (glyph_w - entry->region.w) / 2;
                         gy = (int)y0 + (cell_h - entry->region.h) / 2;
                     }
                     x0 = (float)gx;
