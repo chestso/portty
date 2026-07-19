@@ -6,7 +6,7 @@ Group A — text-default (bare=1 cell, VS16=2 cells):
   VS16:  |⚠️|☀️|☁️|☘️|⛏️|
   ref:   |AB|CD|EF|GH|IJ|
 
-Group B — emoji-default (bare=2 cells); VS15 should narrow to 1 cell but glyph may be blank (VS15 blocks emoji font, text font lacks glyph):
+Group B — emoji-default (bare=2 cells); VS15 narrows to 1 cell, rendering from emoji font if available:
   bare:  |⚡|⚽|⛄|⛔|⛽|
   ref:   |AB|CD|EF|GH|IJ|
   VS15:  |⚡︎|⚽︎|⛄︎|⛔︎|⛽︎|
