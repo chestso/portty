@@ -4074,9 +4074,16 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     // Load debug script if specified
     if (app->script_path) {
         d->debug_script = portty_debug_script_load(app->script_path);
-        if (!d->debug_script)
-            fprintf(stderr, "WARNING: Failed to load debug script: %s\n",
+        if (!d->debug_script) {
+            fprintf(stderr, "ERROR: Failed to load debug script: %s: out of memory\n",
                     app->script_path);
+            exit(1);
+        }
+        const char *err = portty_debug_script_error(d->debug_script);
+        if (err) {
+            fprintf(stderr, "ERROR: %s: %s\n", app->script_path, err);
+            exit(1);
+        }
     }
 
     // Ensure the very first frame is rendered.  coffer starts with no damage

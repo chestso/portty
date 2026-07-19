@@ -1205,9 +1205,17 @@ static void sdl3_run(PorttyBackend *self)
     // Load debug script if specified
     if (d->app->script_path) {
         d->debug_script = portty_debug_script_load(d->app->script_path);
-        if (!d->debug_script)
-            fprintf(stderr, "WARNING: Failed to load debug script: %s\n",
+        if (!d->debug_script) {
+            fprintf(stderr, "ERROR: Failed to load debug script: %s: out of memory\n",
                     d->app->script_path);
+            SDL_SetAtomicInt(&d->quit_requested, 1);
+        } else {
+            const char *err = portty_debug_script_error(d->debug_script);
+            if (err) {
+                fprintf(stderr, "ERROR: %s: %s\n", d->app->script_path, err);
+                SDL_SetAtomicInt(&d->quit_requested, 1);
+            }
+        }
     }
 
     vlog("Event loop starting (event-driven)\n");

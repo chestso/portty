@@ -378,7 +378,10 @@ static void test_parse_unknown_command(void)
     ASSERT_NOT_NULL(path);
 
     PorttyDebugScript *s = portty_debug_script_load(path);
-    ASSERT_NULL(s);
+    // Now returns a struct with error
+    ASSERT_NOT_NULL(s);
+    ASSERT_NOT_NULL(portty_debug_script_error(s));
+    portty_debug_script_free(s);
 
     cleanup_tmp(path);
 }
@@ -386,7 +389,10 @@ static void test_parse_unknown_command(void)
 static void test_parse_missing_file(void)
 {
     PorttyDebugScript *s = portty_debug_script_load("/nonexistent/path/to/script");
-    ASSERT_NULL(s);
+    // Now returns a struct with error instead of NULL
+    ASSERT_NOT_NULL(s);
+    ASSERT_NOT_NULL(portty_debug_script_error(s));
+    portty_debug_script_free(s);
 }
 
 static void test_get_out_of_range(void)
@@ -467,7 +473,10 @@ static void test_parse_dumpcells_missing_args(void)
     ASSERT_NOT_NULL(path);
 
     PorttyDebugScript *s = portty_debug_script_load(path);
-    ASSERT_NULL(s);
+    // Now returns a struct with error
+    ASSERT_NOT_NULL(s);
+    ASSERT_NOT_NULL(portty_debug_script_error(s));
+    portty_debug_script_free(s);
 
     cleanup_tmp(path);
 }
@@ -501,12 +510,12 @@ static void test_parse_screendump_long_path(void)
 static void test_error_message(void)
 {
     PorttyDebugScript *s = portty_debug_script_load("/nonexistent/path");
-    ASSERT_NULL(s);
-    /* error() needs a valid object to read from; for missing file,
-     * load returns NULL and error is not available. Verify that
-     * error() on a failed load returns NULL or a message. */
-    ASSERT_TRUE(portty_debug_script_error(NULL) == NULL ||
-                portty_debug_script_error(NULL) != NULL);
+    // Now returns a struct with error
+    ASSERT_NOT_NULL(s);
+    const char *err = portty_debug_script_error(s);
+    ASSERT_NOT_NULL(err);
+    ASSERT_TRUE(strstr(err, "cannot open file") != NULL);
+    portty_debug_script_free(s);
 }
 
 static void test_parse_trailing_whitespace(void)

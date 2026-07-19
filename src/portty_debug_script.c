@@ -6,6 +6,7 @@
 #include "rend_common.h"
 
 #include <ctype.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -26,6 +27,7 @@ struct PorttyDebugScript
     int capacity;
     char error[256];
     bool has_error;
+    int error_line; // Line number where error occurred (0 if no error)
 };
 
 /* ── Helpers ── */
@@ -41,13 +43,14 @@ static int hex_val(char c)
     return 0;
 }
 
-static void script_set_error(PorttyDebugScript *s, const char *fmt, ...)
+static void script_set_error(PorttyDebugScript *s, int line, const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
     vsnprintf(s->error, sizeof(s->error), fmt, args);
     va_end(args);
     s->has_error = true;
+    s->error_line = line;
 }
 
 static bool script_ensure_capacity(PorttyDebugScript *s)
@@ -224,7 +227,7 @@ static DebugCmd *script_new_cmd(PorttyDebugScript *s)
     return cmd;
 }
 
-static bool parse_command(PorttyDebugScript *s, char *line)
+static bool parse_command(PorttyDebugScript *s, char *line, int line_num)
 {
     /* Skip leading whitespace */
     line = skip_ws(line);
@@ -284,7 +287,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
         int raw_len = 0;
         char *raw = parse_hex_bytes(args, &raw_len);
         if (!raw) {
-            script_set_error(s, "invalid hex bytes in raw command: %s", args);
+            script_set_error(s, line_num, "invalid hex bytes in raw command: %s", args);
             return false;
         }
         cmd->text = raw;
@@ -340,7 +343,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
         cmd->col_start = -1; /* all columns */
         cmd->col_end = 0;
         if (sscanf(args, "%d", &cmd->row) != 1) {
-            script_set_error(s, "dumprow: missing or invalid row argument");
+            script_set_error(s, line_num, "dumprow: missing or invalid row argument");
             return false;
         }
         return true;
@@ -352,7 +355,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
             return false;
         cmd->type = DBG_CMD_DUMPCELLS;
         if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
-            script_set_error(s, "dumpcells: requires row col_start col_end");
+            script_set_error(s, line_num, "dumpcells: requires row col_start col_end");
             return false;
         }
         return true;
@@ -364,7 +367,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
             return false;
         cmd->type = DBG_CMD_DUMPVERTS;
         if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
-            script_set_error(s, "dumpverts: requires row col_start col_end");
+            script_set_error(s, line_num, "dumpverts: requires row col_start col_end");
             return false;
         }
         return true;
@@ -376,7 +379,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
             return false;
         cmd->type = DBG_CMD_VERIFYBUF;
         if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
-            script_set_error(s, "verifybuf: requires row col_start col_end");
+            script_set_error(s, line_num, "verifybuf: requires row col_start col_end");
             return false;
         }
         return true;
@@ -408,7 +411,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
             return false;
         cmd->type = DBG_CMD_MOUSEMOVE;
         if (sscanf(args, "%d %d", &cmd->mouse_x, &cmd->mouse_y) != 2) {
-            script_set_error(s, "mousemove: requires x y");
+            script_set_error(s, line_num, "mousemove: requires x y");
             return false;
         }
         return true;
@@ -422,7 +425,7 @@ static bool parse_command(PorttyDebugScript *s, char *line)
         return true;
     }
 
-    script_set_error(s, "unknown command: %s", line);
+    script_set_error(s, line_num, "unknown command: %s", line);
     return false;
 }
 
@@ -431,8 +434,13 @@ static bool parse_command(PorttyDebugScript *s, char *line)
 PorttyDebugScript *portty_debug_script_load(const char *path)
 {
     FILE *fp = fopen(path, "r");
-    if (!fp)
-        return NULL;
+    if (!fp) {
+        // Create a struct to hold the file open error
+        PorttyDebugScript *s = calloc(1, sizeof(PorttyDebugScript));
+        if (s)
+            script_set_error(s, 0, "cannot open file: %s", strerror(errno));
+        return s;
+    }
 
     PorttyDebugScript *s = calloc(1, sizeof(PorttyDebugScript));
     if (!s) {
@@ -441,17 +449,18 @@ PorttyDebugScript *portty_debug_script_load(const char *path)
     }
 
     char line[4096];
+    int line_num = 0;
     while (fgets(line, sizeof(line), fp)) {
+        line_num++;
         /* Remove trailing newline */
         int len = (int)strlen(line);
         while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
             line[--len] = '\0';
 
-        if (!parse_command(s, line)) {
-            /* parse_command set error; free and return NULL */
-            portty_debug_script_free(s);
+        if (!parse_command(s, line, line_num)) {
+            /* parse_command set error; return struct with error */
             fclose(fp);
-            return NULL;
+            return s;
         }
     }
 
@@ -488,7 +497,15 @@ const char *portty_debug_script_error(const PorttyDebugScript *s)
 {
     if (!s || !s->has_error)
         return NULL;
-    return s->error;
+
+    // If error has a line number, prepend it
+    static char full_error[320];
+    if (s->error_line > 0)
+        snprintf(full_error, sizeof(full_error), "line %d: %s", s->error_line, s->error);
+    else
+        snprintf(full_error, sizeof(full_error), "%s", s->error);
+
+    return full_error;
 }
 
 /* ── Shared execution helpers ── */
