@@ -395,8 +395,7 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
 
     // Ctrl/Alt + printable
     if (codepoint && (mod & (TERM_MOD_CTRL | TERM_MOD_ALT))) {
-        int mod_no_shift = mod & ~TERM_MOD_SHIFT;
-        terminal_send_char(app->term, codepoint, mod_no_shift);
+        terminal_send_char(app->term, codepoint, mod);
         result.handled = true;
     }
 
