@@ -1775,6 +1775,7 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
         "  }\n"
         "  vec4 texel = texture(atlas, v_uv);\n"
         "  float coverage = texel.a;\n"
+        "  if (coverage <= 0.0) discard;\n"
         "  vec3 fg_lin = srgb_to_linear(v_fg.rgb);\n"
         "  vec3 bg_lin = srgb_to_linear(v_bg.rgb);\n"
         "  vec3 color = mix(bg_lin, fg_lin, coverage);\n"
