@@ -6,37 +6,48 @@ Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeT
 
 ## Features
 
-- Full terminal emulation using coffer — external VT engine (consumed via pkg-config) with UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, and a page-based scrollback ring
-- Rendering with SDL3 GPU or Sokol (OpenGL/Metal/D3D11/WebGPU)
-- Damage-driven rendering — coffer's accumulated damage is flushed once per frame into a single dirty signal, so the frame is repainted only when terminal content, the cursor, selection, or the scrollback view actually changes; an idle terminal does no rendering work
-- Gamma-correct text rendering — antialiased glyph coverage is composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), so text gets its physically-correct, heavier/softer weight like kitty rather than the thin look of sRGB-space blending. Tunable with the kitty-style `text_composition_strategy` config key, which on the GPU renderer runs as a luminance-aware fragment shader — thickening dark-on-light text (reverse video) without bolding normal light-on-dark text.
+**Terminal emulation: [coffer](https://github.com/chestso/coffer)** (external VT engine, consumed via pkg-config)
+
+- UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, page-based scrollback ring
+- Sixel graphics — DCS sixel decoding, grid anchoring, RLE/RGB/HLS color, transparency, raster attributes; capability advertising (DA1 reports `4`, DECSET 80/1070/8452, XTSMGRAPHICS); animated in-place updates (DECSDM mode 80) with frame swapping via image id + version
+- Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization; Windows ConPTY workaround routes OSC 5555 to APC dispatch
+- OSC-8 hyperlinks — parsing and tracking
+- OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
+- Kitty keyboard protocol — push/pop/set/query plus Disambiguate and Report-all flags
+- Working-directory tracking — OSC 7 (`file://` URI) and OSC 9;9 (ConEmu protocol)
+- Window title — OSC 2 parsing
+- Damage accumulation — flushed once per frame into a single dirty signal
+
+**Rendering: portty** (SDL3 GPU or Sokol backends)
+
+- Damage-driven rendering — frame repainted only when terminal content, cursor, selection, or scrollback view changes; idle terminal does no rendering work
+- Gamma-correct text rendering — antialiased glyph coverage composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), giving physically-correct weight like kitty. Tunable with `text_composition_strategy` config key (luminance-aware fragment shader on GPU renderer)
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Bold, italic, and bold-italic font styles (variable font axes, platform-native resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
-- Support for Unicode characters and emoji (COLR v1 color fonts)
+- Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
-- Sixel graphics — DCS sixel images are decoded and stored inside coffer and anchored to the grid, so they scroll, enter scrollback, and clear with the text they sit on. Spec coverage includes RLE, RGB and DEC HLS color (correct blue-origin hue), transparency, and raster attributes. Capability is advertised so sixel-aware tools (`img2sixel`, `lsix`, `chafa`) actually emit graphics: the DA1 reply reports `4`, plus DECSET 80/1070/8452 and XTSMGRAPHICS. Animated/in-place updates (DECSDM mode 80) swap frames in place — the renderer re-uploads a cached texture by the engine's image id + version, and the engine recycles pixel buffers from a pool so streaming same-size frames doesn't churn the heap
-- Lottie animations — APC sequences (`ESC _ … ST`) with base64-encoded JSON payloads load, place, and control Lottie animations on the grid. Eight commands (load, load-chunk, place, play, pause, stop, seek, delete) manage animation state and placement tracking. Placements carry per-instance opacity and layer (foreground or background). Animations scroll with the text, enter scrollback, and are cleared with the rows they sit on — the same ownership model as sixel. ThorVG rasterizes each frame; the host fetches RGBA pixels via the coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_tick()`) and composites them as foreground and background layers. A Python TUI player ([plotty](contrib/plotty)) provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling. On Windows, ConPTY strips APC sequences (`ESC _`) — the same limitation that prevents the kitty image protocol from working (Windows Terminal issue #8389). `PSEUDOCONSOLE_PASSTHROUGH_MODE` (flag 0x8) is enabled with fallback, but on some builds it is accepted yet unknown sequences are still dropped. As a workaround, plotty on Windows carries the Lottie payload inside **OSC 5555** (`ESC ] 5555 ; <base64> BEL`), which ConPTY does pass through; coffer routes OSC 5555 to the same APC dispatch, so the payload is processed identically regardless of carrier
+- Sixel rendering — texture upload and compositing of coffer-decoded images
+- Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_tick()`), foreground/background layer compositing
 - Procedural box drawing and block element rendering (U+2500–U+257F)
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
-- OSC 52 clipboard set — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy text to the system clipboard via escape sequence. Read queries (`OSC 52 ; c ; ?`) are silently refused so any program running in the terminal — including processes on the remote end of an SSH session — can't ask the terminal to hand it the contents of your clipboard (passwords, tokens, etc.).
+- OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
-- OSC-8 hyperlinks — dotted Charm-purple underline at rest, solid on hover with pointer cursor; a hover hint shows the full URI. Ctrl+click opens via the system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
+- OSC-8 hyperlink rendering — dotted Charm-purple underline at rest, solid on hover with pointer cursor; hover hint shows full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
-- Scrollback buffer with mouse wheel and Shift+PageUp/Down
+- Scrollback navigation with mouse wheel and Shift+PageUp/Down
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
-- Window title via OSC 2
-- Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste (pasted text is distinguished from typed input so shells don't execute it prematurely)
-- Kitty keyboard protocol (push/pop/set/query plus the Disambiguate and Report-all flags) — modern TUIs like Claude Code can tell Shift+Enter apart from plain Enter, and Ctrl+letter combos no longer collide with their literal control bytes
-- Working-directory tracking via OSC 7 (`file://` URI) and OSC 9;9 (ConEmu protocol) — shells emit these on `cd` so `Ctrl+Shift+N` can spawn a new terminal in the same directory. On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
+- Window title — sets platform window title from coffer-parsed OSC 2
+- Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
+- Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
 - Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs
 - Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
