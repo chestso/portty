@@ -595,7 +595,7 @@ static void draw_block_element(BoxDrawCtx *ctx, uint32_t cp,
 }
 
 // Draw a single-pixel anti-aliased line using Xiaolin Wu's algorithm.
-// Caller must set blend mode to SDL_BLENDMODE_BLEND before calling.
+// Caller must set ctx->blend = true before calling.
 static void draw_aa_line(BoxDrawCtx *ctx,
                          float x0, float y0, float x1, float y1,
                          uint8_t r, uint8_t g, uint8_t b)
@@ -787,14 +787,12 @@ static void draw_rounded_corner(BoxDrawCtx *ctx, uint32_t cp,
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
 // Uses anti-aliased line rendering with thickness matching the light line width.
 //
-// The bitmap is padded by 1px on every side so the Xiaolin Wu AA endpoints
-// — which sit exactly on the cell corners — have a full pixel of room
-// instead of being half-clipped at the bitmap edge.  This eliminates the
-// faded half-pixel seam that appeared at every row boundary when cells
-// were stacked.
+// The bitmap has 10% proportional margins on all sides, giving the Xiaolin Wu
+// AA endpoints room beyond the cell edges. This eliminates the faded half-pixel
+// seam that appeared at every row boundary when cells were stacked.
 //
-// IMPORTANT: Lines extend to the bitmap edges so AA coverage reaches
-// into the padding area for seamless tiling at row boundaries.
+// Lines extend from corner to corner of the full padded bitmap, ensuring
+// AA coverage reaches into the margin area for seamless tiling at cell boundaries.
 static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int cell_w, int cell_h,
                                 int pad_x, int pad_y,
@@ -861,10 +859,10 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
 // The bitmap is cell-sized (w×h) with centered=true, RGBA pixels,
 // and is intended to be inserted into the texture atlas like a font glyph.
 //
-// Diagonal characters (U+2571-U+2573) get 25% proportional margins on all
+// Diagonal characters (U+2571-U+2573) get 10% proportional margins on all
 // sides. This ensures lines drawn across margin bounds connect seamlessly
 // when cells are tiled. Lines extend to bitmap corners for continuous
-// coverage at row boundaries.
+// coverage at cell boundaries.
 GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                  uint8_t r, uint8_t g, uint8_t b)
 {
