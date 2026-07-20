@@ -37,7 +37,7 @@ Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeT
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
-- OSC-8 hyperlink rendering — dotted Charm-purple underline at rest, solid on hover with pointer cursor; hover hint shows full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
+- OSC-8 hyperlinks — pointer cursor changes on hover; hover hint shows full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Nerd Fonts v2 to v3 codepoint translation
@@ -407,7 +407,7 @@ Thomas Christensen
 
 ## Acknowledgments
 
-A tip of the hat to [Charm](https://charm.land): portty's default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via coffer), the cream foreground (`#fffdf5`) is their own body text, and the OSC-8 hyperlinks wear Charm purple. Thanks for keeping the terminal beautiful. 🌸
+A tip of the hat to [Charm](https://charm.land): the default 16-color palette is their [CharmTone](https://github.com/charmbracelet/x/tree/main/exp/charmtone) scheme (via coffer), and the cream foreground (`#fffdf5`) is their own body text. Thanks for keeping the terminal beautiful. 🌸
 
 ## License
 
