@@ -10,6 +10,11 @@
 float rend_srgb_to_linear(uint8_t v);
 uint8_t rend_linear_to_srgb(float lin);
 
+// Convert RGBA pixel data from sRGB to linear in-place. Used for sixel/lottie
+// textures on the linear-light path so they round-trip correctly through the
+// SRGB_LINEAR render target. Alpha channel is preserved unchanged.
+void rend_linearize_rgba_in_place(uint8_t *pixels, int w, int h);
+
 // Nerd Fonts v2 -> v3 codepoint translation. Returns the v3 equivalent if
 // `cp` is in the legacy U+F900-U+FAFF range, otherwise returns `cp` unchanged.
 uint32_t rend_nf_translate_codepoint(uint32_t cp);

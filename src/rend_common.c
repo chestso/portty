@@ -719,6 +719,23 @@ static void build_srgb_lut(void)
     s_atlas_srgb_lut_ready = true;
 }
 
+void rend_linearize_rgba_in_place(uint8_t *pixels, int w, int h)
+{
+    if (!pixels || w <= 0 || h <= 0)
+        return;
+    if (!s_atlas_srgb_lut_ready)
+        build_srgb_lut();
+
+    size_t n = (size_t)w * h;
+    for (size_t i = 0; i < n; i++) {
+        uint8_t *p = pixels + i * 4;
+        p[0] = s_atlas_srgb_to_linear_u8[p[0]];
+        p[1] = s_atlas_srgb_to_linear_u8[p[1]];
+        p[2] = s_atlas_srgb_to_linear_u8[p[2]];
+        // p[3] (alpha) unchanged
+    }
+}
+
 static uint32_t atlas_hash(void *font_data, int glyph_id, uint32_t color)
 {
     uint32_t hash = 2166136261u;

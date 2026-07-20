@@ -251,6 +251,25 @@ static void draw_strikethrough(SDL_Renderer *renderer, int x, int y, int width,
 static void sixel_cache_clear(RendererSdl3Data *data);
 static void lottie_cache_clear(RendererSdl3Data *data);
 
+// Linearize RGBA data for upload to the linear render target.
+// On the linear-light path (linear_ok), SDL samples textures as-is without
+// sRGB decode, so we must pre-linearize sixel/lottie RGBA to match how
+// color glyphs are linearized in the atlas. Returns a heap-allocated copy
+// that the caller must free, or NULL if linearization isn't needed.
+static uint8_t *linearize_for_upload(RendererSdl3Data *data, const uint8_t *src,
+                                     int w, int h)
+{
+    if (!data->linear_ok)
+        return NULL;
+    size_t n = (size_t)w * h * 4;
+    uint8_t *copy = malloc(n);
+    if (!copy)
+        return NULL;
+    memcpy(copy, src, n);
+    rend_linearize_rgba_in_place(copy, w, h);
+    return copy;
+}
+
 // Forward declaration: rebuild the notification panel texture (used by
 // rend_sdl3_load_fonts / rend_sdl3_resize, which precede the definition).
 static void build_notif_texture(RendererSdl3Data *data);
@@ -1225,6 +1244,9 @@ static void sixel_cache_reconcile(RendererSdl3Data *data, const CfrSixel *imgs, 
 // dimension change forces a recreate.
 static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const CfrSixel *img)
 {
+    uint8_t *linear = linearize_for_upload(data, img->rgba, img->width_px, img->height_px);
+    const uint8_t *pixels = linear ? linear : img->rgba;
+
     for (int i = 0; i < data->sixel_cache_count; i++) {
         if (data->sixel_cache[i].id != img->id)
             continue;
@@ -1236,25 +1258,30 @@ static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const CfrSixel *im
             data->sixel_cache[i].texture = NULL;
         } else if (data->sixel_cache[i].version != img->version) {
             // Same size, new pixels — re-upload in place (no churn).
-            SDL_UpdateTexture(data->sixel_cache[i].texture, NULL, img->rgba,
+            SDL_UpdateTexture(data->sixel_cache[i].texture, NULL, pixels,
                               img->width_px * 4);
             data->sixel_cache[i].version = img->version;
+            free(linear);
             return data->sixel_cache[i].texture;
         } else {
+            free(linear);
             return data->sixel_cache[i].texture;
         }
         // Fall through to recreate into this slot.
         SDL_Texture *t = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
                                            SDL_TEXTUREACCESS_STATIC, img->width_px,
                                            img->height_px);
-        if (!t)
+        if (!t) {
+            free(linear);
             return NULL;
-        SDL_UpdateTexture(t, NULL, img->rgba, img->width_px * 4);
+        }
+        SDL_UpdateTexture(t, NULL, pixels, img->width_px * 4);
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
         data->sixel_cache[i].texture = t;
         data->sixel_cache[i].version = img->version;
         data->sixel_cache[i].w = img->width_px;
         data->sixel_cache[i].h = img->height_px;
+        free(linear);
         return t;
     }
 
@@ -1262,10 +1289,13 @@ static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const CfrSixel *im
     SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
                                          SDL_TEXTUREACCESS_STATIC, img->width_px,
                                          img->height_px);
-    if (!tex)
+    if (!tex) {
+        free(linear);
         return NULL;
-    SDL_UpdateTexture(tex, NULL, img->rgba, img->width_px * 4);
+    }
+    SDL_UpdateTexture(tex, NULL, pixels, img->width_px * 4);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    free(linear);
 
     if (data->sixel_cache_count >= SIXEL_CACHE_MAX) {
         // Cache full (>256 simultaneous images — effectively never). Skip
@@ -1354,6 +1384,9 @@ static void lottie_cache_reconcile(RendererSdl3Data *data,
 static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
                                        const CfrLottie *anim)
 {
+    uint8_t *linear = linearize_for_upload(data, anim->rgba, anim->canvas_w, anim->canvas_h);
+    const uint8_t *pixels = linear ? linear : anim->rgba;
+
     for (int i = 0; i < data->lottie_cache_count; i++) {
         if (data->lottie_cache[i].id != anim->id)
             continue;
@@ -1363,34 +1396,42 @@ static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
                 SDL_DestroyTexture(data->lottie_cache[i].texture);
             data->lottie_cache[i].texture = NULL;
         } else if (data->lottie_cache[i].version != anim->version) {
-            SDL_UpdateTexture(data->lottie_cache[i].texture, NULL, anim->rgba,
+            SDL_UpdateTexture(data->lottie_cache[i].texture, NULL, pixels,
                               anim->canvas_w * 4);
             data->lottie_cache[i].version = anim->version;
+            free(linear);
             return data->lottie_cache[i].texture;
         } else {
+            free(linear);
             return data->lottie_cache[i].texture;
         }
         SDL_Texture *t = SDL_CreateTexture(
             data->renderer, SDL_PIXELFORMAT_RGBA32,
             SDL_TEXTUREACCESS_STATIC, anim->canvas_w, anim->canvas_h);
-        if (!t)
+        if (!t) {
+            free(linear);
             return NULL;
-        SDL_UpdateTexture(t, NULL, anim->rgba, anim->canvas_w * 4);
+        }
+        SDL_UpdateTexture(t, NULL, pixels, anim->canvas_w * 4);
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
         data->lottie_cache[i].texture = t;
         data->lottie_cache[i].version = anim->version;
         data->lottie_cache[i].w = anim->canvas_w;
         data->lottie_cache[i].h = anim->canvas_h;
+        free(linear);
         return t;
     }
 
     SDL_Texture *tex = SDL_CreateTexture(
         data->renderer, SDL_PIXELFORMAT_RGBA32,
         SDL_TEXTUREACCESS_STATIC, anim->canvas_w, anim->canvas_h);
-    if (!tex)
+    if (!tex) {
+        free(linear);
         return NULL;
-    SDL_UpdateTexture(tex, NULL, anim->rgba, anim->canvas_w * 4);
+    }
+    SDL_UpdateTexture(tex, NULL, pixels, anim->canvas_w * 4);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
+    free(linear);
 
     if (data->lottie_cache_count >= LOTTIE_CACHE_MAX) {
         SDL_DestroyTexture(tex);
