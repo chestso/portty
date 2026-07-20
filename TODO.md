@@ -212,9 +212,9 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ## 3. Sokol Backend: Diagonal Box-Drawing Seams
 
-### Status: Solution Identified
+### Status: Completed
 
-The diagonal seam problem has a proven solution based on `rectangles.py` demonstration.
+The diagonal seam problem has been resolved with proportional margins and zero-coverage texel discarding.
 
 ### The Solution: Proportional Margins
 
@@ -241,26 +241,44 @@ The earlier approaches used fixed pixel padding (1-2px) rather than proportional
 
 A 25% margin scales with cell size at any DPI, and drawing lines across the full margin bounds ensures continuous lines across cell boundaries.
 
-### Implementation Plan
+### Implementation
 
-1. Update `rend_boxdraw.c` diagonal generation:
-   - Calculate margin as 25% of cell dimensions
-   - Render glyph bitmap at cell_size + 2 \* margin
-   - Draw lines from margin corner to margin corner
+1. `rend_boxdraw.c` now uses 10% proportional margins for diagonal characters (U+2571-U+2573)
+2. Lines extend to bitmap edges for continuous coverage at row boundaries
+3. Sokol backend discards zero-coverage glyph texels to prevent seams
+4. Both backends share the same `rend_boxdraw.c` implementation
 
-2. Both backends already support oversized glyphs (used for fallback fonts):
-   - Glyphs are drawn centered at negative offsets
-   - No backend changes needed
+### Commits
 
-### Affected Files
-
-- `src/rend_boxdraw.c` — diagonal bitmap rendering with proportional margins
-- `src/rend_sdl3_boxdraw.c` — same for SDL3 backend
-- `tests/diagonal_seam.txt` — visual test script for seam verification
+- `77bc344` - Fix diagonal box-drawing seams with proportional margins
+- `46ec8da` - Discard zero-coverage glyph texels to fix Sokol diagonal seams
+- `2f59881` - Remove duplicate SDL3 boxdraw implementation (consolidated to common code)
 
 ---
 
-## 4. Unimplemented Terminfo Capabilities
+## 4. SDL3 Linear-Light Sixel Rendering
+
+### Status: Completed
+
+Sixel images appeared too bright in SDL3 when using linear-light rendering (gpu/vulkan renderers). The fix adds CPU-side sRGB→linear conversion for sixel and lottie textures before upload.
+
+### Root Cause
+
+SDL3's linear-light path (`linear_ok = true`) renders to an `SDL_COLORSPACE_SRGB_LINEAR` float target. SDL linearizes draw/vertex colors but does not decode sampled texture texels. Sixel/lottie textures uploaded as raw sRGB appeared double-encoded (too bright/washed out).
+
+### Solution
+
+1. Added `rend_linearize_rgba_in_place()` in `rend_common.c` - converts RGBA sRGB→linear using the existing atlas LUT
+2. Added `linearize_for_upload()` in `rend_sdl3.c` - allocates temp buffer and linearizes when needed
+3. Updated `sixel_get_texture()` and `lottie_get_texture()` to linearize before upload
+
+### Commit
+
+- `64c7cd2` - Fix bright sixel images in SDL3 linear-light mode
+
+---
+
+## 5. Unimplemented Terminfo Capabilities
 
 These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
 but are not yet fully implemented. coffer now has explicit case handlers (no
@@ -355,7 +373,7 @@ fully implemented in both backends via timer-based cursor visibility toggling.
 
 ---
 
-## 5. Popular Unsupported Capabilities
+## 6. Popular Unsupported Capabilities
 
 These capabilities are not in the terminfo entry, not inherited, and not
 implemented, but are commonly expected by modern TUIs.
