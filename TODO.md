@@ -311,35 +311,17 @@ visual effects are intentionally omitted. No further work is needed.
 | `initc` (OSC 4)           | `\E]4;...`  | Logged once per CfrTerm, then silent |
 | `oc` (OSC 104)            | `\E]104`    | Logged once per CfrTerm, then silent |
 
-### Backend-specific rendering gaps
+### Not rendered by either backend
 
-Some attributes are parsed and stored by coffer but only rendered by one
-backend. These are not terminfo concerns (both backends handle the same VT
-input), but are important to track for visual parity.
+These attributes are parsed and stored by coffer but not rendered by
+either backend. Blink and DECSCNM are deliberately omitted (accessibility)
+— see the Concluded section above for rationale.
 
-**Rendered by SDL3 only (not Sokol):**
-
-| Attribute                                                   | SDL3                  | Sokol           |
-| ----------------------------------------------------------- | --------------------- | --------------- |
-| underline (5 styles: single, double, curly, dotted, dashed) | `rend_sdl3.c:124-234` | Not implemented |
-| strikethrough                                               | `rend_sdl3.c:240`     | Not implemented |
-| `ul_color` (underline color)                                | `rend_sdl3.c:1051`    | Not implemented |
-
-**Rendered differently between backends:**
-
-| Attribute       | SDL3                                    | Sokol                                                    |
-| --------------- | --------------------------------------- | -------------------------------------------------------- |
-| reverse (SGR 7) | Pre-swaps fg/bg in `term_cfr.c:511-516` | Reads `attrs.reverse` directly at `backend_sokol.c:1694` |
-
-**Not rendered by either backend:**
-
-| Attribute                    | Stored in `TerminalCellAttr` | SDL3                                      | Sokol                                     |
-| ---------------------------- | ---------------------------- | ----------------------------------------- | ----------------------------------------- |
-| blink (SGR 5)                | `blink:1`                    | Deliberately not rendered (accessibility) | Deliberately not rendered (accessibility) |
-| font (SGR 10-19)             | `font:4`                     | Not read                                  | Not read                                  |
-| dwl (DECDWL)                 | `dwl:1`                      | Not read                                  | Not read                                  |
-| dhl (DECDHL)                 | `dhl:2`                      | Not read                                  | Not read                                  |
-| DECSCNM (screen reverse, ?5) | N/A (mode, not cell attr)    | Deliberately not rendered (accessibility) | Deliberately not rendered (accessibility) |
+| Attribute        | Stored in `TerminalCellAttr` | SDL3     | Sokol    |
+| ---------------- | ---------------------------- | -------- | -------- |
+| font (SGR 10-19) | `font:4`                     | Not read | Not read |
+| dwl (DECDWL)     | `dwl:1`                      | Not read | Not read |
+| dhl (DECDHL)     | `dhl:2`                      | Not read | Not read |
 
 Note: cursor blink (DECSET ?12) is separate from text blink (SGR 5) and is
 fully implemented in both backends via timer-based cursor visibility toggling.
