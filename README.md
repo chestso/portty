@@ -40,6 +40,7 @@ Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeT
 - OSC-8 hyperlinks — pointer cursor changes on hover; hover hint shows full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
+- Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
 - Scrollback navigation with mouse wheel and Shift+PageUp/Down

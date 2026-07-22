@@ -295,7 +295,7 @@ it.
 | ---------------------------- | ----------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
 | `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Noop (not read by either backend)                             |
 | `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Noop (not read by either backend)                             |
-| `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Noop (not read by either backend)                             |
+| `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded         |
 | `flash` (DECSCNM, ?5)        | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Noop (screen-level reverse not handled; per-cell SGR 7 works) |
 | `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                          |
 | `smglr`/`mgc` (margins, ?69) | `\E[?69h`   | `CFR_MODE_LEFT_RIGHT_MARGINS` tracked, logged once          | Noop                                                          |
@@ -358,15 +358,15 @@ input), but are important to track for visual parity.
 
 **Not rendered by either backend:**
 
-| Attribute                    | Stored in `TerminalCellAttr` | SDL3        | Sokol       |
-| ---------------------------- | ---------------------------- | ----------- | ----------- |
-| blink (SGR 5)                | `blink:1`                    | Not read    | Not read    |
-| dim (SGR 2)                  | `dim:1`                      | Not read    | Not read    |
-| invis (SGR 8)                | `invis:1`                    | Not read    | Not read    |
-| font (SGR 10-19)             | `font:4`                     | Not read    | Not read    |
-| dwl (DECDWL)                 | `dwl:1`                      | Not read    | Not read    |
-| dhl (DECDHL)                 | `dhl:2`                      | Not read    | Not read    |
-| DECSCNM (screen reverse, ?5) | N/A (mode, not cell attr)    | Not handled | Not handled |
+| Attribute                    | Stored in `TerminalCellAttr` | SDL3                                      | Sokol                                     |
+| ---------------------------- | ---------------------------- | ----------------------------------------- | ----------------------------------------- |
+| blink (SGR 5)                | `blink:1`                    | Deliberately not rendered (accessibility) | Deliberately not rendered (accessibility) |
+| dim (SGR 2)                  | `dim:1`                      | Not read                                  | Not read                                  |
+| invis (SGR 8)                | `invis:1`                    | Not read                                  | Not read                                  |
+| font (SGR 10-19)             | `font:4`                     | Not read                                  | Not read                                  |
+| dwl (DECDWL)                 | `dwl:1`                      | Not read                                  | Not read                                  |
+| dhl (DECDHL)                 | `dhl:2`                      | Not read                                  | Not read                                  |
+| DECSCNM (screen reverse, ?5) | N/A (mode, not cell attr)    | Not handled                               | Not handled                               |
 
 Note: cursor blink (DECSET ?12) is separate from text blink (SGR 5) and is
 fully implemented in both backends via timer-based cursor visibility toggling.
