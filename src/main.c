@@ -341,6 +341,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         .demo_text = args->demo_text,
         .exec_argv = args->exec_argv,
         .font_size = args->font_size,
+        .font_name = args->font_name,
         .script_path = args->script_path,
     };
     backend.data = &app;
@@ -496,6 +497,7 @@ static sapp_desc portty_run_sokol(PorttyArgs *args, PorttyConf *conf)
     app->demo_text = args->demo_text;
     app->exec_argv = args->exec_argv;
     app->font_size = args->font_size;
+    app->font_name = args->font_name;
     app->script_path = args->script_path;
     backend->data = app;
 

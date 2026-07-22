@@ -3991,7 +3991,7 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
         return;
 
     char *desktop_font = NULL;
-    const char *font_name = app->conf->font;
+    const char *font_name = app->font_name;
     const char *font_source = "fontconfig generic (no desktop default)";
     if (!font_name) {
         desktop_font = self->get_default_font(self);
@@ -4000,7 +4000,7 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
             font_source = "desktop default";
         }
     } else {
-        font_source = "-f flag";
+        font_source = app->conf->font ? "config file" : "-f flag";
     }
     app->font_source = font_source;
 
