@@ -210,112 +210,15 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ---
 
-## 3. Sokol Backend: Diagonal Box-Drawing Seams
-
-### Status: Completed
-
-The diagonal seam problem has been resolved with proportional margins and zero-coverage texel discarding.
-
-### The Solution: Proportional Margins
-
-The key insight from `rectangles.py`:
-
-1. **Glyph size = 125% of cell size** (25% margin on all sides)
-2. **Lines drawn across margin bounds**, not cell bounds
-3. **When cells tile edge-to-edge, the extended lines connect seamlessly**
-
-Example for a 32×96 cell:
-
-- Margin: 8px horizontal (25% of 32), 24px vertical (25% of 96)
-- Glyph bitmap: 40×120 (cell + margins)
-- Line: drawn from corner to corner of the full margin bounds
-
-When such glyphs are placed centered at negative offsets (so the cell portion aligns with the cell position), the 25% overhang on each side ensures diagonal lines connect perfectly with adjacent cells.
-
-### Why Previous Approaches Failed
-
-The earlier approaches used fixed pixel padding (1-2px) rather than proportional margins. This caused two problems:
-
-1. **DPI scaling**: Fixed 1px pad becomes proportionally smaller at higher DPI
-2. **Incorrect line geometry**: Lines drawn to cell corners rather than margin bounds
-
-A 25% margin scales with cell size at any DPI, and drawing lines across the full margin bounds ensures continuous lines across cell boundaries.
-
-### Implementation
-
-1. `rend_boxdraw.c` now uses 10% proportional margins for diagonal characters (U+2571-U+2573)
-2. Lines extend to bitmap edges for continuous coverage at row boundaries
-3. Sokol backend discards zero-coverage glyph texels to prevent seams
-4. Both backends share the same `rend_boxdraw.c` implementation
-
-### Commits
-
-- `77bc344` - Fix diagonal box-drawing seams with proportional margins
-- `46ec8da` - Discard zero-coverage glyph texels to fix Sokol diagonal seams
-- `2f59881` - Remove duplicate SDL3 boxdraw implementation (consolidated to common code)
-
----
-
-## 4. SDL3 Linear-Light Sixel Rendering
-
-### Status: Completed
-
-Sixel images appeared too bright in SDL3 when using linear-light rendering (gpu/vulkan renderers). The fix adds CPU-side sRGB→linear conversion for sixel and lottie textures before upload.
-
-### Root Cause
-
-SDL3's linear-light path (`linear_ok = true`) renders to an `SDL_COLORSPACE_SRGB_LINEAR` float target. SDL linearizes draw/vertex colors but does not decode sampled texture texels. Sixel/lottie textures uploaded as raw sRGB appeared double-encoded (too bright/washed out).
-
-### Solution
-
-1. Added `rend_linearize_rgba_in_place()` in `rend_common.c` - converts RGBA sRGB→linear using the existing atlas LUT
-2. Added `linearize_for_upload()` in `rend_sdl3.c` - allocates temp buffer and linearizes when needed
-3. Updated `sixel_get_texture()` and `lottie_get_texture()` to linearize before upload
-
-### Commit
-
-- `64c7cd2` - Fix bright sixel images in SDL3 linear-light mode
-
----
-
-## 5. Unimplemented Terminfo Capabilities
+## 3. Unimplemented Terminfo Capabilities
 
 These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
-but are not yet fully implemented. coffer now has explicit case handlers (no
-more silent `default: break` fallthrough) with logging for unimplemented
-sequences.
-
-### Status: Blink and DECSCNM Concluded
-
-Blinking text (SGR 5) and screen-level reverse video (DECSCNM, `?5`) are
-deliberately not rendered. Both are considered accessibility hazards —
-blinking text causes visual distraction and can trigger seizures, while
-screen-level reverse video (distinct from per-cell SGR 7 reverse) is
-primarily used for visual bell effects which are better handled by modern
-UI patterns. The attributes are parsed and stored for compatibility, but the
-visual effects are intentionally omitted. No further work is needed.
-
-| Capability                | Sequence    | coffer status                                               | portty renderer                                       |
-| ------------------------- | ----------- | ----------------------------------------------------------- | ----------------------------------------------------- |
-| `blink` (SGR 5)           | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded |
-| DECSCNM (?5)              | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Deliberately not rendered (accessibility) — concluded |
-| `smm`/`rmm` (meta, ?1034) | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                  |
-
-### Noop + log (no state to track)
-
-| Capability                | Sequence    | coffer status                        |
-| ------------------------- | ----------- | ------------------------------------ |
-| `mc0`/`mc4`/`mc5` (CSI i) | `\E[i` etc. | Logged once per CfrTerm, then silent |
-| `meml` (ESC l)            | `\El`       | Logged once per CfrTerm, then silent |
-| `memu` (ESC m)            | `\Em`       | Logged once per CfrTerm, then silent |
-| `initc` (OSC 4)           | `\E]4;...`  | Logged once per CfrTerm, then silent |
-| `oc` (OSC 104)            | `\E]104`    | Logged once per CfrTerm, then silent |
+but are not yet rendered by portty.
 
 ### Not rendered by either backend
 
 These attributes are parsed and stored by coffer but not rendered by
-either backend. Blink and DECSCNM are deliberately omitted (accessibility)
-— see the Concluded section above for rationale.
+either backend.
 
 | Attribute        | Stored in `TerminalCellAttr` | SDL3     | Sokol    |
 | ---------------- | ---------------------------- | -------- | -------- |
@@ -323,12 +226,9 @@ either backend. Blink and DECSCNM are deliberately omitted (accessibility)
 | dwl (DECDWL)     | `dwl:1`                      | Not read | Not read |
 | dhl (DECDHL)     | `dhl:2`                      | Not read | Not read |
 
-Note: cursor blink (DECSET ?12) is separate from text blink (SGR 5) and is
-fully implemented in both backends via timer-based cursor visibility toggling.
-
 ---
 
-## 6. Popular Unsupported Capabilities
+## 4. Popular Unsupported Capabilities
 
 These capabilities are not in the terminfo entry, not inherited, and not
 implemented, but are commonly expected by modern TUIs.
