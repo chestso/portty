@@ -296,7 +296,7 @@ it.
 | `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Noop (not read by either backend)                             |
 | `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)             |
 | `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded         |
-| `flash` (DECSCNM, ?5)        | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Noop (screen-level reverse not handled; per-cell SGR 7 works) |
+| DECSCNM (?5)                | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Not rendered (screen-level reverse video mode) |
 | `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                          |
 | `smglr`/`mgc` (margins, ?69) | `\E[?69h`   | `CFR_MODE_LEFT_RIGHT_MARGINS` tracked, logged once          | Noop                                                          |
 
