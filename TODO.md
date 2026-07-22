@@ -283,13 +283,12 @@ SDL3's linear-light path (`linear_ok = true`) renders to an `SDL_COLORSPACE_SRGB
 These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
 but are not yet fully implemented. coffer now has explicit case handlers (no
 more silent `default: break` fallthrough) with logging for unimplemented
-sequences. portty renders none of these yet.
+sequences.
 
 ### Stateful (parsed and stored in coffer, renderer noop)
 
-These follow the blink pattern: `CFR_ATTR_BLINK` is parsed and stored in
-coffer, portty maps it to `TerminalCellAttr.blink`, but neither renderer reads
-it.
+`CFR_ATTR_BLINK` is parsed and stored in coffer, portty maps it to
+`TerminalCellAttr.blink`, but neither renderer reads it.
 
 ### Status: Blink and DECSCNM Concluded
 
@@ -303,8 +302,6 @@ visual effects are intentionally omitted. No further work is needed.
 
 | Capability                | Sequence    | coffer status                                               | portty renderer                                       |
 | ------------------------- | ----------- | ----------------------------------------------------------- | ----------------------------------------------------- |
-| `dim` (SGR 2)             | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Implemented (foreground blended toward bg at 40%)     |
-| `invis` (SGR 8)           | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)     |
 | `blink` (SGR 5)           | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded |
 | DECSCNM (?5)              | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Deliberately not rendered (accessibility) — concluded |
 | `smm`/`rmm` (meta, ?1034) | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                  |
@@ -350,8 +347,6 @@ input), but are important to track for visual parity.
 | Attribute                    | Stored in `TerminalCellAttr` | SDL3                                      | Sokol                                     |
 | ---------------------------- | ---------------------------- | ----------------------------------------- | ----------------------------------------- |
 | blink (SGR 5)                | `blink:1`                    | Deliberately not rendered (accessibility) | Deliberately not rendered (accessibility) |
-| dim (SGR 2)                  | `dim:1`                      | Implemented                               | Implemented                               |
-| invis (SGR 8)                | `invis:1`                    | Implemented                               | Implemented                               |
 | font (SGR 10-19)             | `font:4`                     | Not read                                  | Not read                                  |
 | dwl (DECDWL)                 | `dwl:1`                      | Not read                                  | Not read                                  |
 | dhl (DECDHL)                 | `dhl:2`                      | Not read                                  | Not read                                  |
