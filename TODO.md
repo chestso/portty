@@ -285,11 +285,6 @@ but are not yet fully implemented. coffer now has explicit case handlers (no
 more silent `default: break` fallthrough) with logging for unimplemented
 sequences.
 
-### Stateful (parsed and stored in coffer, renderer noop)
-
-`CFR_ATTR_BLINK` is parsed and stored in coffer, portty maps it to
-`TerminalCellAttr.blink`, but neither renderer reads it.
-
 ### Status: Blink and DECSCNM Concluded
 
 Blinking text (SGR 5) and screen-level reverse video (DECSCNM, `?5`) are
@@ -315,12 +310,6 @@ visual effects are intentionally omitted. No further work is needed.
 | `memu` (ESC m)            | `\Em`       | Logged once per CfrTerm, then silent |
 | `initc` (OSC 4)           | `\E]4;...`  | Logged once per CfrTerm, then silent |
 | `oc` (OSC 104)            | `\E]104`    | Logged once per CfrTerm, then silent |
-
-### Fully implemented in coffer
-
-| Capability         | Sequence    | coffer status                                        |
-| ------------------ | ----------- | ---------------------------------------------------- |
-| `rep` (REP, CSI b) | `\E[%p1%db` | Fully implemented: repeats last printed char N times |
 
 ### Backend-specific rendering gaps
 
