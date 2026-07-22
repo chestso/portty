@@ -291,14 +291,24 @@ These follow the blink pattern: `CFR_ATTR_BLINK` is parsed and stored in
 coffer, portty maps it to `TerminalCellAttr.blink`, but neither renderer reads
 it.
 
-| Capability                   | Sequence    | coffer status                                               | portty renderer                                               |
-| ---------------------------- | ----------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
-| `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Noop (not read by either backend)                             |
-| `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)             |
-| `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded         |
-| DECSCNM (?5)                | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Not rendered (screen-level reverse video mode) |
-| `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                          |
-| `smglr`/`mgc` (margins, ?69) | `\E[?69h`   | `CFR_MODE_LEFT_RIGHT_MARGINS` tracked, logged once          | Noop                                                          |
+### Status: Blink and DECSCNM Concluded
+
+Blinking text (SGR 5) and screen-level reverse video (DECSCNM, `?5`) are
+deliberately not rendered. Both are considered accessibility hazards —
+blinking text causes visual distraction and can trigger seizures, while
+screen-level reverse video (distinct from per-cell SGR 7 reverse) is
+primarily used for visual bell effects which are better handled by modern
+UI patterns. The attributes are parsed and stored for compatibility, but the
+visual effects are intentionally omitted. No further work is needed.
+
+| Capability                   | Sequence    | coffer status                                               | portty renderer                                       |
+| ---------------------------- | ----------- | ----------------------------------------------------------- | ----------------------------------------------------- |
+| `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Noop (not read by either backend)                     |
+| `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)     |
+| `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded |
+| DECSCNM (?5)                 | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Deliberately not rendered (accessibility) — concluded |
+| `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                  |
+| `smglr`/`mgc` (margins, ?69) | `\E[?69h`   | `CFR_MODE_LEFT_RIGHT_MARGINS` tracked, logged once          | Noop                                                  |
 
 ### Full implementation design for left/right margins (?69)
 
@@ -366,7 +376,7 @@ input), but are important to track for visual parity.
 | font (SGR 10-19)             | `font:4`                     | Not read                                  | Not read                                  |
 | dwl (DECDWL)                 | `dwl:1`                      | Not read                                  | Not read                                  |
 | dhl (DECDHL)                 | `dhl:2`                      | Not read                                  | Not read                                  |
-| DECSCNM (screen reverse, ?5) | N/A (mode, not cell attr)    | Not handled                               | Not handled                               |
+| DECSCNM (screen reverse, ?5) | N/A (mode, not cell attr)    | Deliberately not rendered (accessibility) | Deliberately not rendered (accessibility) |
 
 Note: cursor blink (DECSET ?12) is separate from text blink (SGR 5) and is
 fully implemented in both backends via timer-based cursor visibility toggling.
