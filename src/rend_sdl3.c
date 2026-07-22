@@ -697,6 +697,19 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     TerminalCell cell = *cell_in;
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
 
+    // Dim/faint (SGR 2): blend foreground toward background at 40% opacity,
+    // matching kitty's dim_opacity default. Works for both color-baked
+    // (emoji) and non-color-baked (text) glyph paths since the blended
+    // color flows into both the atlas color_key and SDL_SetTextureColorMod.
+    if (cell.attrs.dim) {
+        uint8_t bg_r = cell.bg.is_default ? 0 : cell.bg.r;
+        uint8_t bg_g = cell.bg.is_default ? 0 : cell.bg.g;
+        uint8_t bg_b = cell.bg.is_default ? 0 : cell.bg.b;
+        r = (Uint8)(r * 0.4f + bg_r * 0.6f);
+        g = (Uint8)(g * 0.4f + bg_g * 0.6f);
+        b = (Uint8)(b * 0.4f + bg_b * 0.6f);
+    }
+
     // Background perceptual luma (0..1) for the glyph-coverage shader's fg/bg
     // direction. Default-bg cells render over the black-cleared linear target,
     // so treat them as 0 — that keeps normal (light-on-dark) text neutral while

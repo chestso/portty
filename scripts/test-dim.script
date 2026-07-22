@@ -1,0 +1,15 @@
+# Test: dim/faint text attribute (SGR 2)
+# Run: build/src/portty -S scripts/test-dim.script
+# Expected: "NORMAL" at full intensity, "DIM" at reduced opacity (40%)
+
+wait 0.5
+emit \e[2J\e[H
+emit NORMAL\r\n
+emit \e[2mDIM\e[0m\r\n
+emit \e[1mBOLD \e[2mBOLD+DIM\e[0m\r\n
+wait 0.5
+dumprow 0
+dumprow 1
+dumprow 2
+screendump /tmp/portty-test-dim.png
+quit

@@ -2304,6 +2304,13 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
             cell_color(cell.fg, true, rev, fg);
             cell_color(cell.bg, false, rev, bg);
 
+            // Dim/faint (SGR 2): blend foreground toward background at 40% opacity
+            if (cell.attrs.dim) {
+                fg[0] = (uint8_t)(fg[0] * 0.4f + bg[0] * 0.6f);
+                fg[1] = (uint8_t)(fg[1] * 0.4f + bg[1] * 0.6f);
+                fg[2] = (uint8_t)(fg[2] * 0.4f + bg[2] * 0.6f);
+            }
+
             bool in_sel = terminal_cell_in_selection(term, unified_row, col);
 
             bool is_cursor = false;
@@ -3405,6 +3412,13 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
             bool rev = cell.attrs.reverse;
             cell_color(cell.fg, true, rev, fg);
             cell_color(cell.bg, false, rev, bg);
+
+            // Dim/faint (SGR 2): blend foreground toward background at 40% opacity
+            if (cell.attrs.dim) {
+                fg[0] = (uint8_t)(fg[0] * 0.4f + bg[0] * 0.6f);
+                fg[1] = (uint8_t)(fg[1] * 0.4f + bg[1] * 0.6f);
+                fg[2] = (uint8_t)(fg[2] * 0.4f + bg[2] * 0.6f);
+            }
 
             float x0 = (float)(col * cell_w);
             float y0 = (float)(row * cell_h);
