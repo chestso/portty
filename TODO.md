@@ -301,34 +301,13 @@ primarily used for visual bell effects which are better handled by modern
 UI patterns. The attributes are parsed and stored for compatibility, but the
 visual effects are intentionally omitted. No further work is needed.
 
-| Capability                   | Sequence    | coffer status                                               | portty renderer                                       |
-| ---------------------------- | ----------- | ----------------------------------------------------------- | ----------------------------------------------------- |
-| `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Implemented (foreground blended toward bg at 40%)     |
-| `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)     |
-| `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded |
-| DECSCNM (?5)                 | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Deliberately not rendered (accessibility) — concluded |
-| `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                  |
-| `smglr`/`mgc` (margins, ?69) | `\E[?69h`   | `CFR_MODE_LEFT_RIGHT_MARGINS` tracked, logged once          | Noop                                                  |
-
-### Full implementation design for left/right margins (?69)
-
-DECSET ?69 enables left/right margin support via DECSLRM (`CSI Pl;Pr s`).
-Full implementation requires:
-
-- **New fields in CfrTerm:** `int margin_left`, `margin_right` (default 0 and
-  `cols - 1`).
-- **DECSLRM dispatch** (`CSI Pl;Pr s` with `?69`): Parse and validate left/right
-  margins. Only act when `CFR_MODE_LEFT_RIGHT_MARGINS` is on.
-- **Print path:** Autowrap checks against `margin_right` instead of `cols - 1`.
-- **Cursor movement:** Clamp cursor column to `[margin_left, margin_right]`.
-- **Erase operations:** `EL` (erase in line) and `ED` (erase in display)
-  respect left/right margins when origin mode + margins are on.
-- **Scroll operations:** `IL`/`DL`/`SU`/`SD` respect all four margins.
-- ** DECSTBM interaction:** Top/bottom margins (`scroll_top`/`scroll_bottom`)
-  already work; left/right would need similar clamping in the same code paths.
-- ** DECSET ?69l (reset):** Restore margins to full width.
-- **Origin mode (DECOM):** When both DECOM and ?69 are on, cursor coordinates
-  are relative to the top-left of the margin region.
+| Capability                | Sequence    | coffer status                                               | portty renderer                                       |
+| ------------------------- | ----------- | ----------------------------------------------------------- | ----------------------------------------------------- |
+| `dim` (SGR 2)             | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Implemented (foreground blended toward bg at 40%)     |
+| `invis` (SGR 8)           | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)     |
+| `blink` (SGR 5)           | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded |
+| DECSCNM (?5)              | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Deliberately not rendered (accessibility) — concluded |
+| `smm`/`rmm` (meta, ?1034) | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                  |
 
 ### Noop + log (no state to track)
 
