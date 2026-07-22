@@ -46,6 +46,7 @@ typedef struct PorttyApp
     float font_size;         // default 12.0f, not in PorttyConf
     const char *font_name;   // -f FONT or config file font
     const char *script_path; // -S FILE, NULL if none
+    float dpi_scale;         // --dpi-scale multiplier (default 1.0f)
 } PorttyApp;
 
 // Terminal output callbacks (registered with coffer).

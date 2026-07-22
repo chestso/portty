@@ -73,6 +73,17 @@ static int test_fail_count = 0;
         }                                                                      \
     } while (0)
 
+#define ASSERT_FLOAT_NEAR(a, b, eps)                                              \
+    do {                                                                          \
+        float _a = (a), _b = (b), _eps = (eps);                                   \
+        if (_a < _b - _eps || _a > _b + _eps) {                                   \
+            fprintf(stderr, "  FAIL: %s:%d: %s == %s (%.6f != %.6f)\n", __FILE__, \
+                    __LINE__, #a, #b, (double)_a, (double)_b);                    \
+            test_fail_count++;                                                    \
+            return;                                                               \
+        }                                                                         \
+    } while (0)
+
 #define RUN_TEST(fn)                      \
     do {                                  \
         int _before = test_fail_count;    \

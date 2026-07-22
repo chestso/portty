@@ -4005,6 +4005,8 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     app->font_source = font_source;
 
     float display_scale = self->get_display_scale(self);
+    if (app->dpi_scale != 1.0f && display_scale > 0.0f)
+        display_scale *= app->dpi_scale;
     if (display_scale > 0.0f)
         self->set_content_scale(self, display_scale);
 

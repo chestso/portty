@@ -5,7 +5,7 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco
+check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale
 
 if BACKEND_SDL3
 check_PROGRAMS += test_atlas
@@ -95,6 +95,9 @@ test_selection_extend_CFLAGS = $(TEST_CFLAGS)
 # strikethrough run coalescing algorithms without GPU dependencies.
 test_sokol_deco_SOURCES = test_sokol_deco.c $(TEST_COMMON)
 test_sokol_deco_CFLAGS = $(TEST_CFLAGS)
+
+test_dpi_scale_SOURCES = test_dpi_scale.c $(TEST_COMMON)
+test_dpi_scale_CFLAGS = $(TEST_CFLAGS)
 
 # MSYS2/Unix → Windows path conversion. Pure C, no SDL/coffer dependency.
 test_path_compat_SOURCES = test_path_compat.c $(TEST_COMMON) ../src/path_compat.c

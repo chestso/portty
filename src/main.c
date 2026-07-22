@@ -127,6 +127,7 @@ static void print_usage(const char *progname)
     printf("  -s LINES              Set scrollback buffer size in lines\n");
     printf("  -d TEXT               Demo mode: feed TEXT into the terminal\n");
     printf("  -S, --script FILE     Run debug script FILE (see docs/debug-infrastructure-design.md)\n");
+    printf("  --dpi-scale SCALE     Multiply detected DPI scale (default: 1.0)\n");
 }
 
 static void print_version(void)
@@ -150,6 +151,7 @@ typedef struct
     int init_rows;
     int init_scrollback;
     const char *script_path;
+    float dpi_scale;
 } PorttyArgs;
 
 static void portty_args_init(PorttyArgs *args)
@@ -160,6 +162,20 @@ static void portty_args_init(PorttyArgs *args)
     args->init_cols = DEFAULT_COLS;
     args->init_rows = DEFAULT_ROWS;
     args->init_scrollback = -1;
+    args->dpi_scale = 1.0f;
+}
+
+/* Helper for --dpi-scale parsing (shared with tests) */
+int portty_parse_dpi_scale(const char *arg, float *out)
+{
+    if (!arg || !out)
+        return -1;
+    char *end = NULL;
+    float scale = strtof(arg, &end);
+    if (end == arg || *end != '\0' || scale <= 0.0f)
+        return -1;
+    *out = scale;
+    return 0;
 }
 
 static int parse_args(PorttyArgs *args, int argc, char *argv[])
@@ -172,10 +188,11 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
         { "demo", required_argument, NULL, 'd' },
         { "scrollback", required_argument, NULL, 's' },
         { "script", required_argument, NULL, 'S' },
+        { "dpi-scale", required_argument, NULL, 'D' },
         { NULL, 0, NULL, 0 }
     };
 
-    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:", long_options, NULL)) != -1) {
+    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:", long_options, NULL)) != -1) {
         switch (args->opt) {
         case 'h':
             print_usage(argv[0]);
@@ -223,6 +240,17 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
                 fprintf(stderr, "ERROR: Invalid geometry: %s\n", optarg);
                 return 1;
             }
+            break;
+        }
+        case 'D':
+        {
+            char *end = NULL;
+            float scale = strtof(optarg, &end);
+            if (end == optarg || *end != '\0' || scale <= 0.0f) {
+                fprintf(stderr, "ERROR: Invalid DPI scale: %s (must be > 0)\n", optarg);
+                return 1;
+            }
+            args->dpi_scale = scale;
             break;
         }
         case 's':
@@ -343,6 +371,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         .font_size = args->font_size,
         .font_name = args->font_name,
         .script_path = args->script_path,
+        .dpi_scale = args->dpi_scale,
     };
     backend.data = &app;
 
@@ -375,6 +404,8 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     app.font_source = args->font_source;
 
     float display_scale = backend.get_display_scale(&backend);
+    if (args->dpi_scale != 1.0f && display_scale > 0.0f)
+        display_scale *= args->dpi_scale;
     if (display_scale > 0.0f)
         backend.set_content_scale(&backend, display_scale);
 
@@ -499,6 +530,7 @@ static sapp_desc portty_run_sokol(PorttyArgs *args, PorttyConf *conf)
     app->font_size = args->font_size;
     app->font_name = args->font_name;
     app->script_path = args->script_path;
+    app->dpi_scale = args->dpi_scale;
     backend->data = app;
 
     return backend_sokol_desc(app, backend, "portty", 800, 600);
