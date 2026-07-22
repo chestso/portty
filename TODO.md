@@ -294,7 +294,7 @@ it.
 | Capability                   | Sequence    | coffer status                                               | portty renderer                                               |
 | ---------------------------- | ----------- | ----------------------------------------------------------- | ------------------------------------------------------------- |
 | `dim` (SGR 2)                | `\E[2m`     | `CFR_ATTR_DIM` bit set, cleared by SGR 22                   | Noop (not read by either backend)                             |
-| `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Noop (not read by either backend)                             |
+| `invis` (SGR 8)              | `\E[8m`     | `CFR_ATTR_INVIS` bit set, cleared by SGR 28                 | Implemented (foreground hidden, background shown)             |
 | `blink` (SGR 5)              | `\E[5m`     | `CFR_ATTR_BLINK` bit set, cleared by SGR 25                 | Deliberately not rendered (accessibility) — concluded         |
 | `flash` (DECSCNM, ?5)        | `\E[?5h`    | `CFR_MODE_REVERSE_VIDEO` tracked, `set_mode` callback fired | Noop (screen-level reverse not handled; per-cell SGR 7 works) |
 | `smm`/`rmm` (meta, ?1034)    | `\E[?1034h` | `CFR_MODE_META` tracked, logged once                        | Noop                                                          |
@@ -362,7 +362,7 @@ input), but are important to track for visual parity.
 | ---------------------------- | ---------------------------- | ----------------------------------------- | ----------------------------------------- |
 | blink (SGR 5)                | `blink:1`                    | Deliberately not rendered (accessibility) | Deliberately not rendered (accessibility) |
 | dim (SGR 2)                  | `dim:1`                      | Not read                                  | Not read                                  |
-| invis (SGR 8)                | `invis:1`                    | Not read                                  | Not read                                  |
+| invis (SGR 8)                | `invis:1`                    | Implemented                               | Implemented                               |
 | font (SGR 10-19)             | `font:4`                     | Not read                                  | Not read                                  |
 | dwl (DECDWL)                 | `dwl:1`                      | Not read                                  | Not read                                  |
 | dhl (DECDHL)                 | `dhl:2`                      | Not read                                  | Not read                                  |

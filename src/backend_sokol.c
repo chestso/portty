@@ -2348,7 +2348,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                 *glyph_vert_count += 6;
             }
 
-            if (cell.cp != 0 && cell.cp != 0x20 && !is_cursor) {
+            if (cell.cp != 0 && cell.cp != 0x20 && !is_cursor && !cell.attrs.invis) {
                 if (rend_boxdraw_is_supported(cell.cp)) {
                     uint32_t bd_cp = cell.cp;
                     uint32_t color_key = 0;
@@ -3412,7 +3412,7 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
             float y1 = y0 + (float)cell_h;
             float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
 
-            if (cell.cp != 0 && cell.cp != 0x20 && d->font) {
+            if (cell.cp != 0 && cell.cp != 0x20 && d->font && !cell.attrs.invis) {
                 FontStyle style = FONT_STYLE_NORMAL;
                 if (cell.attrs.bold && cell.attrs.italic)
                     style = FONT_STYLE_BOLD_ITALIC;

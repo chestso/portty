@@ -1138,8 +1138,11 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
         // Pass 2: draw glyphs, cursors, and selection overlays
         terminal_row_iter_init(&it, term, unified_row, display_cols);
         while (terminal_row_iter_next(&it)) {
-            render_cell(data, term, row, it.vt_col, it.vis_col, it.pres_w,
-                        &it.cell, cursor_pos, show_cursor, populate_only);
+            // Skip foreground rendering for invisible text (SGR 8)
+            if (!it.cell.attrs.invis) {
+                render_cell(data, term, row, it.vt_col, it.vis_col, it.pres_w,
+                            &it.cell, cursor_pos, show_cursor, populate_only);
+            }
         }
         // Pass 3: draw underlines as continuous spans across consecutive cells
         if (!populate_only) {
