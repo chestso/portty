@@ -603,13 +603,17 @@ static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
 
         printf("  col=%3d cp=%04X w=%d rev=%d invis=%d dim=%d "
                "fg(%s %02X%02X%02X) "
-               "bg(%s %02X%02X%02X)\n",
+               "bg(%s %02X%02X%02X) "
+               "ul=%d ul_color(%s %02X%02X%02X)\n",
                col, cell.cp, cell.width, cell.attrs.reverse,
                cell.attrs.invis, cell.attrs.dim,
                cell.fg.is_default ? "def" : "set",
                cell.fg.r, cell.fg.g, cell.fg.b,
                cell.bg.is_default ? "def" : "set",
-               cell.bg.r, cell.bg.g, cell.bg.b);
+               cell.bg.r, cell.bg.g, cell.bg.b,
+               cell.attrs.underline,
+               cell.ul_color.is_default ? "def" : "set",
+               cell.ul_color.r, cell.ul_color.g, cell.ul_color.b);
     }
     printf("=== end dumpcells ===\n");
 }
