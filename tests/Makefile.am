@@ -5,6 +5,8 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
+EXTRA_DIST = test_helpers.h font_stubs.c
+
 check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale
 
 if BACKEND_SDL3

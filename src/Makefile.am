@@ -114,7 +114,14 @@ endif
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
 EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h \
-    shaders/glyph_coverage_sokol.h portty.rc portty_icon_png.h
+    shaders/glyph_coverage_sokol.h portty.rc portty_icon_png.h \
+    backend_sdl3.h backend_sokol.h base64.h common.h diag.h display_info.h \
+    font_ft.h font_ft_internal.h font.h font_resolve_ct.h font_resolve_fc.h \
+    font_resolve.h font_resolve_w32.h heap_harden.h os_compat.h pager.h \
+    path_compat.h png_reader.h png_writer.h portty_app.h portty_backend.h \
+    portty_bug.h portty_conf.h portty_debug_script.h portty_pty.h \
+    rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
+    rend_sokol_atlas.h term_cfr.h term.h timer.h unicode.h
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:

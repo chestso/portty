@@ -10,7 +10,10 @@ desktop_DATA = applications/portty.desktop
 emacsdir = $(datadir)/emacs/site-lisp/term
 emacs_DATA = portty.el
 
-EXTRA_DIST = portty.ti portty.el
+EXTRA_DIST = portty.ti portty.el \
+    icons/hicolor/scalable/apps/portty.svg \
+    icons/hicolor/symbolic/apps/portty-symbolic.svg \
+    applications/portty.desktop
 
 if !HOST_WINDOWS
 install-data-local:
