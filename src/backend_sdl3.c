@@ -750,8 +750,27 @@ static void sdl3_set_window_title(PorttyBackend *self, const char *title)
 static void sdl3_set_window_size(PorttyBackend *self, int width, int height)
 {
     Sdl3BackendData *d = sdl3_data(self);
-    if (d && d->window)
-        SDL_SetWindowSize(d->window, width, height);
+    if (d && d->window) {
+        // With SDL_WINDOW_HIGH_PIXEL_DENSITY, SDL_SetWindowSize expects
+        // logical/points coordinates, not physical pixels. Convert from
+        // physical pixels to logical by dividing by content scale.
+        float scale = d->rend.content_scale;
+        if (scale <= 0.0f)
+            scale = 1.0f;
+        int logical_w = (int)((float)width / scale);
+        int logical_h = (int)((float)height / scale);
+        SDL_SetWindowSize(d->window, logical_w, logical_h);
+
+        // After SDL processes the resize, get the actual pixel dimensions
+        // and update the renderer. This ensures the renderer uses physical
+        // pixels even though the window manager sees logical coordinates.
+        SDL_SyncWindow(d->window); // Ensure window state is updated
+        int pix_w, pix_h;
+        SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
+        if (pix_w > 0 && pix_h > 0) {
+            rend_sdl3_resize(&d->rend, pix_w, pix_h);
+        }
+    }
 }
 
 static bool sdl3_get_drawable_size(PorttyBackend *self, int *w, int *h)
@@ -1381,7 +1400,13 @@ static void sdl3_run(PorttyBackend *self)
                 break;
 
             case SDL_EVENT_WINDOW_RESIZED:
-                portty_app_handle_resize(d->app, event.window.data1, event.window.data2);
+                // With SDL_WINDOW_HIGH_PIXEL_DENSITY, event dimensions are in
+                // logical points. Convert to physical pixels for the renderer.
+                {
+                    int pix_w, pix_h;
+                    SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
+                    portty_app_handle_resize(d->app, pix_w, pix_h);
+                }
                 terminal_mark_dirty(term);
                 break;
 

@@ -447,7 +447,8 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         }
     }
     backend.set_window_size(&backend, win_w, win_h);
-    backend.resize(&backend, win_w, win_h);
+    // Note: SDL3 backend's set_window_size now handles resize internally
+    // by querying SDL_GetWindowSizeInPixels for proper high-DPI support
     if (backend.show_window)
         backend.show_window(&backend);
 
