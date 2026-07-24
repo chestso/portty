@@ -1456,8 +1456,12 @@ static void sdl3_run(PorttyBackend *self)
                         int button = (whole_ticks > 0) ? 4 : 5;
                         int clicks = abs(whole_ticks);
                         int tmod = sdl_mod_to_term(SDL_GetModState());
-                        int mx = (int)event.wheel.mouse_x;
-                        int my = (int)event.wheel.mouse_y;
+                        // Scale from logical points to physical pixels
+                        float scale = d->rend.content_scale;
+                        if (scale <= 0.0f)
+                            scale = 1.0f;
+                        int mx = (int)(event.wheel.mouse_x * scale);
+                        int my = (int)(event.wheel.mouse_y * scale);
                         for (int i = 0; i < clicks && !consumed; i++) {
                             consumed = portty_app_handle_mouse(
                                 d->app, mx, my, button, true, 0, tmod);
@@ -1478,6 +1482,13 @@ static void sdl3_run(PorttyBackend *self)
                 int clicks = pressed ? event.button.clicks : 0;
                 int tmod = sdl_mod_to_term(SDL_GetModState());
 
+                // Scale from logical points to physical pixels
+                float scale = d->rend.content_scale;
+                if (scale <= 0.0f)
+                    scale = 1.0f;
+                int px = (int)(event.button.x * scale);
+                int py = (int)(event.button.y * scale);
+
                 // Flush any buffered button-up from a previous event
                 if (d->left_button_up_buffered) {
                     d->left_button_up_buffered = false;
@@ -1495,22 +1506,20 @@ static void sdl3_run(PorttyBackend *self)
                         d->left_button_down = true;
                         SDL_CaptureMouse(true);
                         if (portty_app_handle_mouse(d->app,
-                                                    (int)event.button.x,
-                                                    (int)event.button.y, button,
+                                                    px, py, button,
                                                     pressed, clicks, tmod)) {
                             terminal_mark_dirty(term);
                         }
                     } else {
                         d->left_button_up_buffered = true;
-                        d->left_button_up_x = (int)event.button.x;
-                        d->left_button_up_y = (int)event.button.y;
+                        d->left_button_up_x = px;
+                        d->left_button_up_y = py;
                         d->left_button_up_tick = SDL_GetTicks();
                         d->left_button_down = false;
                     }
                 } else {
                     if (portty_app_handle_mouse(d->app,
-                                                (int)event.button.x,
-                                                (int)event.button.y, button,
+                                                px, py, button,
                                                 pressed, clicks, tmod)) {
                         terminal_mark_dirty(term);
                     }
@@ -1537,8 +1546,14 @@ static void sdl3_run(PorttyBackend *self)
                 int tmod = sdl_mod_to_term(SDL_GetModState());
                 if (d->left_button_down)
                     any_button_pressed = true;
-                if (portty_app_handle_mouse(d->app, (int)event.motion.x,
-                                            (int)event.motion.y, 0, any_button_pressed,
+                // Scale from logical points to physical pixels
+                float scale = d->rend.content_scale;
+                if (scale <= 0.0f)
+                    scale = 1.0f;
+                int mx = (int)(event.motion.x * scale);
+                int my = (int)(event.motion.y * scale);
+                if (portty_app_handle_mouse(d->app, mx, my,
+                                            0, any_button_pressed,
                                             0, tmod)) {
                     terminal_mark_dirty(term);
                 }
