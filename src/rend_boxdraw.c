@@ -2,6 +2,7 @@
 #include "font.h"
 
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -594,69 +595,6 @@ static void draw_block_element(BoxDrawCtx *ctx, uint32_t cp,
     }
 }
 
-// Draw a single-pixel anti-aliased line using Xiaolin Wu's algorithm.
-// Caller must set ctx->blend = true before calling.
-static void draw_aa_line(BoxDrawCtx *ctx,
-                         float x0, float y0, float x1, float y1,
-                         uint8_t r, uint8_t g, uint8_t b)
-{
-    bool steep = fabsf(y1 - y0) > fabsf(x1 - x0);
-    if (steep) {
-        float t;
-        t = x0;
-        x0 = y0;
-        y0 = t;
-        t = x1;
-        x1 = y1;
-        y1 = t;
-    }
-    if (x0 > x1) {
-        float t;
-        t = x0;
-        x0 = x1;
-        x1 = t;
-        t = y0;
-        y0 = y1;
-        y1 = t;
-    }
-
-    float dx = x1 - x0;
-    float dy = y1 - y0;
-    float gradient = (dx < 0.001f) ? 1.0f : dy / dx;
-
-    int xpxl1 = (int)roundf(x0);
-    int xpxl2 = (int)roundf(x1);
-    float intery = y0 + gradient * ((float)xpxl1 - x0);
-
-    for (int x = xpxl1; x <= xpxl2; x++) {
-        int iy = (int)floorf(intery);
-        float frac = intery - (float)iy;
-        uint8_t a1 = (uint8_t)(255.0f * (1.0f - frac) + 0.5f);
-        uint8_t a2 = (uint8_t)(255.0f * frac + 0.5f);
-
-        if (steep) {
-            if (a1 > 0) {
-                ctx_set_color(ctx, r, g, b, a1);
-                ctx_draw_point(ctx, (float)iy, (float)x);
-            }
-            if (a2 > 0) {
-                ctx_set_color(ctx, r, g, b, a2);
-                ctx_draw_point(ctx, (float)(iy + 1), (float)x);
-            }
-        } else {
-            if (a1 > 0) {
-                ctx_set_color(ctx, r, g, b, a1);
-                ctx_draw_point(ctx, (float)x, (float)iy);
-            }
-            if (a2 > 0) {
-                ctx_set_color(ctx, r, g, b, a2);
-                ctx_draw_point(ctx, (float)x, (float)(iy + 1));
-            }
-        }
-        intery += gradient;
-    }
-}
-
 // Clamp x to [0, 1]
 static float clampf01(float x)
 {
@@ -785,48 +723,83 @@ static void draw_rounded_corner(BoxDrawCtx *ctx, uint32_t cp,
 }
 
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
-// Uses anti-aliased line rendering with thickness matching the light line width.
+// Uses SDF-based rendering for uniform thickness matching normal box lines.
 //
-// The bitmap has 10% proportional margins on all sides, giving the Xiaolin Wu
-// AA endpoints room beyond the cell edges. This eliminates the faded half-pixel
-// seam that appeared at every row boundary when cells were stacked.
-//
-// Lines extend from corner to corner of the full padded bitmap, ensuring
-// AA coverage reaches into the margin area for seamless tiling at cell boundaries.
+// The bitmap has 10% proportional margins on all sides. Lines extend from
+// bitmap corner to corner, creating overhang that fills gaps when cells
+// are stacked. The atlas stores the oversized bitmap and blits it with
+// negative offsets so overhang overlaps adjacent cells.
 static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int cell_w, int cell_h,
                                 int pad_x, int pad_y,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
-    int thickness = (int)roundf((float)cell_w * 0.20f);
-    if (thickness < 1)
-        thickness = 1;
-
-    ctx_set_blend(ctx, true);
+    int light = cell_w / 5;
+    if (light < 1)
+        light = 1;
 
     int bmp_w = cell_w + pad_x * 2;
     int bmp_h = cell_h + pad_y * 2;
 
+    float stroke = (float)light;
+    float half_stroke = stroke * 0.5f;
+    float aa = 0.5f;
+
+    ctx_set_blend(ctx, true);
+
+    float len;
+    float nx, ny, c;
+
     // Draw bottom-left to top-right diagonal (╱)
+    // From (0, bmp_h-1) to (bmp_w-1, 0)
     if (cp == 0x2571 || cp == 0x2573) {
-        float x0 = 0.0f;
-        float y0 = (float)(bmp_h - 1);
-        float x1 = (float)(bmp_w - 1);
-        float y1 = 0.0f;
-        for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
-            draw_aa_line(ctx, x0 + (float)i, y0, x1 + (float)i, y1,
-                         r, g, b);
+        float dx = (float)(bmp_w - 1);
+        float dy = (float)(-(bmp_h - 1));
+        len = sqrtf(dx * dx + dy * dy);
+        if (len > 0.001f) {
+            nx = -dy / len;
+            ny = dx / len;
+            c = -(nx * 0.0f + ny * (float)(bmp_h - 1));
+
+            for (int py = 0; py < bmp_h; py++) {
+                for (int px = 0; px < bmp_w; px++) {
+                    float dist = nx * (float)px + ny * (float)py + c;
+                    float outer = half_stroke - fabsf(dist);
+                    float alpha = smoothstepf(-aa, aa, outer);
+                    if (alpha > 0.0f) {
+                        uint8_t a = (uint8_t)(alpha * 255.0f + 0.5f);
+                        ctx_set_color(ctx, r, g, b, a);
+                        ctx_draw_point(ctx, (float)px, (float)py);
+                    }
+                }
+            }
+        }
     }
 
     // Draw top-left to bottom-right diagonal (╲)
+    // From (0, 0) to (bmp_w-1, bmp_h-1)
     if (cp == 0x2572 || cp == 0x2573) {
-        float x0 = 0.0f;
-        float y0 = 0.0f;
-        float x1 = (float)(bmp_w - 1);
-        float y1 = (float)(bmp_h - 1);
-        for (int i = -(thickness / 2); i < thickness - thickness / 2; i++)
-            draw_aa_line(ctx, x0 + (float)i, y0, x1 + (float)i, y1,
-                         r, g, b);
+        float dx = (float)(bmp_w - 1);
+        float dy = (float)(bmp_h - 1);
+        len = sqrtf(dx * dx + dy * dy);
+        if (len > 0.001f) {
+            nx = -dy / len;
+            ny = dx / len;
+            c = -(nx * 0.0f + ny * 0.0f);
+
+            for (int py = 0; py < bmp_h; py++) {
+                for (int px = 0; px < bmp_w; px++) {
+                    float dist = nx * (float)px + ny * (float)py + c;
+                    float outer = half_stroke - fabsf(dist);
+                    float alpha = smoothstepf(-aa, aa, outer);
+                    if (alpha > 0.0f) {
+                        uint8_t a = (uint8_t)(alpha * 255.0f + 0.5f);
+                        ctx_set_color(ctx, r, g, b, a);
+                        ctx_draw_point(ctx, (float)px, (float)py);
+                    }
+                }
+            }
+        }
     }
 
     ctx_set_blend(ctx, false);
@@ -867,10 +840,16 @@ GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                  uint8_t r, uint8_t g, uint8_t b)
 {
     bool is_diagonal = (cp >= 0x2571 && cp <= 0x2573);
-    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.10f) : 0; // 10% horizontal margin
-    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.10f) : 0; // 10% vertical margin
+    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.15f) : 0;
+    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.15f) : 0;
     int bmp_w = cell_w + margin_x * 2;
     int bmp_h = cell_h + margin_y * 2;
+
+    if (is_diagonal) {
+        // Debug: log diagonal bitmap dimensions
+        // fprintf(stderr, "BOXDRAW: cp=U+%04X cell=%dx%d margin=%d,%d bmp=%dx%d\n",
+        //         cp, cell_w, cell_h, margin_x, margin_y, bmp_w, bmp_h);
+    }
 
     GlyphBitmap *bmp = malloc(sizeof(GlyphBitmap));
     if (!bmp)

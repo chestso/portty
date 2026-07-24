@@ -309,8 +309,8 @@ static void test_rounded_corner_large_cell(void)
     free_bmp(bmp);
 }
 
-/* Test: diagonal bitmaps (╱╲╳) have 10% proportional margins.
- * Bitmap size should be cell_w * 1.2 x cell_h * 1.2 (cell + 2 * 10% margin). */
+/* Test: diagonal bitmaps (╱╲╳) have 15% proportional margins.
+ * Bitmap size should be cell_w * 1.3 x cell_h * 1.3 (cell + 2 * 15% margin). */
 static void test_diagonal_proportional_margins(void)
 {
     int cell_w = 32, cell_h = 96;
@@ -319,8 +319,8 @@ static void test_diagonal_proportional_margins(void)
     GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
 
-    int expected_margin_x = (int)roundf((float)cell_w * 0.10f);
-    int expected_margin_y = (int)roundf((float)cell_h * 0.10f);
+    int expected_margin_x = (int)roundf((float)cell_w * 0.15f);
+    int expected_margin_y = (int)roundf((float)cell_h * 0.15f);
     int expected_w = cell_w + 2 * expected_margin_x;
     int expected_h = cell_h + 2 * expected_margin_y;
 
@@ -349,8 +349,8 @@ static void test_diagonal_proportional_margins(void)
 static void test_diagonal_lines_reach_bitmap_corners(void)
 {
     int cell_w = 32, cell_h = 96;
-    int margin_x = (int)roundf((float)cell_w * 0.10f);
-    int margin_y = (int)roundf((float)cell_h * 0.10f);
+    int margin_x = (int)roundf((float)cell_w * 0.15f);
+    int margin_y = (int)roundf((float)cell_h * 0.15f);
     int bmp_w = cell_w + 2 * margin_x;
     int bmp_h = cell_h + 2 * margin_y;
 
@@ -406,15 +406,15 @@ static void test_diagonal_lines_reach_bitmap_corners(void)
 }
 
 /* Test: diagonal bitmaps scale margins proportionally at different cell sizes.
- * 10% margin should work at various DPI/font sizes. */
+ * 15% margin should work at various DPI/font sizes. */
 static void test_diagonal_margins_scale_with_cell_size(void)
 {
     /* Small cell (low DPI) */
     int cell_w = 10, cell_h = 22;
     GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
-    int margin_x = (int)roundf((float)cell_w * 0.10f);
-    int margin_y = (int)roundf((float)cell_h * 0.10f);
+    int margin_x = (int)roundf((float)cell_w * 0.15f);
+    int margin_y = (int)roundf((float)cell_h * 0.15f);
     ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
     ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
     free_bmp(bmp);
@@ -424,8 +424,8 @@ static void test_diagonal_margins_scale_with_cell_size(void)
     cell_h = 44;
     bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
-    margin_x = (int)roundf((float)cell_w * 0.10f);
-    margin_y = (int)roundf((float)cell_h * 0.10f);
+    margin_x = (int)roundf((float)cell_w * 0.15f);
+    margin_y = (int)roundf((float)cell_h * 0.15f);
     ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
     ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
     free_bmp(bmp);
@@ -435,8 +435,8 @@ static void test_diagonal_margins_scale_with_cell_size(void)
     cell_h = 88;
     bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
-    margin_x = (int)roundf((float)cell_w * 0.10f);
-    margin_y = (int)roundf((float)cell_h * 0.10f);
+    margin_x = (int)roundf((float)cell_w * 0.15f);
+    margin_y = (int)roundf((float)cell_h * 0.15f);
     ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
     ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
     free_bmp(bmp);

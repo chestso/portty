@@ -621,11 +621,27 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
         // display size: cache_glyph runs the box-filter when the rasterized
         // glyph overflows the cell, and small glyphs stay on their native
         // pixel grid. Blit is always 1:1 — no GPU scaling.
-        dst = (SDL_FRect){
-            floorf((float)cell_x + ((float)avail_w - (float)entry->region.w) * 0.5f),
-            floorf((float)cell_y + ((float)avail_h - (float)entry->region.h) * 0.5f),
-            (float)entry->region.w, (float)entry->region.h
-        };
+        //
+        // For padded bitmaps (diagonals with region > cell), use integer
+        // division for padding calculation to match Sokol's exact placement
+        // and ensure seamless tiling. Normal centered glyphs use floorf.
+        int pad_x = (entry->region.w - avail_w) / 2;
+        int pad_y = (entry->region.h - avail_h) / 2;
+        if (pad_x > 0 || pad_y > 0) {
+            // Padded bitmap - extend beyond cell bounds for seamless overhang
+            dst = (SDL_FRect){
+                (float)(cell_x - pad_x),
+                (float)(cell_y - pad_y),
+                (float)entry->region.w, (float)entry->region.h
+            };
+        } else {
+            // Normal centered glyph - center within cell
+            dst = (SDL_FRect){
+                floorf((float)cell_x + ((float)avail_w - (float)entry->region.w) * 0.5f),
+                floorf((float)cell_y + ((float)avail_h - (float)entry->region.h) * 0.5f),
+                (float)entry->region.w, (float)entry->region.h
+            };
+        }
     } else {
         // Trust FreeType's bitmap bounds: anchor at cell_x + bitmap_left and
         // let the glyph overhang the cell. Row draw is two-pass — all cell
@@ -783,19 +799,19 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                    r, g, b);
             if (bmp) {
                 entry = rend_sdl3_atlas_insert(&data->atlas, BOXDRAW_FONT_DATA,
-                                               (int)bd_cp, color_key, bmp, true);
+                                               (int)bd_cp, color_key, bmp, false);
                 free(bmp->pixels);
                 free(bmp);
             }
         }
 
         if (!populate_only && entry) {
-            // Box-drawing bitmaps are cell-sized and centered.
-            // Use blit_glyph for consistent placement + shader path.
+            // Box-drawing bitmaps carry coverage in alpha (like text glyphs),
+            // not baked color. Use the glyph-coverage shader for proper blending.
             blit_glyph(data->renderer, &data->atlas, entry,
                        cell_x, cell_y, 0, 0,
                        avail_w, avail_h, data->font_ascent,
-                       true, r, g, b, NULL, bg_luma);
+                       false, r, g, b, data->glyph_shader, bg_luma);
         }
         goto render_cursor;
     }
