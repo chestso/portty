@@ -565,7 +565,7 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     vlog("Creating window (placeholder size, will resize after font load)\n");
     SDL_ClearError();
 
-    Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN;
+    Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
     d->window = SDL_CreateWindow(title, 800, 600, window_flags);
     if (!d->window) {
         const char *error = SDL_GetError();
