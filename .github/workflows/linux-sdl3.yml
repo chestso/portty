@@ -10,7 +10,7 @@ on:
 jobs:
   build-and-test:
     name: Build, Test & Dist
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
 
     steps:
       - name: Checkout portty
@@ -45,18 +45,8 @@ jobs:
             libxcursor-dev \
             libgl-dev \
             libncurses-dev \
-            cmake \
-            curl \
-            git
-
-      - name: Build & install SDL3
-        run: |
-          git clone --depth 1 --branch preview-3.2.0 https://github.com/libsdl-org/SDL.git /tmp/SDL3
-          cd /tmp/SDL3
-          mkdir build && cd build
-          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local -DSDL_TEST=OFF -DSDL_TESTS=OFF
-          make -j"$(nproc)"
-          sudo make install
+            libsdl3-dev \
+            curl
 
       - name: Build & install coffer
         working-directory: coffer
