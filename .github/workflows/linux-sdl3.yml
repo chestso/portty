@@ -1,0 +1,82 @@
+name: Linux (SDL3)
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_call:
+
+jobs:
+  build-and-test:
+    name: Build, Test & Dist
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout portty
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Checkout coffer (dependency)
+        uses: actions/checkout@v7
+        with:
+          repository: chestso/coffer
+          ref: v0.1.7
+          path: coffer
+          fetch-depth: 0
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            autoconf \
+            automake \
+            libtool \
+            make \
+            pkg-config \
+            libfreetype6-dev \
+            libharfbuzz-dev \
+            libpng-dev \
+            libfontconfig1-dev \
+            libx11-dev \
+            libxi-dev \
+            libxcursor-dev \
+            libgl-dev \
+            libncurses-dev \
+            curl
+
+      - name: Build & install coffer
+        working-directory: coffer
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          ../configure --prefix=/usr/local
+          make -j"$(nproc)"
+          make check || true
+          sudo make install
+
+      - name: Build portty
+        run: |
+          ./autogen.sh
+          mkdir build && cd build
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            ../configure --enable-release --with-backend=sdl3
+          else
+            ../configure --with-backend=sdl3
+          fi
+          make -j"$(nproc)"
+
+      - name: Run tests
+        run: make -C build check
+
+      - name: Create distribution tarball
+        run: make -C build dist
+
+      - name: Upload tarball artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: portty-source-tarball
+          path: build/portty-*.tar.gz
+          if-no-files-found: error

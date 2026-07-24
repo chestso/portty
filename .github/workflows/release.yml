@@ -8,9 +8,13 @@ permissions:
   contents: write
 
 jobs:
-  build-linux:
+  build-linux-sokol:
     name: Build & Test (Linux Sokol)
     uses: ./.github/workflows/linux-sokol.yml
+
+  build-linux-sdl3:
+    name: Build & Test (Linux SDL3)
+    uses: ./.github/workflows/linux-sdl3.yml
 
   build-macos:
     name: Build & Test (macOS)
@@ -22,7 +26,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-linux-sokol, build-linux-sdl3, build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download macOS arm64 SDL3 artifact
@@ -49,6 +53,12 @@ jobs:
           name: portty-windows-x86_64-sokol
           path: artifacts/windows-x86_64-sokol
 
+      - name: Download source tarball
+        uses: actions/download-artifact@v8
+        with:
+          name: portty-source-tarball
+          path: artifacts/tarball
+
       - name: Create GitHub release
         uses: softprops/action-gh-release@v3
         with:
@@ -57,5 +67,6 @@ jobs:
             artifacts/macos-arm64-sokol/portty-*-macos-*-sokol.zip
             artifacts/windows-x86_64-sdl3/portty-*-windows-*-sdl3.zip
             artifacts/windows-x86_64-sokol/portty-*-windows-*-sokol.zip
+            artifacts/tarball/portty-*.tar.gz
           generate_release_notes: false
           fail_on_unmatched_files: true
