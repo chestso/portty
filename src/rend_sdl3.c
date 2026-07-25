@@ -45,11 +45,11 @@ typedef struct
     void *font_data; // FtFontData*, kept alive for pointer stability
 } LoadedFallbackFont;
 
-// Cursor color: Charm signature purple with slight transparency (RGBA)
+// Cursor color: Charm signature purple, opaque (RGBA)
 #define CURSOR_COLOR_R 0x6B
 #define CURSOR_COLOR_G 0x50
 #define CURSOR_COLOR_B 0xFF
-#define CURSOR_COLOR_A 220
+#define CURSOR_COLOR_A 255
 
 // Selection highlight color: muted Dracula comment-style (RGBA)
 #define SELECTION_COLOR_R 0x44
@@ -698,17 +698,16 @@ static void render_cell_bg(RendererSdl3Data *data, int row, int vis_col,
     SDL_RenderFillRect(data->renderer, &bg_rect);
 }
 
-// Render a single cell.
+// Render a single cell (glyphs only; cursor is drawn separately).
 // Cell must be pre-fetched by the caller (typically via TerminalRowIter).
-// row:     display row (for draw position and cursor compare).
-// vt_col:  libvterm column (for cursor compare, selection check).
+// row:     display row (for draw position).
+// vt_col:  libvterm column (for selection check).
 // vis_col: visual column for draw position (may differ from vt_col on rows
 //          with VS16-widened emoji).
 // pres_w:  presentation width in cells (from iterator).
 static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                         int row, int vt_col, int vis_col, int pres_w,
-                        const TerminalCell *cell_in, TerminalPos cursor_pos,
-                        bool show_cursor, bool populate_only)
+                        const TerminalCell *cell_in, bool populate_only)
 {
     TerminalCell cell = *cell_in;
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
@@ -740,8 +739,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int columns_to_consume = pres_w > 0 ? pres_w : 1;
 
     if (cell.cp == 0) {
-        // Empty cell - jump to cursor drawing, then return
-        goto render_cursor;
+        // Empty cell - nothing to render
+        return;
     }
 
     // Collect the cell's codepoint sequence. Single-codepoint cells —
@@ -813,7 +812,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                        avail_w, avail_h, data->font_ascent,
                        false, r, g, b, data->glyph_shader, bg_luma);
         }
-        goto render_cursor;
+        return;
     }
 
     // Select font style
@@ -985,7 +984,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             free(shaped->y_positions);
             free(shaped->x_advances);
             free(shaped);
-            goto render_cursor;
+            return;
         }
     }
 
@@ -1054,20 +1053,6 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                        entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
                        avail_w, avail_h, data->font_ascent,
                        color_baked, r, g, b, data->glyph_shader, bg_luma);
-    }
-
-render_cursor:
-    if (!populate_only && show_cursor && row == cursor_pos.row && vt_col == cursor_pos.col) {
-        float cx = (float)(vis_col * data->cell_width);
-        float cy = (float)(row * data->cell_height);
-        float cw = (float)data->cell_width;
-        float ch = (float)data->cell_height;
-
-        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-        SDL_SetRenderDrawColor(data->renderer, CURSOR_COLOR_R, CURSOR_COLOR_G,
-                               CURSOR_COLOR_B, CURSOR_COLOR_A);
-        draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
-        SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
     }
 
     // Selection highlight
@@ -1164,13 +1149,29 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
             }
         }
-        // Pass 2: draw glyphs, cursors, and selection overlays
+        // Pass 1.5: draw cursor (under glyphs)
+        if (!populate_only && show_cursor && cursor_pos.row == row) {
+            terminal_row_iter_init(&it, term, unified_row, display_cols);
+            while (terminal_row_iter_next(&it)) {
+                if (it.vt_col == cursor_pos.col) {
+                    float cx = (float)(it.vis_col * data->cell_width);
+                    float cy = (float)(row * data->cell_height);
+                    float cw = (float)(it.pres_w * data->cell_width);
+                    float ch = (float)data->cell_height;
+                    SDL_SetRenderDrawColor(data->renderer, CURSOR_COLOR_R, CURSOR_COLOR_G,
+                                           CURSOR_COLOR_B, 255);
+                    draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
+                    break;
+                }
+            }
+        }
+        // Pass 2: draw glyphs and selection overlays
         terminal_row_iter_init(&it, term, unified_row, display_cols);
         while (terminal_row_iter_next(&it)) {
             // Skip foreground rendering for invisible text (SGR 8)
             if (!it.cell.attrs.invis) {
                 render_cell(data, term, row, it.vt_col, it.vis_col, it.pres_w,
-                            &it.cell, cursor_pos, show_cursor, populate_only);
+                            &it.cell, populate_only);
             }
         }
         // Pass 3: draw underlines as continuous spans across consecutive cells
