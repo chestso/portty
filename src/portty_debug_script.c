@@ -429,6 +429,18 @@ static bool parse_command(PorttyDebugScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "winsize") == 0) {
+        DebugCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = DBG_CMD_WINSIZE;
+        if (sscanf(args, "%d %d", &cmd->winsize_w, &cmd->winsize_h) != 2) {
+            script_set_error(s, line_num, "winsize: requires width height");
+            return false;
+        }
+        return true;
+    }
+
     if (strcmp(line, "quit") == 0) {
         DebugCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -835,6 +847,18 @@ void portty_debug_script_step(PorttyDebugScript *script,
                            cmd->resize_cols, cmd->resize_rows);
         } else {
             fprintf(stderr, "resize: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_WINSIZE:
+    {
+        if (ctx->winsize_fn) {
+            ctx->winsize_fn(ctx->winsize_user_data,
+                            cmd->winsize_w, cmd->winsize_h);
+        } else {
+            fprintf(stderr, "winsize: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

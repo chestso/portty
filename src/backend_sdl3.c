@@ -1218,6 +1218,23 @@ static void sdl3_debug_resize(void *user_data, int cols, int rows)
     fprintf(stderr, "resize: %d cols x %d rows\n", cols, rows);
 }
 
+static void sdl3_debug_winsize(void *user_data, int w, int h)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->window)
+        return;
+    /* Use SDL_SetWindowSize to trigger the real compositor resize path.
+     * This goes through Wayland's xdg_surface configure/ack flow, matching
+     * what happens when the user drags the window border. */
+    float scale = d->rend.content_scale;
+    if (scale <= 0.0f)
+        scale = 1.0f;
+    int logical_w = (int)((float)w / scale + 0.5f);
+    int logical_h = (int)((float)h / scale + 0.5f);
+    SDL_SetWindowSize(d->window, logical_w, logical_h);
+    fprintf(stderr, "winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
+}
+
 static void sdl3_run(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
@@ -1283,6 +1300,8 @@ static void sdl3_run(PorttyBackend *self)
                 .dumpverts_fn = NULL,
                 .resize_fn = sdl3_debug_resize,
                 .resize_user_data = d,
+                .winsize_fn = sdl3_debug_winsize,
+                .winsize_user_data = d,
             };
             portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
             if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
@@ -1428,15 +1447,13 @@ static void sdl3_run(PorttyBackend *self)
 
             case SDL_EVENT_WINDOW_RESIZED:
             case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-                // With SDL_WINDOW_HIGH_PIXEL_DENSITY, event dimensions are in
-                // logical points. Convert to physical pixels for the renderer.
-                {
-                    int pix_w, pix_h;
-                    SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
-                    portty_app_handle_resize(d->app, pix_w, pix_h);
-                }
+            {
+                int pix_w, pix_h;
+                SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
+                portty_app_handle_resize(d->app, pix_w, pix_h);
                 terminal_mark_dirty(term);
                 break;
+            }
 
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 vlog("Window close requested\n");

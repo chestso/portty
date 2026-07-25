@@ -26,6 +26,7 @@ typedef enum
     DBG_CMD_NOTIFY,
     DBG_CMD_MOUSEMOVE,
     DBG_CMD_RESIZE,
+    DBG_CMD_WINSIZE,
     DBG_CMD_QUIT,
 } DebugCmdType;
 
@@ -48,6 +49,9 @@ typedef struct
     /* RESIZE */
     int resize_cols;
     int resize_rows;
+    /* WINSIZE — set window pixel size via SDL_SetWindowSize */
+    int winsize_w;
+    int winsize_h;
     /* NOTIFY */
     char notify_title[128];
     char notify_body[256];
@@ -116,6 +120,10 @@ typedef struct
     /* Resize callback (NULL if unsupported) */
     void (*resize_fn)(void *user_data, int cols, int rows);
     void *resize_user_data;
+    /* Window size callback — sets pixel size via SDL_SetWindowSize,
+     * triggering the real compositor resize path (NULL if unsupported) */
+    void (*winsize_fn)(void *user_data, int w, int h);
+    void *winsize_user_data;
 } DebugExecCtx;
 
 /* Execute one script step. Called each frame by the backend's main loop.
