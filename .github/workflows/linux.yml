@@ -88,7 +88,7 @@ jobs:
 
       - name: Upload tarball artifact
         if: matrix.backend == 'sdl3'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: portty-source-tarball
           path: build/portty-*.tar.gz
