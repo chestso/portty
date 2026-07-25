@@ -8,13 +8,9 @@ permissions:
   contents: write
 
 jobs:
-  build-linux-sokol:
-    name: Build & Test (Linux Sokol)
-    uses: ./.github/workflows/linux-sokol.yml
-
-  build-linux-sdl3:
-    name: Build & Test (Linux SDL3)
-    uses: ./.github/workflows/linux-sdl3.yml
+  build-linux:
+    name: Build & Test (Linux)
+    uses: ./.github/workflows/linux.yml
 
   build-macos:
     name: Build & Test (macOS)
@@ -26,7 +22,7 @@ jobs:
 
   release:
     name: Publish release
-    needs: [build-linux-sokol, build-linux-sdl3, build-macos, build-windows]
+    needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
     steps:
       - name: Download macOS arm64 SDL3 artifact
