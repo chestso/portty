@@ -1659,7 +1659,12 @@ static void sdl3_run(PorttyBackend *self)
         if (terminal_needs_redraw(term)) {
             bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
             rend_sdl3_draw_terminal(rend, term, cursor_vis);
-            SDL_RenderPresent(d->sdl_renderer);
+            /* On Wayland, SDL_RenderPresent blocks on the compositor's frame
+             * callback, which is delayed during interactive resize. Skip
+             * presenting if there are more events pending — the next frame
+             * will present the latest state. */
+            if (SDL_PeepEvents(NULL, 1, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST) == 0)
+                SDL_RenderPresent(d->sdl_renderer);
             terminal_clear_redraw(term);
         }
 
