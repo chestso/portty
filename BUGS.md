@@ -23,10 +23,18 @@ The root cause is the Wayland resize protocol interaction with SDL3's event loop
 
 The Sokol backend avoids this because its frame callback is driven by the compositor's vsync — events are processed within the frame callback, so there is no extra blocking round-trip.
 
+**Related SDL issues:**
+
+- [#15380](https://github.com/libsdl-org/SDL/issues/15380) — `SDL_WaitEventTimeout` can block indefinitely on Wayland due to cursor change race conditions (open, 3.x milestone). The deadlock occurs when cursor changes queue Wayland requests without flushing the write buffer, causing `poll()` to never return.
+- [#13763](https://github.com/libsdl-org/SDL/issues/13763) — Extreme lag when resizing: `SDL_PollEvent()` takes 100ms to several seconds during interactive resize (open, labeled `notourbug`).
+- [#13272](https://github.com/libsdl-org/SDL/issues/13272) — Event queue fills to 65,535 events on Wayland, causing freeze (closed).
+- [#4609](https://github.com/libsdl-org/SDL/issues/4609) — High CPU usage with v-sync on Wayland due to frame callback busy-wait (closed, fixed).
+- [SDL Wiki: AppFreezeDuringDrag](https://wiki.libsdl.org/SDL3/AppFreezeDuringDrag) — Documents that `SDL_PollEvent`, `SDL_WaitEvent`, `SDL_WaitEventTimeout`, and `SDL_PumpEvents` may block during resize/drag on some platforms.
+
 **Mitigations applied** (v0.5.5):
 
 - `SDL_PumpEvents` before `SDL_PollEvent` to ensure Wayland configure events are dispatched
-- Restructured event loop: `PollEvent` drain → timers → render → `SDL_Delay(2)` idle (no `SDL_WaitEventTimeout`, which deadlocks for 1-6 seconds on Wayland)
+- Restructured event loop: `PollEvent` drain → timers → render → `SDL_Delay(2)` idle (no `SDL_WaitEventTimeout`, which can block indefinitely on Wayland per [#15380](https://github.com/libsdl-org/SDL/issues/15380))
 - Removed `SDL_RenderPresent` from the resize event handler (let the bottom-of-loop render handle it)
 
 **Remaining limitation**: `SDL_RenderPresent` still blocks on the compositor's frame callback during continuous drag. This is a Wayland protocol limitation — the compositor controls when the client can present frames. A future fix could use `SDL_SetRenderVSync(0)` or a non-blocking present path, but on Wayland the compositor may still throttle.
