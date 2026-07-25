@@ -1289,7 +1289,7 @@ static void sdl3_run(PorttyBackend *self)
                 d->debug_script_done = true;
         }
 
-        if (!SDL_WaitEventTimeout(&event, 16)) {
+        if (!SDL_WaitEventTimeout(&event, 33)) {
             // Timeout — no SDL events, but timers may need to fire.
         }
 
