@@ -20,6 +20,7 @@
 #include <SDL3/SDL.h>
 #include <errno.h>
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -751,24 +752,25 @@ static void sdl3_set_window_size(PorttyBackend *self, int width, int height)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (d && d->window) {
-        // With SDL_WINDOW_HIGH_PIXEL_DENSITY, SDL_SetWindowSize expects
-        // logical/points coordinates, not physical pixels. Convert from
-        // physical pixels to logical by dividing by content scale.
         float scale = d->rend.content_scale;
         if (scale <= 0.0f)
             scale = 1.0f;
-        int logical_w = (int)((float)width / scale);
-        int logical_h = (int)((float)height / scale);
+        int logical_w = (int)((float)width / scale + 0.5f);
+        int logical_h = (int)((float)height / scale + 0.5f);
         SDL_SetWindowSize(d->window, logical_w, logical_h);
 
-        // After SDL processes the resize, get the actual pixel dimensions
-        // and update the renderer. This ensures the renderer uses physical
-        // pixels even though the window manager sees logical coordinates.
-        SDL_SyncWindow(d->window); // Ensure window state is updated
+        SDL_SyncWindow(d->window);
         int pix_w, pix_h;
         SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
         if (pix_w > 0 && pix_h > 0) {
-            rend_sdl3_resize(&d->rend, pix_w, pix_h);
+            if (pix_w < width) {
+                int extra = (int)ceilf((float)(width - pix_w) / scale);
+                SDL_SetWindowSize(d->window, logical_w + extra, logical_h);
+                SDL_SyncWindow(d->window);
+                SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
+            }
+            if (pix_w > 0 && pix_h > 0)
+                rend_sdl3_resize(&d->rend, pix_w, pix_h);
         }
     }
 }
@@ -807,10 +809,19 @@ static bool sdl3_get_display_size(PorttyBackend *self, int *w, int *h)
     SDL_Rect bounds;
     if (!SDL_GetDisplayUsableBounds(display_id, &bounds))
         return false;
+    /* SDL_GetDisplayUsableBounds returns logical coordinates. Convert to
+     * physical pixels using the window's display scale so comparisons
+     * against physical pixel dimensions in main.c are correct. */
+    float scale = 1.0f;
+    if (d->window) {
+        scale = SDL_GetWindowDisplayScale(d->window);
+        if (scale <= 0.0f)
+            scale = 1.0f;
+    }
     if (w)
-        *w = bounds.w;
+        *w = (int)((float)bounds.w * scale);
     if (h)
-        *h = bounds.h;
+        *h = (int)((float)bounds.h * scale);
     return true;
 }
 
