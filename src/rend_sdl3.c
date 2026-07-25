@@ -1355,6 +1355,8 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
     if (count == 0)
         return;
 
+    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
+
     for (int i = 0; i < count; i++) {
         const CfrSixel *img = &imgs[i];
 
@@ -1362,18 +1364,20 @@ static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
         int px = img->col * data->cell_width;
         int py = screen_row * data->cell_height;
 
-        // Cull fully off-screen images.
-        if (py + img->height_px <= 0 || py >= data->height)
+        int scaled_w = logical_to_physical(img->width_px, scale);
+        int scaled_h = logical_to_physical(img->height_px, scale);
+
+        if (py + scaled_h <= 0 || py >= data->height)
             continue;
-        if (px + img->width_px <= 0 || px >= data->width)
+        if (px + scaled_w <= 0 || px >= data->width)
             continue;
 
         SDL_Texture *tex = sixel_get_texture(data, img);
         if (!tex)
             continue;
 
-        SDL_FRect dst = { (float)px, (float)py, (float)img->width_px,
-                          (float)img->height_px };
+        SDL_FRect dst = { (float)px, (float)py, (float)scaled_w,
+                          (float)scaled_h };
         SDL_RenderTexture(data->renderer, tex, NULL, &dst);
     }
 }
@@ -1487,6 +1491,8 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
     if (count == 0)
         return;
 
+    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
+
     for (int i = 0; i < count; i++) {
         const CfrLottie *anim = &anims[i];
         int pl_count = 0;
@@ -1496,6 +1502,9 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
         SDL_Texture *tex = lottie_get_texture(data, anim);
         if (!tex)
             continue;
+
+        int scaled_canvas_w = logical_to_physical(anim->canvas_w, scale);
+        int scaled_canvas_h = logical_to_physical(anim->canvas_h, scale);
 
         for (int j = 0; j < pl_count; j++) {
             const CfrLottiePlacement *pl = &pls[j];
@@ -1517,12 +1526,11 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
                 SDL_SetTextureAlphaModFloat(tex,
                                             (float)pl->opacity_x256 / 255.0f);
 
-            /* Center the aspect-correct canvas within the cell box */
-            int off_x = (box_w - anim->canvas_w) / 2;
-            int off_y = (box_h - anim->canvas_h) / 2;
+            int off_x = (box_w - scaled_canvas_w) / 2;
+            int off_y = (box_h - scaled_canvas_h) / 2;
             SDL_FRect dst = {
                 (float)(px + off_x), (float)(py + off_y),
-                (float)anim->canvas_w, (float)anim->canvas_h
+                (float)scaled_canvas_w, (float)scaled_canvas_h
             };
             SDL_RenderTexture(data->renderer, tex, NULL, &dst);
 

@@ -28,6 +28,42 @@ int rend_display_row_to_unified(int scroll_offset, int display_row);
 void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport_h);
 
 // =============================================================================
+// Coordinate space conversion — HiDPI scaling
+// =============================================================================
+//
+// portty uses two coordinate spaces:
+//
+// LOGICAL (from terminal engine/coffer):
+//   - sixel.width_px, sixel.height_px: unscaled pixel dimensions
+//   - lottie.canvas_w, lottie.canvas_h: unscaled pixel dimensions
+//   - Terminal column/row positions: always logical
+//   - Font metrics: unscaled
+//
+// PHYSICAL (backend-internal):
+//   - Window/framebuffer dimensions
+//   - cell_w, cell_h: scaled by content_scale during font load
+//   - Mouse coordinates: from SDL/sokol in physical pixels
+//   - All rendering coordinates
+//
+// content_scale multiplies logical → physical.
+// Use these helpers consistently throughout both backends.
+
+static inline int logical_to_physical(int logical, float scale)
+{
+    return (int)(logical * scale + 0.5f);
+}
+
+static inline int physical_to_logical(int physical, float scale)
+{
+    return (int)(physical / scale + 0.5f);
+}
+
+static inline float logical_to_physical_f(float logical, float scale)
+{
+    return logical * scale;
+}
+
+// =============================================================================
 // Glyph atlas packing — GPU-agnostic
 // =============================================================================
 //

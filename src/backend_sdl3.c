@@ -14,6 +14,7 @@
 #include "portty_app.h"
 #include "portty_debug_script.h"
 #include "portty_pty.h"
+#include "rend_common.h"
 #include "rend_sdl3.h"
 #include "term.h"
 #include "timer.h"
@@ -755,8 +756,8 @@ static void sdl3_set_window_size(PorttyBackend *self, int width, int height)
         float scale = d->rend.content_scale;
         if (scale <= 0.0f)
             scale = 1.0f;
-        int logical_w = (int)((float)width / scale + 0.5f);
-        int logical_h = (int)((float)height / scale + 0.5f);
+        int logical_w = physical_to_logical(width, scale);
+        int logical_h = physical_to_logical(height, scale);
         SDL_SetWindowSize(d->window, logical_w, logical_h);
 
         SDL_SyncWindow(d->window);
@@ -764,7 +765,7 @@ static void sdl3_set_window_size(PorttyBackend *self, int width, int height)
         SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
         if (pix_w > 0 && pix_h > 0) {
             if (pix_w < width) {
-                int extra = (int)ceilf((float)(width - pix_w) / scale);
+                int extra = physical_to_logical(width - pix_w, scale);
                 SDL_SetWindowSize(d->window, logical_w + extra, logical_h);
                 SDL_SyncWindow(d->window);
                 SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
@@ -819,9 +820,9 @@ static bool sdl3_get_display_size(PorttyBackend *self, int *w, int *h)
             scale = 1.0f;
     }
     if (w)
-        *w = (int)((float)bounds.w * scale);
+        *w = logical_to_physical(bounds.w, scale);
     if (h)
-        *h = (int)((float)bounds.h * scale);
+        *h = logical_to_physical(bounds.h, scale);
     return true;
 }
 
@@ -1229,8 +1230,8 @@ static void sdl3_debug_winsize(void *user_data, int w, int h)
     float scale = d->rend.content_scale;
     if (scale <= 0.0f)
         scale = 1.0f;
-    int logical_w = (int)((float)w / scale + 0.5f);
-    int logical_h = (int)((float)h / scale + 0.5f);
+    int logical_w = physical_to_logical(w, scale);
+    int logical_h = physical_to_logical(h, scale);
     SDL_SetWindowSize(d->window, logical_w, logical_h);
     fprintf(stderr, "winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
 }
@@ -1505,8 +1506,8 @@ static void sdl3_run(PorttyBackend *self)
                         float scale = d->rend.content_scale;
                         if (scale <= 0.0f)
                             scale = 1.0f;
-                        int mx = (int)(event.wheel.mouse_x * scale);
-                        int my = (int)(event.wheel.mouse_y * scale);
+                        int mx = (int)logical_to_physical_f(event.wheel.mouse_x, scale);
+                        int my = (int)logical_to_physical_f(event.wheel.mouse_y, scale);
                         for (int i = 0; i < clicks && !consumed; i++) {
                             consumed = portty_app_handle_mouse(
                                 d->app, mx, my, button, true, 0, tmod);
@@ -1531,8 +1532,8 @@ static void sdl3_run(PorttyBackend *self)
                 float scale = d->rend.content_scale;
                 if (scale <= 0.0f)
                     scale = 1.0f;
-                int px = (int)(event.button.x * scale);
-                int py = (int)(event.button.y * scale);
+                int px = (int)logical_to_physical_f(event.button.x, scale);
+                int py = (int)logical_to_physical_f(event.button.y, scale);
 
                 // Flush any buffered button-up from a previous event
                 if (d->left_button_up_buffered) {
@@ -1595,8 +1596,8 @@ static void sdl3_run(PorttyBackend *self)
                 float scale = d->rend.content_scale;
                 if (scale <= 0.0f)
                     scale = 1.0f;
-                int mx = (int)(event.motion.x * scale);
-                int my = (int)(event.motion.y * scale);
+                int mx = (int)logical_to_physical_f(event.motion.x, scale);
+                int my = (int)logical_to_physical_f(event.motion.y, scale);
                 if (portty_app_handle_mouse(d->app, mx, my,
                                             0, any_button_pressed,
                                             0, tmod)) {

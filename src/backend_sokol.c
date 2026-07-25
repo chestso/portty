@@ -1432,8 +1432,8 @@ static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
         const CfrLottiePlacement *pls =
             terminal_get_lottie_placements(term, anim->id, &pl_count);
 
-        int scaled_canvas_w = (int)(anim->canvas_w * scale);
-        int scaled_canvas_h = (int)(anim->canvas_h * scale);
+        int scaled_canvas_w = logical_to_physical(anim->canvas_w, scale);
+        int scaled_canvas_h = logical_to_physical(anim->canvas_h, scale);
         int anim_vert_count = 0;
 
         for (int j = 0; j < pl_count; j++) {
@@ -1634,8 +1634,8 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
         int screen_row = img->row + scroll_offset;
         int px = img->col * cell_w;
         int py = screen_row * cell_h;
-        int scaled_w = (int)(img->width_px * scale);
-        int scaled_h = (int)(img->height_px * scale);
+        int scaled_w = logical_to_physical(img->width_px, scale);
+        int scaled_h = logical_to_physical(img->height_px, scale);
 
         if (py + scaled_h <= 0 || py >= win_h)
             continue;
@@ -1677,8 +1677,8 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
         int screen_row = img->row + scroll_offset;
         int px = img->col * cell_w;
         int py = screen_row * cell_h;
-        int scaled_w = (int)(img->width_px * scale);
-        int scaled_h = (int)(img->height_px * scale);
+        int scaled_w = logical_to_physical(img->width_px, scale);
+        int scaled_h = logical_to_physical(img->height_px, scale);
 
         if (py + scaled_h <= 0 || py >= win_h)
             continue;
