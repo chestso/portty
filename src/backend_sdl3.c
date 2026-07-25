@@ -1289,14 +1289,14 @@ static void sdl3_run(PorttyBackend *self)
                 d->debug_script_done = true;
         }
 
-        if (!SDL_WaitEventTimeout(&event, 33)) {
-            // Timeout — no SDL events, but timers may need to fire.
-        }
-
         bool pty_processed = false;
 
-        // Process all pending events
-        do {
+        // === 1. Non-blocking event drain ===
+        // SDL_PollEvent on Wayland doesn't dispatch the display queue,
+        // so resize configure events never arrive. SDL_PumpEvents forces
+        // the Wayland event queue to be pumped before polling.
+        SDL_PumpEvents();
+        while (SDL_PollEvent(&event)) {
             switch (event.type) {
             case SDL_EVENT_USER:
                 switch (event.user.code) {
@@ -1427,6 +1427,7 @@ static void sdl3_run(PorttyBackend *self)
                 break;
 
             case SDL_EVENT_WINDOW_RESIZED:
+            case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
                 // With SDL_WINDOW_HIGH_PIXEL_DENSITY, event dimensions are in
                 // logical points. Convert to physical pixels for the renderer.
                 {
@@ -1590,9 +1591,9 @@ static void sdl3_run(PorttyBackend *self)
             default:
                 break;
             }
-        } while (SDL_PollEvent(&event));
+        }
 
-        // Poll timers
+        // === 2. Timers ===
         Uint64 now = SDL_GetTicks();
         uint32_t elapsed = (uint32_t)(now - last_tick);
         last_tick = now;
@@ -1654,24 +1655,29 @@ static void sdl3_run(PorttyBackend *self)
                 terminal_mark_dirty(term);
         }
 
-        // Drain VT damage and render
+        // === 3. Render (only blocking call during active rendering) ===
         terminal_flush_damage(term);
+        bool rendered = false;
         if (terminal_needs_redraw(term)) {
             bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
             rend_sdl3_draw_terminal(rend, term, cursor_vis);
-            /* On Wayland, SDL_RenderPresent blocks on the compositor's frame
-             * callback, which is delayed during interactive resize. Skip
-             * presenting if there are more events pending — the next frame
-             * will present the latest state. */
-            if (SDL_PeepEvents(NULL, 1, SDL_PEEKEVENT, SDL_EVENT_FIRST, SDL_EVENT_LAST) == 0)
-                SDL_RenderPresent(d->sdl_renderer);
+            SDL_RenderPresent(d->sdl_renderer);
             terminal_clear_redraw(term);
+            rendered = true;
         }
 
         // === Debug script: post-render screendump ===
         if (d->debug_pending_screendump) {
             d->debug_pending_screendump = false;
             sdl3_debug_screendump(d, d->debug_screendump_path);
+        }
+
+        // === 4. Idle: sleep briefly to avoid busy-looping ===
+        // SDL_WaitEventTimeout on Wayland can block far longer than the
+        // requested timeout (known SDL3 issue with wl_display_dispatch).
+        // Use SDL_Delay instead so we always return within 2ms.
+        if (!pty_processed && !rendered) {
+            SDL_Delay(2);
         }
     }
 
