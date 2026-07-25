@@ -9,3 +9,24 @@ However, after the border crossing, SDL has lost all button state (`SDL_GetMouse
 This is a fundamental Wayland protocol limitation ([SDL issue #14980](https://github.com/libsdl-org/SDL/issues/14980), closed as "not our bug"), not a portty bug. The compositor only sends pointer events for surfaces the application owns, and once `wl_pointer.leave` fires, the button state is irrecoverably lost.
 
 **Workaround**: Click anywhere to cancel the stuck selection, then click and drag to start a new one. Right-click copies the current selection and clears it.
+
+## Wayland: SDL3 interactive window resize is laggy
+
+When dragging the window border to resize on Wayland, the resize feels sluggish compared to the Sokol backend. Programmatic resize via `SDL_SetWindowSize` (used by the `winsize` debug command) is smooth and immediate, but manual dragging via the compositor's `xdg_toplevel` configure events has noticeable lag.
+
+The root cause is the Wayland resize protocol interaction with SDL3's event loop:
+
+1. The compositor sends `xdg_surface.configure` with the new size.
+2. SDL3 converts this to `SDL_EVENT_WINDOW_RESIZED` / `SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED`.
+3. `SDL_PollEvent` does not dispatch the Wayland display queue on its own — `SDL_PumpEvents` must be called first (fixed in portty v0.5.5).
+4. After processing the resize, `SDL_RenderPresent` blocks on the compositor's `wl_surface.frame` callback, which is throttled during continuous resize dragging.
+
+The Sokol backend avoids this because its frame callback is driven by the compositor's vsync — events are processed within the frame callback, so there is no extra blocking round-trip.
+
+**Mitigations applied** (v0.5.5):
+
+- `SDL_PumpEvents` before `SDL_PollEvent` to ensure Wayland configure events are dispatched
+- Restructured event loop: `PollEvent` drain → timers → render → `SDL_Delay(2)` idle (no `SDL_WaitEventTimeout`, which deadlocks for 1-6 seconds on Wayland)
+- Removed `SDL_RenderPresent` from the resize event handler (let the bottom-of-loop render handle it)
+
+**Remaining limitation**: `SDL_RenderPresent` still blocks on the compositor's frame callback during continuous drag. This is a Wayland protocol limitation — the compositor controls when the client can present frames. A future fix could use `SDL_SetRenderVSync(0)` or a non-blocking present path, but on Wayland the compositor may still throttle.
