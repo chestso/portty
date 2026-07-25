@@ -1193,6 +1193,20 @@ static void sdl3_debug_screendump(Sdl3BackendData *d, const char *path)
 
 // ── Event loop ───────────────────────────────────────────────────────────
 
+static void sdl3_debug_resize(void *user_data, int cols, int rows)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return;
+    int cell_w, cell_h;
+    if (!d->app->backend->get_cell_size(d->app->backend, &cell_w, &cell_h))
+        return;
+    int pixel_w = cols * cell_w;
+    int pixel_h = rows * cell_h;
+    portty_app_handle_resize(d->app, pixel_w, pixel_h);
+    fprintf(stderr, "resize: %d cols x %d rows\n", cols, rows);
+}
+
 static void sdl3_run(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
@@ -1256,6 +1270,8 @@ static void sdl3_run(PorttyBackend *self)
                 .screendump_path_buf = d->debug_screendump_path,
                 .pending_verifybuf = NULL,
                 .dumpverts_fn = NULL,
+                .resize_fn = sdl3_debug_resize,
+                .resize_user_data = d,
             };
             portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
             if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))

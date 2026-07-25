@@ -417,6 +417,18 @@ static bool parse_command(PorttyDebugScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "resize") == 0) {
+        DebugCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = DBG_CMD_RESIZE;
+        if (sscanf(args, "%d %d", &cmd->resize_cols, &cmd->resize_rows) != 2) {
+            script_set_error(s, line_num, "resize: requires cols rows");
+            return false;
+        }
+        return true;
+    }
+
     if (strcmp(line, "quit") == 0) {
         DebugCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -811,6 +823,18 @@ void portty_debug_script_step(PorttyDebugScript *script,
                               cmd->mouse_x, cmd->mouse_y);
         } else {
             fprintf(stderr, "mousemove: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_RESIZE:
+    {
+        if (ctx->resize_fn) {
+            ctx->resize_fn(ctx->resize_user_data,
+                           cmd->resize_cols, cmd->resize_rows);
+        } else {
+            fprintf(stderr, "resize: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

@@ -25,6 +25,7 @@ typedef enum
     DBG_CMD_VERIFYBUF,
     DBG_CMD_NOTIFY,
     DBG_CMD_MOUSEMOVE,
+    DBG_CMD_RESIZE,
     DBG_CMD_QUIT,
 } DebugCmdType;
 
@@ -44,6 +45,9 @@ typedef struct
     /* MOUSEMOVE */
     int mouse_x;
     int mouse_y;
+    /* RESIZE */
+    int resize_cols;
+    int resize_rows;
     /* NOTIFY */
     char notify_title[128];
     char notify_body[256];
@@ -109,6 +113,9 @@ typedef struct
     /* Notification callback (NULL if unsupported) */
     void (*notify_fn)(void *backend, const char *title, const char *body);
     void *notify_user_data;
+    /* Resize callback (NULL if unsupported) */
+    void (*resize_fn)(void *user_data, int cols, int rows);
+    void *resize_user_data;
 } DebugExecCtx;
 
 /* Execute one script step. Called each frame by the backend's main loop.
