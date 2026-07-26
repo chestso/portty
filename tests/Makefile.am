@@ -149,11 +149,11 @@ endif
 test_portty_app_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
 test_portty_app_LDADD = $(COFFER_LIBS)
 
-# Debug script parser. Pure string parsing — no SDL/coffer dependency for
-# the parser itself, but portty_debug_script.h includes term.h which pulls
+# Script parser. Pure string parsing — no SDL/coffer dependency for
+# the parser itself, but portty_script.h includes term.h which pulls
 # in coffer, and the step helper calls rend_display_row_to_unified.
 test_debug_script_SOURCES = test_debug_script.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/portty_debug_script.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+    ../src/portty_script.c ../src/portty_frame_rec.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
 test_debug_script_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_debug_script_LDADD = $(COFFER_LIBS) -lm
 

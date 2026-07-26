@@ -1,4 +1,4 @@
-#include "portty_debug_script.h"
+#include "portty_script.h"
 #include "test_helpers.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -54,11 +54,11 @@ static void test_load_empty_file(void)
     char *path = write_tmp_script("");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 0);
+    ASSERT_EQ(portty_script_count(s), 0);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -72,11 +72,11 @@ static void test_load_comments_and_blanks(void)
         "# another comment\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 0);
+    ASSERT_EQ(portty_script_count(s), 0);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -85,16 +85,16 @@ static void test_parse_wait(void)
     char *path = write_tmp_script("wait 3.5\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_WAIT);
     ASSERT_TRUE(cmd->wait_seconds > 3.4 && cmd->wait_seconds < 3.6);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -103,16 +103,16 @@ static void test_parse_wait_integer(void)
     char *path = write_tmp_script("wait 5\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_WAIT);
     ASSERT_TRUE(cmd->wait_seconds > 4.9 && cmd->wait_seconds < 5.1);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -121,16 +121,16 @@ static void test_parse_send(void)
     char *path = write_tmp_script("send hello world\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SEND);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -139,11 +139,11 @@ static void test_parse_send_escapes(void)
     char *path = write_tmp_script("send line1\\nline2\\t\\e\\\\\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SEND);
     ASSERT_NOT_NULL(cmd->text);
@@ -154,7 +154,7 @@ static void test_parse_send_escapes(void)
     ASSERT_EQ(cmd->text[12], '\x1b');
     ASSERT_EQ(cmd->text[13], '\\');
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -163,16 +163,16 @@ static void test_parse_send_quoted(void)
     char *path = write_tmp_script("send \"hello world\"\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SEND);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -181,11 +181,11 @@ static void test_parse_raw(void)
     char *path = write_tmp_script("raw 1b 5b 6d\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_RAW);
     ASSERT_NOT_NULL(cmd->text);
@@ -194,7 +194,7 @@ static void test_parse_raw(void)
     ASSERT_EQ((uint8_t)cmd->text[1], 0x5b);
     ASSERT_EQ((uint8_t)cmd->text[2], 0x6d);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -203,16 +203,16 @@ static void test_parse_assert_contains(void)
     char *path = write_tmp_script("assert-contains hello crush\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_ASSERT_CONTAINS);
     ASSERT_STR_EQ(cmd->text, "hello crush");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -221,16 +221,16 @@ static void test_parse_assert_not_contains(void)
     char *path = write_tmp_script("assert-not-contains error\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_ASSERT_NOT_CONTAINS);
     ASSERT_STR_EQ(cmd->text, "error");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -239,16 +239,16 @@ static void test_parse_screendump(void)
     char *path = write_tmp_script("screendump /tmp/screenshot.png\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SCREENDUMP);
     ASSERT_STR_EQ(cmd->path, "/tmp/screenshot.png");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -257,17 +257,17 @@ static void test_parse_dumprow(void)
     char *path = write_tmp_script("dumprow 5\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_DUMPROW);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, -1);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -276,18 +276,18 @@ static void test_parse_dumpcells(void)
     char *path = write_tmp_script("dumpcells 5 3 10\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_DUMPCELLS);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, 3);
     ASSERT_EQ(cmd->col_end, 10);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -296,18 +296,18 @@ static void test_parse_dumpverts(void)
     char *path = write_tmp_script("dumpverts 5 3 6\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_DUMPVERTS);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, 3);
     ASSERT_EQ(cmd->col_end, 6);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -316,18 +316,18 @@ static void test_parse_verifybuf(void)
     char *path = write_tmp_script("verifybuf 5 3 6\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_VERIFYBUF);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, 3);
     ASSERT_EQ(cmd->col_end, 6);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -336,15 +336,15 @@ static void test_parse_quit(void)
     char *path = write_tmp_script("quit\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_QUIT);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -358,17 +358,17 @@ static void test_parse_multi_command(void)
         "quit\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 5);
+    ASSERT_EQ(portty_script_count(s), 5);
 
-    ASSERT_EQ(portty_debug_script_get(s, 0)->type, DBG_CMD_WAIT);
-    ASSERT_EQ(portty_debug_script_get(s, 1)->type, DBG_CMD_SEND);
-    ASSERT_EQ(portty_debug_script_get(s, 2)->type, DBG_CMD_ASSERT_CONTAINS);
-    ASSERT_EQ(portty_debug_script_get(s, 3)->type, DBG_CMD_SCREENDUMP);
-    ASSERT_EQ(portty_debug_script_get(s, 4)->type, DBG_CMD_QUIT);
+    ASSERT_EQ(portty_script_get(s, 0)->type, DBG_CMD_WAIT);
+    ASSERT_EQ(portty_script_get(s, 1)->type, DBG_CMD_SEND);
+    ASSERT_EQ(portty_script_get(s, 2)->type, DBG_CMD_ASSERT_CONTAINS);
+    ASSERT_EQ(portty_script_get(s, 3)->type, DBG_CMD_SCREENDUMP);
+    ASSERT_EQ(portty_script_get(s, 4)->type, DBG_CMD_QUIT);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -377,22 +377,22 @@ static void test_parse_unknown_command(void)
     char *path = write_tmp_script("frobnicate foo\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     // Now returns a struct with error
     ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_debug_script_error(s));
-    portty_debug_script_free(s);
+    ASSERT_NOT_NULL(portty_script_error(s));
+    portty_script_free(s);
 
     cleanup_tmp(path);
 }
 
 static void test_parse_missing_file(void)
 {
-    PorttyDebugScript *s = portty_debug_script_load("/nonexistent/path/to/script");
+    PorttyScript *s = portty_script_load("/nonexistent/path/to/script");
     // Now returns a struct with error instead of NULL
     ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_debug_script_error(s));
-    portty_debug_script_free(s);
+    ASSERT_NOT_NULL(portty_script_error(s));
+    portty_script_free(s);
 }
 
 static void test_get_out_of_range(void)
@@ -400,14 +400,14 @@ static void test_get_out_of_range(void)
     char *path = write_tmp_script("quit\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    ASSERT_NULL(portty_debug_script_get(s, 1));
-    ASSERT_NULL(portty_debug_script_get(s, -1));
+    ASSERT_NULL(portty_script_get(s, 1));
+    ASSERT_NULL(portty_script_get(s, -1));
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -416,17 +416,17 @@ static void test_parse_raw_no_args(void)
     char *path = write_tmp_script("raw\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_RAW);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 0);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -435,17 +435,17 @@ static void test_parse_send_no_args(void)
     char *path = write_tmp_script("send\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SEND);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 0);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -454,16 +454,16 @@ static void test_parse_sendln(void)
     char *path = write_tmp_script("sendln hello world\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SENDLN);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -472,11 +472,11 @@ static void test_parse_dumpcells_missing_args(void)
     char *path = write_tmp_script("dumpcells 5\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     // Now returns a struct with error
     ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_debug_script_error(s));
-    portty_debug_script_free(s);
+    ASSERT_NOT_NULL(portty_script_error(s));
+    portty_script_free(s);
 
     cleanup_tmp(path);
 }
@@ -493,29 +493,29 @@ static void test_parse_screendump_long_path(void)
     char *path = write_tmp_script(script);
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SCREENDUMP);
     /* Path should be truncated to fit in cmd->path[512] */
     ASSERT_TRUE(strlen(cmd->path) < sizeof(cmd->path));
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
 static void test_error_message(void)
 {
-    PorttyDebugScript *s = portty_debug_script_load("/nonexistent/path");
+    PorttyScript *s = portty_script_load("/nonexistent/path");
     // Now returns a struct with error
     ASSERT_NOT_NULL(s);
-    const char *err = portty_debug_script_error(s);
+    const char *err = portty_script_error(s);
     ASSERT_NOT_NULL(err);
     ASSERT_TRUE(strstr(err, "cannot open file") != NULL);
-    portty_debug_script_free(s);
+    portty_script_free(s);
 }
 
 static void test_parse_trailing_whitespace(void)
@@ -523,16 +523,16 @@ static void test_parse_trailing_whitespace(void)
     char *path = write_tmp_script("wait 3.0   \n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_WAIT);
     ASSERT_TRUE(cmd->wait_seconds > 2.9 && cmd->wait_seconds < 3.1);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -541,16 +541,16 @@ static void test_parse_send_carriage_return(void)
     char *path = write_tmp_script("send hello\\rworld\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_SEND);
     ASSERT_EQ(cmd->text[5], '\r');
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -559,16 +559,16 @@ static void test_parse_emit(void)
     char *path = write_tmp_script("emit \"hello world\"\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -577,11 +577,11 @@ static void test_parse_emit_escapes(void)
     char *path = write_tmp_script("emit \\e[4mSingle\\e[0m\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
     ASSERT_NOT_NULL(cmd->text);
@@ -592,7 +592,7 @@ static void test_parse_emit_escapes(void)
     ASSERT_EQ(cmd->text[12], '0');
     ASSERT_EQ(cmd->text[13], 'm');
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -601,11 +601,11 @@ static void test_parse_emit_raw(void)
     char *path = write_tmp_script("emit-raw 1b 5b 34 6d 1b 5b 30 6d\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_EMIT_RAW);
     ASSERT_NOT_NULL(cmd->text);
@@ -613,7 +613,7 @@ static void test_parse_emit_raw(void)
     ASSERT_EQ((uint8_t)cmd->text[0], 0x1b);
     ASSERT_EQ((uint8_t)cmd->text[2], 0x34);
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
@@ -622,11 +622,11 @@ static void test_parse_x_escape(void)
     char *path = write_tmp_script("emit \\x1b[4mSingle\\x1b[0m\n");
     ASSERT_NOT_NULL(path);
 
-    PorttyDebugScript *s = portty_debug_script_load(path);
+    PorttyScript *s = portty_script_load(path);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_debug_script_count(s), 1);
+    ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_debug_script_get(s, 0);
+    const DebugCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
     ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
     ASSERT_NOT_NULL(cmd->text);
@@ -636,7 +636,7 @@ static void test_parse_x_escape(void)
     ASSERT_EQ(cmd->text[12], '0');
     ASSERT_EQ(cmd->text[13], 'm');
 
-    portty_debug_script_free(s);
+    portty_script_free(s);
     cleanup_tmp(path);
 }
 
