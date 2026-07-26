@@ -76,6 +76,14 @@ bool frame_recorder_start(FrameRecorder *r, const char *dir, int fps)
     r->frames_skipped = 0;
     r->start_time = portty_debug_now_seconds();
 
+    // Open manifest file for frame timing data
+    char manifest_path[1024];
+    snprintf(manifest_path, sizeof(manifest_path), "%s/frames.csv", dir);
+    r->manifest = fopen(manifest_path, "w");
+    if (r->manifest) {
+        fprintf(r->manifest, "index,timestamp,filename\n");
+    }
+
     vlog("record-start: %s at %d fps, starting at frame_%06d.qoi\n",
          dir, r->target_fps, r->frame_index);
     return true;
@@ -91,6 +99,11 @@ void frame_recorder_stop(FrameRecorder *r)
     r->frames_skipped = expected - r->frames_written;
     if (r->frames_skipped < 0)
         r->frames_skipped = 0;
+
+    if (r->manifest) {
+        fclose(r->manifest);
+        r->manifest = NULL;
+    }
 
     vlog("record-stop: wrote %d frames, skipped %d (expected %d at %d fps)\n",
          r->frames_written, r->frames_skipped, expected, r->target_fps);
@@ -108,6 +121,14 @@ void frame_recorder_advance(FrameRecorder *r)
 {
     if (!r)
         return;
+
+    // Write manifest row with timestamp relative to recording start
+    if (r->manifest) {
+        double timestamp = portty_debug_now_seconds() - r->start_time;
+        fprintf(r->manifest, "%d,%.3f,frame_%06d.qoi\n",
+                r->frame_index, timestamp, r->frame_index);
+    }
+
     r->frame_index++;
     r->frames_written++;
 }

@@ -3,6 +3,7 @@
 
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdio.h>
 
 typedef struct
 {
@@ -13,6 +14,7 @@ typedef struct
     double start_time;
     int frames_written;
     int frames_skipped;
+    FILE *manifest;
 } FrameRecorder;
 
 FrameRecorder *frame_recorder_new(void);
