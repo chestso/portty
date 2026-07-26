@@ -114,6 +114,7 @@ void frame_recorder_build_path(FrameRecorder *r, char *buf, size_t len)
 {
     if (!r || !buf)
         return;
+    r->capture_time = portty_debug_now_seconds() - r->start_time;
     snprintf(buf, len, "%s/frame_%06d.qoi", r->output_dir, r->frame_index);
 }
 
@@ -122,11 +123,10 @@ void frame_recorder_advance(FrameRecorder *r)
     if (!r)
         return;
 
-    // Write manifest row with timestamp relative to recording start
+    // Write manifest row using timestamp captured before write
     if (r->manifest) {
-        double timestamp = portty_debug_now_seconds() - r->start_time;
         fprintf(r->manifest, "%d,%.3f,frame_%06d.qoi\n",
-                r->frame_index, timestamp, r->frame_index);
+                r->frame_index, r->capture_time, r->frame_index);
     }
 
     r->frame_index++;

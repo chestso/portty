@@ -12,6 +12,7 @@ typedef struct
     bool recording;
     int frame_index;
     double start_time;
+    double capture_time;
     int frames_written;
     int frames_skipped;
     FILE *manifest;
