@@ -89,9 +89,9 @@ static void test_parse_wait(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_WAIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT);
     ASSERT_TRUE(cmd->wait_seconds > 3.4 && cmd->wait_seconds < 3.6);
 
     portty_script_free(s);
@@ -107,9 +107,9 @@ static void test_parse_wait_integer(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_WAIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT);
     ASSERT_TRUE(cmd->wait_seconds > 4.9 && cmd->wait_seconds < 5.1);
 
     portty_script_free(s);
@@ -125,9 +125,9 @@ static void test_parse_send(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SEND);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
     portty_script_free(s);
@@ -143,9 +143,9 @@ static void test_parse_send_escapes(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SEND);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 14);
     ASSERT_EQ(cmd->text[0], 'l');
@@ -167,9 +167,9 @@ static void test_parse_send_quoted(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SEND);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
     portty_script_free(s);
@@ -185,9 +185,9 @@ static void test_parse_raw(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_RAW);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_RAW);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 3);
     ASSERT_EQ((uint8_t)cmd->text[0], 0x1b);
@@ -207,9 +207,9 @@ static void test_parse_assert_contains(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_ASSERT_CONTAINS);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_ASSERT_CONTAINS);
     ASSERT_STR_EQ(cmd->text, "hello crush");
 
     portty_script_free(s);
@@ -225,9 +225,9 @@ static void test_parse_assert_not_contains(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_ASSERT_NOT_CONTAINS);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_ASSERT_NOT_CONTAINS);
     ASSERT_STR_EQ(cmd->text, "error");
 
     portty_script_free(s);
@@ -243,9 +243,9 @@ static void test_parse_screendump(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SCREENDUMP);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SCREENDUMP);
     ASSERT_STR_EQ(cmd->path, "/tmp/screenshot.png");
 
     portty_script_free(s);
@@ -261,9 +261,9 @@ static void test_parse_dumprow(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_DUMPROW);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPROW);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, -1);
 
@@ -280,9 +280,9 @@ static void test_parse_dumpcells(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_DUMPCELLS);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPCELLS);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, 3);
     ASSERT_EQ(cmd->col_end, 10);
@@ -300,9 +300,9 @@ static void test_parse_dumpverts(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_DUMPVERTS);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPVERTS);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, 3);
     ASSERT_EQ(cmd->col_end, 6);
@@ -320,9 +320,9 @@ static void test_parse_verifybuf(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_VERIFYBUF);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_VERIFYBUF);
     ASSERT_EQ(cmd->row, 5);
     ASSERT_EQ(cmd->col_start, 3);
     ASSERT_EQ(cmd->col_end, 6);
@@ -340,9 +340,9 @@ static void test_parse_quit(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_QUIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_QUIT);
 
     portty_script_free(s);
     cleanup_tmp(path);
@@ -362,11 +362,11 @@ static void test_parse_multi_command(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 5);
 
-    ASSERT_EQ(portty_script_get(s, 0)->type, DBG_CMD_WAIT);
-    ASSERT_EQ(portty_script_get(s, 1)->type, DBG_CMD_SEND);
-    ASSERT_EQ(portty_script_get(s, 2)->type, DBG_CMD_ASSERT_CONTAINS);
-    ASSERT_EQ(portty_script_get(s, 3)->type, DBG_CMD_SCREENDUMP);
-    ASSERT_EQ(portty_script_get(s, 4)->type, DBG_CMD_QUIT);
+    ASSERT_EQ(portty_script_get(s, 0)->type, SCRIPT_CMD_WAIT);
+    ASSERT_EQ(portty_script_get(s, 1)->type, SCRIPT_CMD_SEND);
+    ASSERT_EQ(portty_script_get(s, 2)->type, SCRIPT_CMD_ASSERT_CONTAINS);
+    ASSERT_EQ(portty_script_get(s, 3)->type, SCRIPT_CMD_SCREENDUMP);
+    ASSERT_EQ(portty_script_get(s, 4)->type, SCRIPT_CMD_QUIT);
 
     portty_script_free(s);
     cleanup_tmp(path);
@@ -420,9 +420,9 @@ static void test_parse_raw_no_args(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_RAW);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_RAW);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 0);
 
@@ -439,9 +439,9 @@ static void test_parse_send_no_args(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SEND);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 0);
 
@@ -458,9 +458,9 @@ static void test_parse_sendln(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SENDLN);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SENDLN);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
     portty_script_free(s);
@@ -497,9 +497,9 @@ static void test_parse_screendump_long_path(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SCREENDUMP);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SCREENDUMP);
     /* Path should be truncated to fit in cmd->path[512] */
     ASSERT_TRUE(strlen(cmd->path) < sizeof(cmd->path));
 
@@ -527,9 +527,9 @@ static void test_parse_trailing_whitespace(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_WAIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT);
     ASSERT_TRUE(cmd->wait_seconds > 2.9 && cmd->wait_seconds < 3.1);
 
     portty_script_free(s);
@@ -545,9 +545,9 @@ static void test_parse_send_carriage_return(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_SEND);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
     ASSERT_EQ(cmd->text[5], '\r');
 
     portty_script_free(s);
@@ -563,9 +563,9 @@ static void test_parse_emit(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT);
     ASSERT_STR_EQ(cmd->text, "hello world");
 
     portty_script_free(s);
@@ -581,9 +581,9 @@ static void test_parse_emit_escapes(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 14);
     ASSERT_EQ(cmd->text[0], '\x1b');
@@ -605,9 +605,9 @@ static void test_parse_emit_raw(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_EMIT_RAW);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT_RAW);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ((int)strlen(cmd->text), 8);
     ASSERT_EQ((uint8_t)cmd->text[0], 0x1b);
@@ -626,9 +626,9 @@ static void test_parse_x_escape(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(portty_script_count(s), 1);
 
-    const DebugCmd *cmd = portty_script_get(s, 0);
+    const ScriptCmd *cmd = portty_script_get(s, 0);
     ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, DBG_CMD_EMIT);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT);
     ASSERT_NOT_NULL(cmd->text);
     ASSERT_EQ(cmd->text[0], '\x1b');
     ASSERT_EQ(cmd->text[2], '4');

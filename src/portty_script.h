@@ -10,31 +10,31 @@ extern "C" {
 
 typedef enum
 {
-    DBG_CMD_WAIT,
-    DBG_CMD_SEND,
-    DBG_CMD_SENDLN,
-    DBG_CMD_RAW,
-    DBG_CMD_EMIT,
-    DBG_CMD_EMIT_RAW,
-    DBG_CMD_ASSERT_CONTAINS,
-    DBG_CMD_ASSERT_NOT_CONTAINS,
-    DBG_CMD_SCREENDUMP,
-    DBG_CMD_DUMPROW,
-    DBG_CMD_DUMPCELLS,
-    DBG_CMD_DUMPVERTS,
-    DBG_CMD_VERIFYBUF,
-    DBG_CMD_NOTIFY,
-    DBG_CMD_MOUSEMOVE,
-    DBG_CMD_RESIZE,
-    DBG_CMD_WINSIZE,
-    DBG_CMD_RECORD_START,
-    DBG_CMD_RECORD_STOP,
-    DBG_CMD_QUIT,
-} DebugCmdType;
+    SCRIPT_CMD_WAIT,
+    SCRIPT_CMD_SEND,
+    SCRIPT_CMD_SENDLN,
+    SCRIPT_CMD_RAW,
+    SCRIPT_CMD_EMIT,
+    SCRIPT_CMD_EMIT_RAW,
+    SCRIPT_CMD_ASSERT_CONTAINS,
+    SCRIPT_CMD_ASSERT_NOT_CONTAINS,
+    SCRIPT_CMD_SCREENDUMP,
+    SCRIPT_CMD_DUMPROW,
+    SCRIPT_CMD_DUMPCELLS,
+    SCRIPT_CMD_DUMPVERTS,
+    SCRIPT_CMD_VERIFYBUF,
+    SCRIPT_CMD_NOTIFY,
+    SCRIPT_CMD_MOUSEMOVE,
+    SCRIPT_CMD_RESIZE,
+    SCRIPT_CMD_WINSIZE,
+    SCRIPT_CMD_RECORD_START,
+    SCRIPT_CMD_RECORD_STOP,
+    SCRIPT_CMD_QUIT,
+} ScriptCmdType;
 
 typedef struct
 {
-    DebugCmdType type;
+    ScriptCmdType type;
     /* WAIT */
     double wait_seconds;
     /* SEND / RAW / ASSERT_* */
@@ -60,21 +60,21 @@ typedef struct
     /* RECORD_START */
     char record_dir[512];
     int record_fps;
-} DebugCmd;
+} ScriptCmd;
 
 typedef struct PorttyScript PorttyScript;
 
 /* Load and parse a script file. Returns NULL on error. */
 PorttyScript *portty_script_load(const char *path);
 
-/* Free a script and all its DebugCmd text strings. Safe to call on NULL. */
+/* Free a script and all its ScriptCmd text strings. Safe to call on NULL. */
 void portty_script_free(PorttyScript *s);
 
 /* Get the number of parsed commands. */
 int portty_script_count(const PorttyScript *s);
 
 /* Get a command by index (0-based). Returns NULL if out of range. */
-const DebugCmd *portty_script_get(const PorttyScript *s, int index);
+const ScriptCmd *portty_script_get(const PorttyScript *s, int index);
 
 /* Get a human-readable error message if load() failed.
  * Returns NULL if no error or if s is NULL. */

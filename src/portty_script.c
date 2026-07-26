@@ -22,7 +22,7 @@
 
 struct PorttyScript
 {
-    DebugCmd *cmds;
+    ScriptCmd *cmds;
     int count;
     int capacity;
     char error[256];
@@ -57,7 +57,7 @@ static bool script_ensure_capacity(PorttyScript *s)
 {
     if (s->count >= s->capacity) {
         int new_cap = s->capacity == 0 ? 16 : s->capacity * 2;
-        DebugCmd *new_cmds = realloc(s->cmds, (size_t)new_cap * sizeof(DebugCmd));
+        ScriptCmd *new_cmds = realloc(s->cmds, (size_t)new_cap * sizeof(ScriptCmd));
         if (!new_cmds)
             return false;
         s->cmds = new_cmds;
@@ -212,12 +212,12 @@ static void strip_quotes(char *str)
 
 /* ── Parser ── */
 
-static DebugCmd *script_new_cmd(PorttyScript *s)
+static ScriptCmd *script_new_cmd(PorttyScript *s)
 {
     if (!script_ensure_capacity(s))
         return NULL;
-    DebugCmd *cmd = &s->cmds[s->count++];
-    memset(cmd, 0, sizeof(DebugCmd));
+    ScriptCmd *cmd = &s->cmds[s->count++];
+    memset(cmd, 0, sizeof(ScriptCmd));
     cmd->col_start = 0;
     cmd->col_end = 0;
     cmd->row = 0;
@@ -249,25 +249,25 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     strip_trailing(args);
 
     if (strcmp(line, "wait") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_WAIT;
+        cmd->type = SCRIPT_CMD_WAIT;
         cmd->wait_seconds = atof(args);
         return true;
     }
 
     if (strcmp(line, "send") == 0 || strcmp(line, "sendln") == 0 ||
         strcmp(line, "emit") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
         if (strcmp(line, "emit") == 0) {
-            cmd->type = DBG_CMD_EMIT;
+            cmd->type = SCRIPT_CMD_EMIT;
         } else if (strcmp(line, "sendln") == 0) {
-            cmd->type = DBG_CMD_SENDLN;
+            cmd->type = SCRIPT_CMD_SENDLN;
         } else {
-            cmd->type = DBG_CMD_SEND;
+            cmd->type = SCRIPT_CMD_SEND;
         }
         strip_quotes(args);
         int len = (int)strlen(args);
@@ -280,10 +280,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "raw") == 0 || strcmp(line, "emit-raw") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = (strcmp(line, "emit-raw") == 0) ? DBG_CMD_EMIT_RAW : DBG_CMD_RAW;
+        cmd->type = (strcmp(line, "emit-raw") == 0) ? SCRIPT_CMD_EMIT_RAW : SCRIPT_CMD_RAW;
         int raw_len = 0;
         char *raw = parse_hex_bytes(args, &raw_len);
         if (!raw) {
@@ -294,7 +294,7 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         /* Store length in col_start as a hack? No — text is NUL-terminated
          * but may contain NULs. We store the length separately by using
          * a convention: for RAW, text is a malloc'd buffer and we store
-         * the length as the buffer size. But DebugCmd doesn't have a len
+         * the length as the buffer size. But ScriptCmd doesn't have a len
          * field. For now, raw bytes that are NUL will truncate at NUL
          * when used as a C string. This is acceptable for debug scripts
          * where raw is typically escape sequences (no NULs). */
@@ -302,10 +302,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "assert-contains") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_ASSERT_CONTAINS;
+        cmd->type = SCRIPT_CMD_ASSERT_CONTAINS;
         strip_quotes(args);
         cmd->text = strdup(args);
         if (!cmd->text)
@@ -314,10 +314,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "assert-not-contains") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_ASSERT_NOT_CONTAINS;
+        cmd->type = SCRIPT_CMD_ASSERT_NOT_CONTAINS;
         strip_quotes(args);
         cmd->text = strdup(args);
         if (!cmd->text)
@@ -326,20 +326,20 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "screendump") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_SCREENDUMP;
+        cmd->type = SCRIPT_CMD_SCREENDUMP;
         strip_quotes(args);
         snprintf(cmd->path, sizeof(cmd->path), "%s", args);
         return true;
     }
 
     if (strcmp(line, "dumprow") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_DUMPROW;
+        cmd->type = SCRIPT_CMD_DUMPROW;
         cmd->col_start = -1; /* all columns */
         cmd->col_end = 0;
         if (sscanf(args, "%d", &cmd->row) != 1) {
@@ -350,10 +350,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "dumpcells") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_DUMPCELLS;
+        cmd->type = SCRIPT_CMD_DUMPCELLS;
         if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
             script_set_error(s, line_num, "dumpcells: requires row col_start col_end");
             return false;
@@ -362,10 +362,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "dumpverts") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_DUMPVERTS;
+        cmd->type = SCRIPT_CMD_DUMPVERTS;
         if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
             script_set_error(s, line_num, "dumpverts: requires row col_start col_end");
             return false;
@@ -374,10 +374,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "verifybuf") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_VERIFYBUF;
+        cmd->type = SCRIPT_CMD_VERIFYBUF;
         if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
             script_set_error(s, line_num, "verifybuf: requires row col_start col_end");
             return false;
@@ -386,10 +386,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "notify") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_NOTIFY;
+        cmd->type = SCRIPT_CMD_NOTIFY;
         strip_quotes(args);
         char *sep = strstr(args, "\" \"");
         if (sep) {
@@ -406,10 +406,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "mousemove") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_MOUSEMOVE;
+        cmd->type = SCRIPT_CMD_MOUSEMOVE;
         if (sscanf(args, "%d %d", &cmd->mouse_x, &cmd->mouse_y) != 2) {
             script_set_error(s, line_num, "mousemove: requires x y");
             return false;
@@ -418,10 +418,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "resize") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_RESIZE;
+        cmd->type = SCRIPT_CMD_RESIZE;
         if (sscanf(args, "%d %d", &cmd->resize_cols, &cmd->resize_rows) != 2) {
             script_set_error(s, line_num, "resize: requires cols rows");
             return false;
@@ -430,10 +430,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "winsize") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_WINSIZE;
+        cmd->type = SCRIPT_CMD_WINSIZE;
         if (sscanf(args, "%d %d", &cmd->winsize_w, &cmd->winsize_h) != 2) {
             script_set_error(s, line_num, "winsize: requires width height");
             return false;
@@ -442,10 +442,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "record-start") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_RECORD_START;
+        cmd->type = SCRIPT_CMD_RECORD_START;
         cmd->record_fps = 30;
         char *dir = strtok(args, " \t\n");
         if (!dir) {
@@ -461,18 +461,18 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
     }
 
     if (strcmp(line, "record-stop") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_RECORD_STOP;
+        cmd->type = SCRIPT_CMD_RECORD_STOP;
         return true;
     }
 
     if (strcmp(line, "quit") == 0) {
-        DebugCmd *cmd = script_new_cmd(s);
+        ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = DBG_CMD_QUIT;
+        cmd->type = SCRIPT_CMD_QUIT;
         return true;
     }
 
@@ -537,7 +537,7 @@ int portty_script_count(const PorttyScript *s)
     return s ? s->count : 0;
 }
 
-const DebugCmd *portty_script_get(const PorttyScript *s, int index)
+const ScriptCmd *portty_script_get(const PorttyScript *s, int index)
 {
     if (!s || index < 0 || index >= s->count)
         return NULL;
@@ -685,10 +685,10 @@ void portty_script_step(PorttyScript *script,
     if (*cmd_index >= script->count)
         return;
 
-    const DebugCmd *cmd = &script->cmds[*cmd_index];
+    const ScriptCmd *cmd = &script->cmds[*cmd_index];
 
     switch (cmd->type) {
-    case DBG_CMD_WAIT:
+    case SCRIPT_CMD_WAIT:
     {
         if (!s_waiting) {
             s_wait_deadline = portty_now_seconds() + cmd->wait_seconds;
@@ -701,7 +701,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_SEND:
+    case SCRIPT_CMD_SEND:
     {
         if (ctx->pty && cmd->text)
             pty_write(ctx->pty, cmd->text, strlen(cmd->text));
@@ -709,7 +709,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_SENDLN:
+    case SCRIPT_CMD_SENDLN:
     {
         if (ctx->pty && cmd->text) {
             pty_write(ctx->pty, cmd->text, strlen(cmd->text));
@@ -719,7 +719,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_RAW:
+    case SCRIPT_CMD_RAW:
     {
         if (ctx->pty && cmd->text)
             pty_write(ctx->pty, cmd->text, strlen(cmd->text));
@@ -727,7 +727,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_EMIT:
+    case SCRIPT_CMD_EMIT:
     {
         if (ctx->emit_fn && cmd->text) {
             ctx->emit_fn(ctx->emit_user_data, cmd->text, strlen(cmd->text));
@@ -738,7 +738,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_EMIT_RAW:
+    case SCRIPT_CMD_EMIT_RAW:
     {
         if (ctx->emit_fn && cmd->text) {
             ctx->emit_fn(ctx->emit_user_data, cmd->text, strlen(cmd->text));
@@ -749,7 +749,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_ASSERT_CONTAINS:
+    case SCRIPT_CMD_ASSERT_CONTAINS:
     {
         int rows = 0, cols = 0;
         if (ctx->term)
@@ -767,7 +767,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_ASSERT_NOT_CONTAINS:
+    case SCRIPT_CMD_ASSERT_NOT_CONTAINS:
     {
         int rows = 0, cols = 0;
         if (ctx->term)
@@ -785,7 +785,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_SCREENDUMP:
+    case SCRIPT_CMD_SCREENDUMP:
     {
         if (ctx->pending_screendump && ctx->screendump_path_buf) {
             *ctx->pending_screendump = true;
@@ -797,7 +797,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_DUMPROW:
+    case SCRIPT_CMD_DUMPROW:
     {
         int rows = 0, cols = 0;
         if (ctx->term)
@@ -808,7 +808,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_DUMPCELLS:
+    case SCRIPT_CMD_DUMPCELLS:
     {
         execute_dumpcells(ctx->term, ctx->scroll_offset,
                           cmd->row, cmd->col_start, cmd->col_end);
@@ -816,7 +816,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_DUMPVERTS:
+    case SCRIPT_CMD_DUMPVERTS:
     {
         if (ctx->dumpverts_fn) {
             ctx->dumpverts_fn(cmd->row, cmd->col_start, cmd->col_end);
@@ -827,7 +827,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_VERIFYBUF:
+    case SCRIPT_CMD_VERIFYBUF:
     {
         if (ctx->pending_verifybuf && ctx->verify_row &&
             ctx->verify_col_start && ctx->verify_col_end) {
@@ -842,7 +842,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_NOTIFY:
+    case SCRIPT_CMD_NOTIFY:
     {
         if (ctx->notify_fn) {
             ctx->notify_fn(ctx->notify_user_data,
@@ -855,7 +855,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_MOUSEMOVE:
+    case SCRIPT_CMD_MOUSEMOVE:
     {
         if (ctx->mousemove_fn) {
             ctx->mousemove_fn(ctx->mousemove_user_data,
@@ -867,7 +867,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_RESIZE:
+    case SCRIPT_CMD_RESIZE:
     {
         if (ctx->resize_fn) {
             ctx->resize_fn(ctx->resize_user_data,
@@ -879,7 +879,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_WINSIZE:
+    case SCRIPT_CMD_WINSIZE:
     {
         if (ctx->winsize_fn) {
             ctx->winsize_fn(ctx->winsize_user_data,
@@ -891,7 +891,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_RECORD_START:
+    case SCRIPT_CMD_RECORD_START:
     {
         if (ctx->recorder) {
             frame_recorder_start(ctx->recorder, cmd->record_dir, cmd->record_fps);
@@ -905,7 +905,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_RECORD_STOP:
+    case SCRIPT_CMD_RECORD_STOP:
     {
         if (ctx->recorder) {
             if (ctx->record_stop_fn)
@@ -918,7 +918,7 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case DBG_CMD_QUIT:
+    case SCRIPT_CMD_QUIT:
     {
         if (ctx->backend && ctx->backend->request_quit)
             ctx->backend->request_quit(ctx->backend);
