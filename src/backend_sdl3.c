@@ -13,6 +13,7 @@
 #include "png_writer.h"
 #include "portty_app.h"
 #include "portty_debug_script.h"
+#include "portty_frame_rec.h"
 #include "portty_pty.h"
 #include "rend_common.h"
 #include "rend_sdl3.h"
@@ -48,6 +49,7 @@ enum PorttyEventCode
     EVENT_AUTOSCROLL_TICK,
     EVENT_LOTTIE_TICK,
     EVENT_NOTIFY_SHOW,
+    EVENT_RECORD_TICK,
 };
 
 // PTY data event payload
@@ -169,6 +171,9 @@ typedef struct
     bool debug_script_done;
     bool debug_pending_screendump;
     char debug_screendump_path[512];
+    FrameRecorder *frame_recorder;
+    TimerId record_timer;
+    bool debug_pending_record_frame;
 } Sdl3BackendData;
 
 static Sdl3BackendData *sdl3_data(PorttyBackend *self)
@@ -1236,6 +1241,26 @@ static void sdl3_debug_winsize(void *user_data, int w, int h)
     fprintf(stderr, "winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
 }
 
+static void sdl3_record_start(void *user_data, int fps)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d)
+        return;
+    int interval_ms = 1000 / fps;
+    d->record_timer = timer_add(d->timers, interval_ms, EVENT_RECORD_TICK, NULL);
+}
+
+static void sdl3_record_stop(void *user_data)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d)
+        return;
+    if (d->record_timer != TIMER_INVALID) {
+        timer_remove(d->timers, d->record_timer);
+        d->record_timer = TIMER_INVALID;
+    }
+}
+
 static void sdl3_run(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
@@ -1277,6 +1302,11 @@ static void sdl3_run(PorttyBackend *self)
                 fprintf(stderr, "ERROR: %s: %s\n", d->app->script_path, err);
                 SDL_SetAtomicInt(&d->quit_requested, 1);
             }
+            d->frame_recorder = frame_recorder_new();
+            if (!d->frame_recorder) {
+                fprintf(stderr, "ERROR: Failed to allocate frame recorder\n");
+                SDL_SetAtomicInt(&d->quit_requested, 1);
+            }
         }
     }
 
@@ -1303,6 +1333,11 @@ static void sdl3_run(PorttyBackend *self)
                 .resize_user_data = d,
                 .winsize_fn = sdl3_debug_winsize,
                 .winsize_user_data = d,
+                .recorder = d->frame_recorder,
+                .pending_record_frame = &d->debug_pending_record_frame,
+                .record_start_fn = sdl3_record_start,
+                .record_stop_fn = sdl3_record_stop,
+                .record_user_data = d,
             };
             portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
             if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
@@ -1638,6 +1673,12 @@ static void sdl3_run(PorttyBackend *self)
                         d->lottie_timer = TIMER_INVALID;
                     }
                     break;
+                case EVENT_RECORD_TICK:
+                    if (d->frame_recorder && d->frame_recorder->recording) {
+                        d->debug_pending_record_frame = true;
+                        terminal_mark_dirty(term);
+                    }
+                    break;
                 default:
                     break;
                 }
@@ -1690,6 +1731,15 @@ static void sdl3_run(PorttyBackend *self)
             sdl3_debug_screendump(d, d->debug_screendump_path);
         }
 
+        // === Debug script: post-render frame capture ===
+        if (d->debug_pending_record_frame) {
+            d->debug_pending_record_frame = false;
+            frame_recorder_build_path(d->frame_recorder, d->debug_screendump_path,
+                                      sizeof(d->debug_screendump_path));
+            sdl3_debug_screendump(d, d->debug_screendump_path);
+            frame_recorder_advance(d->frame_recorder);
+        }
+
         // === 4. Idle: sleep briefly to avoid busy-looping ===
         // SDL_WaitEventTimeout on Wayland can block far longer than the
         // requested timeout (known SDL3 issue with wl_display_dispatch).
@@ -1706,6 +1756,18 @@ static void sdl3_run(PorttyBackend *self)
     // Free debug script
     portty_debug_script_free(d->debug_script);
     d->debug_script = NULL;
+
+    // Cleanup frame recorder
+    if (d->frame_recorder) {
+        if (d->frame_recorder->recording)
+            frame_recorder_stop(d->frame_recorder);
+        if (d->record_timer != TIMER_INVALID) {
+            timer_remove(d->timers, d->record_timer);
+            d->record_timer = TIMER_INVALID;
+        }
+        frame_recorder_free(d->frame_recorder);
+        d->frame_recorder = NULL;
+    }
 
     if (d->cursor_blink_timer != TIMER_INVALID) {
         timer_remove(d->timers, d->cursor_blink_timer);

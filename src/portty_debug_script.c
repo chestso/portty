@@ -441,6 +441,33 @@ static bool parse_command(PorttyDebugScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "record-start") == 0) {
+        DebugCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = DBG_CMD_RECORD_START;
+        cmd->record_fps = 30;
+        char *dir = strtok(args, " \t\n");
+        if (!dir) {
+            script_set_error(s, line_num, "record-start requires directory");
+            return false;
+        }
+        strip_quotes(dir);
+        snprintf(cmd->record_dir, sizeof(cmd->record_dir), "%s", dir);
+        char *fps_str = strtok(NULL, " \t\n");
+        if (fps_str)
+            cmd->record_fps = atoi(fps_str);
+        return true;
+    }
+
+    if (strcmp(line, "record-stop") == 0) {
+        DebugCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = DBG_CMD_RECORD_STOP;
+        return true;
+    }
+
     if (strcmp(line, "quit") == 0) {
         DebugCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -859,6 +886,33 @@ void portty_debug_script_step(PorttyDebugScript *script,
                             cmd->winsize_w, cmd->winsize_h);
         } else {
             fprintf(stderr, "winsize: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_RECORD_START:
+    {
+        if (ctx->recorder) {
+            frame_recorder_start(ctx->recorder, cmd->record_dir, cmd->record_fps);
+            if (ctx->record_start_fn)
+                ctx->record_start_fn(ctx->record_user_data,
+                                     ctx->recorder->target_fps);
+        } else {
+            fprintf(stderr, "record-start: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case DBG_CMD_RECORD_STOP:
+    {
+        if (ctx->recorder) {
+            if (ctx->record_stop_fn)
+                ctx->record_stop_fn(ctx->record_user_data);
+            frame_recorder_stop(ctx->recorder);
+        } else {
+            fprintf(stderr, "record-stop: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

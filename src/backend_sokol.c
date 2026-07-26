@@ -21,6 +21,7 @@
 #include "portty_app.h"
 #include "portty_conf.h"
 #include "portty_debug_script.h"
+#include "portty_frame_rec.h"
 #include "portty_pty.h"
 #include "os_compat.h"
 #include "rend_sokol_atlas.h"
@@ -154,6 +155,7 @@ enum
     SOKOL_EVENT_CURSOR_BLINK = 1,
     SOKOL_EVENT_AUTOSCROLL_TICK,
     SOKOL_EVENT_LOTTIE_TICK,
+    SOKOL_EVENT_RECORD_TICK,
 };
 
 // Rendering scheduler mode.  DAMAGE mode only emits GPU work when the
@@ -282,6 +284,10 @@ typedef struct
     bool debug_pending_verifybuf;
     int debug_verify_row, debug_verify_col_start, debug_verify_col_end;
     unsigned int debug_glyph_vbuf_gl_id; // GL buffer ID for verifybuf
+    // Frame recorder
+    FrameRecorder *frame_recorder;
+    TimerId record_timer;
+    bool debug_pending_record_frame;
     // Lottie animation rendering
     TimerId lottie_timer;
     SokolLottieCacheEntry lottie_cache[SOKOL_LOTTIE_CACHE_MAX];
@@ -439,6 +445,18 @@ static void sokol_destroy(PorttyBackend *self)
     // Free debug script
     portty_debug_script_free(d->debug_script);
     d->debug_script = NULL;
+
+    // Cleanup frame recorder
+    if (d->frame_recorder) {
+        if (d->frame_recorder->recording)
+            frame_recorder_stop(d->frame_recorder);
+        if (d->record_timer != TIMER_INVALID) {
+            timer_remove(d->timers, d->record_timer);
+            d->record_timer = TIMER_INVALID;
+        }
+        frame_recorder_free(d->frame_recorder);
+        d->frame_recorder = NULL;
+    }
 
     if (d->cursor_blink_timer != TIMER_INVALID) {
         timer_remove(d->timers, d->cursor_blink_timer);
@@ -3906,6 +3924,26 @@ static void sokol_debug_notify(void *backend, const char *title,
     sokol_notify(self, title, body, PORTTY_NOTIFY_INFO);
 }
 
+static void sokol_record_start(void *user_data, int fps)
+{
+    SokolData *d = (SokolData *)user_data;
+    if (!d)
+        return;
+    int interval_ms = 1000 / fps;
+    d->record_timer = timer_add(d->timers, interval_ms, SOKOL_EVENT_RECORD_TICK, NULL);
+}
+
+static void sokol_record_stop(void *user_data)
+{
+    SokolData *d = (SokolData *)user_data;
+    if (!d)
+        return;
+    if (d->record_timer != TIMER_INVALID) {
+        timer_remove(d->timers, d->record_timer);
+        d->record_timer = TIMER_INVALID;
+    }
+}
+
 static void sokol_debug_dumpverts(int row, int col_start, int col_end)
 {
     for (int col = col_start; col <= col_end; col++) {
@@ -4124,6 +4162,11 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
             fprintf(stderr, "ERROR: %s: %s\n", app->script_path, err);
             exit(1);
         }
+        d->frame_recorder = frame_recorder_new();
+        if (!d->frame_recorder) {
+            fprintf(stderr, "ERROR: Failed to allocate frame recorder\n");
+            exit(1);
+        }
     }
 
     // Ensure the very first frame is rendered.  coffer starts with no damage
@@ -4314,6 +4357,11 @@ static void sokol_poll_timers(SokolData *d)
                 timer_remove(d->timers, d->lottie_timer);
                 d->lottie_timer = TIMER_INVALID;
             }
+        } else if (events[i].code == SOKOL_EVENT_RECORD_TICK) {
+            if (d->frame_recorder && d->frame_recorder->recording) {
+                d->debug_pending_record_frame = true;
+                terminal_mark_dirty(d->term);
+            }
         }
     }
 }
@@ -4331,7 +4379,8 @@ static bool sokol_should_render(SokolData *d, double elapsed_ms)
         return false;
     }
 
-    if (d->debug_pending_screendump || d->debug_pending_verifybuf)
+    if (d->debug_pending_screendump || d->debug_pending_verifybuf ||
+        d->debug_pending_record_frame)
         return true;
 
     terminal_flush_damage(d->term);
@@ -4372,6 +4421,11 @@ static void sokol_frame_cb(void)
             .mousemove_user_data = g_sokol.app,
             .notify_fn = sokol_debug_notify,
             .notify_user_data = g_sokol.backend,
+            .recorder = d->frame_recorder,
+            .pending_record_frame = &d->debug_pending_record_frame,
+            .record_start_fn = sokol_record_start,
+            .record_stop_fn = sokol_record_stop,
+            .record_user_data = d,
         };
         portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
         if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
@@ -4397,6 +4451,15 @@ static void sokol_frame_cb(void)
             sokol_debug_screendump(d, d->debug_screendump_path);
             if (d->screenshot_saved)
                 d->quit_requested = true;
+        }
+
+        // === Debug script: frame capture ===
+        if (d->debug_pending_record_frame) {
+            d->debug_pending_record_frame = false;
+            frame_recorder_build_path(d->frame_recorder, d->debug_screendump_path,
+                                      sizeof(d->debug_screendump_path));
+            sokol_debug_screendump(d, d->debug_screendump_path);
+            frame_recorder_advance(d->frame_recorder);
         }
 
         d->self->present(d->self);

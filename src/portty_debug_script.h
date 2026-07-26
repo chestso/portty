@@ -27,6 +27,8 @@ typedef enum
     DBG_CMD_MOUSEMOVE,
     DBG_CMD_RESIZE,
     DBG_CMD_WINSIZE,
+    DBG_CMD_RECORD_START,
+    DBG_CMD_RECORD_STOP,
     DBG_CMD_QUIT,
 } DebugCmdType;
 
@@ -55,6 +57,9 @@ typedef struct
     /* NOTIFY */
     char notify_title[128];
     char notify_body[256];
+    /* RECORD_START */
+    char record_dir[512];
+    int record_fps;
 } DebugCmd;
 
 typedef struct PorttyDebugScript PorttyDebugScript;
@@ -78,6 +83,7 @@ const char *portty_debug_script_error(const PorttyDebugScript *s);
 /* ── Shared execution helpers ── */
 
 #include "portty_backend.h"
+#include "portty_frame_rec.h"
 #include "portty_pty.h"
 #include "term.h"
 
@@ -124,6 +130,16 @@ typedef struct
      * triggering the real compositor resize path (NULL if unsupported) */
     void (*winsize_fn)(void *user_data, int w, int h);
     void *winsize_user_data;
+    /* Frame recorder context */
+    FrameRecorder *recorder;
+    bool *pending_record_frame;
+    /* Timer lifecycle callbacks (backend-specific).
+     * Called by portty_debug_script_step() when RECORD_START/STOP
+     * commands are processed. The backend creates/removes the timer
+     * here, not in frame_recorder_start/stop(). */
+    void (*record_start_fn)(void *user_data, int fps);
+    void (*record_stop_fn)(void *user_data);
+    void *record_user_data;
 } DebugExecCtx;
 
 /* Execute one script step. Called each frame by the backend's main loop.
