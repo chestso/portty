@@ -20,7 +20,7 @@
 #include "display_info.h"
 #include "portty_app.h"
 #include "portty_conf.h"
-#include "portty_debug_script.h"
+#include "portty_script.h"
 #include "portty_frame_rec.h"
 #include "portty_pty.h"
 #include "os_compat.h"
@@ -276,18 +276,18 @@ typedef struct
     bool suppress_next_char; // KEY_DOWN handled by pager — drop the paired CHAR event
     float wheel_accum_y;     // fractional mouse-wheel accumulation (matches SDL3 backend)
     // Debug script infrastructure
-    PorttyDebugScript *debug_script;
-    int debug_cmd_index;
-    bool debug_script_done;
-    bool debug_pending_screendump;
-    char debug_screendump_path[512];
-    bool debug_pending_verifybuf;
-    int debug_verify_row, debug_verify_col_start, debug_verify_col_end;
-    unsigned int debug_glyph_vbuf_gl_id; // GL buffer ID for verifybuf
+    PorttyScript *script;
+    int cmd_index;
+    bool script_done;
+    bool pending_screendump;
+    char screendump_path[512];
+    bool pending_verifybuf;
+    int verify_row, verify_col_start, verify_col_end;
+    unsigned int glyph_vbuf_gl_id; // GL buffer ID for verifybuf
     // Frame recorder
     FrameRecorder *frame_recorder;
     TimerId record_timer;
-    bool debug_pending_record_frame;
+    bool pending_record_frame;
     // Lottie animation rendering
     TimerId lottie_timer;
     SokolLottieCacheEntry lottie_cache[SOKOL_LOTTIE_CACHE_MAX];
@@ -443,8 +443,8 @@ static void sokol_destroy(PorttyBackend *self)
     pthread_mutex_destroy(&d->pty_queue_mtx);
 
     // Free debug script
-    portty_debug_script_free(d->debug_script);
-    d->debug_script = NULL;
+    portty_script_free(d->script);
+    d->script = NULL;
 
     // Cleanup frame recorder
     if (d->frame_recorder) {
@@ -1837,7 +1837,7 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
 
     // Capture GL buffer ID for debug verifybuf (sokol leaves it bound).
 #if defined(SOKOL_GLCORE)
-    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, (GLint *)&d->debug_glyph_vbuf_gl_id);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, (GLint *)&d->glyph_vbuf_gl_id);
 #endif
 
     d->glyph_pip = sg_make_pipeline(&(sg_pipeline_desc){
@@ -3227,9 +3227,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         d->screenshot_frames--;
         if (d->screenshot_frames == 0) {
             d->screenshot_saved = true;
-            d->debug_pending_screendump = true;
-            snprintf(d->debug_screendump_path,
-                     sizeof(d->debug_screendump_path), "%s",
+            d->pending_screendump = true;
+            snprintf(d->screendump_path,
+                     sizeof(d->screendump_path), "%s",
                      d->screenshot_path);
         }
     }
@@ -3983,7 +3983,7 @@ static void sokol_debug_verifybuf(SokolData *d, int row, int col_start,
     printf("verifybuf: not supported on this backend\n");
     return;
 #else
-    GLuint gl_buf = d->debug_glyph_vbuf_gl_id;
+    GLuint gl_buf = d->glyph_vbuf_gl_id;
     if (!gl_buf) {
         printf("verifybuf: GL buffer ID not available\n");
         return;
@@ -4151,13 +4151,13 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
 
     // Load debug script if specified
     if (app->script_path) {
-        d->debug_script = portty_debug_script_load(app->script_path);
-        if (!d->debug_script) {
+        d->script = portty_script_load(app->script_path);
+        if (!d->script) {
             fprintf(stderr, "ERROR: Failed to load debug script: %s: out of memory\n",
                     app->script_path);
             exit(1);
         }
-        const char *err = portty_debug_script_error(d->debug_script);
+        const char *err = portty_script_error(d->script);
         if (err) {
             fprintf(stderr, "ERROR: %s: %s\n", app->script_path, err);
             exit(1);
@@ -4359,7 +4359,7 @@ static void sokol_poll_timers(SokolData *d)
             }
         } else if (events[i].code == SOKOL_EVENT_RECORD_TICK) {
             if (d->frame_recorder && d->frame_recorder->recording) {
-                d->debug_pending_record_frame = true;
+                d->pending_record_frame = true;
                 terminal_mark_dirty(d->term);
             }
         }
@@ -4379,8 +4379,8 @@ static bool sokol_should_render(SokolData *d, double elapsed_ms)
         return false;
     }
 
-    if (d->debug_pending_screendump || d->debug_pending_verifybuf ||
-        d->debug_pending_record_frame)
+    if (d->pending_screendump || d->pending_verifybuf ||
+        d->pending_record_frame)
         return true;
 
     terminal_flush_damage(d->term);
@@ -4402,7 +4402,7 @@ static void sokol_frame_cb(void)
     sokol_drain_pty(d);
 
     // === Debug script: pre-render commands ===
-    if (d->debug_script && !d->debug_script_done) {
+    if (d->script && !d->script_done) {
         DebugExecCtx ctx = {
             .backend = g_sokol.backend,
             .term = d->term,
@@ -4410,26 +4410,26 @@ static void sokol_frame_cb(void)
             .scroll_offset = d->scroll.scroll_offset,
             .emit_fn = (void (*)(void *, const char *, size_t))portty_app_feed_terminal,
             .emit_user_data = g_sokol.app,
-            .pending_screendump = &d->debug_pending_screendump,
-            .screendump_path_buf = d->debug_screendump_path,
-            .pending_verifybuf = &d->debug_pending_verifybuf,
-            .verify_row = &d->debug_verify_row,
-            .verify_col_start = &d->debug_verify_col_start,
-            .verify_col_end = &d->debug_verify_col_end,
+            .pending_screendump = &d->pending_screendump,
+            .screendump_path_buf = d->screendump_path,
+            .pending_verifybuf = &d->pending_verifybuf,
+            .verify_row = &d->verify_row,
+            .verify_col_start = &d->verify_col_start,
+            .verify_col_end = &d->verify_col_end,
             .dumpverts_fn = sokol_debug_dumpverts,
             .mousemove_fn = sokol_debug_mousemove,
             .mousemove_user_data = g_sokol.app,
             .notify_fn = sokol_debug_notify,
             .notify_user_data = g_sokol.backend,
             .recorder = d->frame_recorder,
-            .pending_record_frame = &d->debug_pending_record_frame,
+            .pending_record_frame = &d->pending_record_frame,
             .record_start_fn = sokol_record_start,
             .record_stop_fn = sokol_record_stop,
             .record_user_data = d,
         };
-        portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
-        if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
-            d->debug_script_done = true;
+        portty_script_step(d->script, &d->cmd_index, &ctx);
+        if (d->cmd_index >= portty_script_count(d->script))
+            d->script_done = true;
     }
 
     double elapsed_ms = (double)sapp_frame_duration() * 1000.0;
@@ -4446,19 +4446,19 @@ static void sokol_frame_cb(void)
         // === Debug script: pre-commit deferred commands ===
         // screendump must run after sg_end_pass but BEFORE sg_commit (SwapBuffers),
         // otherwise glReadPixels reads the previous frame's back buffer.
-        if (d->debug_pending_screendump) {
-            d->debug_pending_screendump = false;
-            sokol_debug_screendump(d, d->debug_screendump_path);
+        if (d->pending_screendump) {
+            d->pending_screendump = false;
+            sokol_debug_screendump(d, d->screendump_path);
             if (d->screenshot_saved)
                 d->quit_requested = true;
         }
 
         // === Debug script: frame capture ===
-        if (d->debug_pending_record_frame) {
-            d->debug_pending_record_frame = false;
-            frame_recorder_build_path(d->frame_recorder, d->debug_screendump_path,
-                                      sizeof(d->debug_screendump_path));
-            sokol_debug_screendump(d, d->debug_screendump_path);
+        if (d->pending_record_frame) {
+            d->pending_record_frame = false;
+            frame_recorder_build_path(d->frame_recorder, d->screendump_path,
+                                      sizeof(d->screendump_path));
+            sokol_debug_screendump(d, d->screendump_path);
             frame_recorder_advance(d->frame_recorder);
         }
 
@@ -4466,11 +4466,11 @@ static void sokol_frame_cb(void)
         terminal_clear_redraw(d->term);
 
         // === Debug script: post-present deferred commands ===
-        if (d->debug_pending_verifybuf) {
-            d->debug_pending_verifybuf = false;
-            sokol_debug_verifybuf(d, d->debug_verify_row,
-                                  d->debug_verify_col_start,
-                                  d->debug_verify_col_end);
+        if (d->pending_verifybuf) {
+            d->pending_verifybuf = false;
+            sokol_debug_verifybuf(d, d->verify_row,
+                                  d->verify_col_start,
+                                  d->verify_col_end);
         }
     }
 }

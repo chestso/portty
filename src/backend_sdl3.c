@@ -12,7 +12,7 @@
 #include "png_reader.h"
 #include "png_writer.h"
 #include "portty_app.h"
-#include "portty_debug_script.h"
+#include "portty_script.h"
 #include "portty_frame_rec.h"
 #include "portty_pty.h"
 #include "rend_common.h"
@@ -166,14 +166,14 @@ typedef struct
     float wheel_accum_y;
 
     // Debug script infrastructure
-    PorttyDebugScript *debug_script;
-    int debug_cmd_index;
-    bool debug_script_done;
-    bool debug_pending_screendump;
-    char debug_screendump_path[512];
+    PorttyScript *script;
+    int cmd_index;
+    bool script_done;
+    bool pending_screendump;
+    char screendump_path[512];
     FrameRecorder *frame_recorder;
     TimerId record_timer;
-    bool debug_pending_record_frame;
+    bool pending_record_frame;
 } Sdl3BackendData;
 
 static Sdl3BackendData *sdl3_data(PorttyBackend *self)
@@ -1291,13 +1291,13 @@ static void sdl3_run(PorttyBackend *self)
 
     // Load debug script if specified
     if (d->app->script_path) {
-        d->debug_script = portty_debug_script_load(d->app->script_path);
-        if (!d->debug_script) {
+        d->script = portty_script_load(d->app->script_path);
+        if (!d->script) {
             fprintf(stderr, "ERROR: Failed to load debug script: %s: out of memory\n",
                     d->app->script_path);
             SDL_SetAtomicInt(&d->quit_requested, 1);
         } else {
-            const char *err = portty_debug_script_error(d->debug_script);
+            const char *err = portty_script_error(d->script);
             if (err) {
                 fprintf(stderr, "ERROR: %s: %s\n", d->app->script_path, err);
                 SDL_SetAtomicInt(&d->quit_requested, 1);
@@ -1317,7 +1317,7 @@ static void sdl3_run(PorttyBackend *self)
     Uint64 last_tick = SDL_GetTicks();
     while (!SDL_GetAtomicInt(&d->quit_requested)) {
         // === Debug script: pre-render commands ===
-        if (d->debug_script && !d->debug_script_done) {
+        if (d->script && !d->script_done) {
             DebugExecCtx ctx = {
                 .backend = self,
                 .term = term,
@@ -1325,8 +1325,8 @@ static void sdl3_run(PorttyBackend *self)
                 .scroll_offset = rend_sdl3_get_scroll_offset(rend),
                 .emit_fn = (void (*)(void *, const char *, size_t))portty_app_feed_terminal,
                 .emit_user_data = d->app,
-                .pending_screendump = &d->debug_pending_screendump,
-                .screendump_path_buf = d->debug_screendump_path,
+                .pending_screendump = &d->pending_screendump,
+                .screendump_path_buf = d->screendump_path,
                 .pending_verifybuf = NULL,
                 .dumpverts_fn = NULL,
                 .resize_fn = sdl3_debug_resize,
@@ -1334,14 +1334,14 @@ static void sdl3_run(PorttyBackend *self)
                 .winsize_fn = sdl3_debug_winsize,
                 .winsize_user_data = d,
                 .recorder = d->frame_recorder,
-                .pending_record_frame = &d->debug_pending_record_frame,
+                .pending_record_frame = &d->pending_record_frame,
                 .record_start_fn = sdl3_record_start,
                 .record_stop_fn = sdl3_record_stop,
                 .record_user_data = d,
             };
-            portty_debug_script_step(d->debug_script, &d->debug_cmd_index, &ctx);
-            if (d->debug_cmd_index >= portty_debug_script_count(d->debug_script))
-                d->debug_script_done = true;
+            portty_script_step(d->script, &d->cmd_index, &ctx);
+            if (d->cmd_index >= portty_script_count(d->script))
+                d->script_done = true;
         }
 
         bool pty_processed = false;
@@ -1675,7 +1675,7 @@ static void sdl3_run(PorttyBackend *self)
                     break;
                 case EVENT_RECORD_TICK:
                     if (d->frame_recorder && d->frame_recorder->recording) {
-                        d->debug_pending_record_frame = true;
+                        d->pending_record_frame = true;
                         terminal_mark_dirty(term);
                     }
                     break;
@@ -1726,17 +1726,17 @@ static void sdl3_run(PorttyBackend *self)
         }
 
         // === Debug script: post-render screendump ===
-        if (d->debug_pending_screendump) {
-            d->debug_pending_screendump = false;
-            sdl3_debug_screendump(d, d->debug_screendump_path);
+        if (d->pending_screendump) {
+            d->pending_screendump = false;
+            sdl3_debug_screendump(d, d->screendump_path);
         }
 
         // === Debug script: post-render frame capture ===
-        if (d->debug_pending_record_frame) {
-            d->debug_pending_record_frame = false;
-            frame_recorder_build_path(d->frame_recorder, d->debug_screendump_path,
-                                      sizeof(d->debug_screendump_path));
-            sdl3_debug_screendump(d, d->debug_screendump_path);
+        if (d->pending_record_frame) {
+            d->pending_record_frame = false;
+            frame_recorder_build_path(d->frame_recorder, d->screendump_path,
+                                      sizeof(d->screendump_path));
+            sdl3_debug_screendump(d, d->screendump_path);
             frame_recorder_advance(d->frame_recorder);
         }
 
@@ -1754,8 +1754,8 @@ static void sdl3_run(PorttyBackend *self)
     SDL_StopTextInput(d->window);
 
     // Free debug script
-    portty_debug_script_free(d->debug_script);
-    d->debug_script = NULL;
+    portty_script_free(d->script);
+    d->script = NULL;
 
     // Cleanup frame recorder
     if (d->frame_recorder) {

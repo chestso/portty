@@ -92,7 +92,7 @@ build/src/portty --demo "Hello, world!"
 | `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing)             |
 | `-V` / `--version`          | Print version and exit                                                      |
 | `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                      |
-| `-S FILE` / `--script FILE` | Run debug script FILE (see [Debug Scripting](#debug-scripting))             |
+| `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#debug-scripting))                         |
 
 ### Keyboard Shortcuts
 
@@ -125,7 +125,7 @@ While the pager is open:
 | `Ctrl+C` or `Ctrl+Shift+C`       | Copy selection            |
 | `Ctrl+click` on a link           | Open URL                  |
 
-## Debug Scripting
+## Scripting
 
 portty includes a built-in scripting system for automated debugging and regression testing. Scripts are plain-text files loaded via the `-S` / `--script` CLI flag. Each command executes one per frame inside the render loop, so you can drive the terminal, inspect its state, and capture screenshots at precise points.
 
@@ -160,7 +160,7 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 
 ### `send` vs `emit`
 
-There are two separate input paths for debug scripts:
+There are two separate input paths for scripts:
 
 - **`send` / `sendln` / `raw`** write to the **PTY input** (the child process's stdin). Use these when you want to simulate a user typing into the shell. The shell must output escape sequences on stdout before coffer sees them.
 - **`emit` / `emit-raw`** write directly to **coffer's terminal emulator**, bypassing the child. Use these when you want to feed VT sequences straight to the terminal without involving the shell.

@@ -2,7 +2,7 @@
 #include "config.h"
 #endif
 
-#include "portty_debug_script.h"
+#include "portty_script.h"
 #include "rend_common.h"
 
 #include <ctype.h>
@@ -18,9 +18,9 @@
 #include <time.h>
 #endif
 
-/* ── PorttyDebugScript struct ── */
+/* ── PorttyScript struct ── */
 
-struct PorttyDebugScript
+struct PorttyScript
 {
     DebugCmd *cmds;
     int count;
@@ -43,7 +43,7 @@ static int hex_val(char c)
     return 0;
 }
 
-static void script_set_error(PorttyDebugScript *s, int line, const char *fmt, ...)
+static void script_set_error(PorttyScript *s, int line, const char *fmt, ...)
 {
     va_list args;
     va_start(args, fmt);
@@ -53,7 +53,7 @@ static void script_set_error(PorttyDebugScript *s, int line, const char *fmt, ..
     s->error_line = line;
 }
 
-static bool script_ensure_capacity(PorttyDebugScript *s)
+static bool script_ensure_capacity(PorttyScript *s)
 {
     if (s->count >= s->capacity) {
         int new_cap = s->capacity == 0 ? 16 : s->capacity * 2;
@@ -212,7 +212,7 @@ static void strip_quotes(char *str)
 
 /* ── Parser ── */
 
-static DebugCmd *script_new_cmd(PorttyDebugScript *s)
+static DebugCmd *script_new_cmd(PorttyScript *s)
 {
     if (!script_ensure_capacity(s))
         return NULL;
@@ -227,7 +227,7 @@ static DebugCmd *script_new_cmd(PorttyDebugScript *s)
     return cmd;
 }
 
-static bool parse_command(PorttyDebugScript *s, char *line, int line_num)
+static bool parse_command(PorttyScript *s, char *line, int line_num)
 {
     /* Skip leading whitespace */
     line = skip_ws(line);
@@ -482,18 +482,18 @@ static bool parse_command(PorttyDebugScript *s, char *line, int line_num)
 
 /* ── Public API ── */
 
-PorttyDebugScript *portty_debug_script_load(const char *path)
+PorttyScript *portty_script_load(const char *path)
 {
     FILE *fp = fopen(path, "r");
     if (!fp) {
         // Create a struct to hold the file open error
-        PorttyDebugScript *s = calloc(1, sizeof(PorttyDebugScript));
+        PorttyScript *s = calloc(1, sizeof(PorttyScript));
         if (s)
             script_set_error(s, 0, "cannot open file: %s", strerror(errno));
         return s;
     }
 
-    PorttyDebugScript *s = calloc(1, sizeof(PorttyDebugScript));
+    PorttyScript *s = calloc(1, sizeof(PorttyScript));
     if (!s) {
         fclose(fp);
         return NULL;
@@ -519,7 +519,7 @@ PorttyDebugScript *portty_debug_script_load(const char *path)
     return s;
 }
 
-void portty_debug_script_free(PorttyDebugScript *s)
+void portty_script_free(PorttyScript *s)
 {
     if (!s)
         return;
@@ -532,19 +532,19 @@ void portty_debug_script_free(PorttyDebugScript *s)
     free(s);
 }
 
-int portty_debug_script_count(const PorttyDebugScript *s)
+int portty_script_count(const PorttyScript *s)
 {
     return s ? s->count : 0;
 }
 
-const DebugCmd *portty_debug_script_get(const PorttyDebugScript *s, int index)
+const DebugCmd *portty_script_get(const PorttyScript *s, int index)
 {
     if (!s || index < 0 || index >= s->count)
         return NULL;
     return &s->cmds[index];
 }
 
-const char *portty_debug_script_error(const PorttyDebugScript *s)
+const char *portty_script_error(const PorttyScript *s)
 {
     if (!s || !s->has_error)
         return NULL;
@@ -675,9 +675,9 @@ static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
 static double s_wait_deadline = 0;
 static bool s_waiting = false;
 
-void portty_debug_script_step(PorttyDebugScript *script,
-                              int *cmd_index,
-                              DebugExecCtx *ctx)
+void portty_script_step(PorttyScript *script,
+                        int *cmd_index,
+                        DebugExecCtx *ctx)
 {
     if (!script || !cmd_index || !ctx)
         return;

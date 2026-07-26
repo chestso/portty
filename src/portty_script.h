@@ -1,5 +1,5 @@
-#ifndef PORTTY_DEBUG_SCRIPT_H
-#define PORTTY_DEBUG_SCRIPT_H
+#ifndef PORTTY_SCRIPT_H
+#define PORTTY_SCRIPT_H
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -62,23 +62,23 @@ typedef struct
     int record_fps;
 } DebugCmd;
 
-typedef struct PorttyDebugScript PorttyDebugScript;
+typedef struct PorttyScript PorttyScript;
 
 /* Load and parse a script file. Returns NULL on error. */
-PorttyDebugScript *portty_debug_script_load(const char *path);
+PorttyScript *portty_script_load(const char *path);
 
 /* Free a script and all its DebugCmd text strings. Safe to call on NULL. */
-void portty_debug_script_free(PorttyDebugScript *s);
+void portty_script_free(PorttyScript *s);
 
 /* Get the number of parsed commands. */
-int portty_debug_script_count(const PorttyDebugScript *s);
+int portty_script_count(const PorttyScript *s);
 
 /* Get a command by index (0-based). Returns NULL if out of range. */
-const DebugCmd *portty_debug_script_get(const PorttyDebugScript *s, int index);
+const DebugCmd *portty_script_get(const PorttyScript *s, int index);
 
 /* Get a human-readable error message if load() failed.
  * Returns NULL if no error or if s is NULL. */
-const char *portty_debug_script_error(const PorttyDebugScript *s);
+const char *portty_script_error(const PorttyScript *s);
 
 /* ── Shared execution helpers ── */
 
@@ -134,7 +134,7 @@ typedef struct
     FrameRecorder *recorder;
     bool *pending_record_frame;
     /* Timer lifecycle callbacks (backend-specific).
-     * Called by portty_debug_script_step() when RECORD_START/STOP
+     * Called by portty_script_step() when RECORD_START/STOP
      * commands are processed. The backend creates/removes the timer
      * here, not in frame_recorder_start/stop(). */
     void (*record_start_fn)(void *user_data, int fps);
@@ -150,12 +150,12 @@ typedef struct
  * and are skipped.
  * Advances *cmd_index; when all commands are done, sets *cmd_index to
  * count (caller can detect completion by comparing). */
-void portty_debug_script_step(PorttyDebugScript *script,
-                              int *cmd_index,
-                              DebugExecCtx *ctx);
+void portty_script_step(PorttyScript *script,
+                        int *cmd_index,
+                        DebugExecCtx *ctx);
 
 #ifdef __cplusplus
 }
 #endif
 
-#endif /* PORTTY_DEBUG_SCRIPT_H */
+#endif /* PORTTY_SCRIPT_H */

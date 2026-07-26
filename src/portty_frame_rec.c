@@ -4,7 +4,7 @@
 
 #include "common.h"
 #include "portty_frame_rec.h"
-#include "portty_debug_script.h"
+#include "portty_script.h"
 
 #include <dirent.h>
 #include <stdio.h>
