@@ -68,6 +68,9 @@ jobs:
         if: matrix.backend == 'sokol'
         run: sh scripts/fetch-sokol.sh
 
+      - name: Fetch QOI header
+        run: sh scripts/fetch-qoi.sh
+
       - name: Build portty
         run: |
           ./autogen.sh
