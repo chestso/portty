@@ -11,6 +11,7 @@
 #include "path_compat.h"
 #include "png_reader.h"
 #include "png_writer.h"
+#include "qoi_writer.h"
 #include "portty_app.h"
 #include "portty_script.h"
 #include "portty_frame_rec.h"
@@ -1208,6 +1209,19 @@ static void sdl3_debug_screendump(Sdl3BackendData *d, const char *path)
     vlog("screendump: saved %s (%dx%d)\n", path, w, h);
 }
 
+static void sdl3_record_frame(Sdl3BackendData *d, const char *path)
+{
+    SDL_Surface *surface = SDL_RenderReadPixels(d->sdl_renderer, NULL);
+    if (!surface)
+        return;
+    SDL_Surface *rgba = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    if (rgba) {
+        qoi_write_rgba(path, rgba->pixels, rgba->w, rgba->h);
+        SDL_DestroySurface(rgba);
+    }
+    SDL_DestroySurface(surface);
+}
+
 // ── Event loop ───────────────────────────────────────────────────────────
 
 static void sdl3_debug_resize(void *user_data, int cols, int rows)
@@ -1736,7 +1750,7 @@ static void sdl3_run(PorttyBackend *self)
             d->pending_record_frame = false;
             frame_recorder_build_path(d->frame_recorder, d->screendump_path,
                                       sizeof(d->screendump_path));
-            sdl3_debug_screendump(d, d->screendump_path);
+            sdl3_record_frame(d, d->screendump_path);
             frame_recorder_advance(d->frame_recorder);
         }
 

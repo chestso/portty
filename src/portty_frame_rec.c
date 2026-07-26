@@ -24,7 +24,7 @@ static int find_next_frame_index(const char *dir)
         struct dirent *ent;
         while ((ent = readdir(d))) {
             int idx;
-            if (sscanf(ent->d_name, "frame_%d.png", &idx) == 1) {
+            if (sscanf(ent->d_name, "frame_%d.qoi", &idx) == 1) {
                 if (idx > max_idx)
                     max_idx = idx;
             }
@@ -76,7 +76,7 @@ bool frame_recorder_start(FrameRecorder *r, const char *dir, int fps)
     r->frames_skipped = 0;
     r->start_time = portty_debug_now_seconds();
 
-    vlog("record-start: %s at %d fps, starting at frame_%06d.png\n",
+    vlog("record-start: %s at %d fps, starting at frame_%06d.qoi\n",
          dir, r->target_fps, r->frame_index);
     return true;
 }
@@ -101,7 +101,7 @@ void frame_recorder_build_path(FrameRecorder *r, char *buf, size_t len)
 {
     if (!r || !buf)
         return;
-    snprintf(buf, len, "%s/frame_%06d.png", r->output_dir, r->frame_index);
+    snprintf(buf, len, "%s/frame_%06d.qoi", r->output_dir, r->frame_index);
 }
 
 void frame_recorder_advance(FrameRecorder *r)

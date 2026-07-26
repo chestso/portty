@@ -17,6 +17,7 @@
 #endif
 #include "pager.h"
 #include "png_writer.h"
+#include "qoi_writer.h"
 #include "display_info.h"
 #include "portty_app.h"
 #include "portty_conf.h"
@@ -3909,6 +3910,40 @@ static void sokol_debug_screendump(SokolData *d, const char *path)
 #endif
 }
 
+static void sokol_record_frame(SokolData *d, const char *path)
+{
+    (void)d;
+#if !defined(SOKOL_GLCORE)
+    (void)path;
+    return;
+#else
+    int ss_w = (int)sapp_width();
+    int ss_h = (int)sapp_height();
+    uint8_t *pixels = malloc((size_t)ss_w * ss_h * 4);
+    if (!pixels)
+        return;
+
+    glFinish();
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadBuffer(GL_BACK);
+    glReadPixels(0, 0, ss_w, ss_h, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+    uint8_t *flipped = malloc((size_t)ss_w * ss_h * 4);
+    if (flipped) {
+        for (int y = 0; y < ss_h; y++) {
+            memcpy(flipped + (size_t)y * ss_w * 4,
+                   pixels + (size_t)(ss_h - 1 - y) * ss_w * 4,
+                   (size_t)ss_w * 4);
+        }
+        qoi_write_rgba(path, flipped, ss_w, ss_h);
+        free(flipped);
+    } else {
+        qoi_write_rgba(path, pixels, ss_w, ss_h);
+    }
+    free(pixels);
+#endif
+}
+
 static void sokol_debug_mousemove(void *app, int x, int y)
 {
     PorttyApp *p = (PorttyApp *)app;
@@ -4458,7 +4493,7 @@ static void sokol_frame_cb(void)
             d->pending_record_frame = false;
             frame_recorder_build_path(d->frame_recorder, d->screendump_path,
                                       sizeof(d->screendump_path));
-            sokol_debug_screendump(d, d->screendump_path);
+            sokol_record_frame(d, d->screendump_path);
             frame_recorder_advance(d->frame_recorder);
         }
 

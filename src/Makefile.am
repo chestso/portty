@@ -44,14 +44,14 @@ PORTTY_COMMON_SRC = \
     $(FONT_RESOLVE_SOURCE) \
     font_resolve.c font.c font_ft.c \
     colr.c unicode.c base64.c \
-    png_writer.c png_reader.c \
+    png_writer.c png_reader.c qoi_writer.c \
     portty_conf.c diag.c pager.c timer.c path_compat.c os_compat.c display_info.c \
     portty_bug.c heap_harden.c \
     rend_common.c rend_boxdraw.c \
     portty_script.c portty_frame_rec.c
 
 PORTTY_COMMON_CFLAGS = $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
-    $(LIBPNG_CFLAGS) $(COFFER_CFLAGS)
+    $(LIBPNG_CFLAGS) $(COFFER_CFLAGS) -I$(top_srcdir)/third_party/qoi
 PORTTY_COMMON_LDADD = $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) \
     $(LIBPNG_LIBS) $(COFFER_LIBS) -lm
 
@@ -118,7 +118,7 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     backend_sdl3.h backend_sokol.h base64.h common.h diag.h display_info.h \
     font_ft.h font_ft_internal.h font.h font_resolve_ct.h font_resolve_fc.h \
     font_resolve.h font_resolve_w32.h heap_harden.h os_compat.h pager.h \
-    path_compat.h png_reader.h png_writer.h portty_app.h portty_backend.h \
+    path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
     rend_sokol_atlas.h term_cfr.h term.h timer.h unicode.h
