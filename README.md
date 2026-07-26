@@ -1,5 +1,7 @@
 # portty
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chestso/portty)
+
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
 Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
