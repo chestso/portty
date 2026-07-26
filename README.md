@@ -92,7 +92,7 @@ build/src/portty --demo "Hello, world!"
 | `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing)             |
 | `-V` / `--version`          | Print version and exit                                                      |
 | `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                      |
-| `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#debug-scripting))                         |
+| `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#scripting))                               |
 
 ### Keyboard Shortcuts
 
@@ -156,6 +156,8 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)      |
 | `mousemove <x> <y>`                     | Simulate a mouse move to logical pixel coordinates (Sokol backend only)               |
 | `notify ["title"] ["body"]`             | Show a transient notification panel (Sokol backend only)                              |
+| `record-start <dir> [fps]`              | Start frame recording to directory at target FPS (default 30), QOI format             |
+| `record-stop`                           | Stop frame recording and close manifest                                               |
 | `quit`                                  | Request application quit                                                              |
 
 ### `send` vs `emit`
@@ -264,6 +266,34 @@ quit
 ### Backend Support
 
 The Sokol backend supports all commands. The SDL3 backend supports all commands except `dumpverts`, `verifybuf`, `mousemove`, and `notify` (Sokol-specific), which print "not supported by this backend" and skip.
+
+### Frame Recording
+
+`record-start` captures the framebuffer after each render at a target frame rate (default 30 FPS). Frames are written as QOI files (`frame_000001.qoi`, `frame_000002.qoi`, ...) — QOI encodes 15-33x faster than PNG with only ~20-40% larger files, enabling real-time capture at full frame rate on both backends.
+
+A `frames.csv` manifest is written alongside the images with per-frame timestamps:
+
+```csv
+index,timestamp,filename
+1,0.033,frame_000001.qoi
+2,0.066,frame_000002.qoi
+```
+
+The timestamp is captured before each frame write, so gaps in timestamps indicate dropped frames. To detect drops:
+
+```bash
+awk -F, 'NR>1 {print $2}' frames.csv | \
+  awk 'NR>1 {diff=$1-prev; if(diff>0.05) print "drop before frame "NR": "diff" sec gap"; prev=$1} NR==1{prev=$1}'
+```
+
+Example recording script:
+
+```
+record-start /tmp/frames 30
+wait 5.0
+record-stop
+quit
+```
 
 ## Configuration
 
