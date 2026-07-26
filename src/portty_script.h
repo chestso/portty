@@ -88,7 +88,7 @@ const char *portty_script_error(const PorttyScript *s);
 #include "term.h"
 
 /* Monotonic time helper (no existing utility in the codebase) */
-double portty_debug_now_seconds(void); /* clock_gettime(CLOCK_MONOTONIC) */
+double portty_now_seconds(void); /* clock_gettime(CLOCK_MONOTONIC) */
 
 /* Grid scan for assert-contains / assert-not-contains.
  * Searches all visible rows (and current scrollback view if scroll_offset > 0)

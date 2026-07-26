@@ -561,7 +561,7 @@ const char *portty_script_error(const PorttyScript *s)
 
 /* ── Shared execution helpers ── */
 
-double portty_debug_now_seconds(void)
+double portty_now_seconds(void)
 {
 #ifdef _WIN32
     static LARGE_INTEGER freq = { 0 };
@@ -691,10 +691,10 @@ void portty_script_step(PorttyScript *script,
     case DBG_CMD_WAIT:
     {
         if (!s_waiting) {
-            s_wait_deadline = portty_debug_now_seconds() + cmd->wait_seconds;
+            s_wait_deadline = portty_now_seconds() + cmd->wait_seconds;
             s_waiting = true;
         }
-        if (portty_debug_now_seconds() >= s_wait_deadline) {
+        if (portty_now_seconds() >= s_wait_deadline) {
             s_waiting = false;
             (*cmd_index)++;
         }

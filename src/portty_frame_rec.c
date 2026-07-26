@@ -74,7 +74,7 @@ bool frame_recorder_start(FrameRecorder *r, const char *dir, int fps)
     r->recording = true;
     r->frames_written = 0;
     r->frames_skipped = 0;
-    r->start_time = portty_debug_now_seconds();
+    r->start_time = portty_now_seconds();
 
     // Open manifest file for frame timing data
     char manifest_path[1024];
@@ -94,7 +94,7 @@ void frame_recorder_stop(FrameRecorder *r)
     if (!r || !r->recording)
         return;
 
-    double elapsed = portty_debug_now_seconds() - r->start_time;
+    double elapsed = portty_now_seconds() - r->start_time;
     int expected = (int)(elapsed * r->target_fps);
     r->frames_skipped = expected - r->frames_written;
     if (r->frames_skipped < 0)
@@ -114,7 +114,7 @@ void frame_recorder_build_path(FrameRecorder *r, char *buf, size_t len)
 {
     if (!r || !buf)
         return;
-    r->capture_time = portty_debug_now_seconds() - r->start_time;
+    r->capture_time = portty_now_seconds() - r->start_time;
     snprintf(buf, len, "%s/frame_%06d.qoi", r->output_dir, r->frame_index);
 }
 
