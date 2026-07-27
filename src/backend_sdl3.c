@@ -194,6 +194,30 @@ static int sdl_mod_to_term(int mod)
     return m;
 }
 
+static void sdl3_scale_mouse_coords(Sdl3BackendData *d, float logical_x,
+                                    float logical_y, int *out_px, int *out_py)
+{
+    float scale = d->rend.content_scale;
+    if (scale <= 0.0f)
+        scale = 1.0f;
+    *out_px = (int)logical_to_physical_f(logical_x, scale);
+    *out_py = (int)logical_to_physical_f(logical_y, scale);
+}
+
+static void sdl3_flush_buffered_button_up(Sdl3BackendData *d,
+                                          TerminalBackend *term)
+{
+    if (!d->left_button_up_buffered)
+        return;
+    d->left_button_up_buffered = false;
+    d->left_button_down = false;
+    SDL_CaptureMouse(false);
+    int tmod = sdl_mod_to_term(SDL_GetModState());
+    if (portty_app_handle_mouse(d->app, d->left_button_up_x,
+                                d->left_button_up_y, 1, false, 0, tmod))
+        terminal_mark_dirty(term);
+}
+
 #include "portty_icon_png.h"
 
 static void set_window_icon(SDL_Window *win)
@@ -1533,7 +1557,9 @@ static void sdl3_run(PorttyBackend *self)
                 {
                     float mx, my;
                     SDL_GetMouseState(&mx, &my);
-                    portty_app_handle_mouse_leave(d->app, (int)mx, (int)my);
+                    int px, py;
+                    sdl3_scale_mouse_coords(d, mx, my, &px, &py);
+                    portty_app_handle_mouse_leave(d->app, px, py);
                 }
                 terminal_mark_dirty(term);
                 break;
@@ -1554,12 +1580,9 @@ static void sdl3_run(PorttyBackend *self)
                         int button = (whole_ticks > 0) ? 4 : 5;
                         int clicks = abs(whole_ticks);
                         int tmod = sdl_mod_to_term(SDL_GetModState());
-                        // Scale from logical points to physical pixels
-                        float scale = d->rend.content_scale;
-                        if (scale <= 0.0f)
-                            scale = 1.0f;
-                        int mx = (int)logical_to_physical_f(event.wheel.mouse_x, scale);
-                        int my = (int)logical_to_physical_f(event.wheel.mouse_y, scale);
+                        int mx, my;
+                        sdl3_scale_mouse_coords(d, event.wheel.mouse_x,
+                                                event.wheel.mouse_y, &mx, &my);
                         for (int i = 0; i < clicks && !consumed; i++) {
                             consumed = portty_app_handle_mouse(
                                 d->app, mx, my, button, true, 0, tmod);
@@ -1579,26 +1602,11 @@ static void sdl3_run(PorttyBackend *self)
                 int button = event.button.button;
                 int clicks = pressed ? event.button.clicks : 0;
                 int tmod = sdl_mod_to_term(SDL_GetModState());
-
-                // Scale from logical points to physical pixels
-                float scale = d->rend.content_scale;
-                if (scale <= 0.0f)
-                    scale = 1.0f;
-                int px = (int)logical_to_physical_f(event.button.x, scale);
-                int py = (int)logical_to_physical_f(event.button.y, scale);
+                int px, py;
+                sdl3_scale_mouse_coords(d, event.button.x, event.button.y, &px, &py);
 
                 // Flush any buffered button-up from a previous event
-                if (d->left_button_up_buffered) {
-                    d->left_button_up_buffered = false;
-                    d->left_button_down = false;
-                    SDL_CaptureMouse(false);
-                    if (portty_app_handle_mouse(d->app,
-                                                d->left_button_up_x,
-                                                d->left_button_up_y, 1, false,
-                                                0, tmod)) {
-                        terminal_mark_dirty(term);
-                    }
-                }
+                sdl3_flush_buffered_button_up(d, term);
                 if (button == 1) {
                     if (pressed) {
                         d->left_button_down = true;
@@ -1627,29 +1635,13 @@ static void sdl3_run(PorttyBackend *self)
 
             case SDL_EVENT_MOUSE_MOTION:
             {
-                // Flush a buffered button-up if present
-                if (d->left_button_up_buffered) {
-                    d->left_button_up_buffered = false;
-                    d->left_button_down = false;
-                    SDL_CaptureMouse(false);
-                    int tmod = sdl_mod_to_term(SDL_GetModState());
-                    if (portty_app_handle_mouse(d->app,
-                                                d->left_button_up_x,
-                                                d->left_button_up_y, 1, false,
-                                                0, tmod)) {
-                        terminal_mark_dirty(term);
-                    }
-                }
+                sdl3_flush_buffered_button_up(d, term);
                 bool any_button_pressed = (event.motion.state != 0);
                 int tmod = sdl_mod_to_term(SDL_GetModState());
                 if (d->left_button_down)
                     any_button_pressed = true;
-                // Scale from logical points to physical pixels
-                float scale = d->rend.content_scale;
-                if (scale <= 0.0f)
-                    scale = 1.0f;
-                int mx = (int)logical_to_physical_f(event.motion.x, scale);
-                int my = (int)logical_to_physical_f(event.motion.y, scale);
+                int mx, my;
+                sdl3_scale_mouse_coords(d, event.motion.x, event.motion.y, &mx, &my);
                 if (portty_app_handle_mouse(d->app, mx, my,
                                             0, any_button_pressed,
                                             0, tmod)) {
@@ -1703,17 +1695,7 @@ static void sdl3_run(PorttyBackend *self)
         }
 
         // Flush buffered button-up if no more events pending
-        if (d->left_button_up_buffered) {
-            d->left_button_up_buffered = false;
-            d->left_button_down = false;
-            SDL_CaptureMouse(false);
-            int tmod = sdl_mod_to_term(SDL_GetModState());
-            portty_app_handle_mouse(d->app,
-                                    d->left_button_up_x,
-                                    d->left_button_up_y, 1, false,
-                                    0, tmod);
-            terminal_mark_dirty(term);
-        }
+        sdl3_flush_buffered_button_up(d, term);
 
         // Age and prune deferred-clipboard entries
         clipboard_deferred_free_advance();
@@ -1724,8 +1706,7 @@ static void sdl3_run(PorttyBackend *self)
             if (SDL_GetMouseFocus() == d->window) {
                 float mx, my;
                 SDL_GetMouseState(&mx, &my);
-                px = (int)mx;
-                py = (int)my;
+                sdl3_scale_mouse_coords(d, mx, my, &px, &py);
             }
             if (portty_app_revalidate_hover(d->app, px, py))
                 terminal_mark_dirty(term);
