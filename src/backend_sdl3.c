@@ -759,7 +759,10 @@ static void sdl3_set_window_size(PorttyBackend *self, int width, int height)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (d && d->window) {
-        float scale = d->rend.content_scale;
+        // Use system scale for logical conversion, not content_scale
+        // (which includes user's --dpi-scale). SDL's coordinate system
+        // uses the system DPI scale, not the app's content scale.
+        float scale = SDL_GetWindowDisplayScale(d->window);
         if (scale <= 0.0f)
             scale = 1.0f;
         int logical_w = physical_to_logical(width, scale);
