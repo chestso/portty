@@ -85,4 +85,7 @@ void portty_app_show_diagnostics(PorttyApp *app);
 // Lifecycle helpers.
 void portty_app_set_autoscroll(PorttyApp *app, bool enabled);
 
+// Content scale calculation (unified for all backends).
+float portty_compute_content_scale(float system_scale, float user_scale);
+
 #endif // PORTTY_APP_H

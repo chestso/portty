@@ -4088,11 +4088,9 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     }
     app->font_source = font_source;
 
-    float display_scale = self->get_display_scale(self);
-    if (app->dpi_scale != 1.0f && display_scale > 0.0f)
-        display_scale *= app->dpi_scale;
-    if (display_scale > 0.0f)
-        self->set_content_scale(self, display_scale);
+    float display_scale = portty_compute_content_scale(
+        self->get_display_scale(self), app->dpi_scale);
+    self->set_content_scale(self, display_scale);
 
     // Convert hinting enum to FT int (moved here from main_sokol.c)
     static const int hint_map[] = { FT_LOAD_NO_HINTING, FT_LOAD_TARGET_LIGHT,
@@ -4115,7 +4113,7 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     terminal_get_dimensions(app->term, &term_rows, &term_cols);
     if (self->get_cell_size(self, &cell_w, &cell_h)) {
         terminal_set_cell_px(app->term, cell_w, cell_h);
-        terminal_set_content_scale(app->term, d->content_scale > 0.0f ? d->content_scale : 1.0f);
+        terminal_set_content_scale(app->term, display_scale);
         win_w = term_cols * cell_w;
         win_h = term_rows * cell_h;
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);

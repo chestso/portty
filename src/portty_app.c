@@ -16,6 +16,15 @@
 #include <string.h>
 #include <time.h>
 
+// Content scale calculation (unified for all backends)
+float portty_compute_content_scale(float system_scale, float user_scale)
+{
+    float scale = system_scale;
+    if (user_scale != 1.0f && scale > 0.0f)
+        scale *= user_scale;
+    return scale > 0.0f ? scale : 1.0f;
+}
+
 // Terminal callback implementations (registered with coffer).
 
 void portty_app_term_output_to_pty(const char *data, size_t len, void *user_data)
@@ -435,7 +444,9 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
     int cell_w, cell_h;
     if (app_get_cell_size(app, &cell_w, &cell_h)) {
         terminal_set_cell_px(app->term, cell_w, cell_h);
-        terminal_set_content_scale(app->term, app->backend->get_display_scale(app->backend));
+        float content_scale = portty_compute_content_scale(
+            app->backend->get_display_scale(app->backend), app->dpi_scale);
+        terminal_set_content_scale(app->term, content_scale);
         int cols = pixel_w / cell_w;
         int rows = pixel_h / cell_h;
         if (cols > 0 && rows > 0) {

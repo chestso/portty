@@ -403,11 +403,9 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
 #endif
     app.font_source = args->font_source;
 
-    float display_scale = backend.get_display_scale(&backend);
-    if (args->dpi_scale != 1.0f && display_scale > 0.0f)
-        display_scale *= args->dpi_scale;
-    if (display_scale > 0.0f)
-        backend.set_content_scale(&backend, display_scale);
+    float display_scale = portty_compute_content_scale(
+        backend.get_display_scale(&backend), args->dpi_scale);
+    backend.set_content_scale(&backend, display_scale);
 
     if (backend.load_fonts(&backend, args->font_size, args->font_name, args->ft_hint_target) < 0) {
         fprintf(stderr, "Failed to load fonts\n");
@@ -422,7 +420,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     int win_w = 800, win_h = 600;
     if (backend.get_cell_size(&backend, &cell_w, &cell_h)) {
         terminal_set_cell_px(term, cell_w, cell_h);
-        terminal_set_content_scale(term, backend.get_display_scale(&backend));
+        terminal_set_content_scale(term, display_scale);
         win_w = args->init_cols * cell_w;
         win_h = args->init_rows * cell_h;
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);
