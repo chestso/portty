@@ -3116,6 +3116,25 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         .swapchain = sglue_swapchain(),
     });
 
+    // Lottie rendering must happen even when vert_count == 0 (no terminal updates)
+    // This ensures animations continue when cursor blinks but text hasn't changed
+    int lottie_bg_count = 0;
+    bool has_lottie = d->lottie_pip_created && terminal_lottie_count(term) > 0;
+    if (has_lottie) {
+        int anim_count = 0;
+        const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
+        lottie_cache_reconcile(d, anims, anim_count);
+
+        // Upload the full lottie vertex buffer before any draws
+        sg_update_buffer(d->lottie_vbuf, &(sg_range){
+                                             .ptr = s_lottie_verts,
+                                             .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
+                                         });
+
+        // Draw background lottie (before bg quads)
+        lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
+    }
+
     if (vert_count > 0 && d->glyph_pip_created) {
         s_frame_vert_count = vert_count;
         sg_update_buffer(d->glyph_vbuf, &(sg_range){ .ptr = s_frame_verts, .size = (size_t)vert_count * sizeof(GlyphVertex) });
@@ -3133,22 +3152,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         // Pass 1: draw all background quads (opaque, replace)
         if (bg_vert_count > 0) {
             sg_draw(0, bg_vert_count, 1);
-        }
-        // Lottie: upload vertex buffer once, then render both layers
-        int lottie_bg_count = 0;
-        if (d->lottie_pip_created && terminal_lottie_count(term) > 0) {
-            int anim_count = 0;
-            const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
-            lottie_cache_reconcile(d, anims, anim_count);
-
-            // Upload the full lottie vertex buffer before any draws
-            sg_update_buffer(d->lottie_vbuf, &(sg_range){
-                                                 .ptr = s_lottie_verts,
-                                                 .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
-                                             });
-
-            // Draw background lottie (between bg and glyph quads)
-            lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
         }
         // Pass 1.5: draw cursor quads (under glyphs, opaque)
         if (s_cursor_vert_count > 0) {
@@ -3213,13 +3216,17 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             sg_draw(glyph_vert_start + hint_glyph_start, hint_glyph_count, 1);
         }
         // Pass 7: draw foreground lottie (on top of everything)
-        if (lottie_bg_count >= 0 && d->lottie_pip_created && terminal_lottie_count(term) > 0)
+        if (lottie_bg_count >= 0 && has_lottie)
             (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
-        // Pass 5: draw sixel images (on top of text and lottie)
+        // Pass 8: draw sixel images (on top of text and lottie)
         if (d->lottie_pip_created) {
             sokol_ensure_sixel_vbuf(d);
             sokol_render_sixel_images(d, term);
         }
+    } else if (has_lottie) {
+        // Even with no terminal vertices, render foreground lottie layer
+        if (lottie_bg_count >= 0)
+            (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
     }
 
     // Screenshot automation: defer to after sg_commit (glReadPixels inside
