@@ -239,6 +239,8 @@ char *diag_build_report(const DiagSources *s)
     // open-source drivers (Mesa) are shown green; others plain.
     if (s->gpu_device)
         kv(&sb, "GPU", s->gpu_device);
+    if (s->graphics_api)
+        kv(&sb, "API", s->graphics_api);
     if (s->gpu_driver) {
         if (s->gpu_driver_libre == GPU_DRIVER_LIBRE_YES)
             kv_colored(&sb, "driver", FG_ON, s->gpu_driver);

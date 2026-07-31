@@ -325,6 +325,10 @@ bool rend_has_overlay(RendScrollState *st);
 bool rend_classify_gpu_driver_libre(const char *driver_name,
                                     const char *driver_info);
 
+// Infer the graphics API (Vulkan, OpenGL, Metal, D3D) from the driver name.
+// Returns NULL if unknown.
+const char *rend_infer_graphics_api(const char *driver_name);
+
 // Format a GPU driver string for diagnostics output.
 // `buf` must be at least 160 bytes. Produces e.g. "Mesa (open source) — 24.1".
 void rend_format_gpu_driver(char *buf, size_t bufsz,

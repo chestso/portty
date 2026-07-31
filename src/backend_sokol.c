@@ -1939,6 +1939,7 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
     out->gpu_device = gpu_name[0] ? gpu_name : NULL;
     out->gpu_driver = gpu_driver[0] ? gpu_driver : NULL;
     out->gpu_driver_libre = driver_libre;
+    out->graphics_api = rend_infer_graphics_api(gpu_driver);
     out->linear_light = d->rend.linear_ok;
     out->glyph_shader = false;
     out->content_scale = d->rend.content_scale;

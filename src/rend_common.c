@@ -1285,6 +1285,39 @@ bool rend_classify_gpu_driver_libre(const char *driver_name,
            (driver_name && strstr(driver_name, "open source"));
 }
 
+const char *rend_infer_graphics_api(const char *driver_name)
+{
+    if (!driver_name)
+        return NULL;
+
+    // Vulkan drivers
+    if (strstr(driver_name, "NVK") ||  // Mesa Vulkan for NVIDIA
+        strstr(driver_name, "radv") || // Mesa Vulkan for AMD
+        strstr(driver_name, "anv") ||  // Mesa Vulkan for Intel
+        strstr(driver_name, "vulkan") || strstr(driver_name, "Vulkan"))
+        return "Vulkan";
+
+    // OpenGL drivers
+    if (strstr(driver_name, "radeonsi") || // Mesa OpenGL for AMD
+        strstr(driver_name, "iris") ||     // Mesa OpenGL for Intel
+        strstr(driver_name, "nouveau") ||  // Mesa OpenGL for NVIDIA
+        strstr(driver_name, "OpenGL") || strstr(driver_name, "opengl") ||
+        strstr(driver_name, "Mesa"))
+        return "OpenGL";
+
+    // Apple Metal
+    if (strstr(driver_name, "Metal") || strstr(driver_name, "metal"))
+        return "Metal";
+
+    // Windows D3D
+    if (strstr(driver_name, "D3D12") || strstr(driver_name, "Direct3D 12"))
+        return "D3D12";
+    if (strstr(driver_name, "D3D11") || strstr(driver_name, "Direct3D 11"))
+        return "D3D11";
+
+    return NULL;
+}
+
 void rend_format_gpu_driver(char *buf, size_t bufsz,
                             const char *driver_name,
                             const char *driver_info,

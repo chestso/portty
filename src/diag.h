@@ -22,6 +22,7 @@ typedef struct
     const char *renderer_name;       // "gpu" / "vulkan" / "opengl" / "software"
     const char *gpu_device;          // GPU model (e.g. "NVIDIA GeForce RTX 4060 (NVK AD107)"), or NULL
     const char *gpu_driver;          // driver description (e.g. "NVK (open source) — Mesa 25.x"), or NULL
+    const char *graphics_api;        // "Vulkan" / "OpenGL" / "Metal" / "D3D12", or NULL
     GpuDriverLibre gpu_driver_libre; // driver licensing: libre / proprietary / unknown
     bool linear_light;
     bool glyph_shader; // luminance-aware GPU glyph-coverage shader active

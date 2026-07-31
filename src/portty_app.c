@@ -739,6 +739,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .platform_name = pd.platform_name,
         .gpu_device = pd.gpu_device,
         .gpu_driver = pd.gpu_driver,
+        .graphics_api = pd.graphics_api,
         .gpu_driver_libre = pd.gpu_driver_libre,
         .linear_light = pd.linear_light,
         .glyph_shader = pd.glyph_shader,

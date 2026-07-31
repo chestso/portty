@@ -40,6 +40,7 @@ typedef struct
     const char *backend_name;  // renderer name: "gpu", "vulkan", etc.
     const char *gpu_device;
     const char *gpu_driver;
+    const char *graphics_api; // "Vulkan" / "OpenGL" / "Metal" / "D3D12", or NULL
     GpuDriverLibre gpu_driver_libre;
     bool linear_light;
     bool glyph_shader;

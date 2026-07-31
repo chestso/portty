@@ -2080,6 +2080,7 @@ bool rend_sdl3_get_diag(RendererSdl3Data *data, PorttyDiag *out)
     out->gpu_device = data->gpu_name[0] ? data->gpu_name : NULL;
     out->gpu_driver = data->gpu_driver[0] ? data->gpu_driver : NULL;
     out->gpu_driver_libre = data->gpu_driver_libre;
+    out->graphics_api = rend_infer_graphics_api(data->gpu_driver);
     // Display diagnostics filled by backend
     out->display_session = NULL;
     out->display_xwayland = NULL;
