@@ -668,6 +668,12 @@ static void sokol_drain_pty(SokolData *d)
 
     while (head) {
         PtyDataNode *next = head->next;
+        // Clear link hover on PTY output — content may have scrolled.
+        if (terminal_hovered_hyperlink(d->term) != 0) {
+            terminal_set_hovered_hyperlink(d->term, 0);
+            d->self->panel_hide(d->self, PANEL_ID_LINK_HINT);
+            d->self->set_cursor(d->self, PORTTY_CURSOR_TEXT);
+        }
         terminal_consume_pushed_rows(d->term);
         terminal_process_input(d->term, head->data, head->len);
         int pushed = terminal_consume_pushed_rows(d->term);

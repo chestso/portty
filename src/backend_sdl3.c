@@ -14,9 +14,10 @@
 #include "png_writer.h"
 #include "qoi_writer.h"
 #include "portty_app.h"
-#include "portty_script.h"
 #include "portty_frame_rec.h"
+#include "portty_panel.h"
 #include "portty_pty.h"
+#include "portty_script.h"
 #include "rend_common.h"
 #include "rend_sdl3.h"
 #include "term.h"
@@ -1482,6 +1483,12 @@ static void sdl3_run(PorttyBackend *self)
                 {
                     PtyDataPayload *payload = (PtyDataPayload *)event.user.data1;
                     if (payload) {
+                        // Clear link hover on PTY output — content may have scrolled.
+                        if (terminal_hovered_hyperlink(term) != 0) {
+                            terminal_set_hovered_hyperlink(term, 0);
+                            self->panel_hide(self, PANEL_ID_LINK_HINT);
+                            self->set_cursor(self, PORTTY_CURSOR_TEXT);
+                        }
                         rend_sdl3_process_pty_data(rend, term, payload->data, payload->len);
                         self->set_window_title(self, terminal_get_title(term));
                         free(payload);

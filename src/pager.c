@@ -263,6 +263,15 @@ bool pager_scroll(Pager *p, int delta)
 {
     if (!pager_active(p))
         return false;
+
+    // Hide link hint panel on scroll — the hovered link may have moved.
+    if (p->hovered != 0) {
+        terminal_set_hovered_hyperlink(p->term, 0);
+        p->backend->panel_hide(p->backend, PANEL_ID_LINK_HINT);
+        p->backend->set_cursor(p->backend, PORTTY_CURSOR_TEXT);
+        p->hovered = 0;
+    }
+
     p->backend->scroll(p->backend, p->term, delta);
     return true;
 }
