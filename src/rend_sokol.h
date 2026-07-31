@@ -177,10 +177,10 @@ void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse,
 
 // Lottie/sixel cache management
 void rend_sokol_lottie_cache_reconcile(RendererSokolData *data,
-                                        const CfrLottie *anims, int count);
+                                       const CfrLottie *anims, int count);
 int rend_sokol_lottie_get_texture(RendererSokolData *data, const CfrLottie *anim);
 void rend_sokol_sixel_cache_reconcile(RendererSokolData *data,
-                                       const CfrSixel *imgs, int count);
+                                      const CfrSixel *imgs, int count);
 int rend_sokol_sixel_get_texture(RendererSokolData *data, const CfrSixel *img);
 
 #endif // REND_SOKOL_H

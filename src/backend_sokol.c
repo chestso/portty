@@ -1077,7 +1077,7 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
     rend_sokol_sixel_get_texture(&(d)->rend, img)
 
 static void sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
-                                     uint8_t target_layer, int vert_offset)
+                                      uint8_t target_layer, int vert_offset)
 {
     int anim_count = 0;
     const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
@@ -1231,9 +1231,9 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
 
     // Upload vertex buffer once
     sg_update_buffer(d->rend.sixel_vbuf, &(sg_range){
-                                        .ptr = sixel_verts,
-                                        .size = (size_t)vert_count * sizeof(GlyphVertex),
-                                    });
+                                             .ptr = sixel_verts,
+                                             .size = (size_t)vert_count * sizeof(GlyphVertex),
+                                         });
 
     // Pass 2: draw each image's 6 verts with its own texture
     int vert_offset = 0;
@@ -1281,13 +1281,13 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
 #define cell_color                 rend_sokol_cell_color
 
 // Underline/strikethrough functions moved to rend_sokol.c
-#define sokol_underline_position        rend_sokol_underline_position
-#define sokol_draw_underline_single     rend_sokol_draw_underline_single
-#define sokol_draw_underline_double     rend_sokol_draw_underline_double
-#define sokol_draw_underline_curly      rend_sokol_draw_underline_curly
-#define sokol_draw_underline_dotted     rend_sokol_draw_underline_dotted
-#define sokol_draw_underline_dashed     rend_sokol_draw_underline_dashed
-#define sokol_draw_strikethrough        rend_sokol_draw_strikethrough
+#define sokol_underline_position    rend_sokol_underline_position
+#define sokol_draw_underline_single rend_sokol_draw_underline_single
+#define sokol_draw_underline_double rend_sokol_draw_underline_double
+#define sokol_draw_underline_curly  rend_sokol_draw_underline_curly
+#define sokol_draw_underline_dotted rend_sokol_draw_underline_dotted
+#define sokol_draw_underline_dashed rend_sokol_draw_underline_dashed
+#define sokol_draw_strikethrough    rend_sokol_draw_strikethrough
 
 static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                         int origin_x, int origin_y,
@@ -1852,9 +1852,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     // Build vertex data (using file-scope arrays for debug access)
     static GlyphVertex sel_verts[SOKOL_MAX_VERTICES];
-    int vert_count = 0;       // bg quads in frame_verts
-    int glyph_vert_count = 0; // glyph quads in glyph_verts
-    *rend_sokol_get_cursor_vert_count_ptr() = 0;  // cursor quad in cursor_verts
+    int vert_count = 0;                          // bg quads in frame_verts
+    int glyph_vert_count = 0;                    // glyph quads in glyph_verts
+    *rend_sokol_get_cursor_vert_count_ptr() = 0; // cursor quad in cursor_verts
     int sel_vert_count = 0;
     int scroll_offset = d->rend.scroll.scroll_offset;
 
@@ -2169,9 +2169,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
         // Upload the full lottie vertex buffer before any draws
         sg_update_buffer(d->rend.lottie_vbuf, &(sg_range){
-                                             .ptr = rend_sokol_get_lottie_verts(),
-                                             .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
-                                         });
+                                                  .ptr = rend_sokol_get_lottie_verts(),
+                                                  .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
+                                              });
 
         // Draw background lottie (before bg quads)
         lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
