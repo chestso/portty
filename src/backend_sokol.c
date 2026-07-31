@@ -1134,10 +1134,10 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 unsigned int cs = it.cell.attrs.underline;
                 uint8_t cr[4];
                 if (it.cell.ul_color.is_default) {
-                    cr[0] = UNDERLINE_COLOR_R;
-                    cr[1] = UNDERLINE_COLOR_G;
-                    cr[2] = UNDERLINE_COLOR_B;
-                    cr[3] = UNDERLINE_COLOR_A;
+                    cr[0] = TERM_UNDERLINE_R;
+                    cr[1] = TERM_UNDERLINE_G;
+                    cr[2] = TERM_UNDERLINE_B;
+                    cr[3] = TERM_UNDERLINE_A;
                 } else {
                     cr[0] = it.cell.ul_color.r;
                     cr[1] = it.cell.ul_color.g;
@@ -1212,8 +1212,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
         PanelState *p = &d->rend.panels.panels[i];
         if (p->active) {
-            // Panel background (opaque, same color as panels)
-            uint8_t bg[4] = { 38, 38, 44, 255 };
+            // Panel background (opaque)
+            uint8_t bg[4] = { TERM_PANEL_BG_R, TERM_PANEL_BG_G, TERM_PANEL_BG_B, TERM_PANEL_BG_A };
             rend_sokol_deco_emit_quad(
                 (float)p->px, (float)p->py,
                 (float)(p->px + p->pw), (float)(p->py + p->ph),
@@ -1224,19 +1224,19 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 uint8_t ac[4] = { 0, 0, 0, 255 };
                 switch (p->level) {
                 case PORTTY_NOTIFY_ERROR:
-                    ac[0] = 235; /* Sriracha */
-                    ac[1] = 66;
-                    ac[2] = 104;
+                    ac[0] = TERM_ACCENT_ERROR_R;
+                    ac[1] = TERM_ACCENT_ERROR_G;
+                    ac[2] = TERM_ACCENT_ERROR_B;
                     break;
                 case PORTTY_NOTIFY_WARNING:
-                    ac[0] = 245; /* Mustard */
-                    ac[1] = 239;
-                    ac[2] = 52;
+                    ac[0] = TERM_ACCENT_WARNING_R;
+                    ac[1] = TERM_ACCENT_WARNING_G;
+                    ac[2] = TERM_ACCENT_WARNING_B;
                     break;
                 default:
-                    ac[0] = 71; /* Thunder */
-                    ac[1] = 118;
-                    ac[2] = 255;
+                    ac[0] = TERM_ACCENT_DEFAULT_R;
+                    ac[1] = TERM_ACCENT_DEFAULT_G;
+                    ac[2] = TERM_ACCENT_DEFAULT_B;
                     break;
                 }
                 int accent_px = panel_accent_px(p->px, d->rend.cell_w);
@@ -1278,9 +1278,13 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     float v0 = (float)entry->region.y / atlas_size;
                     float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
                     float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
-                    uint8_t lum = p->close_hover ? 245 : 170;
-                    uint8_t fg[4] = { lum, lum, lum, 255 };
-                    uint8_t bg[4] = { 38, 38, 44, 0 }; // Transparent bg for alpha blend
+                    uint8_t fg[4] = {
+                        p->close_hover ? TERM_CLOSE_FG_HOVER_R : TERM_CLOSE_FG_R,
+                        p->close_hover ? TERM_CLOSE_FG_HOVER_G : TERM_CLOSE_FG_G,
+                        p->close_hover ? TERM_CLOSE_FG_HOVER_B : TERM_CLOSE_FG_B,
+                        255
+                    };
+                    uint8_t bg[4] = { TERM_PANEL_BG_R, TERM_PANEL_BG_G, TERM_PANEL_BG_B, 0 };
                     GlyphVertex *q = &rend_sokol_get_glyph_verts()[glyph_vert_count];
                     rend_sokol_emit_glyph_quad(q,
                                                (float)p->close_px, (float)p->close_py,
@@ -1346,9 +1350,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     sg_begin_pass(&(sg_pass){
         .action = {
             .colors[0] = { .load_action = SG_LOADACTION_CLEAR,
-                           .clear_value = { rend_srgb_to_linear(DEF_BG_R) / 255.0f,
-                                            rend_srgb_to_linear(DEF_BG_G) / 255.0f,
-                                            rend_srgb_to_linear(DEF_BG_B) / 255.0f, 1.0f } } },
+                           .clear_value = { rend_srgb_to_linear(TERM_BG_R) / 255.0f,
+                                            rend_srgb_to_linear(TERM_BG_G) / 255.0f,
+                                            rend_srgb_to_linear(TERM_BG_B) / 255.0f, 1.0f } } },
         .swapchain = sglue_swapchain(),
     });
 
@@ -1751,9 +1755,9 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
     sg_begin_pass(&(sg_pass){
         .action = {
             .colors[0] = { .load_action = SG_LOADACTION_CLEAR,
-                           .clear_value = { rend_srgb_to_linear(DEF_BG_R) / 255.0f,
-                                            rend_srgb_to_linear(DEF_BG_G) / 255.0f,
-                                            rend_srgb_to_linear(DEF_BG_B) / 255.0f, 1.0f } } },
+                           .clear_value = { rend_srgb_to_linear(TERM_BG_R) / 255.0f,
+                                            rend_srgb_to_linear(TERM_BG_G) / 255.0f,
+                                            rend_srgb_to_linear(TERM_BG_B) / 255.0f, 1.0f } } },
         .swapchain = sglue_swapchain(),
     });
 

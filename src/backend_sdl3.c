@@ -19,6 +19,7 @@
 #include "rend_common.h"
 #include "rend_sdl3.h"
 #include "term.h"
+#include "term_colors.h"
 #include "timer.h"
 #include <SDL3/SDL.h>
 #include <errno.h>
@@ -621,7 +622,7 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
             int backdrop = 2;
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
                                   &backdrop, sizeof(backdrop));
-            COLORREF caption = 0x00282828;
+            COLORREF caption = RGB(TERM_CAPTION_R, TERM_CAPTION_G, TERM_CAPTION_B);
             DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR,
                                   &caption, sizeof(caption));
             DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;

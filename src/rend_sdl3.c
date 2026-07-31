@@ -8,6 +8,7 @@
 #include "font_ft.h"
 #include "font_resolve.h"
 #include "term_cfr.h"
+#include "term_colors.h"
 #ifdef _WIN32
 #include "font_resolve_w32.h"
 #define FONT_RESOLVE_BACKEND font_resolve_backend_w32
@@ -45,24 +46,6 @@ typedef struct
     char *font_path;
     void *font_data; // FtFontData*, kept alive for pointer stability
 } LoadedFallbackFont;
-
-// Cursor color: Charm signature purple, opaque (RGBA)
-#define CURSOR_COLOR_R 0x6B
-#define CURSOR_COLOR_G 0x50
-#define CURSOR_COLOR_B 0xFF
-#define CURSOR_COLOR_A 255
-
-// Selection highlight color: muted Dracula comment-style (RGBA)
-#define SELECTION_COLOR_R 0x44
-#define SELECTION_COLOR_G 0x47
-#define SELECTION_COLOR_B 0x5A
-#define SELECTION_COLOR_A 180
-
-// Underline color: matches cursor color
-#define UNDERLINE_COLOR_R CURSOR_COLOR_R
-#define UNDERLINE_COLOR_G CURSOR_COLOR_G
-#define UNDERLINE_COLOR_B CURSOR_COLOR_B
-#define UNDERLINE_COLOR_A 255
 
 // Box-filter downscale a glyph bitmap to fit within max_w x max_h.
 // Returns a newly allocated GlyphBitmap, or NULL if no downscale is needed.
@@ -1030,8 +1013,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             float sh = (float)data->cell_height;
 
             SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(data->renderer, SELECTION_COLOR_R, SELECTION_COLOR_G,
-                                   SELECTION_COLOR_B, SELECTION_COLOR_A);
+            SDL_SetRenderDrawColor(data->renderer, TERM_SELECTION_R, TERM_SELECTION_G,
+                                   TERM_SELECTION_B, TERM_SELECTION_A);
             SDL_FRect sel_rect = { sx, sy, sw, sh };
             SDL_RenderFillRect(data->renderer, &sel_rect);
             SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
@@ -1056,7 +1039,7 @@ static void flush_underline_run(RendererSdl3Data *data, int row, int vis_start,
         underline_y = cell_y + data->cell_height - thickness;
     int run_x = vis_start * data->cell_width;
     int run_w = (vis_end - vis_start) * data->cell_width;
-    SDL_SetRenderDrawColor(data->renderer, r, g, b, UNDERLINE_COLOR_A);
+    SDL_SetRenderDrawColor(data->renderer, r, g, b, TERM_UNDERLINE_A);
     switch (style) {
     case UNDERLINE_SINGLE:
         draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
@@ -1121,8 +1104,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     float cy = (float)(row * data->cell_height);
                     float cw = (float)(it.pres_w * data->cell_width);
                     float ch = (float)data->cell_height;
-                    SDL_SetRenderDrawColor(data->renderer, CURSOR_COLOR_R, CURSOR_COLOR_G,
-                                           CURSOR_COLOR_B, 255);
+                    SDL_SetRenderDrawColor(data->renderer, TERM_CURSOR_R, TERM_CURSOR_G,
+                                           TERM_CURSOR_B, 255);
                     draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
                     break;
                 }
@@ -1146,9 +1129,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
             Uint8 run_r = 0, run_g = 0, run_b = 0;
             while (terminal_row_iter_next(&it)) {
                 unsigned int cs = it.cell.attrs.underline;
-                Uint8 cr = it.cell.ul_color.is_default ? UNDERLINE_COLOR_R : it.cell.ul_color.r;
-                Uint8 cg = it.cell.ul_color.is_default ? UNDERLINE_COLOR_G : it.cell.ul_color.g;
-                Uint8 cb = it.cell.ul_color.is_default ? UNDERLINE_COLOR_B : it.cell.ul_color.b;
+                Uint8 cr = it.cell.ul_color.is_default ? TERM_UNDERLINE_R : it.cell.ul_color.r;
+                Uint8 cg = it.cell.ul_color.is_default ? TERM_UNDERLINE_G : it.cell.ul_color.g;
+                Uint8 cb = it.cell.ul_color.is_default ? TERM_UNDERLINE_B : it.cell.ul_color.b;
                 bool same_run = (run_style != 0 && cs == run_style && cr == run_r &&
                                  cg == run_g && cb == run_b);
                 if (run_style != 0 && !same_run) {
@@ -1721,7 +1704,7 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
         SDL_SetRenderTarget(data->renderer, data->linear_target);
     }
 
-    SDL_SetRenderDrawColor(data->renderer, 0x00, 0x00, 0x00, 255);
+    SDL_SetRenderDrawColor(data->renderer, TERM_BG_R, TERM_BG_G, TERM_BG_B, TERM_BG_A);
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
     render_lottie_layer(data, term, 1); /* background lottie */

@@ -21,18 +21,6 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Cursor color: Charm signature purple, opaque (RGBA)
-#define CURSOR_COLOR_R 0x6B
-#define CURSOR_COLOR_G 0x50
-#define CURSOR_COLOR_B 0xFF
-#define CURSOR_COLOR_A 0xFF
-
-// Selection highlight color: blue-ish tint (RGBA) — matches backend_sokol.c
-#define SELECTION_COLOR_R 0x5A
-#define SELECTION_COLOR_G 0x60
-#define SELECTION_COLOR_B 0x7A
-#define SELECTION_COLOR_A 220
-
 // File-scope vertex arrays (moved from static-local so debug dump functions
 // can access them after the render pass).
 static GlyphVertex s_frame_verts[SOKOL_MAX_VERTICES];
@@ -67,8 +55,8 @@ void rend_sokol_reset_frame_buffers(void)
 
 void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse, uint8_t out[4])
 {
-    const uint8_t def_bg[4] = { DEF_BG_R, DEF_BG_G, DEF_BG_B, 0xFF };
-    const uint8_t def_fg[4] = { 0xD0, 0xD0, 0xD0, 0xFF };
+    const uint8_t def_bg[4] = { TERM_BG_R, TERM_BG_G, TERM_BG_B, TERM_BG_A };
+    const uint8_t def_fg[4] = { TERM_FG_R, TERM_FG_G, TERM_FG_B, TERM_FG_A };
     if (tc.is_default) {
         if (reverse && is_fg) {
             memcpy(out, def_bg, 4);
@@ -87,7 +75,7 @@ void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse, uint8_t o
 
 void rend_sokol_emit_cursor_quad(float x0, float y0, float x1, float y1)
 {
-    uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G, CURSOR_COLOR_B, CURSOR_COLOR_A };
+    uint8_t cc[4] = { TERM_CURSOR_R, TERM_CURSOR_G, TERM_CURSOR_B, TERM_CURSOR_A };
     float cu0 = -(0.0f + 2.0f);
     float cu1 = -(1.0f + 2.0f);
     GlyphVertex *q = s_cursor_verts;
@@ -98,7 +86,7 @@ void rend_sokol_emit_cursor_quad(float x0, float y0, float x1, float y1)
 void rend_sokol_emit_selection_quad(float x0, float y0, float x1, float y1,
                                     GlyphVertex *sel_verts, int *sel_vert_count)
 {
-    uint8_t sc[4] = { SELECTION_COLOR_R, SELECTION_COLOR_G, SELECTION_COLOR_B, SELECTION_COLOR_A };
+    uint8_t sc[4] = { TERM_SELECTION_R, TERM_SELECTION_G, TERM_SELECTION_B, TERM_SELECTION_A };
     float bg_u = 2.0f;
     GlyphVertex *sq = &sel_verts[*sel_vert_count];
     rend_sokol_emit_glyph_quad(sq, x0, y0, x1, y1, bg_u, 0.0f, bg_u, 0.0f, sc, sc);

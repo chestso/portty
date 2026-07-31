@@ -6,6 +6,7 @@
 #include "portty_backend.h"
 #include "portty_panel.h"
 #include "rend_common.h"
+#include "term_colors.h"
 #include "rend_sokol_atlas.h"
 #include "term.h"
 #include <stdbool.h>
@@ -20,17 +21,6 @@
 #define SOKOL_MAX_DECO_VERTICES   200000
 #define SOKOL_MAX_LOTTIE_VERTICES 4096
 #define SOKOL_MAX_SIXEL_VERTICES  4096
-
-// Default background color (moved from rend_sokol.c for use in clear color)
-#define DEF_BG_R 0x00
-#define DEF_BG_G 0x00
-#define DEF_BG_B 0x00
-
-// Default underline color
-#define UNDERLINE_COLOR_R 0x80
-#define UNDERLINE_COLOR_G 0x80
-#define UNDERLINE_COLOR_B 0x80
-#define UNDERLINE_COLOR_A 255
 
 #define SOKOL_LOTTIE_CACHE_MAX 64
 #define SOKOL_SIXEL_CACHE_MAX  256
