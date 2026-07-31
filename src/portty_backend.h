@@ -110,13 +110,14 @@ struct PorttyBackend
     const char *(*get_exe_path)(PorttyBackend *self);
     char *(*get_default_font)(PorttyBackend *self);
 
-    // ── Notifications & link hints (backend-owned UI) ─────────
-    void (*notify)(PorttyBackend *self, const char *title,
-                   const char *body, PorttyNotifyLevel level);
-    void (*notify_dismiss)(PorttyBackend *self);
-    void (*set_link_hint)(PorttyBackend *self, const char *url, int anchor_py);
-    int (*notification_hit)(PorttyBackend *self, int px, int py);
-    bool (*set_notification_hover)(PorttyBackend *self, bool hovered);
+    // ── Panels (general-purpose grid-anchored overlays) ───────
+    void (*panel_show)(PorttyBackend *self, int id,
+                       int col, int row, int cols, int rows,
+                       const char *title, const char *body,
+                       PorttyNotifyLevel level, unsigned int flags);
+    void (*panel_hide)(PorttyBackend *self, int id);
+    int (*panel_hit_test)(PorttyBackend *self, int px, int py, bool *close_btn);
+    void (*panel_set_hover)(PorttyBackend *self, int id, bool hovered);
 
     // ── Rendering ──────────────────────────────────────────────
     int (*load_fonts)(PorttyBackend *self, float size,

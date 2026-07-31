@@ -1078,13 +1078,31 @@ static char *sdl3_get_default_font(PorttyBackend *self)
 
 // ── Notifications & link hints ────────────────────────────────────────────
 
-static void sdl3_notify(PorttyBackend *self, const char *title,
-                        const char *body, PorttyNotifyLevel level)
+static void sdl3_script_panel(void *backend, int id, int col, int row,
+                              int cols, int rows,
+                              const char *title, const char *body, int level,
+                              unsigned int flags)
+{
+    PorttyBackend *self = (PorttyBackend *)backend;
+    self->panel_show(self, id, col, row, cols, rows, title, body,
+                     (PorttyNotifyLevel)level, flags);
+}
+
+static void sdl3_script_panel_hide(void *backend, int id)
+{
+    PorttyBackend *self = (PorttyBackend *)backend;
+    self->panel_hide(self, id);
+}
+
+static void sdl3_panel_show(PorttyBackend *self, int id,
+                            int col, int row, int cols, int rows,
+                            const char *title, const char *body,
+                            PorttyNotifyLevel level, unsigned int flags)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
         return;
-    rend_sdl3_set_notification(&d->rend, title, body, (int)level);
+    rend_sdl3_panel_show(&d->rend, id, col, row, cols, rows, title, body, level, flags);
     SDL_Event ev;
     SDL_zero(ev);
     ev.type = SDL_EVENT_USER;
@@ -1092,32 +1110,29 @@ static void sdl3_notify(PorttyBackend *self, const char *title,
     SDL_PushEvent(&ev);
 }
 
-static void sdl3_notify_dismiss(PorttyBackend *self)
+static void sdl3_panel_hide(PorttyBackend *self, int id)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
         return;
-    rend_sdl3_clear_notification(&d->rend);
+    rend_sdl3_panel_hide(&d->rend, id);
     if (d->term)
         terminal_mark_dirty(d->term);
 }
 
-static void sdl3_set_link_hint(PorttyBackend *self, const char *url, int anchor_py)
+static int sdl3_panel_hit_test(PorttyBackend *self, int px, int py, bool *close_btn)
+{
+    return rend_sdl3_panel_hit_test(&sdl3_data(self)->rend, px, py, close_btn);
+}
+
+static void sdl3_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
         return;
-    rend_sdl3_set_link_hint(&d->rend, url, anchor_py);
-}
-
-static int sdl3_notification_hit(PorttyBackend *self, int px, int py)
-{
-    return rend_sdl3_notification_hit(&sdl3_data(self)->rend, px, py);
-}
-
-static bool sdl3_set_notification_hover(PorttyBackend *self, bool hovered)
-{
-    return rend_sdl3_set_notification_hover(&sdl3_data(self)->rend, hovered);
+    rend_sdl3_panel_set_hover(&d->rend, id, hovered);
+    if (d->term)
+        terminal_mark_dirty(d->term);
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
@@ -1251,7 +1266,7 @@ static void sdl3_record_frame(Sdl3BackendData *d, const char *path)
 
 // ── Event loop ───────────────────────────────────────────────────────────
 
-static void sdl3_debug_resize(void *user_data, int cols, int rows)
+static void sdl3_script_resize(void *user_data, int cols, int rows)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
     if (!d || !d->app)
@@ -1265,7 +1280,7 @@ static void sdl3_debug_resize(void *user_data, int cols, int rows)
     fprintf(stderr, "resize: %d cols x %d rows\n", cols, rows);
 }
 
-static void sdl3_debug_winsize(void *user_data, int w, int h)
+static void sdl3_script_winsize(void *user_data, int w, int h)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
     if (!d || !d->window)
@@ -1359,7 +1374,7 @@ static void sdl3_run(PorttyBackend *self)
     while (!SDL_GetAtomicInt(&d->quit_requested)) {
         // === Debug script: pre-render commands ===
         if (d->script && !d->script_done) {
-            DebugExecCtx ctx = {
+            ScriptExecCtx ctx = {
                 .backend = self,
                 .term = term,
                 .pty = d->pty,
@@ -1370,9 +1385,14 @@ static void sdl3_run(PorttyBackend *self)
                 .screendump_path_buf = d->screendump_path,
                 .pending_verifybuf = NULL,
                 .dumpverts_fn = NULL,
-                .resize_fn = sdl3_debug_resize,
+                .mousemove_fn = NULL,
+                .panel_fn = sdl3_script_panel,
+                .panel_user_data = self,
+                .panel_hide_fn = sdl3_script_panel_hide,
+                .panel_hide_user_data = self,
+                .resize_fn = sdl3_script_resize,
                 .resize_user_data = d,
-                .winsize_fn = sdl3_debug_winsize,
+                .winsize_fn = sdl3_script_winsize,
                 .winsize_user_data = d,
                 .recorder = d->frame_recorder,
                 .pending_record_frame = &d->pending_record_frame,
@@ -1540,13 +1560,10 @@ static void sdl3_run(PorttyBackend *self)
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
             case SDL_EVENT_WINDOW_FOCUS_LOST:
                 d->has_focus = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
-                if (!d->has_focus)
-                    rend_sdl3_set_link_hint(rend, NULL, 0);
                 terminal_mark_dirty(term);
                 break;
 
             case SDL_EVENT_WINDOW_MOUSE_LEAVE:
-                rend_sdl3_set_link_hint(rend, NULL, 0);
                 if (term)
                     terminal_set_hovered_hyperlink(term, 0);
                 if (d->left_button_up_buffered &&
@@ -1827,11 +1844,10 @@ PorttyBackend backend_sdl3 = {
     .get_exe_path = sdl3_get_exe_path,
     .get_default_font = sdl3_get_default_font,
 
-    .notify = sdl3_notify,
-    .notify_dismiss = sdl3_notify_dismiss,
-    .set_link_hint = sdl3_set_link_hint,
-    .notification_hit = sdl3_notification_hit,
-    .set_notification_hover = sdl3_set_notification_hover,
+    .panel_show = sdl3_panel_show,
+    .panel_hide = sdl3_panel_hide,
+    .panel_hit_test = sdl3_panel_hit_test,
+    .panel_set_hover = sdl3_panel_set_hover,
 
     .load_fonts = sdl3_load_fonts,
     .draw_terminal = sdl3_draw_terminal,

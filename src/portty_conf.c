@@ -99,7 +99,6 @@ void portty_conf_init(PorttyConf *conf)
     conf->scrollback = -1;
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
-    conf->notification_transparency = -1;
     conf->shell = NULL;
     conf->source_path = NULL;
 }
@@ -186,12 +185,6 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
                 fprintf(stderr, "WARNING: %s:%d: invalid boolean '%s'\n", path, lineno, val);
             else
                 conf->verbose = b;
-        } else if (strcmp(key, "notification_transparency") == 0) {
-            int b = parse_bool(val);
-            if (b < 0)
-                fprintf(stderr, "WARNING: %s:%d: invalid boolean '%s'\n", path, lineno, val);
-            else
-                conf->notification_transparency = b;
         } else if (strcmp(key, "word_chars") == 0) {
             free(conf->word_chars);
             conf->word_chars = strdup(val);

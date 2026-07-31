@@ -23,12 +23,13 @@ typedef enum
     SCRIPT_CMD_DUMPCELLS,
     SCRIPT_CMD_DUMPVERTS,
     SCRIPT_CMD_VERIFYBUF,
-    SCRIPT_CMD_NOTIFY,
     SCRIPT_CMD_MOUSEMOVE,
     SCRIPT_CMD_RESIZE,
     SCRIPT_CMD_WINSIZE,
     SCRIPT_CMD_RECORD_START,
     SCRIPT_CMD_RECORD_STOP,
+    SCRIPT_CMD_PANEL,
+    SCRIPT_CMD_PANEL_HIDE,
     SCRIPT_CMD_QUIT,
 } ScriptCmdType;
 
@@ -48,15 +49,20 @@ typedef struct
     /* MOUSEMOVE */
     int mouse_x;
     int mouse_y;
+    /* PANEL */
+    int panel_id;
+    int panel_col, panel_row;
+    int panel_cols, panel_rows;
+    char panel_title[128];
+    char panel_body[256];
+    int panel_level;
+    unsigned int panel_flags; /* PANEL_FLAG_* bits */
     /* RESIZE */
     int resize_cols;
     int resize_rows;
     /* WINSIZE — set window pixel size via SDL_SetWindowSize */
     int winsize_w;
     int winsize_h;
-    /* NOTIFY */
-    char notify_title[128];
-    char notify_body[256];
     /* RECORD_START */
     char record_dir[512];
     int record_fps;
@@ -120,9 +126,13 @@ typedef struct
     /* Mouse move callback (NULL if unsupported) */
     void (*mousemove_fn)(void *app, int x, int y);
     void *mousemove_user_data;
-    /* Notification callback (NULL if unsupported) */
-    void (*notify_fn)(void *backend, const char *title, const char *body);
-    void *notify_user_data;
+    /* Panel callback (NULL if unsupported) */
+    void (*panel_fn)(void *backend, int id, int col, int row, int cols, int rows,
+                     const char *title, const char *body, int level, unsigned int flags);
+    void *panel_user_data;
+    /* Panel hide callback (NULL if unsupported) */
+    void (*panel_hide_fn)(void *backend, int id);
+    void *panel_hide_user_data;
     /* Resize callback (NULL if unsupported) */
     void (*resize_fn)(void *user_data, int cols, int rows);
     void *resize_user_data;
@@ -140,7 +150,7 @@ typedef struct
     void (*record_start_fn)(void *user_data, int fps);
     void (*record_stop_fn)(void *user_data);
     void *record_user_data;
-} DebugExecCtx;
+} ScriptExecCtx;
 
 /* Execute one script step. Called each frame by the backend's main loop.
  * Handles wait/send/raw/assert/dumpcells/dumprow.
@@ -152,7 +162,7 @@ typedef struct
  * count (caller can detect completion by comparing). */
 void portty_script_step(PorttyScript *script,
                         int *cmd_index,
-                        DebugExecCtx *ctx);
+                        ScriptExecCtx *ctx);
 
 #ifdef __cplusplus
 }

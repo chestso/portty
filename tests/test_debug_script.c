@@ -640,6 +640,56 @@ static void test_parse_x_escape(void)
     cleanup_tmp(path);
 }
 
+static void test_parse_panel(void)
+{
+    char *path = write_tmp_script("panel 1 0 0 40 3 \"Build Complete\" \"All tests passed\"\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_PANEL);
+    ASSERT_EQ(cmd->panel_id, 1);
+    ASSERT_EQ(cmd->panel_col, 0);
+    ASSERT_EQ(cmd->panel_row, 0);
+    ASSERT_EQ(cmd->panel_cols, 40);
+    ASSERT_EQ(cmd->panel_rows, 3);
+    ASSERT_STR_EQ(cmd->panel_title, "Build Complete");
+    ASSERT_STR_EQ(cmd->panel_body, "All tests passed");
+    ASSERT_EQ(cmd->panel_level, 0);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_panel_with_level(void)
+{
+    char *path = write_tmp_script("panel 2 10 5 30 2 \"Warning\" \"Disk space low\" 1\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_PANEL);
+    ASSERT_EQ(cmd->panel_id, 2);
+    ASSERT_EQ(cmd->panel_col, 10);
+    ASSERT_EQ(cmd->panel_row, 5);
+    ASSERT_EQ(cmd->panel_cols, 30);
+    ASSERT_EQ(cmd->panel_rows, 2);
+    ASSERT_STR_EQ(cmd->panel_title, "Warning");
+    ASSERT_STR_EQ(cmd->panel_body, "Disk space low");
+    ASSERT_EQ(cmd->panel_level, 1);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -676,6 +726,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_screendump_long_path);
     RUN_TEST(test_parse_trailing_whitespace);
     RUN_TEST(test_error_message);
+    RUN_TEST(test_parse_panel);
+    RUN_TEST(test_parse_panel_with_level);
 
     TEST_SUMMARY();
 }

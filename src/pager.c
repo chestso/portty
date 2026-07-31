@@ -146,7 +146,7 @@ bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
 
     // Drop any link hint left over from the main terminal — the pager owns the
     // hint channel while it is open and re-resolves on the next hover.
-    p->backend->set_link_hint(p->backend, NULL, 0);
+    // TODO: panel_hide - link hint panels coming soon
 
     if (!was_open)
         p->backend->pause_pty(p->backend); // freeze background output behind the overlay
@@ -161,7 +161,7 @@ void pager_close(Pager *p)
     free(p->text);
     p->text = NULL;
     p->hovered = 0;
-    p->backend->set_link_hint(p->backend, NULL, 0);
+    // TODO: panel_hide - link hint panels coming soon
     p->backend->set_cursor(p->backend, PORTTY_CURSOR_TEXT);
     p->backend->resume_pty(p->backend);
 }
@@ -347,9 +347,11 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
         if (hid != 0) {
             char url[4096];
             size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
-            p->backend->set_link_hint(p->backend, n > 0 ? url : NULL, pixel_y);
+            // TODO: panel_show - link hint panels coming soon
+            (void)url;
+            (void)pixel_y;
         } else {
-            p->backend->set_link_hint(p->backend, NULL, pixel_y);
+            // TODO: panel_hide - link hint panels coming soon
         }
         p->hovered = hid;
     }

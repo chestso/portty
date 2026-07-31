@@ -236,6 +236,9 @@ GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
 // glyphs, distinguishing them from real font glyphs.
 #define BOXDRAW_FONT_DATA ((void *)(intptr_t)1)
 
+// Atlas glyph ID for close button (distinguishes from box-drawing)
+#define CLOSE_BUTTON_GLYPH_ID 0xFFFFFFFE
+
 // =============================================================================
 // Close "×" bitmap helper — shared between SDL3 and Sokol backends
 // =============================================================================
