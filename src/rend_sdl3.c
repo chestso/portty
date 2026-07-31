@@ -2130,17 +2130,15 @@ bool rend_sdl3_get_diag(RendererSdl3Data *data, PorttyDiag *out)
                     out->display_screen = screen_str;
                 }
 
-                float content_scale = SDL_GetDisplayContentScale(display_id);
                 float window_scale = SDL_GetWindowDisplayScale(data->window);
                 snprintf(scale_str, sizeof(scale_str),
-                         "content %.2f, window %.2f",
-                         (double)content_scale, (double)window_scale);
+                         "%.2fx (compositor)", (double)window_scale);
                 out->display_scale = scale_str;
 
-                // DPI estimate: SDL3 content scale is relative to 96 DPI
-                if (content_scale > 0.0f) {
-                    float dpi = content_scale * 96.0f;
-                    snprintf(dpi_str, sizeof(dpi_str), "%.1f (from content scale)", dpi);
+                // DPI for font sizing: window_scale is what the compositor uses
+                if (window_scale > 0.0f) {
+                    float dpi = window_scale * 96.0f;
+                    snprintf(dpi_str, sizeof(dpi_str), "%.0f (%.2f × 96)", dpi, (double)window_scale);
                     out->display_dpi = dpi_str;
                 }
             }

@@ -271,11 +271,11 @@ char *diag_build_report(const DiagSources *s)
         if (s->display_xwayland)
             kv(&sb, "XWayland", s->display_xwayland);
         if (s->display_screen)
-            kv(&sb, "screen", s->display_screen);
-        if (s->display_dpi)
-            kv(&sb, "DPI", s->display_dpi);
+            kv(&sb, "logical", s->display_screen);
         if (s->display_scale)
             kv(&sb, "scale", s->display_scale);
+        if (s->display_dpi)
+            kv(&sb, "DPI", s->display_dpi);
     }
 
     // Configuration

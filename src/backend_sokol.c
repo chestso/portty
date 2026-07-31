@@ -1962,14 +1962,14 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
         static char dpi_str[128];
 
         // Scale info — available on all platforms via sokol
-        snprintf(scale_str, sizeof(scale_str), "sapp_dpi_scale %.2f, high_dpi %s",
-                 sapp_dpi_scale(), sapp_high_dpi() ? "true" : "false");
+        float dpi_scale = sapp_dpi_scale();
+        snprintf(scale_str, sizeof(scale_str), "%.2fx (compositor)", (double)dpi_scale);
         out->display_scale = scale_str;
 
-        // DPI estimate from sapp_dpi_scale (relative to 96 DPI)
-        float dpi = sapp_dpi_scale() * 96.0f;
-        if (dpi > 0.0f) {
-            snprintf(dpi_str, sizeof(dpi_str), "%.1f (from dpi_scale)", dpi);
+        // DPI for font sizing: dpi_scale is what the compositor uses
+        if (dpi_scale > 0.0f) {
+            float dpi = dpi_scale * 96.0f;
+            snprintf(dpi_str, sizeof(dpi_str), "%.0f (%.2f × 96)", dpi, (double)dpi_scale);
             out->display_dpi = dpi_str;
         }
     }
@@ -1979,7 +1979,6 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
         static char session_str[16];
         static char xwayland_str[8];
         static char screen_str[128];
-        static char dpi_str[128];
 
         const char *xdg_session = getenv("XDG_SESSION_TYPE");
         if (xdg_session && *xdg_session) {
@@ -2001,32 +2000,9 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
             int scr_h = DisplayHeight(xdisp, screen);
             int scr_wmm = DisplayWidthMM(xdisp, screen);
             int scr_hmm = DisplayHeightMM(xdisp, screen);
-            float phys_dpi = scr_wmm > 0 ? (float)scr_w * 25.4f / (float)scr_wmm : 0.0f;
             snprintf(screen_str, sizeof(screen_str), "%dx%d px, %dx%d mm",
                      scr_w, scr_h, scr_wmm, scr_hmm);
             out->display_screen = screen_str;
-
-            float xft_dpi = 0.0f;
-            char *rms = XResourceManagerString(xdisp);
-            if (rms) {
-                XrmDatabase db = XrmGetStringDatabase(rms);
-                if (db) {
-                    XrmValue value;
-                    char *type = NULL;
-                    if (XrmGetResource(db, "Xft.dpi", "Xft.Dpi", &type, &value)) {
-                        if (type && strcmp(type, "String") == 0)
-                            xft_dpi = (float)atof(value.addr);
-                    }
-                    XrmDestroyDatabase(db);
-                }
-            }
-            if (xft_dpi > 0.0f)
-                snprintf(dpi_str, sizeof(dpi_str), "physical %.1f, Xft.dpi %.0f",
-                         phys_dpi, xft_dpi);
-            else
-                snprintf(dpi_str, sizeof(dpi_str), "physical %.1f, Xft.dpi (unset)",
-                         phys_dpi);
-            out->display_dpi = dpi_str;
         }
     }
 #elif defined(__APPLE__)
