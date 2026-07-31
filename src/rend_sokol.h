@@ -171,4 +171,8 @@ void rend_sokol_draw_strikethrough(RendererSokolData *data, int row,
                                    int vis_start, int vis_end,
                                    const uint8_t color[4]);
 
+// Color conversion
+void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse,
+                           uint8_t out[4]);
+
 #endif // REND_SOKOL_H

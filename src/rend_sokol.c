@@ -76,7 +76,7 @@ void rend_sokol_reset_frame_buffers(void)
 
 // ── Color conversion ──────────────────────────────────────────────────────
 
-static void cell_color(TerminalColor tc, bool is_fg, bool reverse, uint8_t out[4])
+void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse, uint8_t out[4])
 {
     const uint8_t def_bg[4] = { DEF_BG_R, DEF_BG_G, DEF_BG_B, 0xFF };
     const uint8_t def_fg[4] = { 0xD0, 0xD0, 0xD0, 0xFF };
