@@ -348,6 +348,7 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
             char url[4096];
             size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
             // TODO: panel_show - link hint panels coming soon
+            (void)n;
             (void)url;
             (void)pixel_y;
         } else {

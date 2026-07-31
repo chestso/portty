@@ -279,6 +279,7 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
         char url[4096];
         size_t n = terminal_cell_get_hyperlink(app->term, link_row, link_col, url,
                                                sizeof(url));
+        (void)n;
         int cell_w, cell_h;
         int anchor_py = py;
         if (app_get_cell_size(app, &cell_w, &cell_h) && cell_h > 0) {
