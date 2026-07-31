@@ -7,19 +7,16 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
 EXTRA_DIST = test_helpers.h font_stubs.c
 
-check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale test_content_scale test_panel
+check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale test_content_scale test_panel test_link_hint
 
 if BACKEND_SDL3
 check_PROGRAMS += test_atlas
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) $(TERM_STUBS) \
-    ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+    ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/font.c font_stubs.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
 # rend_sdl3_atlas.c uses pow() for the sRGB->linear LUT.
 test_atlas_LDADD = -lm
 endif
-
-test_unicode_SOURCES = test_unicode.c $(TEST_COMMON) ../src/unicode.c
-test_unicode_CFLAGS = $(TEST_CFLAGS)
 
 test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/portty_conf.c
 test_conf_CFLAGS = $(TEST_CFLAGS)
@@ -44,31 +41,31 @@ test_paste_normalize_CFLAGS = $(TEST_CFLAGS)
 # Regression test for the on_mouse guard: altscreen without mouse_mode
 # must not allow terminal-level selection without Shift.
 test_altscreen_mouse_SOURCES = test_altscreen_mouse.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_altscreen_mouse_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_altscreen_mouse_LDADD = $(COFFER_LIBS)
 
 test_term_cfr_SOURCES = test_term_cfr.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_term_cfr_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_term_cfr_LDADD = $(COFFER_LIBS)
 
 test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_osc52_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_osc52_LDADD = $(COFFER_LIBS)
 
 # Sixel end-to-end through the host bridge: feed a DCS sequence via
 # terminal_process_input and read images back via terminal_get_sixels.
 test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_sixel_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_sixel_LDADD = $(COFFER_LIBS)
 
 # Lottie end-to-end through the host bridge: feed an APC sequence via
 # terminal_process_input and read animations back via terminal_get_lotties.
 test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/unicode.c ../src/path_compat.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_lottie_LDADD = $(COFFER_LIBS)
 
@@ -78,7 +75,7 @@ test_lottie_LDADD = $(COFFER_LIBS)
 if BACKEND_SDL3
 if !HOST_WINDOWS
 check_PROGRAMS += test_pty_pause
-test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) ../src/term.c ../src/unicode.c
+test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) ../src/term.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
 endif
 endif
@@ -114,7 +111,7 @@ test_path_compat_CFLAGS = $(TEST_CFLAGS)
 
 # Procedural box-drawing alignment test.  Renders to a CPU pixel buffer
 # (GlyphBitmap) and inspects pixels directly — no SDL or GPU required.
-test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_boxdraw.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_boxdraw.c ../src/rend_common.c ../src/font.c font_stubs.c
 test_boxdraw_CFLAGS = $(TEST_CFLAGS)
 test_boxdraw_LDADD = -lm
 
@@ -137,7 +134,7 @@ test_timer_CFLAGS = $(TEST_CFLAGS)
 test_timer_LDADD =
 
 # Shared GPU-agnostic renderer helpers (Nerd Font map, sRGB helpers).
-test_rend_common_SOURCES = test_rend_common.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+test_rend_common_SOURCES = test_rend_common.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_common.c ../src/font.c font_stubs.c
 test_rend_common_CFLAGS = $(TEST_CFLAGS)
 test_rend_common_LDADD = -lm
 
@@ -146,7 +143,7 @@ test_rend_common_LDADD = -lm
 # coffer for the full handler implementations.
 test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
     ../src/portty_app.c ../src/term.c ../src/term_cfr.c ../src/base64.c \
-    ../src/unicode.c ../src/path_compat.c ../src/pager.c ../src/rend_common.c \
+    ../src/path_compat.c ../src/pager.c ../src/rend_common.c \
     ../src/portty_conf.c ../src/diag.c ../src/font.c font_stubs.c
 if HOST_WINDOWS
 test_portty_app_SOURCES += ../src/pty_w32.c
@@ -160,7 +157,7 @@ test_portty_app_LDADD = $(COFFER_LIBS)
 # the parser itself, but portty_script.h includes term.h which pulls
 # in coffer, and the step helper calls rend_display_row_to_unified.
 test_debug_script_SOURCES = test_debug_script.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/portty_script.c ../src/portty_frame_rec.c ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+    ../src/portty_script.c ../src/portty_frame_rec.c ../src/rend_common.c ../src/font.c font_stubs.c
 test_debug_script_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_debug_script_LDADD = $(COFFER_LIBS) -lm
 
@@ -168,8 +165,13 @@ test_debug_script_LDADD = $(COFFER_LIBS) -lm
 # unicode_cell_has_vs15() — pure logic, no SDL/coffer dependency, but
 # rend_common.c pulls in font.c (needs font_stubs.c).
 test_vs15_routing_SOURCES = test_vs15_routing.c $(TEST_COMMON) $(TERM_STUBS) \
-    ../src/rend_common.c ../src/unicode.c ../src/font.c font_stubs.c
+    ../src/rend_common.c ../src/font.c font_stubs.c
 test_vs15_routing_CFLAGS = $(TEST_CFLAGS)
 test_vs15_routing_LDADD = -lm
+
+# Link hint panel positioning tests. Pure logic, no SDL/coffer dependency.
+test_link_hint_SOURCES = test_link_hint.c $(TEST_COMMON)
+test_link_hint_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_link_hint_LDADD = $(COFFER_LIBS)
 
 TESTS = $(check_PROGRAMS)

@@ -1,6 +1,5 @@
 #include "test_helpers.h"
 #include "rend_common.h"
-#include "unicode.h"
 #include <stdlib.h>
 
 /* --- VS15 detection --- */

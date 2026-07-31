@@ -32,7 +32,6 @@
 #include "term.h"
 #include "term_cfr.h"
 #include "timer.h"
-#include "unicode.h"
 #ifdef _WIN32
 #include <pthread.h>
 #include <io.h>

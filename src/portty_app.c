@@ -7,9 +7,9 @@
 #include "diag.h"
 #include "pager.h"
 #include "portty_backend.h"
+#include "portty_panel.h"
 #include "rend_common.h"
 #include "term.h"
-#include "term_cfr.h"
 #include <coffer/coffer.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -279,20 +279,62 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
         char url[4096];
         size_t n = terminal_cell_get_hyperlink(app->term, link_row, link_col, url,
                                                sizeof(url));
-        (void)n;
-        int cell_w, cell_h;
-        int anchor_py = py;
-        if (app_get_cell_size(app, &cell_w, &cell_h) && cell_h > 0) {
-            int display_row = py / cell_h;
-            if (display_row < 0)
-                display_row = 0;
-            anchor_py = display_row * cell_h;
+        if (n > 0 && n < sizeof(url)) {
+            int cell_w, cell_h;
+            if (app_get_cell_size(app, &cell_w, &cell_h) && cell_w > 0 && cell_h > 0) {
+                int term_rows, term_cols;
+                terminal_get_dimensions(app->term, &term_rows, &term_cols);
+
+                int display_row = py / cell_h;
+                if (display_row < 0)
+                    display_row = 0;
+                if (display_row >= term_rows)
+                    display_row = term_rows - 1;
+
+                int display_col = link_col;
+                if (display_col < 0)
+                    display_col = 0;
+                if (display_col >= term_cols)
+                    display_col = term_cols - 1;
+
+                int url_cells = cfr_utf8_display_width(url, n);
+                int panel_cols = url_cells + PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
+                if (panel_cols > term_cols)
+                    panel_cols = term_cols;
+                if (panel_cols < PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1)
+                    panel_cols = PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1;
+
+                int panel_rows = 1 + PANEL_DECORATION_ROWS;
+
+                int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
+                if (panel_row < 0)
+                    panel_row = 0;
+                if (panel_row + panel_rows > term_rows) {
+                    panel_row = term_rows - panel_rows;
+                    if (panel_row < 0) {
+                        panel_row = 0;
+                        panel_rows = term_rows;
+                    }
+                }
+
+                int panel_col;
+                if (display_col + panel_cols / 2 <= term_cols / 2) {
+                    panel_col = 0;
+                } else {
+                    panel_col = term_cols - panel_cols;
+                    if (panel_col < 0)
+                        panel_col = 0;
+                }
+
+                app->backend->panel_show(app->backend, PANEL_ID_LINK_HINT,
+                                         panel_col, panel_row, panel_cols, panel_rows,
+                                         NULL, url,
+                                         PORTTY_NOTIFY_INFO,
+                                         PANEL_FLAG_NO_ACCENT | PANEL_FLAG_NO_CLOSE);
+            }
         }
-        // TODO: panel_show - link hint panels coming soon
-        (void)url;
-        (void)anchor_py;
     } else {
-        // TODO: panel_hide - link hint panels coming soon
+        app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
     }
     return true;
 }
@@ -542,7 +584,7 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
             }
         }
     } else {
-        // TODO: panel_hide - link hint panels coming soon
+        app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
     }
 
     bool in_altscreen = terminal_is_altscreen(app->term);

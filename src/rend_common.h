@@ -15,6 +15,18 @@ typedef enum
     UNDERLINE_DASHED = 5
 } UnderlineStyle;
 
+// Unicode codepoint constants used by emoji routing
+#define UNICODE_VARIATION_SELECTOR_15 0xFE0E
+#define UNICODE_VARIATION_SELECTOR_16 0xFE0F
+
+// Emoji detection functions (moved from the former unicode module)
+bool is_emoji_presentation(uint32_t cp);
+bool is_regional_indicator(uint32_t cp);
+
+// Returns true if any codepoint in the cell's chars[] is U+FE0E (VS15).
+// VS15 narrows the cell to 1 column but does NOT block color emoji routing.
+bool unicode_cell_has_vs15(const uint32_t *chars, int max);
+
 // sRGB transfer function, single-sourced here for every CPU-side color-space
 // conversion in the renderer (the color-glyph atlas linearize LUT and the
 // notification/link-hint panel glyph blend). The standard sRGB EOTF/OETF.

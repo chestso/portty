@@ -6,8 +6,8 @@
 // lookups as the main view, but target the overlay terminal.
 
 #include "pager.h"
-#include "common.h"
 #include "portty_app.h"
+#include "portty_panel.h"
 #include "term_cfr.h"
 
 #include <coffer/coffer.h>
@@ -146,7 +146,7 @@ bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
 
     // Drop any link hint left over from the main terminal — the pager owns the
     // hint channel while it is open and re-resolves on the next hover.
-    // TODO: panel_hide - link hint panels coming soon
+    p->backend->panel_hide(p->backend, PANEL_ID_LINK_HINT);
 
     if (!was_open)
         p->backend->pause_pty(p->backend); // freeze background output behind the overlay
@@ -161,7 +161,7 @@ void pager_close(Pager *p)
     free(p->text);
     p->text = NULL;
     p->hovered = 0;
-    // TODO: panel_hide - link hint panels coming soon
+    p->backend->panel_hide(p->backend, PANEL_ID_LINK_HINT);
     p->backend->set_cursor(p->backend, PORTTY_CURSOR_TEXT);
     p->backend->resume_pty(p->backend);
 }
@@ -347,12 +347,44 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
         if (hid != 0) {
             char url[4096];
             size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
-            // TODO: panel_show - link hint panels coming soon
-            (void)n;
-            (void)url;
-            (void)pixel_y;
+            if (n > 0 && n < sizeof(url)) {
+                int url_cells = cfr_utf8_display_width(url, n);
+                int panel_cols = url_cells + PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
+                if (panel_cols > p->cols)
+                    panel_cols = p->cols;
+                if (panel_cols < PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1)
+                    panel_cols = PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1;
+
+                int panel_rows = 1 + PANEL_DECORATION_ROWS;
+
+                int panel_row = (row > 0) ? row - panel_rows : row + 1;
+                if (panel_row < 0)
+                    panel_row = 0;
+                if (panel_row + panel_rows > p->rows) {
+                    panel_row = p->rows - panel_rows;
+                    if (panel_row < 0) {
+                        panel_row = 0;
+                        panel_rows = p->rows;
+                    }
+                }
+
+                int panel_col;
+                if (col + panel_cols / 2 <= p->cols / 2) {
+                    panel_col = 0;
+                } else {
+                    panel_col = p->cols - panel_cols;
+                    if (panel_col < 0)
+                        panel_col = 0;
+                }
+
+                p->backend->panel_show(p->backend, PANEL_ID_LINK_HINT,
+                                       panel_col, panel_row, panel_cols, panel_rows,
+                                       NULL, url,
+                                       PORTTY_NOTIFY_INFO,
+                                       PANEL_FLAG_NO_ACCENT | PANEL_FLAG_NO_CLOSE);
+            }
         } else {
-            // TODO: panel_hide - link hint panels coming soon
+            p->backend->panel_hide(p->backend, PANEL_ID_LINK_HINT);
         }
         p->hovered = hid;
     }

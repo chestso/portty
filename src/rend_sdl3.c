@@ -22,7 +22,6 @@
 #include "png_writer.h"
 #include "display_info.h"
 
-#include "unicode.h"
 #include <SDL3/SDL.h>
 #include <stdint.h>
 

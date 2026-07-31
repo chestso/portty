@@ -6,6 +6,9 @@
 
 #define PORTTY_PANEL_MAX 8
 
+// Reserved panel IDs (negative to avoid collision with user/script panels)
+#define PANEL_ID_LINK_HINT -1 // OSC-8 URL hover hint pill
+
 // Panel decoration flags (bitwise OR)
 #define PANEL_FLAG_NO_ACCENT 0x01
 #define PANEL_FLAG_NO_CLOSE  0x02

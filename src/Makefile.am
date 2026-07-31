@@ -44,7 +44,7 @@ PORTTY_COMMON_SRC = \
     $(PTY_SOURCE) \
     $(FONT_RESOLVE_SOURCE) \
     font_resolve.c font.c font_ft.c \
-    colr.c unicode.c base64.c \
+    colr.c base64.c \
     png_writer.c png_reader.c qoi_writer.c \
     portty_conf.c diag.c pager.c timer.c path_compat.c os_compat.c display_info.c \
     portty_bug.c heap_harden.c \
@@ -122,7 +122,7 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
-    rend_sokol_atlas.h rend_sokol.h term_cfr.h term.h timer.h unicode.h
+    rend_sokol_atlas.h rend_sokol.h term_cfr.h term.h timer.h
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:

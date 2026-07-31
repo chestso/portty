@@ -9,7 +9,6 @@
 #include "rend_common.h"
 #include "rend_sokol_atlas.h"
 #include "term.h"
-#include "unicode.h"
 #include <coffer/coffer.h>
 #include <math.h>
 #include <sokol/sokol_gfx.h>
