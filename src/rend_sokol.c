@@ -9,6 +9,7 @@
 #include "rend_common.h"
 #include "rend_sokol_atlas.h"
 #include "term.h"
+#include "unicode.h"
 #include <coffer/coffer.h>
 #include <math.h>
 #include <sokol/sokol_gfx.h>
@@ -31,18 +32,6 @@
 #define SELECTION_COLOR_G 0x60
 #define SELECTION_COLOR_B 0x7A
 #define SELECTION_COLOR_A 220
-
-// Underline color: matches cursor color
-#define UNDERLINE_COLOR_R CURSOR_COLOR_R
-#define UNDERLINE_COLOR_G CURSOR_COLOR_G
-#define UNDERLINE_COLOR_B CURSOR_COLOR_B
-#define UNDERLINE_COLOR_A 255
-
-// Default background color — used both as the render pass clear color and
-// as the bg for cells with bg.is_default.
-#define DEF_BG_R 0x00
-#define DEF_BG_G 0x00
-#define DEF_BG_B 0x00
 
 // File-scope vertex arrays (moved from static-local so debug dump functions
 // can access them after the render pass).
@@ -102,12 +91,7 @@ void rend_sokol_emit_cursor_quad(float x0, float y0, float x1, float y1)
     float cu0 = -(0.0f + 2.0f);
     float cu1 = -(1.0f + 2.0f);
     GlyphVertex *q = s_cursor_verts;
-    q[0] = (GlyphVertex){ x0, y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-    q[1] = (GlyphVertex){ x1, y0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-    q[2] = (GlyphVertex){ x1, y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-    q[3] = (GlyphVertex){ x0, y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-    q[4] = (GlyphVertex){ x1, y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-    q[5] = (GlyphVertex){ x0, y1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    rend_sokol_emit_glyph_quad(q, x0, y0, x1, y1, cu0, 0.0f, cu1, 1.0f, cc, cc);
     s_cursor_vert_count = 6;
 }
 
@@ -116,15 +100,24 @@ void rend_sokol_emit_selection_quad(float x0, float y0, float x1, float y1,
 {
     uint8_t sc[4] = { SELECTION_COLOR_R, SELECTION_COLOR_G, SELECTION_COLOR_B, SELECTION_COLOR_A };
     float bg_u = 2.0f;
-    float bg_v = 0.0f;
     GlyphVertex *sq = &sel_verts[*sel_vert_count];
-    sq[0] = (GlyphVertex){ x0, y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-    sq[1] = (GlyphVertex){ x1, y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-    sq[2] = (GlyphVertex){ x1, y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-    sq[3] = (GlyphVertex){ x0, y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-    sq[4] = (GlyphVertex){ x1, y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-    sq[5] = (GlyphVertex){ x0, y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    rend_sokol_emit_glyph_quad(sq, x0, y0, x1, y1, bg_u, 0.0f, bg_u, 0.0f, sc, sc);
     *sel_vert_count += 6;
+}
+
+// ── Glyph quad emission helper ─────────────────────────────────────────────
+
+void rend_sokol_emit_glyph_quad(GlyphVertex *q,
+                                float x0, float y0, float x1, float y1,
+                                float u0, float v0, float u1, float v1,
+                                const uint8_t fg[4], const uint8_t bg[4])
+{
+    q[0] = (GlyphVertex){ x0, y0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[1] = (GlyphVertex){ x1, y0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[2] = (GlyphVertex){ x1, y1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[3] = (GlyphVertex){ x0, y0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[4] = (GlyphVertex){ x1, y1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+    q[5] = (GlyphVertex){ x0, y1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
 }
 
 // ── Pipeline creation ──────────────────────────────────────────────────────
@@ -553,12 +546,7 @@ void rend_sokol_deco_emit_quad(float x0, float y0, float x1, float y1,
     }
     GlyphVertex *q = &s_deco_verts[s_deco_vert_count];
     float u = 2.0f;
-    q[0] = (GlyphVertex){ x0, y0, u, 0.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[1] = (GlyphVertex){ x1, y0, u, 0.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[2] = (GlyphVertex){ x1, y1, u, 1.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[3] = (GlyphVertex){ x0, y0, u, 0.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[4] = (GlyphVertex){ x1, y1, u, 1.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[5] = (GlyphVertex){ x0, y1, u, 1.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
+    rend_sokol_emit_glyph_quad(q, x0, y0, x1, y1, u, 0.0f, u, 1.0f, color, color);
     s_deco_vert_count += 6;
 }
 
@@ -1071,8 +1059,8 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
 
             uint8_t fg[4], bg[4];
             bool rev = cell.attrs.reverse;
-            cell_color(cell.fg, true, rev, fg);
-            cell_color(cell.bg, false, rev, bg);
+            rend_sokol_cell_color(cell.fg, true, rev, fg);
+            rend_sokol_cell_color(cell.bg, false, rev, bg);
 
             // Dim/faint (SGR 2): blend foreground toward background at 40% opacity
             if (cell.attrs.dim) {
@@ -1102,12 +1090,8 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
             if (track_index)
                 rend_sokol_get_vert_index()[row * SOKOL_MAX_COLS + col] = *vert_count;
             GlyphVertex *q = &rend_sokol_get_frame_verts()[*vert_count];
-            q[0] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[1] = (GlyphVertex){ cell_x1, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[2] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[3] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[4] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[5] = (GlyphVertex){ cell_x0, cell_y1, bg_u, bg_v, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            rend_sokol_emit_glyph_quad(q, cell_x0, cell_y0, cell_x1, cell_y1,
+                                       bg_u, bg_v, bg_u, bg_v, fg, bg);
             *vert_count += 6;
 
             if (is_cursor) {
@@ -1173,12 +1157,8 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                         float v1 = (float)(bd_entry->region.y + bd_entry->region.h) / atlas_size;
 
                         q = &rend_sokol_get_glyph_verts()[*glyph_vert_count];
-                        q[0] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                        q[1] = (GlyphVertex){ gx1, gy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                        q[2] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                        q[3] = (GlyphVertex){ gx0, gy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                        q[4] = (GlyphVertex){ gx1, gy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                        q[5] = (GlyphVertex){ gx0, gy1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                        rend_sokol_emit_glyph_quad(q, gx0, gy0, gx1, gy1,
+                                                   u0, v0, u1, v1, fg, bg);
                         *glyph_vert_count += 6;
                     }
                     goto selection_check;
@@ -1374,12 +1354,8 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                                 float u_off = color_baked ? 3.0f : 0.0f;
 
                                 q = &rend_sokol_get_glyph_verts()[*glyph_vert_count];
-                                q[0] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                                q[1] = (GlyphVertex){ gx1, gy0, u1 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                                q[2] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                                q[3] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                                q[4] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                                q[5] = (GlyphVertex){ gx0, gy1, u0 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                                rend_sokol_emit_glyph_quad(q, gx0, gy0, gx1, gy1,
+                                                           u0 + u_off, v0, u1 + u_off, v1, fg, bg);
                                 *glyph_vert_count += 6;
                             }
                         }
@@ -1493,12 +1469,8 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                     float u_off = color_baked ? 3.0f : 0.0f;
 
                     q = &rend_sokol_get_glyph_verts()[*glyph_vert_count];
-                    q[0] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[1] = (GlyphVertex){ gx1, gy0, u1 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[2] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[3] = (GlyphVertex){ gx0, gy0, u0 + u_off, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[4] = (GlyphVertex){ gx1, gy1, u1 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[5] = (GlyphVertex){ gx0, gy1, u0 + u_off, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    rend_sokol_emit_glyph_quad(q, gx0, gy0, gx1, gy1,
+                                               u0 + u_off, v0, u1 + u_off, v1, fg, bg);
                     *glyph_vert_count += 6;
                 }
             }
@@ -1509,5 +1481,194 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                                                sel_verts, sel_vert_count);
             }
         }
+    }
+}
+
+// ── Lottie rendering ───────────────────────────────────────────────────────
+
+int rend_sokol_render_lottie_layer(RendererSokolData *data, TerminalBackend *term,
+                                   int win_w, int win_h,
+                                   uint8_t target_layer, int vert_offset)
+{
+    int anim_count = 0;
+    const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
+    if (anim_count == 0)
+        return 0;
+
+    int cell_w = data->cell_w;
+    int cell_h = data->cell_h;
+    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
+    int scroll_offset = data->scroll.scroll_offset;
+    float uniforms[2] = { (float)win_w, (float)win_h };
+
+    int vert_base = vert_offset;
+
+    for (int i = 0; i < anim_count; i++) {
+        const CfrLottie *anim = &anims[i];
+        int pl_count = 0;
+        const CfrLottiePlacement *pls =
+            terminal_get_lottie_placements(term, anim->id, &pl_count);
+
+        int scaled_canvas_w = logical_to_physical(anim->canvas_w, scale);
+        int scaled_canvas_h = logical_to_physical(anim->canvas_h, scale);
+        int anim_vert_count = 0;
+
+        for (int j = 0; j < pl_count; j++) {
+            const CfrLottiePlacement *pl = &pls[j];
+            if (pl->layer != target_layer)
+                continue;
+
+            int screen_row = pl->row + scroll_offset;
+            int px = pl->col * cell_w;
+            int py = screen_row * cell_h;
+            int box_w = pl->cols * cell_w;
+            int box_h = pl->rows * cell_h;
+
+            if (py + box_h <= 0 || py >= win_h)
+                continue;
+            if (px + box_w <= 0 || px >= win_w)
+                continue;
+            if (vert_base + anim_vert_count + 6 > SOKOL_MAX_LOTTIE_VERTICES)
+                break;
+
+            int off_x = (box_w - scaled_canvas_w) / 2;
+            int off_y = (box_h - scaled_canvas_h) / 2;
+            float x0 = (float)(px + off_x);
+            float y0 = (float)(py + off_y);
+            float x1 = x0 + (float)scaled_canvas_w;
+            float y1 = y0 + (float)scaled_canvas_h;
+
+            uint8_t op = (uint8_t)pl->opacity_x256;
+            uint8_t op_color[4] = { op, op, op, op };
+            uint8_t zero[4] = { 0, 0, 0, 0 };
+
+            GlyphVertex *q = &rend_sokol_get_lottie_verts()[vert_base + anim_vert_count];
+            rend_sokol_emit_glyph_quad(q, x0, y0, x1, y1,
+                                       0.0f, 0.0f, 1.0f, 1.0f, op_color, zero);
+            anim_vert_count += 6;
+        }
+
+        if (anim_vert_count > 0) {
+            int cache_idx = rend_sokol_lottie_get_texture(data, anim);
+            if (cache_idx >= 0) {
+                sg_apply_pipeline(data->lottie_pip);
+                sg_apply_bindings(&(sg_bindings){
+                    .vertex_buffers[0] = data->lottie_vbuf,
+                    .views[0] = data->lottie_cache[cache_idx].view,
+                    .samplers[0] = data->lottie_sampler,
+                });
+                sg_apply_uniforms(0, &SG_RANGE(uniforms));
+                sg_draw(vert_base, anim_vert_count, 1);
+            }
+            vert_base += anim_vert_count;
+        }
+    }
+
+    return vert_base - vert_offset;
+}
+
+// ── Sixel rendering ─────────────────────────────────────────────────────────
+
+static GlyphVertex s_sixel_verts[SOKOL_MAX_SIXEL_VERTICES];
+
+void rend_sokol_ensure_sixel_vbuf(RendererSokolData *data)
+{
+    if (data->sixel_vbuf_created)
+        return;
+    data->sixel_vbuf = sg_make_buffer(&(sg_buffer_desc){
+        .size = SOKOL_MAX_SIXEL_VERTICES * sizeof(GlyphVertex),
+        .usage.dynamic_update = true,
+        .label = "sokol-sixel-vbuf",
+    });
+    data->sixel_vbuf_created = true;
+}
+
+void rend_sokol_render_sixel_images(RendererSokolData *data, TerminalBackend *term,
+                                    int win_w, int win_h)
+{
+    int count = 0;
+    const CfrSixel *imgs = terminal_get_sixels(term, &count);
+    rend_sokol_sixel_cache_reconcile(data, imgs, count);
+    if (count == 0)
+        return;
+
+    int cell_w = data->cell_w;
+    int cell_h = data->cell_h;
+    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
+    int scroll_offset = data->scroll.scroll_offset;
+    float uniforms[2] = { (float)win_w, (float)win_h };
+    uint8_t full_op[4] = { 255, 255, 255, 255 };
+
+    int vert_count = 0;
+
+    // Pass 1: build all vertices and ensure textures are cached
+    for (int i = 0; i < count; i++) {
+        const CfrSixel *img = &imgs[i];
+
+        int screen_row = img->row + scroll_offset;
+        int px = img->col * cell_w;
+        int py = screen_row * cell_h;
+        int scaled_w = logical_to_physical(img->width_px, scale);
+        int scaled_h = logical_to_physical(img->height_px, scale);
+
+        if (py + scaled_h <= 0 || py >= win_h)
+            continue;
+        if (px + scaled_w <= 0 || px >= win_w)
+            continue;
+        if (vert_count + 6 > SOKOL_MAX_SIXEL_VERTICES)
+            break;
+
+        float x0 = (float)px;
+        float y0 = (float)py;
+        float x1 = x0 + (float)scaled_w;
+        float y1 = y0 + (float)scaled_h;
+
+        uint8_t zero[4] = { 0, 0, 0, 0 };
+        GlyphVertex *q = &s_sixel_verts[vert_count];
+        rend_sokol_emit_glyph_quad(q, x0, y0, x1, y1,
+                                   0.0f, 0.0f, 1.0f, 1.0f, full_op, zero);
+
+        vert_count += 6;
+    }
+
+    if (vert_count == 0)
+        return;
+
+    // Upload vertex buffer once
+    sg_update_buffer(data->sixel_vbuf, &(sg_range){
+                                           .ptr = s_sixel_verts,
+                                           .size = (size_t)vert_count * sizeof(GlyphVertex),
+                                       });
+
+    // Pass 2: draw each image's 6 verts with its own texture
+    int vert_offset = 0;
+    for (int i = 0; i < count; i++) {
+        const CfrSixel *img = &imgs[i];
+
+        int screen_row = img->row + scroll_offset;
+        int px = img->col * cell_w;
+        int py = screen_row * cell_h;
+        int scaled_w = logical_to_physical(img->width_px, scale);
+        int scaled_h = logical_to_physical(img->height_px, scale);
+
+        if (py + scaled_h <= 0 || py >= win_h)
+            continue;
+        if (px + scaled_w <= 0 || px >= win_w)
+            continue;
+        if (vert_offset + 6 > vert_count)
+            break;
+
+        int cache_idx = rend_sokol_sixel_get_texture(data, img);
+        if (cache_idx >= 0 && data->lottie_pip_created) {
+            sg_apply_pipeline(data->lottie_pip);
+            sg_apply_bindings(&(sg_bindings){
+                .vertex_buffers[0] = data->sixel_vbuf,
+                .views[0] = data->sixel_cache[cache_idx].view,
+                .samplers[0] = data->lottie_sampler,
+            });
+            sg_apply_uniforms(0, &SG_RANGE(uniforms));
+            sg_draw(vert_offset, 6, 1);
+        }
+        vert_offset += 6;
     }
 }

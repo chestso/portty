@@ -21,6 +21,17 @@
 #define SOKOL_MAX_LOTTIE_VERTICES 4096
 #define SOKOL_MAX_SIXEL_VERTICES  4096
 
+// Default background color (moved from rend_sokol.c for use in clear color)
+#define DEF_BG_R 0x00
+#define DEF_BG_G 0x00
+#define DEF_BG_B 0x00
+
+// Default underline color
+#define UNDERLINE_COLOR_R 0x80
+#define UNDERLINE_COLOR_G 0x80
+#define UNDERLINE_COLOR_B 0x80
+#define UNDERLINE_COLOR_A 255
+
 #define SOKOL_LOTTIE_CACHE_MAX 64
 #define SOKOL_SIXEL_CACHE_MAX  256
 
@@ -180,6 +191,12 @@ void rend_sokol_emit_cursor_quad(float x0, float y0, float x1, float y1);
 void rend_sokol_emit_selection_quad(float x0, float y0, float x1, float y1,
                                     GlyphVertex *sel_verts, int *sel_vert_count);
 
+// Glyph quad emission helpers
+void rend_sokol_emit_glyph_quad(GlyphVertex *q,
+                                float x0, float y0, float x1, float y1,
+                                float u0, float v0, float u1, float v1,
+                                const uint8_t fg[4], const uint8_t bg[4]);
+
 // Terminal cell rendering
 void rend_sokol_render_terminal_cells(RendererSokolData *data,
                                       TerminalBackend *term,
@@ -188,6 +205,16 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data,
                                       int *vert_count, int *glyph_vert_count,
                                       int *sel_vert_count,
                                       GlyphVertex *sel_verts);
+
+// Lottie rendering
+int rend_sokol_render_lottie_layer(RendererSokolData *data, TerminalBackend *term,
+                                   int win_w, int win_h,
+                                   uint8_t target_layer, int vert_offset);
+
+// Sixel rendering
+void rend_sokol_ensure_sixel_vbuf(RendererSokolData *data);
+void rend_sokol_render_sixel_images(RendererSokolData *data, TerminalBackend *term,
+                                    int win_w, int win_h);
 
 // Lottie/sixel cache management
 void rend_sokol_lottie_cache_reconcile(RendererSokolData *data,

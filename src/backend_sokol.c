@@ -1043,233 +1043,6 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 
 #define SOKOL_MAX_SIXEL_VERTICES 4096
 
-// Cache functions moved to rend_sokol.c
-#define lottie_cache_reconcile(d, anims, count) \
-    rend_sokol_lottie_cache_reconcile(&(d)->rend, anims, count)
-#define lottie_get_texture(d, anim) \
-    rend_sokol_lottie_get_texture(&(d)->rend, anim)
-#define sixel_cache_reconcile(d, imgs, count) \
-    rend_sokol_sixel_cache_reconcile(&(d)->rend, imgs, count)
-#define sixel_get_texture(d, img) \
-    rend_sokol_sixel_get_texture(&(d)->rend, img)
-
-static void sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
-                                      uint8_t target_layer, int vert_offset)
-{
-    int anim_count = 0;
-    const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
-    if (anim_count == 0)
-        return 0;
-
-    int cell_w = d->rend.cell_w;
-    int cell_h = d->rend.cell_h;
-    float scale = d->rend.content_scale > 0.0f ? d->rend.content_scale : 1.0f;
-    int win_w = (int)sapp_width();
-    int win_h = (int)sapp_height();
-    int scroll_offset = d->rend.scroll.scroll_offset;
-    float uniforms[2] = { (float)win_w, (float)win_h };
-
-    int vert_base = vert_offset;
-
-    for (int i = 0; i < anim_count; i++) {
-        const CfrLottie *anim = &anims[i];
-        int pl_count = 0;
-        const CfrLottiePlacement *pls =
-            terminal_get_lottie_placements(term, anim->id, &pl_count);
-
-        int scaled_canvas_w = logical_to_physical(anim->canvas_w, scale);
-        int scaled_canvas_h = logical_to_physical(anim->canvas_h, scale);
-        int anim_vert_count = 0;
-
-        for (int j = 0; j < pl_count; j++) {
-            const CfrLottiePlacement *pl = &pls[j];
-            if (pl->layer != target_layer)
-                continue;
-
-            int screen_row = pl->row + scroll_offset;
-            int px = pl->col * cell_w;
-            int py = screen_row * cell_h;
-            int box_w = pl->cols * cell_w;
-            int box_h = pl->rows * cell_h;
-
-            if (py + box_h <= 0 || py >= win_h)
-                continue;
-            if (px + box_w <= 0 || px >= win_w)
-                continue;
-            if (vert_base + anim_vert_count + 6 > SOKOL_MAX_LOTTIE_VERTICES)
-                break;
-
-            int off_x = (box_w - scaled_canvas_w) / 2;
-            int off_y = (box_h - scaled_canvas_h) / 2;
-            float x0 = (float)(px + off_x);
-            float y0 = (float)(py + off_y);
-            float x1 = x0 + (float)scaled_canvas_w;
-            float y1 = y0 + (float)scaled_canvas_h;
-
-            uint8_t op = (uint8_t)pl->opacity_x256;
-            uint8_t op_color[4] = { op, op, op, op };
-
-            GlyphVertex *q = &rend_sokol_get_lottie_verts()[vert_base + anim_vert_count];
-            q[0] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
-            q[1] = (GlyphVertex){ x1, y0, 1.0f, 0.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
-            q[2] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
-            q[3] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
-            q[4] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
-            q[5] = (GlyphVertex){ x0, y1, 0.0f, 1.0f, { op_color[0], op_color[1], op_color[2], op_color[3] }, { 0, 0, 0, 0 } };
-            anim_vert_count += 6;
-        }
-
-        if (anim_vert_count > 0) {
-            int cache_idx = lottie_get_texture(d, anim);
-            if (cache_idx >= 0) {
-                sg_apply_pipeline(d->rend.lottie_pip);
-                sg_apply_bindings(&(sg_bindings){
-                    .vertex_buffers[0] = d->rend.lottie_vbuf,
-                    .views[0] = d->rend.lottie_cache[cache_idx].view,
-                    .samplers[0] = d->rend.lottie_sampler,
-                });
-                sg_apply_uniforms(0, &SG_RANGE(uniforms));
-                sg_draw(vert_base, anim_vert_count, 1);
-            }
-            vert_base += anim_vert_count;
-        }
-    }
-
-    return vert_base - vert_offset;
-}
-
-static void sokol_ensure_sixel_vbuf(SokolData *d)
-{
-    if (d->rend.sixel_vbuf_created)
-        return;
-    d->rend.sixel_vbuf = sg_make_buffer(&(sg_buffer_desc){
-        .size = SOKOL_MAX_SIXEL_VERTICES * sizeof(GlyphVertex),
-        .usage.dynamic_update = true,
-        .label = "sokol-sixel-vbuf",
-    });
-    d->rend.sixel_vbuf_created = true;
-}
-
-static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
-{
-    int count = 0;
-    const CfrSixel *imgs = terminal_get_sixels(term, &count);
-    sixel_cache_reconcile(d, imgs, count);
-    if (count == 0)
-        return;
-
-    int cell_w = d->rend.cell_w;
-    int cell_h = d->rend.cell_h;
-    float scale = d->rend.content_scale > 0.0f ? d->rend.content_scale : 1.0f;
-    int win_w = (int)sapp_width();
-    int win_h = (int)sapp_height();
-    int scroll_offset = d->rend.scroll.scroll_offset;
-    float uniforms[2] = { (float)win_w, (float)win_h };
-    uint8_t full_op[4] = { 255, 255, 255, 255 };
-
-    static GlyphVertex sixel_verts[SOKOL_MAX_SIXEL_VERTICES];
-    int vert_count = 0;
-
-    // Pass 1: build all vertices and ensure textures are cached
-    for (int i = 0; i < count; i++) {
-        const CfrSixel *img = &imgs[i];
-
-        int screen_row = img->row + scroll_offset;
-        int px = img->col * cell_w;
-        int py = screen_row * cell_h;
-        int scaled_w = logical_to_physical(img->width_px, scale);
-        int scaled_h = logical_to_physical(img->height_px, scale);
-
-        if (py + scaled_h <= 0 || py >= win_h)
-            continue;
-        if (px + scaled_w <= 0 || px >= win_w)
-            continue;
-        if (vert_count + 6 > SOKOL_MAX_SIXEL_VERTICES)
-            break;
-
-        float x0 = (float)px;
-        float y0 = (float)py;
-        float x1 = x0 + (float)scaled_w;
-        float y1 = y0 + (float)scaled_h;
-
-        GlyphVertex *q = &sixel_verts[vert_count];
-        q[0] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
-        q[1] = (GlyphVertex){ x1, y0, 1.0f, 0.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
-        q[2] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
-        q[3] = (GlyphVertex){ x0, y0, 0.0f, 0.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
-        q[4] = (GlyphVertex){ x1, y1, 1.0f, 1.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
-        q[5] = (GlyphVertex){ x0, y1, 0.0f, 1.0f, { full_op[0], full_op[1], full_op[2], full_op[3] }, { 0, 0, 0, 0 } };
-
-        vert_count += 6;
-    }
-
-    if (vert_count == 0)
-        return;
-
-    // Upload vertex buffer once
-    sg_update_buffer(d->rend.sixel_vbuf, &(sg_range){
-                                             .ptr = sixel_verts,
-                                             .size = (size_t)vert_count * sizeof(GlyphVertex),
-                                         });
-
-    // Pass 2: draw each image's 6 verts with its own texture
-    int vert_offset = 0;
-    for (int i = 0; i < count; i++) {
-        const CfrSixel *img = &imgs[i];
-
-        int screen_row = img->row + scroll_offset;
-        int px = img->col * cell_w;
-        int py = screen_row * cell_h;
-        int scaled_w = logical_to_physical(img->width_px, scale);
-        int scaled_h = logical_to_physical(img->height_px, scale);
-
-        if (py + scaled_h <= 0 || py >= win_h)
-            continue;
-        if (px + scaled_w <= 0 || px >= win_w)
-            continue;
-        if (vert_offset + 6 > vert_count)
-            break;
-
-        int cache_idx = sixel_get_texture(d, img);
-        if (cache_idx >= 0 && d->rend.lottie_pip_created) {
-            sg_apply_pipeline(d->rend.lottie_pip);
-            sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->rend.sixel_vbuf,
-                .views[0] = d->rend.sixel_cache[cache_idx].view,
-                .samplers[0] = d->rend.lottie_sampler,
-            });
-            sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(vert_offset, 6, 1);
-        }
-        vert_offset += 6;
-    }
-}
-
-// Append a solid-color quad to the decoration vertex buffer. UV x=2.0
-// selects the bg-only shader path, so fg and bg are both set to the
-// requested color and alpha.
-// (Moved to rend_sokol.c: rend_sokol_deco_emit_quad)
-#define sokol_deco_emit_quad rend_sokol_deco_emit_quad
-
-// (Moved to rend_sokol.c)
-#define sokol_deco_strip_emit      rend_sokol_deco_strip_emit
-#define sokol_deco_coalesce_update rend_sokol_deco_coalesce_update
-#define sokol_deco_coalesce_flush  rend_sokol_deco_coalesce_flush
-#define cell_color                 rend_sokol_cell_color
-
-// Underline/strikethrough functions moved to rend_sokol.c
-#define sokol_underline_position    rend_sokol_underline_position
-#define sokol_draw_underline_single rend_sokol_draw_underline_single
-#define sokol_draw_underline_double rend_sokol_draw_underline_double
-#define sokol_draw_underline_curly  rend_sokol_draw_underline_curly
-#define sokol_draw_underline_dotted rend_sokol_draw_underline_dotted
-#define sokol_draw_underline_dashed rend_sokol_draw_underline_dashed
-#define sokol_draw_strikethrough    rend_sokol_draw_strikethrough
-
-// Terminal cell rendering moved to rend_sokol.c
-#define sokol_render_terminal_cells(d, term, ox, oy, cv, so, vc, gvc, svc, sv) \
-    rend_sokol_render_terminal_cells(&(d)->rend, term, ox, oy, cv, so, vc, gvc, svc, sv)
-
 static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                 bool cursor_visible)
 {
@@ -1322,9 +1095,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     rend_sokol_reset_frame_buffers();
 
-    sokol_render_terminal_cells(d, term, 0, 0, cursor_visible, scroll_offset,
-                                &vert_count, &glyph_vert_count, &sel_vert_count,
-                                sel_verts);
+    rend_sokol_render_terminal_cells(&d->rend, term, 0, 0, cursor_visible, scroll_offset,
+                                     &vert_count, &glyph_vert_count, &sel_vert_count,
+                                     sel_verts);
 
     // Track where panel glyphs start for multi-pass rendering
     int panel_glyph_start = glyph_vert_count;
@@ -1335,11 +1108,11 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         if (p->active && d->rend.panel_terms[i]) {
             int text_x = panel_term_px(p->px, d->rend.cell_w, panel_show_accent(p->flags));
             int text_y = panel_term_py(p->py, d->rend.cell_h);
-            sokol_render_terminal_cells(d, d->rend.panel_terms[i],
-                                        text_x, text_y,
-                                        false, 0,
-                                        &vert_count, &glyph_vert_count,
-                                        &sel_vert_count, sel_verts);
+            rend_sokol_render_terminal_cells(&d->rend, d->rend.panel_terms[i],
+                                             text_x, text_y,
+                                             false, 0,
+                                             &vert_count, &glyph_vert_count,
+                                             &sel_vert_count, sel_verts);
         }
     }
 
@@ -1379,24 +1152,24 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 if (run_style != 0 && !same_run) {
                     switch (run_style) {
                     case 1:
-                        sokol_draw_underline_single(d, row, run_start,
-                                                    vis_run_end, run_color);
+                        rend_sokol_draw_underline_single(&d->rend, row, run_start,
+                                                         vis_run_end, run_color);
                         break;
                     case 2:
-                        sokol_draw_underline_double(d, row, run_start,
-                                                    vis_run_end, run_color);
+                        rend_sokol_draw_underline_double(&d->rend, row, run_start,
+                                                         vis_run_end, run_color);
                         break;
                     case 3:
-                        sokol_draw_underline_curly(d, row, run_start,
-                                                   vis_run_end, run_color);
+                        rend_sokol_draw_underline_curly(&d->rend, row, run_start,
+                                                        vis_run_end, run_color);
                         break;
                     case 4:
-                        sokol_draw_underline_dotted(d, row, run_start,
-                                                    vis_run_end, run_color);
+                        rend_sokol_draw_underline_dotted(&d->rend, row, run_start,
+                                                         vis_run_end, run_color);
                         break;
                     case 5:
-                        sokol_draw_underline_dashed(d, row, run_start,
-                                                    vis_run_end, run_color);
+                        rend_sokol_draw_underline_dashed(&d->rend, row, run_start,
+                                                         vis_run_end, run_color);
                         break;
                     }
                     run_style = 0;
@@ -1414,24 +1187,24 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             if (run_style != 0) {
                 switch (run_style) {
                 case 1:
-                    sokol_draw_underline_single(d, row, run_start,
-                                                vis_run_end, run_color);
+                    rend_sokol_draw_underline_single(&d->rend, row, run_start,
+                                                     vis_run_end, run_color);
                     break;
                 case 2:
-                    sokol_draw_underline_double(d, row, run_start,
-                                                vis_run_end, run_color);
+                    rend_sokol_draw_underline_double(&d->rend, row, run_start,
+                                                     vis_run_end, run_color);
                     break;
                 case 3:
-                    sokol_draw_underline_curly(d, row, run_start,
-                                               vis_run_end, run_color);
+                    rend_sokol_draw_underline_curly(&d->rend, row, run_start,
+                                                    vis_run_end, run_color);
                     break;
                 case 4:
-                    sokol_draw_underline_dotted(d, row, run_start,
-                                                vis_run_end, run_color);
+                    rend_sokol_draw_underline_dotted(&d->rend, row, run_start,
+                                                     vis_run_end, run_color);
                     break;
                 case 5:
-                    sokol_draw_underline_dashed(d, row, run_start,
-                                                vis_run_end, run_color);
+                    rend_sokol_draw_underline_dashed(&d->rend, row, run_start,
+                                                     vis_run_end, run_color);
                     break;
                 }
             }
@@ -1448,14 +1221,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             while (terminal_row_iter_next(&it)) {
                 bool cs = it.cell.attrs.strikethrough;
                 uint8_t cr[4];
-                cell_color(it.cell.fg, true, it.cell.attrs.reverse, cr);
+                rend_sokol_cell_color(it.cell.fg, true, it.cell.attrs.reverse, cr);
                 bool same_run = in_run && cs &&
                                 cr[0] == run_color[0] &&
                                 cr[1] == run_color[1] &&
                                 cr[2] == run_color[2];
                 if (in_run && !same_run) {
-                    sokol_draw_strikethrough(d, row, run_start,
-                                             vis_run_end, run_color);
+                    rend_sokol_draw_strikethrough(&d->rend, row, run_start,
+                                                  vis_run_end, run_color);
                     in_run = false;
                 }
                 if (cs && !in_run) {
@@ -1469,8 +1242,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 vis_run_end = it.vis_col + it.pres_w;
             }
             if (in_run) {
-                sokol_draw_strikethrough(d, row, run_start,
-                                         vis_run_end, run_color);
+                rend_sokol_draw_strikethrough(&d->rend, row, run_start,
+                                              vis_run_end, run_color);
             }
         }
     }
@@ -1481,7 +1254,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         if (p->active) {
             // Panel background (opaque, same color as panels)
             uint8_t bg[4] = { 38, 38, 44, 255 };
-            sokol_deco_emit_quad(
+            rend_sokol_deco_emit_quad(
                 (float)p->px, (float)p->py,
                 (float)(p->px + p->pw), (float)(p->py + p->ph),
                 bg);
@@ -1508,7 +1281,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 }
                 int accent_px = panel_accent_px(p->px, d->rend.cell_w);
                 int accent_w = panel_accent_w(d->rend.cell_w);
-                sokol_deco_emit_quad(
+                rend_sokol_deco_emit_quad(
                     (float)accent_px, (float)p->py,
                     (float)(accent_px + accent_w), (float)(p->py + p->ph),
                     ac);
@@ -1549,12 +1322,11 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     uint8_t fg[4] = { lum, lum, lum, 255 };
                     uint8_t bg[4] = { 38, 38, 44, 0 }; // Transparent bg for alpha blend
                     GlyphVertex *q = &rend_sokol_get_glyph_verts()[glyph_vert_count];
-                    q[0] = (GlyphVertex){ (float)p->close_px, (float)p->close_py, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[1] = (GlyphVertex){ (float)(p->close_px + p->close_size), (float)p->close_py, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[2] = (GlyphVertex){ (float)(p->close_px + p->close_size), (float)(p->close_py + p->close_size), u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[3] = (GlyphVertex){ (float)p->close_px, (float)p->close_py, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[4] = (GlyphVertex){ (float)(p->close_px + p->close_size), (float)(p->close_py + p->close_size), u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-                    q[5] = (GlyphVertex){ (float)p->close_px, (float)(p->close_py + p->close_size), u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    rend_sokol_emit_glyph_quad(q,
+                                               (float)p->close_px, (float)p->close_py,
+                                               (float)(p->close_px + p->close_size),
+                                               (float)(p->close_py + p->close_size),
+                                               u0, v0, u1, v1, fg, bg);
                     glyph_vert_count += 6;
                 }
             }
@@ -1627,7 +1399,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     if (has_lottie) {
         int anim_count = 0;
         const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
-        lottie_cache_reconcile(d, anims, anim_count);
+        rend_sokol_lottie_cache_reconcile(&d->rend, anims, anim_count);
 
         // Upload the full lottie vertex buffer before any draws
         sg_update_buffer(d->rend.lottie_vbuf, &(sg_range){
@@ -1636,7 +1408,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                               });
 
         // Draw background lottie (before bg quads)
-        lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
+        lottie_bg_count = rend_sokol_render_lottie_layer(&d->rend, term, sapp_width(), sapp_height(), 1, 0);
     }
 
     if (vert_count > 0 && d->rend.glyph_pip_created) {
@@ -1706,16 +1478,16 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         }
         // Pass 6: draw foreground lottie (on top of everything)
         if (lottie_bg_count >= 0 && has_lottie)
-            (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
+            (void)rend_sokol_render_lottie_layer(&d->rend, term, sapp_width(), sapp_height(), 0, lottie_bg_count);
         // Pass 8: draw sixel images (on top of text and lottie)
         if (d->rend.lottie_pip_created) {
-            sokol_ensure_sixel_vbuf(d);
-            sokol_render_sixel_images(d, term);
+            rend_sokol_ensure_sixel_vbuf(&d->rend);
+            rend_sokol_render_sixel_images(&d->rend, term, sapp_width(), sapp_height());
         }
     } else if (has_lottie) {
         // Even with no terminal vertices, render foreground lottie layer
         if (lottie_bg_count >= 0)
-            (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
+            (void)rend_sokol_render_lottie_layer(&d->rend, term, sapp_width(), sapp_height(), 0, lottie_bg_count);
     }
 
     // Screenshot automation: defer to after sg_commit (glReadPixels inside
@@ -1934,8 +1706,8 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
 
             uint8_t fg[4], bg[4];
             bool rev = cell.attrs.reverse;
-            cell_color(cell.fg, true, rev, fg);
-            cell_color(cell.bg, false, rev, bg);
+            rend_sokol_cell_color(cell.fg, true, rev, fg);
+            rend_sokol_cell_color(cell.bg, false, rev, bg);
 
             // Dim/faint (SGR 2): blend foreground toward background at 40% opacity
             if (cell.attrs.dim) {
@@ -2009,12 +1781,7 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
             float vu0 = v0;
             float vu1 = v1;
             GlyphVertex *q = &verts[vert_count];
-            q[0] = (GlyphVertex){ x0, y0, u0, vu0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[1] = (GlyphVertex){ x1, y0, u1, vu0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[2] = (GlyphVertex){ x1, y1, u1, vu1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[3] = (GlyphVertex){ x0, y0, u0, vu0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[4] = (GlyphVertex){ x1, y1, u1, vu1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-            q[5] = (GlyphVertex){ x0, y1, u0, vu1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+            rend_sokol_emit_glyph_quad(q, x0, y0, x1, y1, u0, vu0, u1, vu1, fg, bg);
             vert_count += 6;
         }
     }
