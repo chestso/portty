@@ -291,6 +291,9 @@ typedef struct
     // General-purpose panels
     PanelManager panels;
     TerminalBackend *panel_terms[PORTTY_PANEL_MAX];
+
+    // Renderer module (rend_sokol)
+    RendererSokolData rend;
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
