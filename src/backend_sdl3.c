@@ -6,6 +6,7 @@
 
 #include "backend_sdl3.h"
 #include "common.h"
+#include "display_info.h"
 #include "os_compat.h"
 #include "pager.h"
 #include "path_compat.h"
@@ -1225,6 +1226,66 @@ static bool sdl3_get_diag(PorttyBackend *self, PorttyDiag *out)
     if (!rend_sdl3_get_diag(&d->rend, out))
         return false;
     out->platform_name = self->name;
+
+    // Display diagnostics — windowing/compositor info, not renderer
+    out->display_physical = display_info_get_physical();
+
+    {
+        static char session_str[32];
+        static char xwayland_str[8];
+        static char screen_str[128];
+        static char scale_str[128];
+        static char dpi_str[128];
+
+        const char *video_driver = SDL_GetCurrentVideoDriver();
+        const char *xdg_session = getenv("XDG_SESSION_TYPE");
+
+        if (xdg_session && *xdg_session) {
+            snprintf(session_str, sizeof(session_str), "%s", xdg_session);
+        } else if (video_driver) {
+            snprintf(session_str, sizeof(session_str), "%s", video_driver);
+        }
+        if (session_str[0])
+            out->display_session = session_str;
+
+        // XWayland detection (Linux only)
+        if (xdg_session && strcmp(xdg_session, "wayland") == 0 && video_driver &&
+            strcmp(video_driver, "x11") == 0) {
+            snprintf(xwayland_str, sizeof(xwayland_str), "yes");
+            out->display_xwayland = xwayland_str;
+        }
+
+        if (d->window) {
+            SDL_DisplayID display_id = SDL_GetDisplayForWindow(d->window);
+            if (!display_id)
+                display_id = SDL_GetPrimaryDisplay();
+            if (display_id) {
+                SDL_Rect bounds;
+                if (SDL_GetDisplayBounds(display_id, &bounds)) {
+                    const char *display_name = SDL_GetDisplayName(display_id);
+                    if (display_name)
+                        snprintf(screen_str, sizeof(screen_str), "%dx%d px (%s)",
+                                 bounds.w, bounds.h, display_name);
+                    else
+                        snprintf(screen_str, sizeof(screen_str), "%dx%d px",
+                                 bounds.w, bounds.h);
+                    out->display_screen = screen_str;
+                }
+
+                float window_scale = SDL_GetWindowDisplayScale(d->window);
+                snprintf(scale_str, sizeof(scale_str), "%.2fx (compositor)", (double)window_scale);
+                out->display_scale = scale_str;
+
+                // DPI for font sizing: window_scale is what the compositor uses
+                if (window_scale > 0.0f) {
+                    float dpi = window_scale * 96.0f;
+                    snprintf(dpi_str, sizeof(dpi_str), "%.0f (%.2f × 96)", dpi, (double)window_scale);
+                    out->display_dpi = dpi_str;
+                }
+            }
+        }
+    }
+
     return true;
 }
 
