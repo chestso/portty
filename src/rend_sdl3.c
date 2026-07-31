@@ -1073,7 +1073,7 @@ static void flush_strike_run(RendererSdl3Data *data, int row, int vis_start,
 
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
-                                 bool cursor_visible, bool populate_only)
+                                 bool cursor_visible, bool populate_only, int scroll_offset)
 {
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
     // Hide cursor when scrolled back, when terminal says it's not visible, when cursor_visible is false,
@@ -1081,10 +1081,10 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
     bool cursor_in_bounds = cursor_pos.row >= 0 && cursor_pos.row < display_rows &&
                             cursor_pos.col >= 0 && cursor_pos.col < display_cols;
     bool show_cursor = cursor_visible && cursor_in_bounds &&
-                       (data->scroll.scroll_offset == 0) && terminal_get_cursor_visible(term);
+                       (scroll_offset == 0) && terminal_get_cursor_visible(term);
 
     for (int row = 0; row < display_rows; row++) {
-        int unified_row = row - data->scroll.scroll_offset;
+        int unified_row = row - scroll_offset;
         TerminalRowIter it;
 
         // Pass 1: draw all cell backgrounds for this row.
@@ -1705,7 +1705,7 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
 
     SDL_SetRenderDrawColor(data->renderer, TERM_BG_R, TERM_BG_G, TERM_BG_B, TERM_BG_A);
     SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false);
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, data->scroll.scroll_offset);
     render_lottie_layer(data, term, 1); /* background lottie */
     render_lottie_layer(data, term, 0); /* foreground lottie */
     if (with_sixel)
@@ -1800,7 +1800,7 @@ static SDL_Texture *make_close_x_texture(SDL_Renderer *r, int size)
 
 // Forward declaration
 static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
-                           int rows, int cols, bool cursor_visible);
+                           int rows, int cols, bool cursor_visible, int scroll_offset);
 
 // Build terminal and texture for a panel slot based on PanelState
 static void build_panel_terminal(RendererSdl3Data *data, int slot)
@@ -1809,6 +1809,7 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
         return;
 
     PanelState *ps = &data->panels.panels[slot];
+
     if (!ps->active || !data->font || data->cell_width <= 0 || data->cell_height <= 0 ||
         !font_has_style(data->font, FONT_STYLE_NORMAL))
         return;
@@ -1873,7 +1874,7 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
     // First, populate atlas with panel glyphs (may be different from main terminal)
     int term_r, term_c;
     terminal_get_dimensions(data->panel_terms[slot], &term_r, &term_c);
-    populate_atlas(data, data->panel_terms[slot], term_r, term_c, false);
+    populate_atlas(data, data->panel_terms[slot], term_r, term_c, false, 0);
 
     // Save current render target
     SDL_Texture *prev_target = SDL_GetRenderTarget(data->renderer);
@@ -1884,7 +1885,7 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
     SDL_RenderClear(data->renderer);
 
     // Render terminal cells to the texture
-    render_visible_cells(data, data->panel_terms[slot], term_r, term_c, false, false);
+    render_visible_cells(data, data->panel_terms[slot], term_r, term_c, false, false, 0);
 
     // Restore render target
     SDL_SetRenderTarget(data->renderer, prev_target);
@@ -1899,16 +1900,16 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
 // interfering with in-flight draw commands.
 // Returns true if any eviction occurred during the pass.
 static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
-                           int rows, int cols, bool cursor_visible)
+                           int rows, int cols, bool cursor_visible, int scroll_offset)
 {
     bool eviction = false;
     data->atlas.packing.eviction_occurred = false;
-    render_visible_cells(data, term, rows, cols, cursor_visible, true);
+    render_visible_cells(data, term, rows, cols, cursor_visible, true, scroll_offset);
     if (data->atlas.packing.eviction_occurred) {
         eviction = true;
         rend_sdl3_atlas_flush(&data->atlas);
         data->atlas.packing.eviction_occurred = false;
-        render_visible_cells(data, term, rows, cols, cursor_visible, true);
+        render_visible_cells(data, term, rows, cols, cursor_visible, true, scroll_offset);
     }
     rend_sdl3_atlas_flush(&data->atlas);
     return eviction;
@@ -1951,7 +1952,7 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
     if (display_cols > term_cols)
         display_cols = term_cols;
 
-    bool evicted = populate_atlas(data, term, display_rows, display_cols, cursor_visible);
+    bool evicted = populate_atlas(data, term, display_rows, display_cols, cursor_visible, data->scroll.scroll_offset);
 
     // Draw the scene gamma-correct (linear-light) and draw sixel images.
     draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
@@ -2299,7 +2300,7 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     }
 
     rend_sdl3_atlas_begin_frame(&data->atlas);
-    populate_atlas(data, term, render_rows, render_cols, false);
+    populate_atlas(data, term, render_rows, render_cols, false, data->scroll.scroll_offset);
 
     // Draw the scene gamma-correct (linear-light) into `target`
     // so the PNG matches on-screen output, including sixel images.
