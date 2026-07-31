@@ -788,6 +788,31 @@ void rend_sokol_draw_underline_dashed(RendererSokolData *data, int row,
     }
 }
 
+void rend_sokol_draw_underline(RendererSokolData *data, int row,
+                               int vis_start, int vis_end,
+                               UnderlineStyle style, const uint8_t color[4])
+{
+    switch (style) {
+    case UNDERLINE_SINGLE:
+        rend_sokol_draw_underline_single(data, row, vis_start, vis_end, color);
+        break;
+    case UNDERLINE_DOUBLE:
+        rend_sokol_draw_underline_double(data, row, vis_start, vis_end, color);
+        break;
+    case UNDERLINE_CURLY:
+        rend_sokol_draw_underline_curly(data, row, vis_start, vis_end, color);
+        break;
+    case UNDERLINE_DOTTED:
+        rend_sokol_draw_underline_dotted(data, row, vis_start, vis_end, color);
+        break;
+    case UNDERLINE_DASHED:
+        rend_sokol_draw_underline_dashed(data, row, vis_start, vis_end, color);
+        break;
+    default:
+        break;
+    }
+}
+
 void rend_sokol_draw_strikethrough(RendererSokolData *data, int row,
                                    int vis_start, int vis_end,
                                    const uint8_t color[4])

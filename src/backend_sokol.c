@@ -1150,28 +1150,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                  cr[2] == run_color[2] &&
                                  cr[3] == run_color[3]);
                 if (run_style != 0 && !same_run) {
-                    switch (run_style) {
-                    case UNDERLINE_SINGLE:
-                        rend_sokol_draw_underline_single(&d->rend, row, run_start,
-                                                         vis_run_end, run_color);
-                        break;
-                    case UNDERLINE_DOUBLE:
-                        rend_sokol_draw_underline_double(&d->rend, row, run_start,
-                                                         vis_run_end, run_color);
-                        break;
-                    case UNDERLINE_CURLY:
-                        rend_sokol_draw_underline_curly(&d->rend, row, run_start,
-                                                        vis_run_end, run_color);
-                        break;
-                    case UNDERLINE_DOTTED:
-                        rend_sokol_draw_underline_dotted(&d->rend, row, run_start,
-                                                         vis_run_end, run_color);
-                        break;
-                    case UNDERLINE_DASHED:
-                        rend_sokol_draw_underline_dashed(&d->rend, row, run_start,
-                                                         vis_run_end, run_color);
-                        break;
-                    }
+                    rend_sokol_draw_underline(&d->rend, row, run_start,
+                                              vis_run_end, run_style, run_color);
                     run_style = 0;
                 }
                 if (cs != 0 && run_style == 0) {
@@ -1185,28 +1165,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 vis_run_end = it.vis_col + it.pres_w;
             }
             if (run_style != 0) {
-                switch (run_style) {
-                case UNDERLINE_SINGLE:
-                    rend_sokol_draw_underline_single(&d->rend, row, run_start,
-                                                     vis_run_end, run_color);
-                    break;
-                case UNDERLINE_DOUBLE:
-                    rend_sokol_draw_underline_double(&d->rend, row, run_start,
-                                                     vis_run_end, run_color);
-                    break;
-                case UNDERLINE_CURLY:
-                    rend_sokol_draw_underline_curly(&d->rend, row, run_start,
-                                                    vis_run_end, run_color);
-                    break;
-                case UNDERLINE_DOTTED:
-                    rend_sokol_draw_underline_dotted(&d->rend, row, run_start,
-                                                     vis_run_end, run_color);
-                    break;
-                case UNDERLINE_DASHED:
-                    rend_sokol_draw_underline_dashed(&d->rend, row, run_start,
-                                                     vis_run_end, run_color);
-                    break;
-                }
+                rend_sokol_draw_underline(&d->rend, row, run_start,
+                                          vis_run_end, run_style, run_color);
             }
         }
 

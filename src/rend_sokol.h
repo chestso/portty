@@ -182,6 +182,11 @@ void rend_sokol_draw_strikethrough(RendererSokolData *data, int row,
                                    int vis_start, int vis_end,
                                    const uint8_t color[4]);
 
+// Draw underline by style enum (dispatches to style-specific function)
+void rend_sokol_draw_underline(RendererSokolData *data, int row,
+                               int vis_start, int vis_end,
+                               UnderlineStyle style, const uint8_t color[4]);
+
 // Color conversion
 void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse,
                            uint8_t out[4]);
