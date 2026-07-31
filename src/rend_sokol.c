@@ -24,13 +24,13 @@
 #define CURSOR_COLOR_R 0x6B
 #define CURSOR_COLOR_G 0x50
 #define CURSOR_COLOR_B 0xFF
-#define CURSOR_COLOR_A 255
+#define CURSOR_COLOR_A 0xFF
 
-// Selection highlight color: muted Dracula comment-style (RGBA)
-#define SELECTION_COLOR_R 0x44
-#define SELECTION_COLOR_G 0x47
-#define SELECTION_COLOR_B 0x5A
-#define SELECTION_COLOR_A 180
+// Selection highlight color: blue-ish tint (RGBA) — matches backend_sokol.c
+#define SELECTION_COLOR_R 0x5A
+#define SELECTION_COLOR_G 0x60
+#define SELECTION_COLOR_B 0x7A
+#define SELECTION_COLOR_A 220
 
 // Underline color: matches cursor color
 #define UNDERLINE_COLOR_R CURSOR_COLOR_R
@@ -92,6 +92,39 @@ void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse, uint8_t o
         out[2] = tc.b;
         out[3] = 0xFF;
     }
+}
+
+// ── Cursor/Selection quad emission ────────────────────────────────────────
+
+void rend_sokol_emit_cursor_quad(float x0, float y0, float x1, float y1)
+{
+    uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G, CURSOR_COLOR_B, CURSOR_COLOR_A };
+    float cu0 = -(0.0f + 2.0f);
+    float cu1 = -(1.0f + 2.0f);
+    GlyphVertex *q = s_cursor_verts;
+    q[0] = (GlyphVertex){ x0, y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    q[1] = (GlyphVertex){ x1, y0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    q[2] = (GlyphVertex){ x1, y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    q[3] = (GlyphVertex){ x0, y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    q[4] = (GlyphVertex){ x1, y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    q[5] = (GlyphVertex){ x0, y1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
+    s_cursor_vert_count = 6;
+}
+
+void rend_sokol_emit_selection_quad(float x0, float y0, float x1, float y1,
+                                    GlyphVertex *sel_verts, int *sel_vert_count)
+{
+    uint8_t sc[4] = { SELECTION_COLOR_R, SELECTION_COLOR_G, SELECTION_COLOR_B, SELECTION_COLOR_A };
+    float bg_u = 2.0f;
+    float bg_v = 0.0f;
+    GlyphVertex *sq = &sel_verts[*sel_vert_count];
+    sq[0] = (GlyphVertex){ x0, y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    sq[1] = (GlyphVertex){ x1, y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    sq[2] = (GlyphVertex){ x1, y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    sq[3] = (GlyphVertex){ x0, y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    sq[4] = (GlyphVertex){ x1, y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    sq[5] = (GlyphVertex){ x0, y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
+    *sel_vert_count += 6;
 }
 
 // ── Pipeline creation ──────────────────────────────────────────────────────

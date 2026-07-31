@@ -175,6 +175,11 @@ void rend_sokol_draw_strikethrough(RendererSokolData *data, int row,
 void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse,
                            uint8_t out[4]);
 
+// Cursor/Selection quad emission
+void rend_sokol_emit_cursor_quad(float x0, float y0, float x1, float y1);
+void rend_sokol_emit_selection_quad(float x0, float y0, float x1, float y1,
+                                    GlyphVertex *sel_verts, int *sel_vert_count);
+
 // Lottie/sixel cache management
 void rend_sokol_lottie_cache_reconcile(RendererSokolData *data,
                                        const CfrLottie *anims, int count);

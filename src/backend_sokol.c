@@ -1036,30 +1036,7 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 
 // ── Rendering ────────────────────────────────────────────────────────────
 
-#define SELECTION_COLOR_R 0x5A
-#define SELECTION_COLOR_G 0x60
-#define SELECTION_COLOR_B 0x7A
-#define SELECTION_COLOR_A 220
-
-// Cursor color: Charm signature purple (RGBA) — matches SDL3 renderer
-#define CURSOR_COLOR_R 0x6B
-#define CURSOR_COLOR_G 0x50
-#define CURSOR_COLOR_B 0xFF
-#define CURSOR_COLOR_A 0xFF
-
-// Underline color: matches cursor color (same as SDL3 renderer)
-#define UNDERLINE_COLOR_R CURSOR_COLOR_R
-#define UNDERLINE_COLOR_G CURSOR_COLOR_G
-#define UNDERLINE_COLOR_B CURSOR_COLOR_B
-#define UNDERLINE_COLOR_A 255
-
-// Default background color — used both as the render pass clear color and
-// as the bg for cells with bg.is_default. Keeping them in sync ensures
-// empty cells (skipped, show clear color) and default-bg cells (emit a
-// bg quad) look identical.
-#define DEF_BG_R 0x00
-#define DEF_BG_G 0x00
-#define DEF_BG_B 0x00
+// Color constants moved to rend_sokol.c - use rend_sokol_emit_cursor_quad/sel_quad
 
 // Vertex format defined in rend_sokol.h
 // Static buffers moved to rend_sokol.c - use accessor functions
@@ -1329,18 +1306,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                         float cy0 = (float)(origin_y + row * cell_h);
                         float cx1 = cx0 + (float)cell_w;
                         float cy1 = cy0 + (float)cell_h;
-                        uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G,
-                                          CURSOR_COLOR_B, CURSOR_COLOR_A };
-                        float cu0 = -(0.0f + 2.0f);
-                        float cu1 = -(1.0f + 2.0f);
-                        GlyphVertex *q = rend_sokol_get_cursor_verts();
-                        q[0] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        q[1] = (GlyphVertex){ cx1, cy0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        q[2] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        q[3] = (GlyphVertex){ cx0, cy0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        q[4] = (GlyphVertex){ cx1, cy1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        q[5] = (GlyphVertex){ cx0, cy1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                        *rend_sokol_get_cursor_vert_count_ptr() = 6;
+                        rend_sokol_emit_cursor_quad(cx0, cy0, cx1, cy1);
                     }
                 }
                 continue;
@@ -1388,18 +1354,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
             *vert_count += 6;
 
             if (is_cursor) {
-                uint8_t cc[4] = { CURSOR_COLOR_R, CURSOR_COLOR_G,
-                                  CURSOR_COLOR_B, CURSOR_COLOR_A };
-                float cu0 = -(0.0f + 2.0f);
-                float cu1 = -(1.0f + 2.0f);
-                q = rend_sokol_get_cursor_verts();
-                q[0] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                q[1] = (GlyphVertex){ cell_x1, cell_y0, cu1, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                q[2] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                q[3] = (GlyphVertex){ cell_x0, cell_y0, cu0, 0.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                q[4] = (GlyphVertex){ cell_x1, cell_y1, cu1, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                q[5] = (GlyphVertex){ cell_x0, cell_y1, cu0, 1.0f, { cc[0], cc[1], cc[2], cc[3] }, { cc[0], cc[1], cc[2], cc[3] } };
-                *rend_sokol_get_cursor_vert_count_ptr() = 6;
+                rend_sokol_emit_cursor_quad(cell_x0, cell_y0, cell_x1, cell_y1);
             }
 
             if (cell.cp != 0 && cell.cp != 0x20 && !cell.attrs.invis) {
@@ -1793,16 +1748,8 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
 
         selection_check:
             if (in_sel && *sel_vert_count + 6 <= SOKOL_MAX_VERTICES) {
-                uint8_t sc[4] = { SELECTION_COLOR_R, SELECTION_COLOR_G,
-                                  SELECTION_COLOR_B, SELECTION_COLOR_A };
-                GlyphVertex *sq = &sel_verts[*sel_vert_count];
-                sq[0] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                sq[1] = (GlyphVertex){ cell_x1, cell_y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                sq[2] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                sq[3] = (GlyphVertex){ cell_x0, cell_y0, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                sq[4] = (GlyphVertex){ cell_x1, cell_y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                sq[5] = (GlyphVertex){ cell_x0, cell_y1, bg_u, bg_v, { sc[0], sc[1], sc[2], sc[3] }, { sc[0], sc[1], sc[2], sc[3] } };
-                *sel_vert_count += 6;
+                rend_sokol_emit_selection_quad(cell_x0, cell_y0, cell_x1, cell_y1,
+                                               sel_verts, sel_vert_count);
             }
         }
     }
