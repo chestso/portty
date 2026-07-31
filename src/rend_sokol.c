@@ -1024,11 +1024,11 @@ int rend_sokol_sixel_get_texture(RendererSokolData *data, const CfrSixel *img)
     return n;
 }
 void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *term,
-                                        int origin_x, int origin_y,
-                                        bool cursor_visible, int scroll_offset,
-                                        int *vert_count, int *glyph_vert_count,
-                                        int *sel_vert_count,
-                                        GlyphVertex *sel_verts)
+                                      int origin_x, int origin_y,
+                                      bool cursor_visible, int scroll_offset,
+                                      int *vert_count, int *glyph_vert_count,
+                                      int *sel_vert_count,
+                                      GlyphVertex *sel_verts)
 {
     int rows, cols;
     terminal_get_dimensions(term, &rows, &cols);

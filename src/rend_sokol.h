@@ -182,12 +182,12 @@ void rend_sokol_emit_selection_quad(float x0, float y0, float x1, float y1,
 
 // Terminal cell rendering
 void rend_sokol_render_terminal_cells(RendererSokolData *data,
-                                       TerminalBackend *term,
-                                       int origin_x, int origin_y,
-                                       bool cursor_visible, int scroll_offset,
-                                       int *vert_count, int *glyph_vert_count,
-                                       int *sel_vert_count,
-                                       GlyphVertex *sel_verts);
+                                      TerminalBackend *term,
+                                      int origin_x, int origin_y,
+                                      bool cursor_visible, int scroll_offset,
+                                      int *vert_count, int *glyph_vert_count,
+                                      int *sel_vert_count,
+                                      GlyphVertex *sel_verts);
 
 // Lottie/sixel cache management
 void rend_sokol_lottie_cache_reconcile(RendererSokolData *data,

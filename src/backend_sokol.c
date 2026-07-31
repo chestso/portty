@@ -1266,11 +1266,9 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
 #define sokol_draw_underline_dashed rend_sokol_draw_underline_dashed
 #define sokol_draw_strikethrough    rend_sokol_draw_strikethrough
 
-
 // Terminal cell rendering moved to rend_sokol.c
 #define sokol_render_terminal_cells(d, term, ox, oy, cv, so, vc, gvc, svc, sv) \
     rend_sokol_render_terminal_cells(&(d)->rend, term, ox, oy, cv, so, vc, gvc, svc, sv)
-
 
 static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                 bool cursor_visible)
