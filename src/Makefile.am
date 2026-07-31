@@ -67,7 +67,7 @@ endif
 
 if BACKEND_SOKOL
 portty_SOURCES = main.c $(PORTTY_COMMON_SRC) \
-    backend_sokol.c rend_sokol_atlas.c
+    backend_sokol.c rend_sokol.c rend_sokol_atlas.c
 portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) -I$(top_srcdir)/third_party -I$(top_srcdir) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
 portty_LDADD = $(PORTTY_COMMON_LDADD)
@@ -122,7 +122,7 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
-    rend_sokol_atlas.h term_cfr.h term.h timer.h unicode.h
+    rend_sokol_atlas.h rend_sokol.h term_cfr.h term.h timer.h unicode.h
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:

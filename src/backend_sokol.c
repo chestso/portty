@@ -27,6 +27,7 @@
 #include "portty_panel.h"
 #include "os_compat.h"
 #include "rend_sokol_atlas.h"
+#include "rend_sokol.h"
 #include "rend_common.h"
 #include "term.h"
 #include "term_cfr.h"
@@ -169,27 +170,8 @@ typedef enum
     RENDER_MODE_FIXED_FPS,
 } RenderMode;
 
-#define SOKOL_LOTTIE_CACHE_MAX 64
-#define SOKOL_LOTTIE_TICK_MS   16
-#define SOKOL_SIXEL_CACHE_MAX  256
-
-typedef struct
-{
-    sg_image image;
-    sg_view view;
-    uint64_t id;
-    uint32_t version;
-    int w, h;
-} SokolLottieCacheEntry;
-
-typedef struct
-{
-    sg_image image;
-    sg_view view;
-    uint64_t id;
-    uint32_t version;
-    int w, h;
-} SokolSixelCacheEntry;
+// Cache limits (shared with rend_sokol.h)
+#define SOKOL_LOTTIE_TICK_MS 16
 
 typedef struct PtyDataNode
 {
@@ -1110,35 +1092,16 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 #define DEF_BG_G 0x00
 #define DEF_BG_B 0x00
 
-// Vertex format: position (xy) + texcoord (uv) + fg color (rgba) + bg color (rgba)
-// 2 floats + 2 floats + 4 ubytes + 4 ubytes = 20 bytes per vertex
-typedef struct
-{
-    float x, y;    // pixel position
-    float u, v;    // atlas texcoord
-    uint8_t fg[4]; // foreground color (RGBA)
-    uint8_t bg[4]; // background color (RGBA)
-} GlyphVertex;
-
-#define SOKOL_MAX_COLS          400
-#define SOKOL_MAX_ROWS          120
-#define SOKOL_MAX_VERTICES      (SOKOL_MAX_COLS * SOKOL_MAX_ROWS * 12)
-#define SOKOL_MAX_DECO_VERTICES 200000
-
-// File-scope vertex arrays (moved from static-local in sokol_draw_terminal
-// so debug dump functions can access them after the render pass).
+// Vertex format defined in rend_sokol.h
+// Static buffers for terminal rendering (decoration buffers in rend_sokol.c)
 static GlyphVertex s_frame_verts[SOKOL_MAX_VERTICES];
 static int s_frame_vert_count;
 static int s_vert_index[SOKOL_MAX_ROWS][SOKOL_MAX_COLS];
 static GlyphVertex s_glyph_verts[SOKOL_MAX_VERTICES];
-static GlyphVertex s_cursor_verts[6]; // Cursor quad (single cell)
+static GlyphVertex s_cursor_verts[6];
 static int s_cursor_vert_count;
-static GlyphVertex s_deco_verts[SOKOL_MAX_DECO_VERTICES];
-static int s_deco_vert_count;
-static bool s_deco_overflow_warned;
 
 #define SOKOL_MAX_LOTTIE_VERTICES 4096
-
 static GlyphVertex s_lottie_verts[SOKOL_MAX_LOTTIE_VERTICES];
 
 #define SOKOL_MAX_SIXEL_VERTICES 4096
@@ -1831,119 +1794,13 @@ static void cell_color(TerminalColor tc, bool is_fg, bool reverse,
 // Append a solid-color quad to the decoration vertex buffer. UV x=2.0
 // selects the bg-only shader path, so fg and bg are both set to the
 // requested color and alpha.
-static void sokol_deco_emit_quad(float x0, float y0, float x1, float y1,
-                                 const uint8_t color[4])
-{
-    if (s_deco_vert_count + 6 > SOKOL_MAX_DECO_VERTICES) {
-        if (!s_deco_overflow_warned) {
-            vlog("decoration vertex buffer exhausted; skipping remaining decorations");
-            s_deco_overflow_warned = true;
-        }
-        return;
-    }
-    GlyphVertex *q = &s_deco_verts[s_deco_vert_count];
-    float u = 2.0f;
-    q[0] = (GlyphVertex){ x0, y0, u, 0.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[1] = (GlyphVertex){ x1, y0, u, 0.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[2] = (GlyphVertex){ x1, y1, u, 1.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[3] = (GlyphVertex){ x0, y0, u, 0.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[4] = (GlyphVertex){ x1, y1, u, 1.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    q[5] = (GlyphVertex){ x0, y1, u, 1.0f, { color[0], color[1], color[2], color[3] }, { color[0], color[1], color[2], color[3] } };
-    s_deco_vert_count += 6;
-}
+// (Moved to rend_sokol.c: rend_sokol_deco_emit_quad)
+#define sokol_deco_emit_quad rend_sokol_deco_emit_quad
 
-typedef struct
-{
-    int y;
-    float x_start;
-    float x_end;
-    uint8_t alpha;
-} DecoStrip;
-
-static void sokol_deco_strip_emit(float x0, float x1, int y, uint8_t alpha,
-                                  const uint8_t color[4])
-{
-    if (alpha == 0)
-        return;
-    uint8_t c[4] = { color[0], color[1], color[2], alpha };
-    sokol_deco_emit_quad(x0, (float)y, x1, (float)(y + 1), c);
-}
-
-// Update the scanline coalescer. `alphas` holds one alpha value per y-row in
-// the range [y_min, y_max] inclusive. Active strips are kept in `strips`; on
-// alpha/y changes strips are flushed and the list rebuilt.
-static void sokol_deco_coalesce_update(float x, float y_min, float y_max,
-                                       const uint8_t *alphas, DecoStrip *strips,
-                                       int *strip_count, int max_strips,
-                                       const uint8_t color[4])
-{
-    // Build a new set of (y, alpha) pairs for this x coordinate.
-    int new_count = 0;
-    int new_y[8];
-    uint8_t new_alpha[8];
-    for (int y = (int)y_min; y <= (int)y_max && new_count < 8; y++) {
-        uint8_t a = alphas[y - (int)y_min];
-        if (a > 0) {
-            new_y[new_count] = y;
-            new_alpha[new_count] = a;
-            new_count++;
-        }
-    }
-
-    // Flush any active strip that is no longer present or whose alpha changed.
-    for (int i = 0; i < *strip_count; i++) {
-        DecoStrip *s = &strips[i];
-        bool found = false;
-        uint8_t alpha = 0;
-        for (int j = 0; j < new_count; j++) {
-            if (new_y[j] == s->y) {
-                found = true;
-                alpha = new_alpha[j];
-                break;
-            }
-        }
-        if (!found || alpha != s->alpha) {
-            sokol_deco_strip_emit(s->x_start, x, s->y, s->alpha, color);
-            // Remove from active list by shifting remaining entries.
-            memmove(&strips[i], &strips[i + 1],
-                    (size_t)(*strip_count - i - 1) * sizeof(DecoStrip));
-            (*strip_count)--;
-            i--;
-        }
-    }
-
-    // Extend or create strips for the new set.
-    for (int i = 0; i < new_count; i++) {
-        bool found = false;
-        for (int j = 0; j < *strip_count; j++) {
-            if (strips[j].y == new_y[i] &&
-                strips[j].alpha == new_alpha[i]) {
-                strips[j].x_end = x;
-                found = true;
-                break;
-            }
-        }
-        if (!found && *strip_count < max_strips) {
-            int idx = *strip_count;
-            strips[idx].y = new_y[i];
-            strips[idx].x_start = x;
-            strips[idx].x_end = x + 1.0f;
-            strips[idx].alpha = new_alpha[i];
-            (*strip_count)++;
-        }
-    }
-}
-
-static void sokol_deco_coalesce_flush(DecoStrip *strips, int *strip_count,
-                                      const uint8_t color[4])
-{
-    for (int i = 0; i < *strip_count; i++) {
-        DecoStrip *s = &strips[i];
-        sokol_deco_strip_emit(s->x_start, s->x_end, s->y, s->alpha, color);
-    }
-    *strip_count = 0;
-}
-
+// (Moved to rend_sokol.c)
+#define sokol_deco_strip_emit      rend_sokol_deco_strip_emit
+#define sokol_deco_coalesce_update rend_sokol_deco_coalesce_update
+#define sokol_deco_coalesce_flush  rend_sokol_deco_coalesce_flush
 static int sokol_underline_position(SokolData *d, int row)
 {
     int cell_y = row * d->cell_h;
@@ -1956,7 +1813,6 @@ static int sokol_underline_position(SokolData *d, int row)
         underline_y = cell_y + d->cell_h - thickness;
     return underline_y;
 }
-
 static void sokol_draw_underline_single(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
@@ -1966,9 +1822,8 @@ static void sokol_draw_underline_single(SokolData *d, int row, int vis_start,
     int y = sokol_underline_position(d, row);
     float x0 = (float)(vis_start * d->cell_w);
     float x1 = (float)(vis_end * d->cell_w);
-    sokol_deco_emit_quad(x0, (float)y, x1, (float)(y + thickness), color);
+    rend_sokol_deco_emit_quad(x0, (float)y, x1, (float)(y + thickness), color);
 }
-
 static void sokol_draw_underline_double(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
@@ -1982,10 +1837,9 @@ static void sokol_draw_underline_double(SokolData *d, int row, int vis_start,
     int y2 = y1 + thickness + gap;
     float x0 = (float)(vis_start * d->cell_w);
     float x1 = (float)(vis_end * d->cell_w);
-    sokol_deco_emit_quad(x0, (float)y1, x1, (float)(y1 + thickness), color);
-    sokol_deco_emit_quad(x0, (float)y2, x1, (float)(y2 + thickness), color);
+    rend_sokol_deco_emit_quad(x0, (float)y1, x1, (float)(y1 + thickness), color);
+    rend_sokol_deco_emit_quad(x0, (float)y2, x1, (float)(y2 + thickness), color);
 }
-
 static void sokol_draw_underline_curly(SokolData *d, int row, int vis_start,
                                        int vis_end, const uint8_t color[4])
 {
@@ -2003,7 +1857,6 @@ static void sokol_draw_underline_curly(SokolData *d, int row, int vis_start,
     float center_y = (float)underline_y + amplitude;
     int run_x = vis_start * d->cell_w;
     int run_w = (vis_end - vis_start) * d->cell_w;
-
     DecoStrip strips[16];
     int strip_count = 0;
     for (int px = 0; px < run_w; px++) {
@@ -2024,12 +1877,11 @@ static void sokol_draw_underline_curly(SokolData *d, int row, int vis_start,
                 alphas[n] = 0;
             }
         }
-        sokol_deco_coalesce_update(x, (float)y_min, (float)y_max, alphas,
-                                   strips, &strip_count, 16, color);
+        rend_sokol_deco_coalesce_update(x, (float)y_min, (float)y_max, alphas,
+                                        strips, &strip_count, 16, color);
     }
-    sokol_deco_coalesce_flush(strips, &strip_count, color);
+    rend_sokol_deco_coalesce_flush(strips, &strip_count, color);
 }
-
 static void sokol_draw_underline_dotted(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
@@ -2044,9 +1896,6 @@ static void sokol_draw_underline_dotted(SokolData *d, int row, int vis_start,
     int underline_y = sokol_underline_position(d, row);
     int run_x = vis_start * d->cell_w;
     int run_w = (vis_end - vis_start) * d->cell_w;
-
-    DecoStrip strips[16];
-    int strip_count = 0;
     for (float cx = (float)run_x; cx < (float)(run_x + run_w); cx += stride) {
         float cy = (float)underline_y + radius;
         int x_min = (int)floorf(cx - radius - 1.0f);
@@ -2066,15 +1915,12 @@ static void sokol_draw_underline_dotted(SokolData *d, int row, int vis_start,
                 else
                     alpha = 0;
                 if (alpha > 0)
-                    sokol_deco_strip_emit((float)x, (float)(x + 1), y, alpha,
-                                          color);
+                    rend_sokol_deco_strip_emit((float)x, (float)(x + 1), y, alpha,
+                                               color);
             }
         }
     }
-    (void)strips;
-    (void)strip_count;
 }
-
 static void sokol_draw_underline_dashed(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
@@ -2100,10 +1946,9 @@ static void sokol_draw_underline_dashed(SokolData *d, int row, int vis_start,
         if (x0 + w > run_x + run_w)
             w = run_x + run_w - x0;
         if (w > 0)
-            sokol_deco_emit_quad((float)x0, y0, (float)(x0 + w), y1, color);
+            rend_sokol_deco_emit_quad((float)x0, y0, (float)(x0 + w), y1, color);
     }
 }
-
 static void sokol_draw_strikethrough(SokolData *d, int row, int vis_start,
                                      int vis_end, const uint8_t color[4])
 {
@@ -2115,8 +1960,8 @@ static void sokol_draw_strikethrough(SokolData *d, int row, int vis_start,
     int strike_y = cell_y + d->font_ascent - d->font_cap_height / 2;
     float x0 = (float)(vis_start * d->cell_w);
     float x1 = (float)(vis_end * d->cell_w);
-    sokol_deco_emit_quad(x0, (float)strike_y, x1,
-                         (float)(strike_y + thickness), color);
+    rend_sokol_deco_emit_quad(x0, (float)strike_y, x1,
+                              (float)(strike_y + thickness), color);
 }
 
 static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
@@ -2713,8 +2558,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     // Decoration pass: coalesce underlines and strikethroughs by style and
     // color, and emit them into s_deco_verts for alpha-blended rendering.
-    s_deco_vert_count = 0;
-    s_deco_overflow_warned = false;
+    rend_sokol_deco_reset();
     for (int row = 0; row < rows; row++) {
         int unified_row = rend_display_row_to_unified(scroll_offset, row);
 
@@ -2959,11 +2803,12 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     // Append decoration quads after selection quads. They are drawn with
     // the selection pipeline (alpha-blended) between glyphs and selections.
     int deco_vert_start = vert_count;
-    if (s_deco_vert_count > 0 &&
-        vert_count + s_deco_vert_count <= SOKOL_MAX_VERTICES) {
-        memcpy(&s_frame_verts[vert_count], s_deco_verts,
-               (size_t)s_deco_vert_count * sizeof(GlyphVertex));
-        vert_count += s_deco_vert_count;
+    int deco_count = rend_sokol_deco_get_count();
+    if (deco_count > 0 &&
+        vert_count + deco_count <= SOKOL_MAX_VERTICES) {
+        memcpy(&s_frame_verts[vert_count], rend_sokol_deco_get_verts(),
+               (size_t)deco_count * sizeof(GlyphVertex));
+        vert_count += deco_count;
     }
 
     // Flush atlas dirty regions to GPU
@@ -3036,7 +2881,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         // Pass 3: draw decoration quads (alpha-blended, on top of terminal
         // glyphs). This includes underlines, strikethroughs, and the
         // notification accent stripe.
-        if (s_deco_vert_count > 0 && d->sel_pip_created) {
+        if (deco_count > 0 && d->sel_pip_created) {
             sg_apply_pipeline(d->sel_pip);
             sg_apply_bindings(&(sg_bindings){
                 .vertex_buffers[0] = d->glyph_vbuf,
@@ -3044,7 +2889,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 .samplers[0] = d->atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(deco_vert_start, s_deco_vert_count, 1);
+            sg_draw(deco_vert_start, deco_count, 1);
         }
         // Pass 4: draw selection overlay quads (alpha-blended, on top of
         // decorations so selected text remains readable).
