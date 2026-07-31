@@ -188,8 +188,6 @@ typedef struct
     TerminalBackend *term;
     bool running;
     bool quit_requested;
-    int cell_w, cell_h;
-    float content_scale;
     char *working_dir;
     char *exe_path;
     // Renderer state
@@ -206,24 +204,8 @@ typedef struct
     int screenshot_frames; // >0 = countdown to screenshot
     char screenshot_path[512];
     bool screenshot_saved;
-    // Font
-    FontBackend *font;
-    FontResolveBackend *resolve;
-    int font_ascent, font_descent, font_cap_height;
-    char *font_path;
+    // Font hinting (backend-specific, not in rend)
     char hint_name[8];
-    // Scroll & fallback
-    RendScrollState scroll;
-    RendFallbackState fallback;
-    float font_size;
-    FontOptions font_options;
-    // Glyph atlas
-    RendSokolAtlas atlas;
-    sg_pipeline glyph_pip;
-    sg_buffer glyph_vbuf;
-    bool glyph_pip_created;
-    sg_pipeline sel_pip;
-    bool sel_pip_created;
     // PTY reader thread
     pthread_t pty_thread;
     bool pty_thread_running;
@@ -242,7 +224,6 @@ typedef struct
     TimerId cursor_blink_timer;
     bool cursor_blink_visible;
     bool has_focus;
-    bool linear_ok;
     PorttyCursor current_cursor;
     // Render scheduler
     RenderMode render_mode;
@@ -272,25 +253,10 @@ typedef struct
     FrameRecorder *frame_recorder;
     TimerId record_timer;
     bool pending_record_frame;
-    // Lottie animation rendering
+    // Lottie animation timer (animation data lives in rend)
     TimerId lottie_timer;
-    SokolLottieCacheEntry lottie_cache[SOKOL_LOTTIE_CACHE_MAX];
-    int lottie_cache_count;
-    sg_pipeline lottie_pip;
-    sg_buffer lottie_vbuf;
-    sg_sampler lottie_sampler;
-    bool lottie_pip_created;
-    // Sixel image rendering
-    SokolSixelCacheEntry sixel_cache[SOKOL_SIXEL_CACHE_MAX];
-    int sixel_cache_count;
-    sg_buffer sixel_vbuf;
-    bool sixel_vbuf_created;
     // Window title state
     char *last_title;
-
-    // General-purpose panels
-    PanelManager panels;
-    TerminalBackend *panel_terms[PORTTY_PANEL_MAX];
 
     // Renderer module (rend_sokol)
     RendererSokolData rend;
@@ -318,22 +284,22 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
     d->term = app->term;
     d->pty = app->pty;
     d->running = true;
-    d->content_scale = 1.0f;
-    d->cell_w = 10;
-    d->cell_h = 20;
+    d->rend.content_scale = 1.0f;
+    d->rend.cell_w = 10;
+    d->rend.cell_h = 20;
 #ifndef _WIN32
     d->wakeup_pipe[0] = d->wakeup_pipe[1] = -1;
 #else
     d->wakeup_event = NULL;
 #endif
     pthread_mutex_init(&d->pty_queue_mtx, NULL);
-    memset(&d->scroll, 0, sizeof(d->scroll));
-    rend_fallback_init(&d->fallback);
+    memset(&d->rend.scroll, 0, sizeof(d->rend.scroll));
+    rend_fallback_init(&d->rend.fallback);
     d->timers = timer_manager_create();
     d->cursor_blink_timer = TIMER_INVALID;
     d->cursor_blink_visible = true;
     d->has_focus = true;
-    d->linear_ok = true;
+    d->rend.linear_ok = true;
     d->render_mode = RENDER_MODE_DAMAGE;
     d->record_fps = 0.0;
     d->record_accumulator_ms = 0.0;
@@ -347,8 +313,8 @@ static bool sokol_init(PorttyBackend *self, PorttyApp *app,
     d->last_click_y = 0;
     d->autoscroll_timer = TIMER_INVALID;
     d->lottie_timer = TIMER_INVALID;
-    d->lottie_pip_created = false;
-    d->lottie_cache_count = 0;
+    d->rend.lottie_pip_created = false;
+    d->rend.lottie_cache_count = 0;
     d->pty_paused = false;
 
     // Cache exe path for spawn_new_terminal
@@ -447,29 +413,29 @@ static void sokol_destroy(PorttyBackend *self)
     }
 
     // Destroy lottie cache and pipeline
-    for (int i = 0; i < d->lottie_cache_count; i++) {
-        if (d->lottie_cache[i].image.id != SG_INVALID_ID)
-            sg_destroy_image(d->lottie_cache[i].image);
-        if (d->lottie_cache[i].view.id != SG_INVALID_ID)
-            sg_destroy_view(d->lottie_cache[i].view);
+    for (int i = 0; i < d->rend.lottie_cache_count; i++) {
+        if (d->rend.lottie_cache[i].image.id != SG_INVALID_ID)
+            sg_destroy_image(d->rend.lottie_cache[i].image);
+        if (d->rend.lottie_cache[i].view.id != SG_INVALID_ID)
+            sg_destroy_view(d->rend.lottie_cache[i].view);
     }
-    d->lottie_cache_count = 0;
-    if (d->lottie_pip_created) {
-        sg_destroy_pipeline(d->lottie_pip);
-        sg_destroy_buffer(d->lottie_vbuf);
-        sg_destroy_sampler(d->lottie_sampler);
+    d->rend.lottie_cache_count = 0;
+    if (d->rend.lottie_pip_created) {
+        sg_destroy_pipeline(d->rend.lottie_pip);
+        sg_destroy_buffer(d->rend.lottie_vbuf);
+        sg_destroy_sampler(d->rend.lottie_sampler);
     }
 
     // Destroy sixel cache and vbuf
-    for (int i = 0; i < d->sixel_cache_count; i++) {
-        if (d->sixel_cache[i].image.id != SG_INVALID_ID)
-            sg_destroy_image(d->sixel_cache[i].image);
-        if (d->sixel_cache[i].view.id != SG_INVALID_ID)
-            sg_destroy_view(d->sixel_cache[i].view);
+    for (int i = 0; i < d->rend.sixel_cache_count; i++) {
+        if (d->rend.sixel_cache[i].image.id != SG_INVALID_ID)
+            sg_destroy_image(d->rend.sixel_cache[i].image);
+        if (d->rend.sixel_cache[i].view.id != SG_INVALID_ID)
+            sg_destroy_view(d->rend.sixel_cache[i].view);
     }
-    d->sixel_cache_count = 0;
-    if (d->sixel_vbuf_created)
-        sg_destroy_buffer(d->sixel_vbuf);
+    d->rend.sixel_cache_count = 0;
+    if (d->rend.sixel_vbuf_created)
+        sg_destroy_buffer(d->rend.sixel_vbuf);
 
     if (d->tex_created)
         sg_destroy_image(d->tex);
@@ -480,16 +446,16 @@ static void sokol_destroy(PorttyBackend *self)
         sg_destroy_view(d->tex_view);
     }
     free(d->pixels);
-    if (d->font) {
-        rend_fallback_destroy(&d->fallback, d->font);
-        font_destroy(d->font);
-        d->font = NULL;
+    if (d->rend.font) {
+        rend_fallback_destroy(&d->rend.fallback, d->rend.font);
+        font_destroy(d->rend.font);
+        d->rend.font = NULL;
     }
-    if (d->resolve) {
-        font_resolve_destroy(d->resolve);
-        d->resolve = NULL;
+    if (d->rend.resolve) {
+        font_resolve_destroy(d->rend.resolve);
+        d->rend.resolve = NULL;
     }
-    free(d->font_path);
+    free(d->rend.font_path);
     free(d->last_title);
     sg_shutdown();
     free(d->working_dir);
@@ -706,8 +672,8 @@ static void sokol_drain_pty(SokolData *d)
         terminal_consume_pushed_rows(d->term);
         terminal_process_input(d->term, head->data, head->len);
         int pushed = terminal_consume_pushed_rows(d->term);
-        if (pushed > 0 && rend_get_scroll_offset(&d->scroll) > 0)
-            rend_scroll(&d->scroll, d->term, pushed);
+        if (pushed > 0 && rend_get_scroll_offset(&d->rend.scroll) > 0)
+            rend_scroll(&d->rend.scroll, d->term, pushed);
         free(head);
         head = next;
     }
@@ -974,17 +940,17 @@ static void sokol_panel_show(PorttyBackend *self, int id,
                              PorttyNotifyLevel level, unsigned int flags)
 {
     SokolData *d = sokol_data(self);
-    if (!d || !d->font || d->cell_w <= 0 || d->cell_h <= 0)
+    if (!d || !d->rend.font || d->rend.cell_w <= 0 || d->rend.cell_h <= 0)
         return;
 
-    panel_mgr_set_cell_size(&d->panels, d->cell_w, d->cell_h);
-    PanelState *p = panel_mgr_show(&d->panels, id, col, row, cols, rows,
+    panel_mgr_set_cell_size(&d->rend.panels, d->rend.cell_w, d->rend.cell_h);
+    PanelState *p = panel_mgr_show(&d->rend.panels, id, col, row, cols, rows,
                                    title, body, level, flags);
     if (!p)
         return;
 
     // Create or reuse terminal for this panel
-    int idx = p - d->panels.panels;
+    int idx = p - d->rend.panels.panels;
     if (idx < 0 || idx >= PORTTY_PANEL_MAX)
         return;
 
@@ -996,32 +962,32 @@ static void sokol_panel_show(PorttyBackend *self, int id,
 
     // Check if terminal needs recreation (wrong size or doesn't exist)
     int existing_cols = 0, existing_rows = 0;
-    if (d->panel_terms[idx]) {
-        terminal_get_dimensions(d->panel_terms[idx], &existing_rows, &existing_cols);
+    if (d->rend.panel_terms[idx]) {
+        terminal_get_dimensions(d->rend.panel_terms[idx], &existing_rows, &existing_cols);
     }
 
-    if (!d->panel_terms[idx] || existing_cols != term_cols || existing_rows != term_rows) {
+    if (!d->rend.panel_terms[idx] || existing_cols != term_cols || existing_rows != term_rows) {
         // Destroy old terminal if it exists
-        if (d->panel_terms[idx]) {
-            terminal_destroy(d->panel_terms[idx]);
-            free(d->panel_terms[idx]);
-            d->panel_terms[idx] = NULL;
+        if (d->rend.panel_terms[idx]) {
+            terminal_destroy(d->rend.panel_terms[idx]);
+            free(d->rend.panel_terms[idx]);
+            d->rend.panel_terms[idx] = NULL;
         }
         // Create new terminal with correct dimensions
         CfrConfig cfg = CFR_CONFIG_DEFAULTS;
         cfg.cols = term_cols;
         cfg.rows = term_rows;
-        cfg.cell_w_px = d->cell_w;
-        cfg.cell_h_px = d->cell_h;
-        d->panel_terms[idx] = term_cfr_new(&cfg);
+        cfg.cell_w_px = d->rend.cell_w;
+        cfg.cell_h_px = d->rend.cell_h;
+        d->rend.panel_terms[idx] = term_cfr_new(&cfg);
     }
 
-    if (d->panel_terms[idx]) {
+    if (d->rend.panel_terms[idx]) {
         // Build ANSI content
         char *ansi = sokol_panel_build_ansi(d, title, body, level);
         if (ansi) {
-            terminal_process_input(d->panel_terms[idx], ansi, strlen(ansi));
-            terminal_flush_damage(d->panel_terms[idx]);
+            terminal_process_input(d->rend.panel_terms[idx], ansi, strlen(ansi));
+            terminal_flush_damage(d->rend.panel_terms[idx]);
             free(ansi);
         }
     }
@@ -1036,18 +1002,18 @@ static void sokol_panel_hide(PorttyBackend *self, int id)
     if (!d)
         return;
 
-    PanelState *p = panel_mgr_find(&d->panels, id);
+    PanelState *p = panel_mgr_find(&d->rend.panels, id);
     if (!p)
         return;
 
-    int idx = p - d->panels.panels;
-    if (idx >= 0 && idx < PORTTY_PANEL_MAX && d->panel_terms[idx]) {
-        terminal_destroy(d->panel_terms[idx]);
-        free(d->panel_terms[idx]);
-        d->panel_terms[idx] = NULL;
+    int idx = p - d->rend.panels.panels;
+    if (idx >= 0 && idx < PORTTY_PANEL_MAX && d->rend.panel_terms[idx]) {
+        terminal_destroy(d->rend.panel_terms[idx]);
+        free(d->rend.panel_terms[idx]);
+        d->rend.panel_terms[idx] = NULL;
     }
 
-    panel_mgr_hide(&d->panels, id);
+    panel_mgr_hide(&d->rend.panels, id);
     if (d->term)
         terminal_mark_dirty(d->term);
 }
@@ -1057,7 +1023,7 @@ static int sokol_panel_hit_test(PorttyBackend *self, int px, int py, bool *close
     SokolData *d = sokol_data(self);
     if (!d)
         return -1;
-    return panel_mgr_hit_test(&d->panels, px, py, close_btn);
+    return panel_mgr_hit_test(&d->rend.panels, px, py, close_btn);
 }
 
 static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
@@ -1065,7 +1031,7 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
     SokolData *d = sokol_data(self);
     if (!d)
         return;
-    panel_mgr_set_hover(&d->panels, id, hovered);
+    panel_mgr_set_hover(&d->rend.panels, id, hovered);
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
@@ -1102,7 +1068,7 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 
 static void sokol_ensure_lottie_pipeline(SokolData *d)
 {
-    if (d->lottie_pip_created)
+    if (d->rend.lottie_pip_created)
         return;
 
     static const char *vs_src =
@@ -1162,13 +1128,13 @@ static void sokol_ensure_lottie_pipeline(SokolData *d)
         .label = "sokol-lottie-shader",
     });
 
-    d->lottie_vbuf = sg_make_buffer(&(sg_buffer_desc){
+    d->rend.lottie_vbuf = sg_make_buffer(&(sg_buffer_desc){
         .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
         .usage.dynamic_update = true,
         .label = "sokol-lottie-vbuf",
     });
 
-    d->lottie_pip = sg_make_pipeline(&(sg_pipeline_desc){
+    d->rend.lottie_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shd,
         .layout = {
             .buffers[0].stride = sizeof(GlyphVertex),
@@ -1179,7 +1145,7 @@ static void sokol_ensure_lottie_pipeline(SokolData *d)
             },
         },
         .colors[0] = {
-            .pixel_format = d->linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8,
+            .pixel_format = d->rend.linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8,
             .blend = {
                 .enabled = true,
                 .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
@@ -1191,21 +1157,21 @@ static void sokol_ensure_lottie_pipeline(SokolData *d)
         .label = "sokol-lottie-pipeline",
     });
 
-    d->lottie_sampler = sg_make_sampler(&(sg_sampler_desc){
+    d->rend.lottie_sampler = sg_make_sampler(&(sg_sampler_desc){
         .min_filter = SG_FILTER_LINEAR,
         .mag_filter = SG_FILTER_LINEAR,
         .label = "sokol-lottie-sampler",
     });
 
-    d->lottie_pip_created = true;
+    d->rend.lottie_pip_created = true;
 }
 
 static void lottie_cache_reconcile(SokolData *d, const CfrLottie *anims, int count)
 {
-    for (int i = 0; i < d->lottie_cache_count;) {
+    for (int i = 0; i < d->rend.lottie_cache_count;) {
         bool live = false;
         for (int j = 0; j < count; j++) {
-            if (anims[j].id == d->lottie_cache[i].id) {
+            if (anims[j].id == d->rend.lottie_cache[i].id) {
                 live = true;
                 break;
             }
@@ -1213,68 +1179,68 @@ static void lottie_cache_reconcile(SokolData *d, const CfrLottie *anims, int cou
         if (live) {
             i++;
         } else {
-            if (d->lottie_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->lottie_cache[i].image);
-            if (d->lottie_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->lottie_cache[i].view);
-            d->lottie_cache[i] = d->lottie_cache[--d->lottie_cache_count];
+            if (d->rend.lottie_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->rend.lottie_cache[i].image);
+            if (d->rend.lottie_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->rend.lottie_cache[i].view);
+            d->rend.lottie_cache[i] = d->rend.lottie_cache[--d->rend.lottie_cache_count];
         }
     }
 }
 
 static int lottie_get_texture(SokolData *d, const CfrLottie *anim)
 {
-    for (int i = 0; i < d->lottie_cache_count; i++) {
-        if (d->lottie_cache[i].id != anim->id)
+    for (int i = 0; i < d->rend.lottie_cache_count; i++) {
+        if (d->rend.lottie_cache[i].id != anim->id)
             continue;
-        if (d->lottie_cache[i].w != anim->canvas_w ||
-            d->lottie_cache[i].h != anim->canvas_h) {
+        if (d->rend.lottie_cache[i].w != anim->canvas_w ||
+            d->rend.lottie_cache[i].h != anim->canvas_h) {
             // Size changed — recreate
-            if (d->lottie_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->lottie_cache[i].image);
-            if (d->lottie_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->lottie_cache[i].view);
-            d->lottie_cache[i].image.id = SG_INVALID_ID;
-            d->lottie_cache[i].view.id = SG_INVALID_ID;
-        } else if (d->lottie_cache[i].version != anim->version) {
+            if (d->rend.lottie_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->rend.lottie_cache[i].image);
+            if (d->rend.lottie_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->rend.lottie_cache[i].view);
+            d->rend.lottie_cache[i].image.id = SG_INVALID_ID;
+            d->rend.lottie_cache[i].view.id = SG_INVALID_ID;
+        } else if (d->rend.lottie_cache[i].version != anim->version) {
             // Version changed — update pixels
-            sg_update_image(d->lottie_cache[i].image, &(sg_image_data){
+            sg_update_image(d->rend.lottie_cache[i].image, &(sg_image_data){
                                                           .mip_levels[0] = {
                                                               .ptr = (void *)anim->rgba,
                                                               .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
                                                           },
                                                       });
-            d->lottie_cache[i].version = anim->version;
+            d->rend.lottie_cache[i].version = anim->version;
             return i;
         } else {
             return i;
         }
         // Re-create image (size changed or first creation)
-        d->lottie_cache[i].image = sg_make_image(&(sg_image_desc){
+        d->rend.lottie_cache[i].image = sg_make_image(&(sg_image_desc){
             .width = anim->canvas_w,
             .height = anim->canvas_h,
             .pixel_format = SG_PIXELFORMAT_RGBA8,
             .usage.dynamic_update = true,
             .label = "sokol-lottie",
         });
-        d->lottie_cache[i].view = sg_make_view(&(sg_view_desc){
-            .texture.image = d->lottie_cache[i].image,
+        d->rend.lottie_cache[i].view = sg_make_view(&(sg_view_desc){
+            .texture.image = d->rend.lottie_cache[i].image,
             .label = "sokol-lottie-view",
         });
-        sg_update_image(d->lottie_cache[i].image, &(sg_image_data){
+        sg_update_image(d->rend.lottie_cache[i].image, &(sg_image_data){
                                                       .mip_levels[0] = {
                                                           .ptr = (void *)anim->rgba,
                                                           .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
                                                       },
                                                   });
-        d->lottie_cache[i].version = anim->version;
-        d->lottie_cache[i].w = anim->canvas_w;
-        d->lottie_cache[i].h = anim->canvas_h;
+        d->rend.lottie_cache[i].version = anim->version;
+        d->rend.lottie_cache[i].w = anim->canvas_w;
+        d->rend.lottie_cache[i].h = anim->canvas_h;
         return i;
     }
 
     // New cache entry
-    if (d->lottie_cache_count >= SOKOL_LOTTIE_CACHE_MAX)
+    if (d->rend.lottie_cache_count >= SOKOL_LOTTIE_CACHE_MAX)
         return -1;
 
     sg_image img = sg_make_image(&(sg_image_desc){
@@ -1294,13 +1260,13 @@ static int lottie_get_texture(SokolData *d, const CfrLottie *anim)
         .texture.image = img,
         .label = "sokol-lottie-view",
     });
-    int n = d->lottie_cache_count++;
-    d->lottie_cache[n].image = img;
-    d->lottie_cache[n].view = view;
-    d->lottie_cache[n].id = anim->id;
-    d->lottie_cache[n].version = anim->version;
-    d->lottie_cache[n].w = anim->canvas_w;
-    d->lottie_cache[n].h = anim->canvas_h;
+    int n = d->rend.lottie_cache_count++;
+    d->rend.lottie_cache[n].image = img;
+    d->rend.lottie_cache[n].view = view;
+    d->rend.lottie_cache[n].id = anim->id;
+    d->rend.lottie_cache[n].version = anim->version;
+    d->rend.lottie_cache[n].w = anim->canvas_w;
+    d->rend.lottie_cache[n].h = anim->canvas_h;
     return n;
 }
 
@@ -1314,12 +1280,12 @@ static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
     if (anim_count == 0)
         return 0;
 
-    int cell_w = d->cell_w;
-    int cell_h = d->cell_h;
-    float scale = d->content_scale > 0.0f ? d->content_scale : 1.0f;
+    int cell_w = d->rend.cell_w;
+    int cell_h = d->rend.cell_h;
+    float scale = d->rend.content_scale > 0.0f ? d->rend.content_scale : 1.0f;
     int win_w = (int)sapp_width();
     int win_h = (int)sapp_height();
-    int scroll_offset = d->scroll.scroll_offset;
+    int scroll_offset = d->rend.scroll.scroll_offset;
     float uniforms[2] = { (float)win_w, (float)win_h };
 
     int vert_base = vert_offset;
@@ -1375,11 +1341,11 @@ static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
         if (anim_vert_count > 0) {
             int cache_idx = lottie_get_texture(d, anim);
             if (cache_idx >= 0) {
-                sg_apply_pipeline(d->lottie_pip);
+                sg_apply_pipeline(d->rend.lottie_pip);
                 sg_apply_bindings(&(sg_bindings){
-                    .vertex_buffers[0] = d->lottie_vbuf,
-                    .views[0] = d->lottie_cache[cache_idx].view,
-                    .samplers[0] = d->lottie_sampler,
+                    .vertex_buffers[0] = d->rend.lottie_vbuf,
+                    .views[0] = d->rend.lottie_cache[cache_idx].view,
+                    .samplers[0] = d->rend.lottie_sampler,
                 });
                 sg_apply_uniforms(0, &SG_RANGE(uniforms));
                 sg_draw(vert_base, anim_vert_count, 1);
@@ -1395,10 +1361,10 @@ static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
 
 static void sixel_cache_reconcile(SokolData *d, const CfrSixel *imgs, int count)
 {
-    for (int i = 0; i < d->sixel_cache_count;) {
+    for (int i = 0; i < d->rend.sixel_cache_count;) {
         bool live = false;
         for (int j = 0; j < count; j++) {
-            if (imgs[j].id == d->sixel_cache[i].id) {
+            if (imgs[j].id == d->rend.sixel_cache[i].id) {
                 live = true;
                 break;
             }
@@ -1406,64 +1372,64 @@ static void sixel_cache_reconcile(SokolData *d, const CfrSixel *imgs, int count)
         if (live) {
             i++;
         } else {
-            if (d->sixel_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->sixel_cache[i].image);
-            if (d->sixel_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->sixel_cache[i].view);
-            d->sixel_cache[i] = d->sixel_cache[--d->sixel_cache_count];
+            if (d->rend.sixel_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->rend.sixel_cache[i].image);
+            if (d->rend.sixel_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->rend.sixel_cache[i].view);
+            d->rend.sixel_cache[i] = d->rend.sixel_cache[--d->rend.sixel_cache_count];
         }
     }
 }
 
 static int sixel_get_texture(SokolData *d, const CfrSixel *img)
 {
-    for (int i = 0; i < d->sixel_cache_count; i++) {
-        if (d->sixel_cache[i].id != img->id)
+    for (int i = 0; i < d->rend.sixel_cache_count; i++) {
+        if (d->rend.sixel_cache[i].id != img->id)
             continue;
-        if (d->sixel_cache[i].w != img->width_px ||
-            d->sixel_cache[i].h != img->height_px) {
-            if (d->sixel_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->sixel_cache[i].image);
-            if (d->sixel_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->sixel_cache[i].view);
-            d->sixel_cache[i].image.id = SG_INVALID_ID;
-            d->sixel_cache[i].view.id = SG_INVALID_ID;
-        } else if (d->sixel_cache[i].version != img->version) {
-            sg_update_image(d->sixel_cache[i].image, &(sg_image_data){
+        if (d->rend.sixel_cache[i].w != img->width_px ||
+            d->rend.sixel_cache[i].h != img->height_px) {
+            if (d->rend.sixel_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(d->rend.sixel_cache[i].image);
+            if (d->rend.sixel_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(d->rend.sixel_cache[i].view);
+            d->rend.sixel_cache[i].image.id = SG_INVALID_ID;
+            d->rend.sixel_cache[i].view.id = SG_INVALID_ID;
+        } else if (d->rend.sixel_cache[i].version != img->version) {
+            sg_update_image(d->rend.sixel_cache[i].image, &(sg_image_data){
                                                          .mip_levels[0] = {
                                                              .ptr = (void *)img->rgba,
                                                              .size = (size_t)img->width_px * img->height_px * 4,
                                                          },
                                                      });
-            d->sixel_cache[i].version = img->version;
+            d->rend.sixel_cache[i].version = img->version;
             return i;
         } else {
             return i;
         }
-        d->sixel_cache[i].image = sg_make_image(&(sg_image_desc){
+        d->rend.sixel_cache[i].image = sg_make_image(&(sg_image_desc){
             .width = img->width_px,
             .height = img->height_px,
             .pixel_format = SG_PIXELFORMAT_RGBA8,
             .usage.dynamic_update = true,
             .label = "sokol-sixel",
         });
-        d->sixel_cache[i].view = sg_make_view(&(sg_view_desc){
-            .texture.image = d->sixel_cache[i].image,
+        d->rend.sixel_cache[i].view = sg_make_view(&(sg_view_desc){
+            .texture.image = d->rend.sixel_cache[i].image,
             .label = "sokol-sixel-view",
         });
-        sg_update_image(d->sixel_cache[i].image, &(sg_image_data){
+        sg_update_image(d->rend.sixel_cache[i].image, &(sg_image_data){
                                                      .mip_levels[0] = {
                                                          .ptr = (void *)img->rgba,
                                                          .size = (size_t)img->width_px * img->height_px * 4,
                                                      },
                                                  });
-        d->sixel_cache[i].version = img->version;
-        d->sixel_cache[i].w = img->width_px;
-        d->sixel_cache[i].h = img->height_px;
+        d->rend.sixel_cache[i].version = img->version;
+        d->rend.sixel_cache[i].w = img->width_px;
+        d->rend.sixel_cache[i].h = img->height_px;
         return i;
     }
 
-    if (d->sixel_cache_count >= SOKOL_SIXEL_CACHE_MAX)
+    if (d->rend.sixel_cache_count >= SOKOL_SIXEL_CACHE_MAX)
         return -1;
 
     sg_image img_obj = sg_make_image(&(sg_image_desc){
@@ -1483,26 +1449,26 @@ static int sixel_get_texture(SokolData *d, const CfrSixel *img)
         .texture.image = img_obj,
         .label = "sokol-sixel-view",
     });
-    int n = d->sixel_cache_count++;
-    d->sixel_cache[n].image = img_obj;
-    d->sixel_cache[n].view = view;
-    d->sixel_cache[n].id = img->id;
-    d->sixel_cache[n].version = img->version;
-    d->sixel_cache[n].w = img->width_px;
-    d->sixel_cache[n].h = img->height_px;
+    int n = d->rend.sixel_cache_count++;
+    d->rend.sixel_cache[n].image = img_obj;
+    d->rend.sixel_cache[n].view = view;
+    d->rend.sixel_cache[n].id = img->id;
+    d->rend.sixel_cache[n].version = img->version;
+    d->rend.sixel_cache[n].w = img->width_px;
+    d->rend.sixel_cache[n].h = img->height_px;
     return n;
 }
 
 static void sokol_ensure_sixel_vbuf(SokolData *d)
 {
-    if (d->sixel_vbuf_created)
+    if (d->rend.sixel_vbuf_created)
         return;
-    d->sixel_vbuf = sg_make_buffer(&(sg_buffer_desc){
+    d->rend.sixel_vbuf = sg_make_buffer(&(sg_buffer_desc){
         .size = SOKOL_MAX_SIXEL_VERTICES * sizeof(GlyphVertex),
         .usage.dynamic_update = true,
         .label = "sokol-sixel-vbuf",
     });
-    d->sixel_vbuf_created = true;
+    d->rend.sixel_vbuf_created = true;
 }
 
 static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
@@ -1513,12 +1479,12 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
     if (count == 0)
         return;
 
-    int cell_w = d->cell_w;
-    int cell_h = d->cell_h;
-    float scale = d->content_scale > 0.0f ? d->content_scale : 1.0f;
+    int cell_w = d->rend.cell_w;
+    int cell_h = d->rend.cell_h;
+    float scale = d->rend.content_scale > 0.0f ? d->rend.content_scale : 1.0f;
     int win_w = (int)sapp_width();
     int win_h = (int)sapp_height();
-    int scroll_offset = d->scroll.scroll_offset;
+    int scroll_offset = d->rend.scroll.scroll_offset;
     float uniforms[2] = { (float)win_w, (float)win_h };
     uint8_t full_op[4] = { 255, 255, 255, 255 };
 
@@ -1562,7 +1528,7 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
         return;
 
     // Upload vertex buffer once
-    sg_update_buffer(d->sixel_vbuf, &(sg_range){
+    sg_update_buffer(d->rend.sixel_vbuf, &(sg_range){
                                         .ptr = sixel_verts,
                                         .size = (size_t)vert_count * sizeof(GlyphVertex),
                                     });
@@ -1586,12 +1552,12 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
             break;
 
         int cache_idx = sixel_get_texture(d, img);
-        if (cache_idx >= 0 && d->lottie_pip_created) {
-            sg_apply_pipeline(d->lottie_pip);
+        if (cache_idx >= 0 && d->rend.lottie_pip_created) {
+            sg_apply_pipeline(d->rend.lottie_pip);
             sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->sixel_vbuf,
-                .views[0] = d->sixel_cache[cache_idx].view,
-                .samplers[0] = d->lottie_sampler,
+                .vertex_buffers[0] = d->rend.sixel_vbuf,
+                .views[0] = d->rend.sixel_cache[cache_idx].view,
+                .samplers[0] = d->rend.lottie_sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(vert_offset, 6, 1);
@@ -1602,7 +1568,7 @@ static void sokol_render_sixel_images(SokolData *d, TerminalBackend *term)
 
 static void sokol_ensure_glyph_pipeline(SokolData *d)
 {
-    if (d->glyph_pip_created)
+    if (d->rend.glyph_pip_created)
         return;
 
     static const char *vs_src =
@@ -1707,7 +1673,7 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
         .label = "sokol-glyph-shader",
     });
 
-    d->glyph_vbuf = sg_make_buffer(&(sg_buffer_desc){
+    d->rend.glyph_vbuf = sg_make_buffer(&(sg_buffer_desc){
         .size = SOKOL_MAX_VERTICES * sizeof(GlyphVertex),
         .usage.dynamic_update = true,
         .label = "sokol-glyph-vbuf",
@@ -1718,7 +1684,7 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
     glGetIntegerv(GL_ARRAY_BUFFER_BINDING, (GLint *)&d->glyph_vbuf_gl_id);
 #endif
 
-    d->glyph_pip = sg_make_pipeline(&(sg_pipeline_desc){
+    d->rend.glyph_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shd,
         .layout = {
             .buffers[0].stride = sizeof(GlyphVertex),
@@ -1729,15 +1695,15 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
                 [3] = { .offset = offsetof(GlyphVertex, bg), .format = SG_VERTEXFORMAT_UBYTE4N },
             },
         },
-        .colors[0] = { .pixel_format = d->linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8 },
+        .colors[0] = { .pixel_format = d->rend.linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8 },
         .label = "sokol-glyph-pipeline",
     });
-    d->glyph_pip_created = true;
+    d->rend.glyph_pip_created = true;
 
     // Selection overlay pipeline: same shader, alpha-blended on top.
     // UVs hit the zero-coverage texel so coverage=0, meaning the shader
     // outputs bg_lin (the selection color) with the selection alpha.
-    d->sel_pip = sg_make_pipeline(&(sg_pipeline_desc){
+    d->rend.sel_pip = sg_make_pipeline(&(sg_pipeline_desc){
         .shader = shd,
         .layout = {
             .buffers[0].stride = sizeof(GlyphVertex),
@@ -1749,7 +1715,7 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
             },
         },
         .colors[0] = {
-            .pixel_format = d->linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8,
+            .pixel_format = d->rend.linear_ok ? SG_PIXELFORMAT_SRGB8A8 : SG_PIXELFORMAT_RGBA8,
             .blend = {
                 .enabled = true,
                 .src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA,
@@ -1760,7 +1726,7 @@ static void sokol_ensure_glyph_pipeline(SokolData *d)
         },
         .label = "sokol-selection-pipeline",
     });
-    d->sel_pip_created = true;
+    d->rend.sel_pip_created = true;
 }
 
 static void cell_color(TerminalColor tc, bool is_fg, bool reverse,
@@ -1797,47 +1763,47 @@ static void cell_color(TerminalColor tc, bool is_fg, bool reverse,
 #define sokol_deco_coalesce_flush  rend_sokol_deco_coalesce_flush
 static int sokol_underline_position(SokolData *d, int row)
 {
-    int cell_y = row * d->cell_h;
-    int underline_y = cell_y + d->font_ascent +
-                      (int)roundf(2.0f * d->content_scale);
-    int thickness = (int)roundf(1.0f * d->content_scale);
+    int cell_y = row * d->rend.cell_h;
+    int underline_y = cell_y + d->rend.font_ascent +
+                      (int)roundf(2.0f * d->rend.content_scale);
+    int thickness = (int)roundf(1.0f * d->rend.content_scale);
     if (thickness < 1)
         thickness = 1;
-    if (underline_y + thickness > cell_y + d->cell_h)
-        underline_y = cell_y + d->cell_h - thickness;
+    if (underline_y + thickness > cell_y + d->rend.cell_h)
+        underline_y = cell_y + d->rend.cell_h - thickness;
     return underline_y;
 }
 static void sokol_draw_underline_single(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
-    int thickness = (int)roundf(1.0f * d->content_scale);
+    int thickness = (int)roundf(1.0f * d->rend.content_scale);
     if (thickness < 1)
         thickness = 1;
     int y = sokol_underline_position(d, row);
-    float x0 = (float)(vis_start * d->cell_w);
-    float x1 = (float)(vis_end * d->cell_w);
+    float x0 = (float)(vis_start * d->rend.cell_w);
+    float x1 = (float)(vis_end * d->rend.cell_w);
     rend_sokol_deco_emit_quad(x0, (float)y, x1, (float)(y + thickness), color);
 }
 static void sokol_draw_underline_double(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
-    int thickness = (int)roundf(1.0f * d->content_scale);
+    int thickness = (int)roundf(1.0f * d->rend.content_scale);
     if (thickness < 1)
         thickness = 1;
-    int gap = (int)roundf(1.0f * d->content_scale);
+    int gap = (int)roundf(1.0f * d->rend.content_scale);
     if (gap < 1)
         gap = 1;
     int y1 = sokol_underline_position(d, row);
     int y2 = y1 + thickness + gap;
-    float x0 = (float)(vis_start * d->cell_w);
-    float x1 = (float)(vis_end * d->cell_w);
+    float x0 = (float)(vis_start * d->rend.cell_w);
+    float x1 = (float)(vis_end * d->rend.cell_w);
     rend_sokol_deco_emit_quad(x0, (float)y1, x1, (float)(y1 + thickness), color);
     rend_sokol_deco_emit_quad(x0, (float)y2, x1, (float)(y2 + thickness), color);
 }
 static void sokol_draw_underline_curly(SokolData *d, int row, int vis_start,
                                        int vis_end, const uint8_t color[4])
 {
-    float pd = d->content_scale;
+    float pd = d->rend.content_scale;
     float amplitude = 1.5f * pd;
     if (amplitude < 1.0f)
         amplitude = 1.0f;
@@ -1849,8 +1815,8 @@ static void sokol_draw_underline_curly(SokolData *d, int row, int vis_start,
         thickness = 0.5f;
     int underline_y = sokol_underline_position(d, row);
     float center_y = (float)underline_y + amplitude;
-    int run_x = vis_start * d->cell_w;
-    int run_w = (vis_end - vis_start) * d->cell_w;
+    int run_x = vis_start * d->rend.cell_w;
+    int run_w = (vis_end - vis_start) * d->rend.cell_w;
     DecoStrip strips[16];
     int strip_count = 0;
     for (int px = 0; px < run_w; px++) {
@@ -1879,7 +1845,7 @@ static void sokol_draw_underline_curly(SokolData *d, int row, int vis_start,
 static void sokol_draw_underline_dotted(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
-    float pd = d->content_scale;
+    float pd = d->rend.content_scale;
     float radius = 0.5f * pd;
     if (radius < 0.5f)
         radius = 0.5f;
@@ -1888,8 +1854,8 @@ static void sokol_draw_underline_dotted(SokolData *d, int row, int vis_start,
         gap = 2.0f;
     float stride = radius * 2.0f + gap;
     int underline_y = sokol_underline_position(d, row);
-    int run_x = vis_start * d->cell_w;
-    int run_w = (vis_end - vis_start) * d->cell_w;
+    int run_x = vis_start * d->rend.cell_w;
+    int run_w = (vis_end - vis_start) * d->rend.cell_w;
     for (float cx = (float)run_x; cx < (float)(run_x + run_w); cx += stride) {
         float cy = (float)underline_y + radius;
         int x_min = (int)floorf(cx - radius - 1.0f);
@@ -1918,7 +1884,7 @@ static void sokol_draw_underline_dotted(SokolData *d, int row, int vis_start,
 static void sokol_draw_underline_dashed(SokolData *d, int row, int vis_start,
                                         int vis_end, const uint8_t color[4])
 {
-    float pd = d->content_scale;
+    float pd = d->rend.content_scale;
     int thickness = (int)roundf(1.0f * pd);
     if (thickness < 1)
         thickness = 1;
@@ -1930,8 +1896,8 @@ static void sokol_draw_underline_dashed(SokolData *d, int row, int vis_start,
         gap = 1;
     int stride = dash_w + gap;
     int y = sokol_underline_position(d, row);
-    int run_x = vis_start * d->cell_w;
-    int run_w = (vis_end - vis_start) * d->cell_w;
+    int run_x = vis_start * d->rend.cell_w;
+    int run_w = (vis_end - vis_start) * d->rend.cell_w;
     float y0 = (float)y;
     float y1 = (float)(y + thickness);
     for (int px = 0; px < run_w; px += stride) {
@@ -1946,14 +1912,14 @@ static void sokol_draw_underline_dashed(SokolData *d, int row, int vis_start,
 static void sokol_draw_strikethrough(SokolData *d, int row, int vis_start,
                                      int vis_end, const uint8_t color[4])
 {
-    float pd = d->content_scale;
+    float pd = d->rend.content_scale;
     int thickness = (int)roundf(1.0f * pd);
     if (thickness < 1)
         thickness = 1;
-    int cell_y = row * d->cell_h;
-    int strike_y = cell_y + d->font_ascent - d->font_cap_height / 2;
-    float x0 = (float)(vis_start * d->cell_w);
-    float x1 = (float)(vis_end * d->cell_w);
+    int cell_y = row * d->rend.cell_h;
+    int strike_y = cell_y + d->rend.font_ascent - d->rend.font_cap_height / 2;
+    float x0 = (float)(vis_start * d->rend.cell_w);
+    float x1 = (float)(vis_end * d->rend.cell_w);
     rend_sokol_deco_emit_quad(x0, (float)strike_y, x1,
                               (float)(strike_y + thickness), color);
 }
@@ -1970,8 +1936,8 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
     if (rows <= 0 || cols <= 0)
         return;
 
-    int cell_w = d->cell_w;
-    int cell_h = d->cell_h;
+    int cell_w = d->rend.cell_w;
+    int cell_h = d->rend.cell_h;
     if (cell_w <= 0 || cell_h <= 0)
         return;
 
@@ -2077,20 +2043,20 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                     uint32_t color_key = 0;
 
                     RendSokolAtlasEntry *bd_entry = rend_sokol_atlas_lookup(
-                        &d->atlas, BOXDRAW_FONT_DATA, (int)bd_cp, color_key);
+                        &d->rend.atlas, BOXDRAW_FONT_DATA, (int)bd_cp, color_key);
 
                     if (!bd_entry) {
                         GlyphBitmap *bmp = rend_boxdraw_render(
                             bd_cp, cell_w, cell_h, fg[0], fg[1], fg[2]);
                         if (bmp) {
                             bd_entry = rend_sokol_atlas_insert(
-                                &d->atlas, BOXDRAW_FONT_DATA,
+                                &d->rend.atlas, BOXDRAW_FONT_DATA,
                                 (int)bd_cp, color_key, bmp, false);
                             free(bmp->pixels);
                             free(bmp);
                         } else {
                             bd_entry = rend_sokol_atlas_insert_empty(
-                                &d->atlas, BOXDRAW_FONT_DATA,
+                                &d->rend.atlas, BOXDRAW_FONT_DATA,
                                 (int)bd_cp, color_key);
                         }
                     }
@@ -2141,7 +2107,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                     goto selection_check;
                 }
 
-                if (!d->font)
+                if (!d->rend.font)
                     goto selection_check;
 
                 FontStyle style = FONT_STYLE_NORMAL;
@@ -2152,7 +2118,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                 else if (cell.attrs.italic)
                     style = FONT_STYLE_ITALIC;
 
-                if (!font_has_style(d->font, style))
+                if (!font_has_style(d->rend.font, style))
                     style = FONT_STYLE_NORMAL;
 
                 uint32_t cps[32];
@@ -2169,9 +2135,9 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                     }
                     cp_count = (int)n;
                 }
-                bool emoji_available = font_has_style(d->font, FONT_STYLE_EMOJI);
+                bool emoji_available = font_has_style(d->rend.font, FONT_STYLE_EMOJI);
                 bool emoji_has_glyph = emoji_available &&
-                                       font_get_glyph_index(d->font, FONT_STYLE_EMOJI, cell.cp) != 0;
+                                       font_get_glyph_index(d->rend.font, FONT_STYLE_EMOJI, cell.cp) != 0;
                 if (rend_should_use_emoji(cps, cp_count, emoji_available, emoji_has_glyph))
                     style = FONT_STYLE_EMOJI;
 
@@ -2179,12 +2145,12 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                 int avail_h = cell_h;
 
                 for (int s = 0; s < FONT_STYLE_COUNT; s++)
-                    font_set_presentation_width(d->font, s, avail_w);
+                    font_set_presentation_width(d->rend.font, s, avail_w);
 
                 if (style == FONT_STYLE_EMOJI && avail_h < avail_w)
                     avail_w = avail_h;
 
-                bool color_baked = rend_is_color_font(d->font, style);
+                bool color_baked = rend_is_color_font(d->rend.font, style);
                 uint8_t render_r = color_baked ? fg[0] : 255;
                 uint8_t render_g = color_baked ? fg[1] : 255;
                 uint8_t render_b = color_baked ? fg[2] : 255;
@@ -2205,10 +2171,10 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                     cache_w = cache_h = side;
                 }
 
-                if (cp_count > 1 && d->font->render_shaped) {
-                    void *sh_font_data = d->font->font_data[style];
+                if (cp_count > 1 && d->rend.font->render_shaped) {
+                    void *sh_font_data = d->rend.font->font_data[style];
                     ShapedGlyphs *shaped = font_render_shaped_text(
-                        d->font, style, cps, cp_count,
+                        d->rend.font, style, cps, cp_count,
                         render_r, render_g, render_b);
 
                     if (shaped) {
@@ -2231,8 +2197,8 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
 
                     if (!shaped && style != FONT_STYLE_NORMAL) {
                         style = FONT_STYLE_NORMAL;
-                        sh_font_data = d->font->font_data[style];
-                        color_baked = rend_is_color_font(d->font, style);
+                        sh_font_data = d->rend.font->font_data[style];
+                        color_baked = rend_is_color_font(d->rend.font, style);
                         render_r = color_baked ? fg[0] : 255;
                         render_g = color_baked ? fg[1] : 255;
                         render_b = color_baked ? fg[2] : 255;
@@ -2240,18 +2206,18 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                         ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
                                         : 0xFFFFFF;
                         shaped = font_render_shaped_text(
-                            d->font, style, cps, cp_count,
+                            d->rend.font, style, cps, cp_count,
                             render_r, render_g, render_b);
                     }
 
                     if (!shaped && cp_count > 0) {
-                        const char *fb_path = rend_fallback_lookup(&d->fallback, d->resolve, cps[0]);
-                        if (fb_path && rend_fallback_ensure(&d->fallback, d->font, fb_path,
-                                                            d->font_size, &d->font_options, d->cell_w)) {
+                        const char *fb_path = rend_fallback_lookup(&d->rend.fallback, d->rend.resolve, cps[0]);
+                        if (fb_path && rend_fallback_ensure(&d->rend.fallback, d->rend.font, fb_path,
+                                                            d->rend.font_size, &d->rend.font_options, d->rend.cell_w)) {
                             style = FONT_STYLE_FALLBACK;
-                            sh_font_data = d->font->font_data[style];
-                            font_set_presentation_width(d->font, style, avail_w);
-                            color_baked = rend_is_color_font(d->font, style);
+                            sh_font_data = d->rend.font->font_data[style];
+                            font_set_presentation_width(d->rend.font, style, avail_w);
+                            color_baked = rend_is_color_font(d->rend.font, style);
                             render_r = color_baked ? fg[0] : 255;
                             render_g = color_baked ? fg[1] : 255;
                             render_b = color_baked ? fg[2] : 255;
@@ -2259,7 +2225,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                             ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
                                             : 0xFFFFFF;
                             shaped = font_render_shaped_text(
-                                d->font, style, cps, cp_count,
+                                d->rend.font, style, cps, cp_count,
                                 render_r, render_g, render_b);
                         }
                     }
@@ -2271,10 +2237,10 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                 continue;
                             uint32_t atlas_gid = (cell.width >= 2) ? (gid | (1u << 29)) : gid;
                             RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
-                                &d->atlas, sh_font_data, (int)atlas_gid, color_key);
+                                &d->rend.atlas, sh_font_data, (int)atlas_gid, color_key);
                             if (!entry) {
                                 GlyphBitmap *gb = font_render_glyph_id(
-                                    d->font, style, gid,
+                                    d->rend.font, style, gid,
                                     render_r, render_g, render_b);
                                 if (gb) {
                                     GlyphBitmap *scaled = NULL;
@@ -2295,23 +2261,23 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                     uint32_t insert_id = atlas_gid ? atlas_gid
                                                                    : (uint32_t)gb->glyph_id;
                                     entry = rend_sokol_atlas_insert(
-                                        &d->atlas, sh_font_data, (int)insert_id, color_key,
+                                        &d->rend.atlas, sh_font_data, (int)insert_id, color_key,
                                         scaled ? scaled : gb, color_baked);
                                     if (scaled) {
                                         free(scaled->pixels);
                                         free(scaled);
                                     }
-                                    d->font->free_glyph_bitmap(d->font, gb);
+                                    d->rend.font->free_glyph_bitmap(d->rend.font, gb);
                                 } else if (atlas_gid != 0) {
                                     entry = rend_sokol_atlas_insert_empty(
-                                        &d->atlas, sh_font_data, (int)atlas_gid, color_key);
+                                        &d->rend.atlas, sh_font_data, (int)atlas_gid, color_key);
                                 }
                             }
 
                             if (entry && entry->region.w > 0 && entry->region.h > 0 &&
                                 *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                                 int gx = (int)cell_x0 + shaped->x_positions[gi] + entry->x_offset;
-                                int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
+                                int gy = (int)cell_y0 + d->rend.font_ascent - entry->y_offset;
                                 if (entry->centered) {
                                     int glyph_w = cell.width * cell_w;
                                     gx = (int)floorf(cell_x0 + ((float)glyph_w - (float)entry->region.w) * 0.5f);
@@ -2349,37 +2315,37 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                     }
                 }
 
-                uint32_t glyph_id = font_get_glyph_index(d->font, style, cell.cp);
+                uint32_t glyph_id = font_get_glyph_index(d->rend.font, style, cell.cp);
 
-                void *font_data = d->font->font_data[style];
+                void *font_data = d->rend.font->font_data[style];
                 if (glyph_id == 0 && style != FONT_STYLE_NORMAL) {
                     style = FONT_STYLE_NORMAL;
-                    font_data = d->font->font_data[style];
-                    color_baked = rend_is_color_font(d->font, style);
+                    font_data = d->rend.font->font_data[style];
+                    color_baked = rend_is_color_font(d->rend.font, style);
                     render_r = color_baked ? fg[0] : 255;
                     render_g = color_baked ? fg[1] : 255;
                     render_b = color_baked ? fg[2] : 255;
                     color_key = color_baked
                                     ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
                                     : 0xFFFFFF;
-                    glyph_id = font_get_glyph_index(d->font, style, cell.cp);
+                    glyph_id = font_get_glyph_index(d->rend.font, style, cell.cp);
                 }
 
                 if (glyph_id == 0) {
-                    const char *fb_path = rend_fallback_lookup(&d->fallback, d->resolve, cell.cp);
-                    if (fb_path && rend_fallback_ensure(&d->fallback, d->font, fb_path,
-                                                        d->font_size, &d->font_options, d->cell_w)) {
+                    const char *fb_path = rend_fallback_lookup(&d->rend.fallback, d->rend.resolve, cell.cp);
+                    if (fb_path && rend_fallback_ensure(&d->rend.fallback, d->rend.font, fb_path,
+                                                        d->rend.font_size, &d->rend.font_options, d->rend.cell_w)) {
                         style = FONT_STYLE_FALLBACK;
-                        font_data = d->font->font_data[style];
-                        font_set_presentation_width(d->font, style, avail_w);
-                        color_baked = rend_is_color_font(d->font, style);
+                        font_data = d->rend.font->font_data[style];
+                        font_set_presentation_width(d->rend.font, style, avail_w);
+                        color_baked = rend_is_color_font(d->rend.font, style);
                         render_r = color_baked ? fg[0] : 255;
                         render_g = color_baked ? fg[1] : 255;
                         render_b = color_baked ? fg[2] : 255;
                         color_key = color_baked
                                         ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
                                         : 0xFFFFFF;
-                        glyph_id = font_get_glyph_index(d->font, style, cell.cp);
+                        glyph_id = font_get_glyph_index(d->rend.font, style, cell.cp);
                     }
                 }
 
@@ -2390,11 +2356,11 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                 RendSokolAtlasEntry *entry = NULL;
                 if (atlas_glyph_id != 0)
                     entry = rend_sokol_atlas_lookup(
-                        &d->atlas, font_data, (int)atlas_glyph_id, color_key);
+                        &d->rend.atlas, font_data, (int)atlas_glyph_id, color_key);
 
                 if (!entry) {
                     GlyphBitmap *bmp = font_render_glyphs(
-                        d->font, style, &cell.cp, 1, render_r, render_g, render_b);
+                        d->rend.font, style, &cell.cp, 1, render_r, render_g, render_b);
                     if (bmp) {
                         GlyphBitmap *scaled = NULL;
                         if (downscale_glyph) {
@@ -2414,23 +2380,23 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                         uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
                                                             : (uint32_t)bmp->glyph_id;
                         entry = rend_sokol_atlas_insert(
-                            &d->atlas, font_data, (int)insert_id, color_key,
+                            &d->rend.atlas, font_data, (int)insert_id, color_key,
                             scaled ? scaled : bmp, color_baked);
                         if (scaled) {
                             free(scaled->pixels);
                             free(scaled);
                         }
-                        d->font->free_glyph_bitmap(d->font, bmp);
+                        d->rend.font->free_glyph_bitmap(d->rend.font, bmp);
                     } else if (atlas_glyph_id != 0) {
                         entry = rend_sokol_atlas_insert_empty(
-                            &d->atlas, font_data, (int)atlas_glyph_id, color_key);
+                            &d->rend.atlas, font_data, (int)atlas_glyph_id, color_key);
                     }
                 }
 
                 if (entry && entry->region.w > 0 && entry->region.h > 0 &&
                     *glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
                     int gx = (int)cell_x0 + entry->x_offset;
-                    int gy = (int)cell_y0 + d->font_ascent - entry->y_offset;
+                    int gy = (int)cell_y0 + d->rend.font_ascent - entry->y_offset;
                     if (entry->centered) {
                         int glyph_w = cell.width * cell_w;
                         gx = (int)floorf(cell_x0 + ((float)glyph_w - (float)entry->region.w) * 0.5f);
@@ -2485,16 +2451,16 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         return;
 
     // If overlay is active, render the overlay terminal instead
-    if (d->scroll.overlay)
-        term = d->scroll.overlay;
+    if (d->rend.scroll.overlay)
+        term = d->rend.scroll.overlay;
 
     int rows, cols;
     terminal_get_dimensions(term, &rows, &cols);
     if (rows <= 0 || cols <= 0)
         return;
 
-    int cell_w = d->cell_w;
-    int cell_h = d->cell_h;
+    int cell_w = d->rend.cell_w;
+    int cell_h = d->rend.cell_h;
     if (cell_w <= 0 || cell_h <= 0)
         return;
 
@@ -2508,8 +2474,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     }
 
     // Ensure atlas is initialized
-    if (!d->atlas.texture_created) {
-        if (!rend_sokol_atlas_init(&d->atlas, d->linear_ok))
+    if (!d->rend.atlas.texture_created) {
+        if (!rend_sokol_atlas_init(&d->rend.atlas, d->rend.linear_ok))
             return;
     }
 
@@ -2517,7 +2483,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     sokol_ensure_glyph_pipeline(d);
     sokol_ensure_lottie_pipeline(d);
 
-    rend_sokol_atlas_begin_frame(&d->atlas);
+    rend_sokol_atlas_begin_frame(&d->rend.atlas);
 
     // Build vertex data (using file-scope arrays for debug access)
     static GlyphVertex sel_verts[SOKOL_MAX_VERTICES];
@@ -2525,7 +2491,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     int glyph_vert_count = 0; // glyph quads in glyph_verts
     *rend_sokol_get_cursor_vert_count_ptr() = 0;  // cursor quad in cursor_verts
     int sel_vert_count = 0;
-    int scroll_offset = d->scroll.scroll_offset;
+    int scroll_offset = d->rend.scroll.scroll_offset;
 
     rend_sokol_reset_frame_buffers();
 
@@ -2538,11 +2504,11 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     // General-purpose panels
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
-        PanelState *p = &d->panels.panels[i];
-        if (p->active && d->panel_terms[i]) {
-            int text_x = panel_term_px(p->px, d->cell_w, panel_show_accent(p->flags));
-            int text_y = panel_term_py(p->py, d->cell_h);
-            sokol_render_terminal_cells(d, d->panel_terms[i],
+        PanelState *p = &d->rend.panels.panels[i];
+        if (p->active && d->rend.panel_terms[i]) {
+            int text_x = panel_term_px(p->px, d->rend.cell_w, panel_show_accent(p->flags));
+            int text_y = panel_term_py(p->py, d->rend.cell_h);
+            sokol_render_terminal_cells(d, d->rend.panel_terms[i],
                                         text_x, text_y,
                                         false, 0,
                                         &vert_count, &glyph_vert_count,
@@ -2684,7 +2650,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
 
     // General-purpose panels: emit background quads
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
-        PanelState *p = &d->panels.panels[i];
+        PanelState *p = &d->rend.panels.panels[i];
         if (p->active) {
             // Panel background (opaque, same color as panels)
             uint8_t bg[4] = { 38, 38, 44, 255 };
@@ -2713,8 +2679,8 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                     ac[2] = 255;
                     break;
                 }
-                int accent_px = panel_accent_px(p->px, d->cell_w);
-                int accent_w = panel_accent_w(d->cell_w);
+                int accent_px = panel_accent_px(p->px, d->rend.cell_w);
+                int accent_w = panel_accent_w(d->rend.cell_w);
                 sokol_deco_emit_quad(
                     (float)accent_px, (float)p->py,
                     (float)(accent_px + accent_w), (float)(p->py + p->ph),
@@ -2726,7 +2692,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 // Lookup or insert close button bitmap in atlas
                 uint32_t color_key = 0; // White, no color key needed
                 RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
-                    &d->atlas, BOXDRAW_FONT_DATA, CLOSE_BUTTON_GLYPH_ID, color_key);
+                    &d->rend.atlas, BOXDRAW_FONT_DATA, CLOSE_BUTTON_GLYPH_ID, color_key);
                 if (!entry) {
                     // Create the close button bitmap
                     int size = p->close_size;
@@ -2739,7 +2705,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                         if (bmp->pixels) {
                             rend_make_close_x_bitmap(bmp->pixels, size);
                             entry = rend_sokol_atlas_insert(
-                                &d->atlas, BOXDRAW_FONT_DATA,
+                                &d->rend.atlas, BOXDRAW_FONT_DATA,
                                 CLOSE_BUTTON_GLYPH_ID, color_key, bmp, false);
                         }
                         free(bmp->pixels);
@@ -2807,7 +2773,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     }
 
     // Flush atlas dirty regions to GPU
-    rend_sokol_atlas_flush(&d->atlas);
+    rend_sokol_atlas_flush(&d->rend.atlas);
 
     // Enable sRGB framebuffer for gamma-correct linear-light compositing.
     // OpenGL auto-decodes blend src/dst to linear, blends in linear, and
@@ -2830,14 +2796,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
     // Lottie rendering must happen even when vert_count == 0 (no terminal updates)
     // This ensures animations continue when cursor blinks but text hasn't changed
     int lottie_bg_count = 0;
-    bool has_lottie = d->lottie_pip_created && terminal_lottie_count(term) > 0;
+    bool has_lottie = d->rend.lottie_pip_created && terminal_lottie_count(term) > 0;
     if (has_lottie) {
         int anim_count = 0;
         const CfrLottie *anims = terminal_get_lotties(term, &anim_count);
         lottie_cache_reconcile(d, anims, anim_count);
 
         // Upload the full lottie vertex buffer before any draws
-        sg_update_buffer(d->lottie_vbuf, &(sg_range){
+        sg_update_buffer(d->rend.lottie_vbuf, &(sg_range){
                                              .ptr = rend_sokol_get_lottie_verts(),
                                              .size = SOKOL_MAX_LOTTIE_VERTICES * sizeof(GlyphVertex),
                                          });
@@ -2846,17 +2812,17 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         lottie_bg_count = sokol_render_lottie_layer(d, term, 1, 0);
     }
 
-    if (vert_count > 0 && d->glyph_pip_created) {
+    if (vert_count > 0 && d->rend.glyph_pip_created) {
         *rend_sokol_get_frame_vert_count_ptr() = vert_count;
-        sg_update_buffer(d->glyph_vbuf, &(sg_range){ .ptr = rend_sokol_get_frame_verts(), .size = (size_t)vert_count * sizeof(GlyphVertex) });
+        sg_update_buffer(d->rend.glyph_vbuf, &(sg_range){ .ptr = rend_sokol_get_frame_verts(), .size = (size_t)vert_count * sizeof(GlyphVertex) });
 
         float uniforms[4] = { (float)win_w, (float)win_h,
                               (float)cell_w, (float)cell_h };
-        sg_apply_pipeline(d->glyph_pip);
+        sg_apply_pipeline(d->rend.glyph_pip);
         sg_apply_bindings(&(sg_bindings){
-            .vertex_buffers[0] = d->glyph_vbuf,
-            .views[0] = d->atlas.texture_view,
-            .samplers[0] = d->atlas.sampler,
+            .vertex_buffers[0] = d->rend.glyph_vbuf,
+            .views[0] = d->rend.atlas.texture_view,
+            .samplers[0] = d->rend.atlas.sampler,
         });
         sg_apply_uniforms(0, &SG_RANGE(uniforms));
 
@@ -2876,12 +2842,12 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         // Pass 3: draw decoration quads (alpha-blended, on top of terminal
         // glyphs). This includes underlines, strikethroughs, and the
         // notification accent stripe.
-        if (deco_count > 0 && d->sel_pip_created) {
-            sg_apply_pipeline(d->sel_pip);
+        if (deco_count > 0 && d->rend.sel_pip_created) {
+            sg_apply_pipeline(d->rend.sel_pip);
             sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->glyph_vbuf,
-                .views[0] = d->atlas.texture_view,
-                .samplers[0] = d->atlas.sampler,
+                .vertex_buffers[0] = d->rend.glyph_vbuf,
+                .views[0] = d->rend.atlas.texture_view,
+                .samplers[0] = d->rend.atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(deco_vert_start, deco_count, 1);
@@ -2889,12 +2855,12 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         // Pass 4: draw selection overlay quads (alpha-blended, on top of
         // decorations so selected text remains readable).
         int sel_count = vert_count - sel_vert_start;
-        if (sel_count > 0 && d->sel_pip_created) {
-            sg_apply_pipeline(d->sel_pip);
+        if (sel_count > 0 && d->rend.sel_pip_created) {
+            sg_apply_pipeline(d->rend.sel_pip);
             sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->glyph_vbuf,
-                .views[0] = d->atlas.texture_view,
-                .samplers[0] = d->atlas.sampler,
+                .vertex_buffers[0] = d->rend.glyph_vbuf,
+                .views[0] = d->rend.atlas.texture_view,
+                .samplers[0] = d->rend.atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(sel_vert_start, sel_count, 1);
@@ -2902,11 +2868,11 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         // Pass 5: draw panel glyph quads (opaque, on top of panel backgrounds)
         int panel_glyph_count = glyph_vert_count - panel_glyph_start;
         if (panel_glyph_count > 0) {
-            sg_apply_pipeline(d->glyph_pip);
+            sg_apply_pipeline(d->rend.glyph_pip);
             sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->glyph_vbuf,
-                .views[0] = d->atlas.texture_view,
-                .samplers[0] = d->atlas.sampler,
+                .vertex_buffers[0] = d->rend.glyph_vbuf,
+                .views[0] = d->rend.atlas.texture_view,
+                .samplers[0] = d->rend.atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(glyph_vert_start + panel_glyph_start, panel_glyph_count, 1);
@@ -2915,7 +2881,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         if (lottie_bg_count >= 0 && has_lottie)
             (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
         // Pass 8: draw sixel images (on top of text and lottie)
-        if (d->lottie_pip_created) {
+        if (d->rend.lottie_pip_created) {
             sokol_ensure_sixel_vbuf(d);
             sokol_render_sixel_images(d, term);
         }
@@ -2956,8 +2922,8 @@ static void sokol_resize(PorttyBackend *self, int w, int h)
         return;
     // Sokol handles the GL swapchain internally via sglue_swapchain().
     // Update panel layout if cell size changed
-    if (d->cell_w > 0 && d->cell_h > 0)
-        panel_mgr_set_cell_size(&d->panels, d->cell_w, d->cell_h);
+    if (d->rend.cell_w > 0 && d->rend.cell_h > 0)
+        panel_mgr_set_cell_size(&d->rend.panels, d->rend.cell_w, d->rend.cell_h);
 }
 
 static bool sokol_get_cell_size(PorttyBackend *self, int *cw, int *ch)
@@ -2966,9 +2932,9 @@ static bool sokol_get_cell_size(PorttyBackend *self, int *cw, int *ch)
     if (!d)
         return false;
     if (cw)
-        *cw = d->cell_w;
+        *cw = d->rend.cell_w;
     if (ch)
-        *ch = d->cell_h;
+        *ch = d->rend.cell_h;
     return true;
 }
 
@@ -2981,26 +2947,26 @@ static int sokol_load_fonts(PorttyBackend *self, float size,
     if (!d)
         return -1;
 
-    d->font = &font_backend_ft;
-    if (!font_init(d->font)) {
+    d->rend.font = &font_backend_ft;
+    if (!font_init(d->rend.font)) {
         fprintf(stderr, "ERROR: Failed to initialize font backend\n");
         return -1;
     }
 
 #ifdef _WIN32
     extern FontResolveBackend font_resolve_backend_w32;
-    d->resolve = font_resolve_init(&font_resolve_backend_w32);
+    d->rend.resolve = font_resolve_init(&font_resolve_backend_w32);
 #elif defined(__APPLE__)
     extern FontResolveBackend font_resolve_backend_ct;
-    d->resolve = font_resolve_init(&font_resolve_backend_ct);
+    d->rend.resolve = font_resolve_init(&font_resolve_backend_ct);
 #else
     extern FontResolveBackend font_resolve_backend_fc;
-    d->resolve = font_resolve_init(&font_resolve_backend_fc);
+    d->rend.resolve = font_resolve_init(&font_resolve_backend_fc);
 #endif
-    if (!d->resolve) {
+    if (!d->rend.resolve) {
         fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
-        font_destroy(d->font);
-        d->font = NULL;
+        font_destroy(d->rend.font);
+        d->rend.font = NULL;
         return -1;
     }
 
@@ -3014,25 +2980,25 @@ static int sokol_load_fonts(PorttyBackend *self, float size,
     snprintf(d->hint_name, sizeof(d->hint_name), "%s", hint_name);
 
     RendFontLoadResult r = { 0 };
-    if (rend_load_fonts(&r, d->font, d->resolve, size, name,
-                        ft_hint_target, d->content_scale, hint_name) != 0) {
-        font_resolve_destroy(d->resolve);
-        d->resolve = NULL;
-        font_destroy(d->font);
-        d->font = NULL;
+    if (rend_load_fonts(&r, d->rend.font, d->rend.resolve, size, name,
+                        ft_hint_target, d->rend.content_scale, hint_name) != 0) {
+        font_resolve_destroy(d->rend.resolve);
+        d->rend.resolve = NULL;
+        font_destroy(d->rend.font);
+        d->rend.font = NULL;
         return -1;
     }
 
-    d->font_ascent = r.font_ascent;
-    d->font_descent = r.font_descent;
-    d->font_cap_height = r.font_cap_height;
-    d->cell_w = r.cell_width;
-    d->cell_h = r.cell_height;
-    d->font_size = r.font_size;
-    d->font_options = r.font_options;
-    panel_mgr_set_cell_size(&d->panels, d->cell_w, d->cell_h);
-    free(d->font_path);
-    d->font_path = r.font_path;
+    d->rend.font_ascent = r.font_ascent;
+    d->rend.font_descent = r.font_descent;
+    d->rend.font_cap_height = r.font_cap_height;
+    d->rend.cell_w = r.cell_width;
+    d->rend.cell_h = r.cell_height;
+    d->rend.font_size = r.font_size;
+    d->rend.font_options = r.font_options;
+    panel_mgr_set_cell_size(&d->rend.panels, d->rend.cell_w, d->rend.cell_h);
+    free(d->rend.font_path);
+    d->rend.font_path = r.font_path;
     r.font_path = NULL;
 
     return 0;
@@ -3043,27 +3009,27 @@ static void sokol_scroll(PorttyBackend *self, TerminalBackend *term,
 {
     SokolData *d = sokol_data(self);
     if (d)
-        rend_scroll(&d->scroll, term, delta);
+        rend_scroll(&d->rend.scroll, term, delta);
 }
 
 static void sokol_reset_scroll(PorttyBackend *self)
 {
     SokolData *d = sokol_data(self);
     if (d)
-        rend_reset_scroll(&d->scroll);
+        rend_reset_scroll(&d->rend.scroll);
 }
 
 static int sokol_get_scroll_offset(PorttyBackend *self)
 {
     SokolData *d = sokol_data(self);
-    return d ? rend_get_scroll_offset(&d->scroll) : 0;
+    return d ? rend_get_scroll_offset(&d->rend.scroll) : 0;
 }
 
 static void sokol_set_content_scale(PorttyBackend *self, float scale)
 {
     SokolData *d = sokol_data(self);
     if (d)
-        d->content_scale = scale;
+        d->rend.content_scale = scale;
 }
 
 // ── Pager overlay ────────────────────────────────────────────────────────
@@ -3072,20 +3038,20 @@ static void sokol_set_overlay(PorttyBackend *self, TerminalBackend *overlay)
 {
     SokolData *d = sokol_data(self);
     if (d)
-        rend_set_overlay(&d->scroll, overlay);
+        rend_set_overlay(&d->rend.scroll, overlay);
 }
 
 static void sokol_clear_overlay(PorttyBackend *self)
 {
     SokolData *d = sokol_data(self);
     if (d)
-        rend_clear_overlay(&d->scroll);
+        rend_clear_overlay(&d->rend.scroll);
 }
 
 static bool sokol_has_overlay(PorttyBackend *self)
 {
     SokolData *d = sokol_data(self);
-    return d ? rend_has_overlay(&d->scroll) : false;
+    return d ? rend_has_overlay(&d->rend.scroll) : false;
 }
 
 // ── Offscreen rendering ──────────────────────────────────────────────────
@@ -3102,8 +3068,8 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
     if (rows <= 0 || cols <= 0)
         return -1;
 
-    int cell_w = d->cell_w;
-    int cell_h = d->cell_h;
+    int cell_w = d->rend.cell_w;
+    int cell_h = d->rend.cell_h;
     if (cell_w <= 0 || cell_h <= 0)
         return -1;
 
@@ -3120,11 +3086,11 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
     terminal_flush_damage(term);
 
     sokol_ensure_glyph_pipeline(d);
-    if (!d->atlas.texture_created) {
-        if (!rend_sokol_atlas_init(&d->atlas, d->linear_ok))
+    if (!d->rend.atlas.texture_created) {
+        if (!rend_sokol_atlas_init(&d->rend.atlas, d->rend.linear_ok))
             return -1;
     }
-    rend_sokol_atlas_begin_frame(&d->atlas);
+    rend_sokol_atlas_begin_frame(&d->rend.atlas);
 
     // Build vertex data (same logic as sokol_draw_terminal but simplified)
     static GlyphVertex verts[SOKOL_MAX_VERTICES];
@@ -3157,7 +3123,7 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
             float y1 = y0 + (float)cell_h;
             float u0 = 0, v0 = 0, u1 = 0, v1 = 0;
 
-            if (cell.cp != 0 && cell.cp != 0x20 && d->font && !cell.attrs.invis) {
+            if (cell.cp != 0 && cell.cp != 0x20 && d->rend.font && !cell.attrs.invis) {
                 FontStyle style = FONT_STYLE_NORMAL;
                 if (cell.attrs.bold && cell.attrs.italic)
                     style = FONT_STYLE_BOLD_ITALIC;
@@ -3165,32 +3131,32 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
                     style = FONT_STYLE_BOLD;
                 else if (cell.attrs.italic)
                     style = FONT_STYLE_ITALIC;
-                if (!font_has_style(d->font, style))
+                if (!font_has_style(d->rend.font, style))
                     style = FONT_STYLE_NORMAL;
 
-                uint32_t glyph_id = font_get_glyph_index(d->font, style, cell.cp);
+                uint32_t glyph_id = font_get_glyph_index(d->rend.font, style, cell.cp);
                 uint32_t color_key = 0;
                 RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
-                    &d->atlas, d->font->font_data[style], (int)glyph_id, color_key);
+                    &d->rend.atlas, d->rend.font->font_data[style], (int)glyph_id, color_key);
 
                 if (!entry) {
                     GlyphBitmap *bmp = font_render_glyphs(
-                        d->font, style, &cell.cp, 1, 255, 255, 255);
+                        d->rend.font, style, &cell.cp, 1, 255, 255, 255);
                     if (bmp) {
                         entry = rend_sokol_atlas_insert(
-                            &d->atlas, d->font->font_data[style],
+                            &d->rend.atlas, d->rend.font->font_data[style],
                             (int)glyph_id, color_key, bmp, false);
-                        d->font->free_glyph_bitmap(d->font, bmp);
+                        d->rend.font->free_glyph_bitmap(d->rend.font, bmp);
                     } else {
                         entry = rend_sokol_atlas_insert_empty(
-                            &d->atlas, d->font->font_data[style],
+                            &d->rend.atlas, d->rend.font->font_data[style],
                             (int)glyph_id, color_key);
                     }
                 }
 
                 if (entry && entry->region.w > 0 && entry->region.h > 0) {
                     int gx = (int)x0 + entry->x_offset;
-                    int gy = (int)y0 + d->font_ascent - entry->y_offset;
+                    int gy = (int)y0 + d->rend.font_ascent - entry->y_offset;
                     if (entry->centered) {
                         int glyph_w = cell.width * cell_w;
                         gx = (int)x0 + (glyph_w - entry->region.w) / 2;
@@ -3226,7 +3192,7 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
         }
     }
 
-    rend_sokol_atlas_flush(&d->atlas);
+    rend_sokol_atlas_flush(&d->rend.atlas);
 
     sg_begin_pass(&(sg_pass){
         .action = {
@@ -3237,14 +3203,14 @@ static int sokol_render_to_png(PorttyBackend *self, TerminalBackend *term,
         .swapchain = sglue_swapchain(),
     });
 
-    if (vert_count > 0 && d->glyph_pip_created) {
-        sg_update_buffer(d->glyph_vbuf, &(sg_range){ .ptr = verts, .size = (size_t)vert_count * sizeof(GlyphVertex) });
+    if (vert_count > 0 && d->rend.glyph_pip_created) {
+        sg_update_buffer(d->rend.glyph_vbuf, &(sg_range){ .ptr = verts, .size = (size_t)vert_count * sizeof(GlyphVertex) });
         float resolution[2] = { (float)img_w, (float)img_h };
-        sg_apply_pipeline(d->glyph_pip);
+        sg_apply_pipeline(d->rend.glyph_pip);
         sg_apply_bindings(&(sg_bindings){
-            .vertex_buffers[0] = d->glyph_vbuf,
-            .views[0] = d->atlas.texture_view,
-            .samplers[0] = d->atlas.sampler,
+            .vertex_buffers[0] = d->rend.glyph_vbuf,
+            .views[0] = d->rend.atlas.texture_view,
+            .samplers[0] = d->rend.atlas.sampler,
         });
         sg_apply_uniforms(0, &SG_RANGE(resolution));
         sg_draw(0, vert_count, 1);
@@ -3415,14 +3381,14 @@ static bool sokol_get_diag(PorttyBackend *self, PorttyDiag *out)
     out->gpu_device = gpu_name[0] ? gpu_name : NULL;
     out->gpu_driver = gpu_driver[0] ? gpu_driver : NULL;
     out->gpu_driver_libre = driver_libre;
-    out->linear_light = d->linear_ok;
+    out->linear_light = d->rend.linear_ok;
     out->glyph_shader = false;
-    out->content_scale = d->content_scale;
+    out->content_scale = d->rend.content_scale;
     out->pixel_width = (int)sapp_width();
     out->pixel_height = (int)sapp_height();
-    out->cell_width = d->cell_w;
-    out->cell_height = d->cell_h;
-    out->font_path = d->font_path;
+    out->cell_width = d->rend.cell_w;
+    out->cell_height = d->rend.cell_h;
+    out->font_path = d->rend.font_path;
     out->hinting = d->hint_name[0] ? d->hint_name : NULL;
 
     // Display / scaling info
@@ -3851,7 +3817,7 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
 
     // Keep cell_w/cell_h as the per-cell pixel dimensions (10x20 default),
     // not the window dimensions.
-    if (self->get_cell_size(self, &d->cell_w, &d->cell_h)) {
+    if (self->get_cell_size(self, &d->rend.cell_w, &d->rend.cell_h)) {
         // already set via get_cell_size
     }
 
@@ -4041,7 +4007,7 @@ static void sokol_frame_cb(void)
             .backend = g_sokol.backend,
             .term = d->term,
             .pty = d->pty,
-            .scroll_offset = d->scroll.scroll_offset,
+            .scroll_offset = d->rend.scroll.scroll_offset,
             .emit_fn = (void (*)(void *, const char *, size_t))portty_app_feed_terminal,
             .emit_user_data = g_sokol.app,
             .pending_screendump = &d->pending_screendump,
@@ -4237,8 +4203,8 @@ static void sokol_event_cb(const sapp_event *ev)
         // Scroll to cursor when user types while scrolled back
         if (kr.force_redraw) {
             terminal_mark_dirty(d->term);
-        } else if ((kr.handled || kr.len > 0) && rend_get_scroll_offset(&d->scroll) != 0) {
-            rend_reset_scroll(&d->scroll);
+        } else if ((kr.handled || kr.len > 0) && rend_get_scroll_offset(&d->rend.scroll) != 0) {
+            rend_reset_scroll(&d->rend.scroll);
             terminal_mark_dirty(d->term);
         }
         // Reset cursor blink on user input
@@ -4286,8 +4252,8 @@ static void sokol_event_cb(const sapp_event *ev)
             if (kr.len > 0 && !kr.handled && d->pty)
                 pty_write(d->pty, kr.data, kr.len);
             // Scroll to cursor when user types while scrolled back
-            if ((kr.handled || kr.len > 0) && rend_get_scroll_offset(&d->scroll) != 0)
-                rend_reset_scroll(&d->scroll);
+            if ((kr.handled || kr.len > 0) && rend_get_scroll_offset(&d->rend.scroll) != 0)
+                rend_reset_scroll(&d->rend.scroll);
             // Reset cursor blink on user input
             d->cursor_blink_visible = true;
             if (d->cursor_blink_timer != TIMER_INVALID)
