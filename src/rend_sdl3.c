@@ -1799,7 +1799,7 @@ static SDL_Texture *make_close_x_texture(SDL_Renderer *r, int size)
 }
 
 // Forward declaration
-static void populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
+static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
                            int rows, int cols, bool cursor_visible);
 
 // Build terminal and texture for a panel slot based on PanelState
@@ -1897,17 +1897,21 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
 // first; on return the atlas is ready for the draw pass. Doing the upload while
 // the render queue is empty avoids the implicit flush inside SDL_UpdateTexture
 // interfering with in-flight draw commands.
-static void populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
+// Returns true if any eviction occurred during the pass.
+static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
                            int rows, int cols, bool cursor_visible)
 {
+    bool eviction = false;
     data->atlas.packing.eviction_occurred = false;
     render_visible_cells(data, term, rows, cols, cursor_visible, true);
     if (data->atlas.packing.eviction_occurred) {
+        eviction = true;
         rend_sdl3_atlas_flush(&data->atlas);
         data->atlas.packing.eviction_occurred = false;
         render_visible_cells(data, term, rows, cols, cursor_visible, true);
     }
     rend_sdl3_atlas_flush(&data->atlas);
+    return eviction;
 }
 
 void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
@@ -1947,15 +1951,16 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
     if (display_cols > term_cols)
         display_cols = term_cols;
 
-    populate_atlas(data, term, display_rows, display_cols, cursor_visible);
+    bool evicted = populate_atlas(data, term, display_rows, display_cols, cursor_visible);
 
     // Draw the scene gamma-correct (linear-light) and draw sixel images.
     draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
 
     // Build textures for dirty panels (after main terminal atlas work is complete)
+    // Also rebuild if atlas eviction occurred - panel glyphs may have been evicted.
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
         PanelState *ps = &data->panels.panels[i];
-        if (ps->active && ps->dirty) {
+        if (ps->active && (ps->dirty || evicted)) {
             build_panel_terminal(data, i);
             ps->dirty = false;
         }
