@@ -114,6 +114,18 @@ void rend_sokol_set_content_scale(RendererSokolData *data, float scale);
 void rend_sokol_ensure_glyph_pipeline(RendererSokolData *data);
 void rend_sokol_ensure_lottie_pipeline(RendererSokolData *data);
 
+// Static buffer accessors (for backend_sokol.c)
+GlyphVertex *rend_sokol_get_frame_verts(void);
+GlyphVertex *rend_sokol_get_glyph_verts(void);
+GlyphVertex *rend_sokol_get_cursor_verts(void);
+int *rend_sokol_get_vert_index(void);
+int *rend_sokol_get_frame_vert_count_ptr(void);
+int *rend_sokol_get_cursor_vert_count_ptr(void);
+GlyphVertex *rend_sokol_get_lottie_verts(void);
+
+// Buffer operations
+void rend_sokol_reset_frame_buffers(void);
+
 // Debug utilities (used by script commands)
 void rend_sokol_deco_reset(void);
 int rend_sokol_deco_get_count(void);

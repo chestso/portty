@@ -47,10 +47,32 @@
 // File-scope vertex arrays (moved from static-local so debug dump functions
 // can access them after the render pass).
 static GlyphVertex s_frame_verts[SOKOL_MAX_VERTICES];
+static int s_frame_vert_count;
 static int s_vert_index[SOKOL_MAX_ROWS][SOKOL_MAX_COLS];
+static GlyphVertex s_glyph_verts[SOKOL_MAX_VERTICES];
+static GlyphVertex s_cursor_verts[6];
+static int s_cursor_vert_count;
 static GlyphVertex s_deco_verts[SOKOL_MAX_DECO_VERTICES];
 static int s_deco_vert_count;
 static bool s_deco_overflow_warned;
+static GlyphVertex s_lottie_verts[SOKOL_MAX_LOTTIE_VERTICES];
+
+// ── Buffer accessors ─────────────────────────────────────────────────────────
+
+GlyphVertex *rend_sokol_get_frame_verts(void) { return s_frame_verts; }
+GlyphVertex *rend_sokol_get_glyph_verts(void) { return s_glyph_verts; }
+GlyphVertex *rend_sokol_get_cursor_verts(void) { return s_cursor_verts; }
+int *rend_sokol_get_vert_index(void) { return &s_vert_index[0][0]; }
+int *rend_sokol_get_frame_vert_count_ptr(void) { return &s_frame_vert_count; }
+int *rend_sokol_get_cursor_vert_count_ptr(void) { return &s_cursor_vert_count; }
+GlyphVertex *rend_sokol_get_lottie_verts(void) { return s_lottie_verts; }
+
+void rend_sokol_reset_frame_buffers(void)
+{
+    s_frame_vert_count = 0;
+    s_cursor_vert_count = 0;
+    memset(s_vert_index, -1, sizeof(s_vert_index));
+}
 
 // ── Color conversion ──────────────────────────────────────────────────────
 
