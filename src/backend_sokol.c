@@ -1066,113 +1066,17 @@ static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 
 #define SOKOL_MAX_SIXEL_VERTICES 4096
 
-static void lottie_cache_reconcile(SokolData *d, const CfrLottie *anims, int count)
-{
-    for (int i = 0; i < d->rend.lottie_cache_count;) {
-        bool live = false;
-        for (int j = 0; j < count; j++) {
-            if (anims[j].id == d->rend.lottie_cache[i].id) {
-                live = true;
-                break;
-            }
-        }
-        if (live) {
-            i++;
-        } else {
-            if (d->rend.lottie_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->rend.lottie_cache[i].image);
-            if (d->rend.lottie_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->rend.lottie_cache[i].view);
-            d->rend.lottie_cache[i] = d->rend.lottie_cache[--d->rend.lottie_cache_count];
-        }
-    }
-}
+// Cache functions moved to rend_sokol.c
+#define lottie_cache_reconcile(d, anims, count) \
+    rend_sokol_lottie_cache_reconcile(&(d)->rend, anims, count)
+#define lottie_get_texture(d, anim) \
+    rend_sokol_lottie_get_texture(&(d)->rend, anim)
+#define sixel_cache_reconcile(d, imgs, count) \
+    rend_sokol_sixel_cache_reconcile(&(d)->rend, imgs, count)
+#define sixel_get_texture(d, img) \
+    rend_sokol_sixel_get_texture(&(d)->rend, img)
 
-static int lottie_get_texture(SokolData *d, const CfrLottie *anim)
-{
-    for (int i = 0; i < d->rend.lottie_cache_count; i++) {
-        if (d->rend.lottie_cache[i].id != anim->id)
-            continue;
-        if (d->rend.lottie_cache[i].w != anim->canvas_w ||
-            d->rend.lottie_cache[i].h != anim->canvas_h) {
-            // Size changed — recreate
-            if (d->rend.lottie_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->rend.lottie_cache[i].image);
-            if (d->rend.lottie_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->rend.lottie_cache[i].view);
-            d->rend.lottie_cache[i].image.id = SG_INVALID_ID;
-            d->rend.lottie_cache[i].view.id = SG_INVALID_ID;
-        } else if (d->rend.lottie_cache[i].version != anim->version) {
-            // Version changed — update pixels
-            sg_update_image(d->rend.lottie_cache[i].image, &(sg_image_data){
-                                                          .mip_levels[0] = {
-                                                              .ptr = (void *)anim->rgba,
-                                                              .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
-                                                          },
-                                                      });
-            d->rend.lottie_cache[i].version = anim->version;
-            return i;
-        } else {
-            return i;
-        }
-        // Re-create image (size changed or first creation)
-        d->rend.lottie_cache[i].image = sg_make_image(&(sg_image_desc){
-            .width = anim->canvas_w,
-            .height = anim->canvas_h,
-            .pixel_format = SG_PIXELFORMAT_RGBA8,
-            .usage.dynamic_update = true,
-            .label = "sokol-lottie",
-        });
-        d->rend.lottie_cache[i].view = sg_make_view(&(sg_view_desc){
-            .texture.image = d->rend.lottie_cache[i].image,
-            .label = "sokol-lottie-view",
-        });
-        sg_update_image(d->rend.lottie_cache[i].image, &(sg_image_data){
-                                                      .mip_levels[0] = {
-                                                          .ptr = (void *)anim->rgba,
-                                                          .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
-                                                      },
-                                                  });
-        d->rend.lottie_cache[i].version = anim->version;
-        d->rend.lottie_cache[i].w = anim->canvas_w;
-        d->rend.lottie_cache[i].h = anim->canvas_h;
-        return i;
-    }
-
-    // New cache entry
-    if (d->rend.lottie_cache_count >= SOKOL_LOTTIE_CACHE_MAX)
-        return -1;
-
-    sg_image img = sg_make_image(&(sg_image_desc){
-        .width = anim->canvas_w,
-        .height = anim->canvas_h,
-        .pixel_format = SG_PIXELFORMAT_RGBA8,
-        .usage.dynamic_update = true,
-        .label = "sokol-lottie",
-    });
-    sg_update_image(img, &(sg_image_data){
-                             .mip_levels[0] = {
-                                 .ptr = (void *)anim->rgba,
-                                 .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
-                             },
-                         });
-    sg_view view = sg_make_view(&(sg_view_desc){
-        .texture.image = img,
-        .label = "sokol-lottie-view",
-    });
-    int n = d->rend.lottie_cache_count++;
-    d->rend.lottie_cache[n].image = img;
-    d->rend.lottie_cache[n].view = view;
-    d->rend.lottie_cache[n].id = anim->id;
-    d->rend.lottie_cache[n].version = anim->version;
-    d->rend.lottie_cache[n].w = anim->canvas_w;
-    d->rend.lottie_cache[n].h = anim->canvas_h;
-    return n;
-}
-
-// Build lottie verts for one layer AND draw them per-animation in one pass.
-// Returns the number of vertices built (for offset tracking by the caller).
-static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
+static void sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
                                      uint8_t target_layer, int vert_offset)
 {
     int anim_count = 0;
@@ -1255,108 +1159,6 @@ static int sokol_render_lottie_layer(SokolData *d, TerminalBackend *term,
     }
 
     return vert_base - vert_offset;
-}
-
-// --- Sixel image cache and rendering ---
-
-static void sixel_cache_reconcile(SokolData *d, const CfrSixel *imgs, int count)
-{
-    for (int i = 0; i < d->rend.sixel_cache_count;) {
-        bool live = false;
-        for (int j = 0; j < count; j++) {
-            if (imgs[j].id == d->rend.sixel_cache[i].id) {
-                live = true;
-                break;
-            }
-        }
-        if (live) {
-            i++;
-        } else {
-            if (d->rend.sixel_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->rend.sixel_cache[i].image);
-            if (d->rend.sixel_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->rend.sixel_cache[i].view);
-            d->rend.sixel_cache[i] = d->rend.sixel_cache[--d->rend.sixel_cache_count];
-        }
-    }
-}
-
-static int sixel_get_texture(SokolData *d, const CfrSixel *img)
-{
-    for (int i = 0; i < d->rend.sixel_cache_count; i++) {
-        if (d->rend.sixel_cache[i].id != img->id)
-            continue;
-        if (d->rend.sixel_cache[i].w != img->width_px ||
-            d->rend.sixel_cache[i].h != img->height_px) {
-            if (d->rend.sixel_cache[i].image.id != SG_INVALID_ID)
-                sg_destroy_image(d->rend.sixel_cache[i].image);
-            if (d->rend.sixel_cache[i].view.id != SG_INVALID_ID)
-                sg_destroy_view(d->rend.sixel_cache[i].view);
-            d->rend.sixel_cache[i].image.id = SG_INVALID_ID;
-            d->rend.sixel_cache[i].view.id = SG_INVALID_ID;
-        } else if (d->rend.sixel_cache[i].version != img->version) {
-            sg_update_image(d->rend.sixel_cache[i].image, &(sg_image_data){
-                                                         .mip_levels[0] = {
-                                                             .ptr = (void *)img->rgba,
-                                                             .size = (size_t)img->width_px * img->height_px * 4,
-                                                         },
-                                                     });
-            d->rend.sixel_cache[i].version = img->version;
-            return i;
-        } else {
-            return i;
-        }
-        d->rend.sixel_cache[i].image = sg_make_image(&(sg_image_desc){
-            .width = img->width_px,
-            .height = img->height_px,
-            .pixel_format = SG_PIXELFORMAT_RGBA8,
-            .usage.dynamic_update = true,
-            .label = "sokol-sixel",
-        });
-        d->rend.sixel_cache[i].view = sg_make_view(&(sg_view_desc){
-            .texture.image = d->rend.sixel_cache[i].image,
-            .label = "sokol-sixel-view",
-        });
-        sg_update_image(d->rend.sixel_cache[i].image, &(sg_image_data){
-                                                     .mip_levels[0] = {
-                                                         .ptr = (void *)img->rgba,
-                                                         .size = (size_t)img->width_px * img->height_px * 4,
-                                                     },
-                                                 });
-        d->rend.sixel_cache[i].version = img->version;
-        d->rend.sixel_cache[i].w = img->width_px;
-        d->rend.sixel_cache[i].h = img->height_px;
-        return i;
-    }
-
-    if (d->rend.sixel_cache_count >= SOKOL_SIXEL_CACHE_MAX)
-        return -1;
-
-    sg_image img_obj = sg_make_image(&(sg_image_desc){
-        .width = img->width_px,
-        .height = img->height_px,
-        .pixel_format = SG_PIXELFORMAT_RGBA8,
-        .usage.dynamic_update = true,
-        .label = "sokol-sixel",
-    });
-    sg_update_image(img_obj, &(sg_image_data){
-                                 .mip_levels[0] = {
-                                     .ptr = (void *)img->rgba,
-                                     .size = (size_t)img->width_px * img->height_px * 4,
-                                 },
-                             });
-    sg_view view = sg_make_view(&(sg_view_desc){
-        .texture.image = img_obj,
-        .label = "sokol-sixel-view",
-    });
-    int n = d->rend.sixel_cache_count++;
-    d->rend.sixel_cache[n].image = img_obj;
-    d->rend.sixel_cache[n].view = view;
-    d->rend.sixel_cache[n].id = img->id;
-    d->rend.sixel_cache[n].version = img->version;
-    d->rend.sixel_cache[n].w = img->width_px;
-    d->rend.sixel_cache[n].h = img->height_px;
-    return n;
 }
 
 static void sokol_ensure_sixel_vbuf(SokolData *d)

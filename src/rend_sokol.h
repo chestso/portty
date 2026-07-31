@@ -175,4 +175,12 @@ void rend_sokol_draw_strikethrough(RendererSokolData *data, int row,
 void rend_sokol_cell_color(TerminalColor tc, bool is_fg, bool reverse,
                            uint8_t out[4]);
 
+// Lottie/sixel cache management
+void rend_sokol_lottie_cache_reconcile(RendererSokolData *data,
+                                        const CfrLottie *anims, int count);
+int rend_sokol_lottie_get_texture(RendererSokolData *data, const CfrLottie *anim);
+void rend_sokol_sixel_cache_reconcile(RendererSokolData *data,
+                                       const CfrSixel *imgs, int count);
+int rend_sokol_sixel_get_texture(RendererSokolData *data, const CfrSixel *img);
+
 #endif // REND_SOKOL_H

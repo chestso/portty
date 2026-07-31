@@ -782,3 +782,211 @@ void rend_sokol_draw_strikethrough(RendererSokolData *data, int row,
     rend_sokol_deco_emit_quad(x0, (float)strike_y, x1,
                               (float)(strike_y + thickness), color);
 }
+
+// ── Lottie/sixel cache management ──────────────────────────────────────────
+
+void rend_sokol_lottie_cache_reconcile(RendererSokolData *data,
+                                        const CfrLottie *anims, int count)
+{
+    for (int i = 0; i < data->lottie_cache_count;) {
+        bool live = false;
+        for (int j = 0; j < count; j++) {
+            if (anims[j].id == data->lottie_cache[i].id) {
+                live = true;
+                break;
+            }
+        }
+        if (live) {
+            i++;
+        } else {
+            if (data->lottie_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(data->lottie_cache[i].image);
+            if (data->lottie_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(data->lottie_cache[i].view);
+            data->lottie_cache[i] = data->lottie_cache[--data->lottie_cache_count];
+        }
+    }
+}
+
+int rend_sokol_lottie_get_texture(RendererSokolData *data, const CfrLottie *anim)
+{
+    for (int i = 0; i < data->lottie_cache_count; i++) {
+        if (data->lottie_cache[i].id != anim->id)
+            continue;
+        if (data->lottie_cache[i].w != anim->canvas_w ||
+            data->lottie_cache[i].h != anim->canvas_h) {
+            // Size changed — recreate
+            if (data->lottie_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(data->lottie_cache[i].image);
+            if (data->lottie_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(data->lottie_cache[i].view);
+            data->lottie_cache[i].image.id = SG_INVALID_ID;
+            data->lottie_cache[i].view.id = SG_INVALID_ID;
+        } else if (data->lottie_cache[i].version != anim->version) {
+            // Version changed — update pixels
+            sg_update_image(data->lottie_cache[i].image, &(sg_image_data){
+                                                          .mip_levels[0] = {
+                                                              .ptr = (void *)anim->rgba,
+                                                              .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
+                                                          },
+                                                      });
+            data->lottie_cache[i].version = anim->version;
+            return i;
+        } else {
+            return i;
+        }
+        // Re-create image (size changed or first creation)
+        data->lottie_cache[i].image = sg_make_image(&(sg_image_desc){
+            .width = anim->canvas_w,
+            .height = anim->canvas_h,
+            .pixel_format = SG_PIXELFORMAT_RGBA8,
+            .usage.dynamic_update = true,
+            .label = "sokol-lottie",
+        });
+        data->lottie_cache[i].view = sg_make_view(&(sg_view_desc){
+            .texture.image = data->lottie_cache[i].image,
+            .label = "sokol-lottie-view",
+        });
+        sg_update_image(data->lottie_cache[i].image, &(sg_image_data){
+                                                      .mip_levels[0] = {
+                                                          .ptr = (void *)anim->rgba,
+                                                          .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
+                                                      },
+                                                  });
+        data->lottie_cache[i].version = anim->version;
+        data->lottie_cache[i].w = anim->canvas_w;
+        data->lottie_cache[i].h = anim->canvas_h;
+        return i;
+    }
+
+    // New cache entry
+    if (data->lottie_cache_count >= SOKOL_LOTTIE_CACHE_MAX)
+        return -1;
+
+    sg_image img = sg_make_image(&(sg_image_desc){
+        .width = anim->canvas_w,
+        .height = anim->canvas_h,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.dynamic_update = true,
+        .label = "sokol-lottie",
+    });
+    sg_update_image(img, &(sg_image_data){
+                             .mip_levels[0] = {
+                                 .ptr = (void *)anim->rgba,
+                                 .size = (size_t)anim->canvas_w * anim->canvas_h * 4,
+                             },
+                         });
+    sg_view view = sg_make_view(&(sg_view_desc){
+        .texture.image = img,
+        .label = "sokol-lottie-view",
+    });
+    int n = data->lottie_cache_count++;
+    data->lottie_cache[n].image = img;
+    data->lottie_cache[n].view = view;
+    data->lottie_cache[n].id = anim->id;
+    data->lottie_cache[n].version = anim->version;
+    data->lottie_cache[n].w = anim->canvas_w;
+    data->lottie_cache[n].h = anim->canvas_h;
+    return n;
+}
+
+void rend_sokol_sixel_cache_reconcile(RendererSokolData *data,
+                                       const CfrSixel *imgs, int count)
+{
+    for (int i = 0; i < data->sixel_cache_count;) {
+        bool live = false;
+        for (int j = 0; j < count; j++) {
+            if (imgs[j].id == data->sixel_cache[i].id) {
+                live = true;
+                break;
+            }
+        }
+        if (live) {
+            i++;
+        } else {
+            if (data->sixel_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(data->sixel_cache[i].image);
+            if (data->sixel_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(data->sixel_cache[i].view);
+            data->sixel_cache[i] = data->sixel_cache[--data->sixel_cache_count];
+        }
+    }
+}
+
+int rend_sokol_sixel_get_texture(RendererSokolData *data, const CfrSixel *img)
+{
+    for (int i = 0; i < data->sixel_cache_count; i++) {
+        if (data->sixel_cache[i].id != img->id)
+            continue;
+        if (data->sixel_cache[i].w != img->width_px ||
+            data->sixel_cache[i].h != img->height_px) {
+            if (data->sixel_cache[i].image.id != SG_INVALID_ID)
+                sg_destroy_image(data->sixel_cache[i].image);
+            if (data->sixel_cache[i].view.id != SG_INVALID_ID)
+                sg_destroy_view(data->sixel_cache[i].view);
+            data->sixel_cache[i].image.id = SG_INVALID_ID;
+            data->sixel_cache[i].view.id = SG_INVALID_ID;
+        } else if (data->sixel_cache[i].version != img->version) {
+            sg_update_image(data->sixel_cache[i].image, &(sg_image_data){
+                                                         .mip_levels[0] = {
+                                                             .ptr = (void *)img->rgba,
+                                                             .size = (size_t)img->width_px * img->height_px * 4,
+                                                         },
+                                                     });
+            data->sixel_cache[i].version = img->version;
+            return i;
+        } else {
+            return i;
+        }
+        data->sixel_cache[i].image = sg_make_image(&(sg_image_desc){
+            .width = img->width_px,
+            .height = img->height_px,
+            .pixel_format = SG_PIXELFORMAT_RGBA8,
+            .usage.dynamic_update = true,
+            .label = "sokol-sixel",
+        });
+        data->sixel_cache[i].view = sg_make_view(&(sg_view_desc){
+            .texture.image = data->sixel_cache[i].image,
+            .label = "sokol-sixel-view",
+        });
+        sg_update_image(data->sixel_cache[i].image, &(sg_image_data){
+                                                     .mip_levels[0] = {
+                                                         .ptr = (void *)img->rgba,
+                                                         .size = (size_t)img->width_px * img->height_px * 4,
+                                                     },
+                                                 });
+        data->sixel_cache[i].version = img->version;
+        data->sixel_cache[i].w = img->width_px;
+        data->sixel_cache[i].h = img->height_px;
+        return i;
+    }
+
+    if (data->sixel_cache_count >= SOKOL_SIXEL_CACHE_MAX)
+        return -1;
+
+    sg_image img_obj = sg_make_image(&(sg_image_desc){
+        .width = img->width_px,
+        .height = img->height_px,
+        .pixel_format = SG_PIXELFORMAT_RGBA8,
+        .usage.dynamic_update = true,
+        .label = "sokol-sixel",
+    });
+    sg_update_image(img_obj, &(sg_image_data){
+                                 .mip_levels[0] = {
+                                     .ptr = (void *)img->rgba,
+                                     .size = (size_t)img->width_px * img->height_px * 4,
+                                 },
+                             });
+    sg_view view = sg_make_view(&(sg_view_desc){
+        .texture.image = img_obj,
+        .label = "sokol-sixel-view",
+    });
+    int n = data->sixel_cache_count++;
+    data->sixel_cache[n].image = img_obj;
+    data->sixel_cache[n].view = view;
+    data->sixel_cache[n].id = img->id;
+    data->sixel_cache[n].version = img->version;
+    data->sixel_cache[n].w = img->width_px;
+    data->sixel_cache[n].h = img->height_px;
+    return n;
+}
