@@ -4,6 +4,17 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// Underline style values (matches terminal cell attr.underline)
+typedef enum
+{
+    UNDERLINE_NONE = 0,
+    UNDERLINE_SINGLE = 1,
+    UNDERLINE_DOUBLE = 2,
+    UNDERLINE_CURLY = 3,
+    UNDERLINE_DOTTED = 4,
+    UNDERLINE_DASHED = 5
+} UnderlineStyle;
+
 // sRGB transfer function, single-sourced here for every CPU-side color-space
 // conversion in the renderer (the color-glyph atlas linearize LUT and the
 // notification/link-hint panel glyph blend). The standard sRGB EOTF/OETF.

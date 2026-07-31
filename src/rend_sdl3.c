@@ -1058,19 +1058,19 @@ static void flush_underline_run(RendererSdl3Data *data, int row, int vis_start,
     int run_w = (vis_end - vis_start) * data->cell_width;
     SDL_SetRenderDrawColor(data->renderer, r, g, b, UNDERLINE_COLOR_A);
     switch (style) {
-    case 1:
+    case UNDERLINE_SINGLE:
         draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
         break;
-    case 2:
+    case UNDERLINE_DOUBLE:
         draw_underline_double(data->renderer, run_x, underline_y, run_w, pd);
         break;
-    case 3:
+    case UNDERLINE_CURLY:
         draw_underline_curly(data->renderer, run_x, underline_y, run_w, pd, r, g, b);
         break;
-    case 4:
+    case UNDERLINE_DOTTED:
         draw_underline_dotted(data->renderer, run_x, underline_y, run_w, pd);
         break;
-    case 5:
+    case UNDERLINE_DASHED:
         draw_underline_dashed(data->renderer, run_x, underline_y, run_w, pd);
         break;
     }
