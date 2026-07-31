@@ -39,6 +39,7 @@ endif
 # Shared sources — compiled for both backends
 PORTTY_COMMON_SRC = \
     portty_app.c \
+    portty_panel.c \
     term.c term_cfr.c \
     $(PTY_SOURCE) \
     $(FONT_RESOLVE_SOURCE) \

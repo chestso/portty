@@ -7,7 +7,7 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
 EXTRA_DIST = test_helpers.h font_stubs.c
 
-check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale test_content_scale
+check_PROGRAMS = test_unicode test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale test_content_scale test_panel
 
 if BACKEND_SDL3
 check_PROGRAMS += test_atlas
@@ -103,6 +103,10 @@ test_dpi_scale_CFLAGS = $(TEST_CFLAGS)
 
 test_content_scale_SOURCES = test_content_scale.c $(TEST_COMMON)
 test_content_scale_CFLAGS = $(TEST_CFLAGS)
+
+# Panel state management. Pure C, no SDL/coffer dependency.
+test_panel_SOURCES = test_panel.c $(TEST_COMMON) ../src/portty_panel.c
+test_panel_CFLAGS = $(TEST_CFLAGS)
 
 # MSYS2/Unix → Windows path conversion. Pure C, no SDL/coffer dependency.
 test_path_compat_SOURCES = test_path_compat.c $(TEST_COMMON) ../src/path_compat.c

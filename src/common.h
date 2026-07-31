@@ -7,11 +7,6 @@
 /* Global verbose flag - defined in main.c */
 extern int verbose;
 
-/* Notification panel transparency (defined in main.c, set from config). When
- * false (default) the top notification panel is fully opaque; when true it is
- * drawn translucent (alpha background). */
-extern bool portty_notification_transparent;
-
 /* kitty-style text_composition_strategy knob (defined in main.c, set from
  * config). Applied as a uniform coverage curve to grayscale glyph alpha in
  * font_ft.c, on top of the renderer's linear-light blending. Neutral defaults

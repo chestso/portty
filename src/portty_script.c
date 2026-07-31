@@ -385,22 +385,106 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
-    if (strcmp(line, "notify") == 0) {
+    if (strcmp(line, "panel") == 0) {
         ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
             return false;
-        cmd->type = SCRIPT_CMD_NOTIFY;
-        strip_quotes(args);
-        char *sep = strstr(args, "\" \"");
-        if (sep) {
-            *sep = '\0';
-            snprintf(cmd->notify_title, sizeof(cmd->notify_title), "%s", args + 1);
-            snprintf(cmd->notify_body, sizeof(cmd->notify_body), "%s", sep + 3);
-            cmd->notify_title[strlen(cmd->notify_title) - 1] = '\0';
-            cmd->notify_body[strlen(cmd->notify_body) - 1] = '\0';
-        } else {
-            snprintf(cmd->notify_title, sizeof(cmd->notify_title), "%s", args);
-            cmd->notify_body[0] = '\0';
+        cmd->type = SCRIPT_CMD_PANEL;
+        cmd->panel_level = 0; /* default */
+        /* Format: panel <id> <col> <row> <cols> <rows> "title" "body" [level] */
+        int pos_count = 0;
+        char *p = args;
+        int parsed[5];
+        while (pos_count < 5 && *p) {
+            while (*p && isspace(*p))
+                p++;
+            if (!*p)
+                break;
+            char *end;
+            parsed[pos_count] = (int)strtol(p, &end, 10);
+            if (end == p)
+                break;
+            pos_count++;
+            p = end;
+        }
+        if (pos_count < 5) {
+            script_set_error(s, line_num, "panel: requires id col row cols rows");
+            return false;
+        }
+        cmd->panel_id = parsed[0];
+        cmd->panel_col = parsed[1];
+        cmd->panel_row = parsed[2];
+        cmd->panel_cols = parsed[3];
+        cmd->panel_rows = parsed[4];
+        /* Skip to first quote */
+        while (*p && *p != '"')
+            p++;
+        if (*p != '"') {
+            script_set_error(s, line_num, "panel: requires quoted title and body");
+            return false;
+        }
+        p++; /* skip opening quote */
+        char *title_start = p;
+        while (*p && !(*p == '"' && (p == title_start || *(p - 1) != '\\')))
+            p++;
+        if (*p != '"') {
+            script_set_error(s, line_num, "panel: unterminated title string");
+            return false;
+        }
+        size_t title_len = (size_t)(p - title_start);
+        if (title_len >= sizeof(cmd->panel_title))
+            title_len = sizeof(cmd->panel_title) - 1;
+        memcpy(cmd->panel_title, title_start, title_len);
+        cmd->panel_title[title_len] = '\0';
+        expand_escapes(cmd->panel_title, (int)strlen(cmd->panel_title));
+        p++; /* skip closing quote */
+        while (*p && isspace(*p))
+            p++;
+        if (*p != '"') {
+            script_set_error(s, line_num, "panel: requires quoted body string");
+            return false;
+        }
+        p++; /* skip opening quote of body */
+        char *body_start = p;
+        while (*p && !(*p == '"' && (p == body_start || *(p - 1) != '\\')))
+            p++;
+        if (*p != '"') {
+            script_set_error(s, line_num, "panel: unterminated body string");
+            return false;
+        }
+        size_t body_len = (size_t)(p - body_start);
+        if (body_len >= sizeof(cmd->panel_body))
+            body_len = sizeof(cmd->panel_body) - 1;
+        memcpy(cmd->panel_body, body_start, body_len);
+        cmd->panel_body[body_len] = '\0';
+        expand_escapes(cmd->panel_body, (int)strlen(cmd->panel_body));
+
+        p++; /* skip closing quote */
+        while (*p && isspace(*p))
+            p++;
+        if (*p) {
+            char *next = NULL;
+            cmd->panel_level = (int)strtol(p, &next, 10);
+            /* Check for optional flags parameter */
+            if (next && *next) {
+                while (*next && isspace(*next))
+                    next++;
+                if (*next) {
+                    cmd->panel_flags = (unsigned int)strtoul(next, NULL, 10);
+                }
+            }
+        }
+        return true;
+    }
+
+    if (strcmp(line, "panel_hide") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_PANEL_HIDE;
+        if (sscanf(args, "%d", &cmd->panel_id) != 1) {
+            script_set_error(s, line_num, "panel_hide: requires id");
+            return false;
         }
         return true;
     }
@@ -677,7 +761,7 @@ static bool s_waiting = false;
 
 void portty_script_step(PorttyScript *script,
                         int *cmd_index,
-                        DebugExecCtx *ctx)
+                        ScriptExecCtx *ctx)
 {
     if (!script || !cmd_index || !ctx)
         return;
@@ -842,14 +926,32 @@ void portty_script_step(PorttyScript *script,
         break;
     }
 
-    case SCRIPT_CMD_NOTIFY:
+    case SCRIPT_CMD_PANEL:
     {
-        if (ctx->notify_fn) {
-            ctx->notify_fn(ctx->notify_user_data,
-                           cmd->notify_title[0] ? cmd->notify_title : "",
-                           cmd->notify_body[0] ? cmd->notify_body : "");
+        if (ctx->panel_fn) {
+            ctx->panel_fn(ctx->panel_user_data,
+                          cmd->panel_id,
+                          cmd->panel_col,
+                          cmd->panel_row,
+                          cmd->panel_cols,
+                          cmd->panel_rows,
+                          cmd->panel_title,
+                          cmd->panel_body,
+                          cmd->panel_level,
+                          cmd->panel_flags);
         } else {
-            fprintf(stderr, "notify: not supported by this backend\n");
+            fprintf(stderr, "panel: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_PANEL_HIDE:
+    {
+        if (ctx->panel_hide_fn) {
+            ctx->panel_hide_fn(ctx->panel_hide_user_data, cmd->panel_id);
+        } else {
+            fprintf(stderr, "panel_hide: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

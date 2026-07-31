@@ -7,6 +7,7 @@
 #include "font.h"
 #include "font_ft.h"
 #include "font_resolve.h"
+#include "term_cfr.h"
 #ifdef _WIN32
 #include "font_resolve_w32.h"
 #define FONT_RESOLVE_BACKEND font_resolve_backend_w32
@@ -270,54 +271,31 @@ static uint8_t *linearize_for_upload(RendererSdl3Data *data, const uint8_t *src,
     return copy;
 }
 
-// Forward declaration: rebuild the notification panel texture (used by
-// rend_sdl3_load_fonts / rend_sdl3_resize, which precede the definition).
-static void build_notif_texture(RendererSdl3Data *data);
+// Forward declaration for panel terminal building
+static void build_panel_terminal(RendererSdl3Data *data, int slot);
 
-// Forward declaration: rebuild the link-hint strip texture (same rebuild
-// triggers as the notification panel — resize / font reload).
-static void build_hint_texture(RendererSdl3Data *data);
-
-// Tear down the link-hint strip: texture, retained URI, and state.
-static void hint_free(RendererSdl3Data *data)
+// Free panel terminal and texture for a specific slot
+static void panel_free_slot(RendererSdl3Data *data, int slot)
 {
-    if (data->hint_texture) {
-        SDL_DestroyTexture(data->hint_texture);
-        data->hint_texture = NULL;
+    if (slot < 0 || slot >= PORTTY_PANEL_MAX)
+        return;
+    if (data->panel_textures[slot]) {
+        SDL_DestroyTexture(data->panel_textures[slot]);
+        data->panel_textures[slot] = NULL;
     }
-    free(data->hint_text);
-    data->hint_text = NULL;
-    data->hint_active = false;
-    data->hint_h = 0;
-}
-
-// Destroy the notification's GPU textures (kept separate from the source
-// strings, which a rebuild reuses).
-static void notif_free_textures(RendererSdl3Data *data)
-{
-    if (data->notif_texture) {
-        SDL_DestroyTexture(data->notif_texture);
-        data->notif_texture = NULL;
-    }
-    if (data->notif_close_tex) {
-        SDL_DestroyTexture(data->notif_close_tex);
-        data->notif_close_tex = NULL;
+    if (data->panel_terms[slot]) {
+        terminal_destroy(data->panel_terms[slot]);
+        free(data->panel_terms[slot]);
+        data->panel_terms[slot] = NULL;
     }
 }
 
-// Full notification teardown: textures, retained strings, and state. Used by
-// both clear-notification and renderer destroy.
-static void notif_free(RendererSdl3Data *data)
+// Free all panel terminals and textures
+static void panels_free_all(RendererSdl3Data *data)
 {
-    notif_free_textures(data);
-    free(data->notif_title);
-    data->notif_title = NULL;
-    free(data->notif_body);
-    data->notif_body = NULL;
-    data->notif_active = false;
-    data->notif_close_hover = false;
-    data->notif_h = 0;
-    data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        panel_free_slot(data, i);
+    }
 }
 
 // Capture the GPU model + driver from SDL's GPU renderer device for the
@@ -378,20 +356,9 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Rende
     memset(&data->font_options, 0, sizeof(data->font_options));
     data->content_scale = 1.0f;
     data->font_path = NULL;
-    data->notif_active = false;
-    data->notif_close_hover = false;
-    data->notif_level = 0;
-    data->notif_title = NULL;
-    data->notif_body = NULL;
-    data->notif_texture = NULL;
-    data->notif_close_tex = NULL;
-    data->notif_h = 0;
-    data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
-    data->hint_active = false;
-    data->hint_text = NULL;
-    data->hint_texture = NULL;
-    data->hint_h = 0;
-    data->hint_anchor_py = 0;
+    memset(&data->panels, 0, sizeof(data->panels));
+    memset(data->panel_terms, 0, sizeof(data->panel_terms));
+    memset(data->panel_textures, 0, sizeof(data->panel_textures));
     data->linear_target = NULL;
     data->linear_w = 0;
     data->linear_h = 0;
@@ -469,9 +436,8 @@ void rend_sdl3_destroy(RendererSdl3Data *data)
     rend_shader_destroy(data->glyph_shader);
     data->glyph_shader = NULL;
 
-    // Destroy notification panel + link-hint textures and retained strings
-    notif_free(data);
-    hint_free(data);
+    // Destroy panel textures
+    panels_free_all(data);
 
     free(data->font_path);
     data->font_path = NULL;
@@ -543,11 +509,8 @@ int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *fo
     data->font_path = r.font_path;
     r.font_path = NULL;
 
-    // Cell metrics changed — rebuild any active notification panel at the new size.
-    if (data->notif_active)
-        build_notif_texture(data);
-    if (data->hint_active)
-        build_hint_texture(data);
+    // Cell metrics changed — panel textures will rebuild on next draw pass
+    panel_mgr_set_cell_size(&data->panels, data->cell_width, data->cell_height);
 
     return 0;
 }
@@ -1781,77 +1744,51 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
 
 // --- Top notification panel (pure-SDL3 path) ---------------------------------
 //
-// The renderer draws the panel; notif_active defaults false and the
+// The renderer draws the panel; panel_active defaults false and the
 // panel draw is a no-op when inactive.
 
-// Alpha-composite a straight-alpha RGBA glyph bitmap (RGB already the fg
-// colour, coverage in alpha — see font_ft.c rasterize path) over the opaque
-// panel buffer at a baseline-relative pen position. The coverage blend runs in
-// linear light (decode fg/bg sRGB -> linear, blend, re-encode) so panel/hint
-// text matches the gamma-correct weight of the terminal grid, which SDL blends
-// in an SRGB_LINEAR float target. See rend_srgb_to_linear / rend_linear_to_srgb.
-//
-// This blends in linear light unconditionally — there is no linear_ok check
-// here, unlike draw_scene_linear's grid path. The SDL3 platform forces the
-// "gpu" renderer and aborts startup if it is unavailable (platform_sdl3.c),
-// precisely so the grid never blends in sRGB space, so a linear-capable
-// renderer is guaranteed wherever these panels are drawn.
-// branch only survives as a guard for a runtime float-target allocation
-// failure, a degraded state not worth mirroring here.
-static void notif_blit_glyph(uint8_t *buf, int buf_w, int buf_h,
-                             const GlyphBitmap *gb, int pen_x, int baseline)
+// Build ANSI content for panel terminal with background color, title (bold),
+// and body text.
+static char *rend_sdl3_panel_build_ansi(const char *title, const char *body)
 {
-    if (!gb || !gb->pixels || gb->width <= 0 || gb->height <= 0)
-        return;
-    int gx0 = pen_x + gb->x_offset;
-    int gy0 = baseline - gb->y_offset;
-    for (int y = 0; y < gb->height; y++) {
-        int dy = gy0 + y;
-        if (dy < 0 || dy >= buf_h)
-            continue;
-        const uint8_t *srow = gb->pixels + (size_t)y * gb->width * 4;
-        uint8_t *drow = buf + (size_t)dy * buf_w * 4;
-        for (int x = 0; x < gb->width; x++) {
-            int dx = gx0 + x;
-            if (dx < 0 || dx >= buf_w)
-                continue;
-            const uint8_t *s = srow + (size_t)x * 4;
-            uint8_t a = s[3];
-            if (!a)
-                continue;
-            uint8_t *d = drow + (size_t)dx * 4;
-            float af = a / 255.0f;
-            for (int c = 0; c < 3; c++) {
-                float fg = rend_srgb_to_linear(s[c]);
-                float bg = rend_srgb_to_linear(d[c]);
-                d[c] = rend_linear_to_srgb(fg * af + bg * (1.0f - af));
-            }
-            d[3] = 255;
-        }
+    // Simple string builder using static buffer (panels are small)
+    static char buf[2048];
+    int len = 0;
+
+    const char *panel_bg = "\x1b[48;2;38;38;44m";
+
+    // Clear screen first in case terminal is being reused
+    len += snprintf(buf + len, sizeof(buf) - len, "\x1b[2J\x1b[H");
+    if (len < 0 || len >= (int)sizeof(buf))
+        return NULL;
+
+    if (title) {
+        len += snprintf(buf + len, sizeof(buf) - len,
+                        "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
+                        panel_bg, title);
+        if (len < 0 || len >= (int)sizeof(buf))
+            return NULL;
     }
+    if (body) {
+        if (title) {
+            len += snprintf(buf + len, sizeof(buf) - len, "\r\n%s", panel_bg);
+            if (len < 0 || len >= (int)sizeof(buf))
+                return NULL;
+        } else {
+            len += snprintf(buf + len, sizeof(buf) - len, "%s", panel_bg);
+            if (len < 0 || len >= (int)sizeof(buf))
+                return NULL;
+        }
+        len += snprintf(buf + len, sizeof(buf) - len,
+                        "\x1b[38;2;190;190;198m%s\x1b[39m", body);
+        if (len < 0 || len >= (int)sizeof(buf))
+            return NULL;
+    }
+
+    return len > 0 ? strdup(buf) : NULL;
 }
 
-// Lay out one UTF-8 line into the panel buffer at the given baseline, returning
-// nothing. Renders monospace by glyph advance in the requested font style.
-static void notif_draw_line(RendererSdl3Data *data, uint8_t *buf, int buf_w,
-                            int buf_h, const char *text, int x0, int baseline,
-                            FontStyle style, uint8_t r, uint8_t g, uint8_t b)
-{
-    uint32_t cps[512];
-    int n = utf8_to_codepoints(text, cps, 512);
-    int pen_x = x0;
-    for (int i = 0; i < n; i++) {
-        int adv = data->cell_width;
-        GlyphBitmap *gb = font_render_glyphs(data->font, style, &cps[i], 1, r, g, b);
-        if (gb) {
-            if (gb->advance > 0)
-                adv = gb->advance;
-            notif_blit_glyph(buf, buf_w, buf_h, gb, pen_x, baseline);
-            data->font->free_glyph_bitmap(data->font, gb);
-        }
-        pen_x += adv;
-    }
-}
+// Build terminal for a panel slot by rendering to texture
 
 // Close "×" bitmap is now shared via rend_make_close_x_bitmap() in rend_common.c.
 // Build a `size`×`size` white texture holding an anti-aliased "×". SDL's 2D
@@ -1879,245 +1816,96 @@ static SDL_Texture *make_close_x_texture(SDL_Renderer *r, int size)
     return tex;
 }
 
-// Rasterize the current notification (notif_title/notif_body/notif_level) into
-// notif_texture, a full-window-width bar. Frees any previous texture first.
-static void build_notif_texture(RendererSdl3Data *data)
+// Forward declaration
+static void populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
+                           int rows, int cols, bool cursor_visible);
+
+// Build terminal and texture for a panel slot based on PanelState
+static void build_panel_terminal(RendererSdl3Data *data, int slot)
 {
-    notif_free_textures(data);
-    data->notif_h = 0;
-    data->notif_close_rect = (SDL_FRect){ 0, 0, 0, 0 };
-    data->notif_close_hover = false;
-    if (!data->notif_active || !data->font || data->width <= 0 ||
-        data->cell_height <= 0 || !font_has_style(data->font, FONT_STYLE_NORMAL))
+    if (slot < 0 || slot >= PORTTY_PANEL_MAX)
         return;
 
-    float scale = data->content_scale > 0 ? data->content_scale : 1.0f;
-    int pad = (int)(10.0f * scale + 0.5f);
-    int accent_w = (int)(4.0f * scale + 0.5f);
-    int gap = (int)(8.0f * scale + 0.5f);
-    int line_h = data->cell_height;
-
-    // Severity accent colour (blue / yellow / red).
-    uint8_t ar, ag, ab;
-    switch (data->notif_level) {
-    case 2:
-        ar = 224, ag = 27, ab = 36; // error
-        break;
-    case 1:
-        ar = 245, ag = 194, ab = 17; // warning
-        break;
-    default:
-        ar = 98, ag = 160, ab = 234; // info
-        break;
-    }
-
-    // Collect lines: title (bold) then body (dim). Split each on '\n'.
-    struct
-    {
-        const char *text;
-        bool is_title;
-    } lines[16];
-    int n_lines = 0;
-    char *title_copy = data->notif_title ? strdup(data->notif_title) : NULL;
-    char *body_copy = data->notif_body ? strdup(data->notif_body) : NULL;
-    for (int pass = 0; pass < 2; pass++) {
-        char *s = pass == 0 ? title_copy : body_copy;
-        if (!s)
-            continue;
-        char *line = s;
-        for (char *p = s;; p++) {
-            if (*p == '\n' || *p == '\0') {
-                bool end = (*p == '\0');
-                *p = '\0';
-                if (n_lines < 16) {
-                    lines[n_lines].text = line;
-                    lines[n_lines].is_title = (pass == 0);
-                    n_lines++;
-                }
-                line = p + 1;
-                if (end)
-                    break;
-            }
-        }
-    }
-    if (n_lines == 0) {
-        free(title_copy);
-        free(body_copy);
-        return;
-    }
-
-    int panel_w = data->width;
-    int panel_h = pad * 2 + n_lines * line_h;
-    int close_size = line_h;
-    int close_x = panel_w - pad - close_size;
-    int close_y = (panel_h - close_size) / 2;
-    int text_x = pad + accent_w + gap;
-
-    uint8_t *bufp = calloc((size_t)panel_w * panel_h, 4);
-    if (!bufp) {
-        free(title_copy);
-        free(body_copy);
-        return;
-    }
-    // Background fill (dark panel) + left severity accent stripe. Opaque by
-    // default; translucent when notification transparency is opted in (the
-    // texture blends over the terminal). The accent stripe stays opaque.
-    uint8_t bg_a = portty_notification_transparent ? 205 : 255;
-    for (int y = 0; y < panel_h; y++) {
-        for (int x = 0; x < panel_w; x++) {
-            uint8_t *d = bufp + ((size_t)y * panel_w + x) * 4;
-            bool stripe = (x >= pad && x < pad + accent_w && y >= pad && y < panel_h - pad);
-            d[0] = stripe ? ar : 38;
-            d[1] = stripe ? ag : 38;
-            d[2] = stripe ? ab : 44;
-            d[3] = stripe ? 255 : bg_a;
-        }
-    }
-
-    // Text lines.
-    FontStyle bold = font_has_style(data->font, FONT_STYLE_BOLD) ? FONT_STYLE_BOLD
-                                                                 : FONT_STYLE_NORMAL;
-    for (int i = 0; i < n_lines; i++) {
-        int baseline = pad + i * line_h + data->font_ascent;
-        if (lines[i].is_title)
-            notif_draw_line(data, bufp, panel_w, panel_h, lines[i].text, text_x,
-                            baseline, bold, 236, 236, 241);
-        else
-            notif_draw_line(data, bufp, panel_w, panel_h, lines[i].text, text_x,
-                            baseline, FONT_STYLE_NORMAL, 190, 190, 198);
-    }
-
-    // The close "×" is NOT baked here — it is drawn at frame time on top of the
-    // texture (and on top of the hover highlight) so the highlight sits cleanly
-    // behind a crisp glyph instead of muddying a baked one. See sdl3_draw_terminal.
-
-    SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                         SDL_TEXTUREACCESS_STATIC, panel_w, panel_h);
-    if (tex) {
-        SDL_UpdateTexture(tex, NULL, bufp, panel_w * 4);
-        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        data->notif_texture = tex;
-        data->notif_h = panel_h;
-        data->notif_close_rect =
-            (SDL_FRect){ (float)close_x, (float)close_y, (float)close_size, (float)close_size };
-        data->notif_close_tex = make_close_x_texture(data->renderer, close_size);
-    }
-
-    free(bufp);
-    free(title_copy);
-    free(body_copy);
-}
-
-// Byte length of the UTF-8 sequence starting with lead byte `c`.
-static int utf8_seq_len(unsigned char c)
-{
-    return (c < 0x80) ? 1 : (c < 0xE0) ? 2
-                        : (c < 0xF0)   ? 3
-                                       : 4;
-}
-
-// Middle-truncate `src` to at most `max_cols` display columns (codepoints),
-// inserting a "…" ellipsis, into the NUL-terminated buffer `out`. URIs that
-// already fit are copied verbatim. Operates on codepoint boundaries so a
-// multibyte sequence is never split.
-static void hint_truncate_middle(const char *src, char *out, size_t out_cap,
-                                 int max_cols)
-{
-    if (!out || out_cap == 0)
-        return;
-    if (!src) {
-        out[0] = '\0';
-        return;
-    }
-    if (max_cols < 5)
-        max_cols = 5; // room for head + ellipsis + tail
-    size_t len = strlen(src);
-    int ncp = 0;
-    for (size_t i = 0; i < len;)
-        i += utf8_seq_len((unsigned char)src[i]), ncp++;
-    if (ncp <= max_cols) {
-        snprintf(out, out_cap, "%s", src);
-        return;
-    }
-    int head = (max_cols - 1) / 2;
-    int tail = max_cols - 1 - head;
-    size_t head_bytes = 0;
-    for (int idx = 0; idx < head && head_bytes < len;)
-        head_bytes += utf8_seq_len((unsigned char)src[head_bytes]), idx++;
-    size_t tail_start = 0;
-    for (int idx = 0; idx < ncp - tail && tail_start < len;)
-        tail_start += utf8_seq_len((unsigned char)src[tail_start]), idx++;
-
-    size_t pos = 0;
-    if (head_bytes > out_cap - 1)
-        head_bytes = out_cap - 1;
-    memcpy(out, src, head_bytes);
-    pos = head_bytes;
-    static const char ell[3] = { (char)0xE2, (char)0x80, (char)0xA6 }; /* U+2026 */
-    for (int k = 0; k < 3 && pos + 1 < out_cap; k++)
-        out[pos++] = ell[k];
-    size_t tail_bytes = len - tail_start;
-    if (tail_bytes > out_cap - 1 - pos)
-        tail_bytes = out_cap - 1 - pos;
-    memcpy(out + pos, src + tail_start, tail_bytes);
-    pos += tail_bytes;
-    out[pos] = '\0';
-}
-
-// Rasterize the hover-hint URI (hint_text) into hint_texture, a single-line
-// full-window-width strip. Frees any previous texture first. Reuses the
-// notification glyph-layout path; neutral styling, no close button or accent.
-static void build_hint_texture(RendererSdl3Data *data)
-{
-    if (data->hint_texture) {
-        SDL_DestroyTexture(data->hint_texture);
-        data->hint_texture = NULL;
-    }
-    data->hint_h = 0;
-    if (!data->hint_active || !data->hint_text || !data->font || data->width <= 0 ||
-        data->cell_height <= 0 || data->cell_width <= 0 ||
+    PanelState *ps = &data->panels.panels[slot];
+    if (!ps->active || !data->font || data->cell_width <= 0 || data->cell_height <= 0 ||
         !font_has_style(data->font, FONT_STYLE_NORMAL))
         return;
 
-    float scale = data->content_scale > 0 ? data->content_scale : 1.0f;
-    int pad = (int)(8.0f * scale + 0.5f);
-    int line_h = data->cell_height;
-    int panel_w = data->width;
-    int panel_h = pad * 2 + line_h;
-
-    int avail_px = panel_w - 2 * pad;
-    int max_cols = avail_px > 0 ? avail_px / data->cell_width : 0;
-    char trunc[1024];
-    hint_truncate_middle(data->hint_text, trunc, sizeof(trunc), max_cols);
-
-    uint8_t *bufp = calloc((size_t)panel_w * panel_h, 4);
-    if (!bufp)
+    // Terminal size = panel size minus decoration cells
+    int term_cols = panel_term_cols(ps->cols, panel_show_accent(ps->flags));
+    int term_rows = panel_term_rows(ps->rows);
+    if (term_cols <= 0 || term_rows <= 0)
         return;
-    // Dark neutral fill, opaque by default; translucent when notification
-    // transparency is opted in (matches the panel).
-    uint8_t bg_a = portty_notification_transparent ? 205 : 255;
-    for (int y = 0; y < panel_h; y++) {
-        for (int x = 0; x < panel_w; x++) {
-            uint8_t *d = bufp + ((size_t)y * panel_w + x) * 4;
-            d[0] = 38;
-            d[1] = 38;
-            d[2] = 44;
-            d[3] = bg_a;
-        }
-    }
-    int baseline = pad + data->font_ascent;
-    notif_draw_line(data, bufp, panel_w, panel_h, trunc, pad, baseline,
-                    FONT_STYLE_NORMAL, 210, 210, 220);
 
-    SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                         SDL_TEXTUREACCESS_STATIC, panel_w, panel_h);
-    if (tex) {
-        SDL_UpdateTexture(tex, NULL, bufp, panel_w * 4);
-        SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-        data->hint_texture = tex;
-        data->hint_h = panel_h;
+    // Terminal pixel size
+    int term_w = term_cols * data->cell_width;
+    int term_h = term_rows * data->cell_height;
+
+    // Check if terminal needs recreation (wrong size or doesn't exist)
+    int existing_cols = 0, existing_rows = 0;
+    if (data->panel_terms[slot]) {
+        terminal_get_dimensions(data->panel_terms[slot], &existing_rows, &existing_cols);
     }
-    free(bufp);
+
+    if (!data->panel_terms[slot] || existing_cols != term_cols || existing_rows != term_rows) {
+        // Destroy old terminal if it exists
+        if (data->panel_terms[slot]) {
+            terminal_destroy(data->panel_terms[slot]);
+            free(data->panel_terms[slot]);
+            data->panel_terms[slot] = NULL;
+        }
+        // Create new terminal with correct dimensions
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = term_cols;
+        cfg.rows = term_rows;
+        cfg.cell_w_px = data->cell_width;
+        cfg.cell_h_px = data->cell_height;
+        data->panel_terms[slot] = term_cfr_new(&cfg);
+    }
+    if (!data->panel_terms[slot])
+        return;
+
+    // Build ANSI content and feed to terminal
+    char *ansi = rend_sdl3_panel_build_ansi(ps->title, ps->body);
+    if (ansi) {
+        terminal_process_input(data->panel_terms[slot], ansi, strlen(ansi));
+        terminal_flush_damage(data->panel_terms[slot]);
+        free(ansi);
+    }
+
+    // Create or reuse texture
+    if (!data->panel_textures[slot] ||
+        (data->panel_textures[slot] &&
+         (SDL_GetTextureSize(data->panel_textures[slot], NULL, NULL), false))) {
+        if (data->panel_textures[slot])
+            SDL_DestroyTexture(data->panel_textures[slot]);
+        data->panel_textures[slot] = SDL_CreateTexture(
+            data->renderer, SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_TARGET, term_w, term_h);
+    }
+    if (!data->panel_textures[slot])
+        return;
+
+    SDL_SetTextureBlendMode(data->panel_textures[slot], SDL_BLENDMODE_BLEND);
+
+    // First, populate atlas with panel glyphs (may be different from main terminal)
+    int term_r, term_c;
+    terminal_get_dimensions(data->panel_terms[slot], &term_r, &term_c);
+    populate_atlas(data, data->panel_terms[slot], term_r, term_c, false);
+
+    // Save current render target
+    SDL_Texture *prev_target = SDL_GetRenderTarget(data->renderer);
+
+    // Render panel terminal to texture
+    SDL_SetRenderTarget(data->renderer, data->panel_textures[slot]);
+    SDL_SetRenderDrawColor(data->renderer, 38, 38, 44, 255);
+    SDL_RenderClear(data->renderer);
+
+    // Render terminal cells to the texture
+    render_visible_cells(data, data->panel_terms[slot], term_r, term_c, false, false);
+
+    // Restore render target
+    SDL_SetRenderTarget(data->renderer, prev_target);
 }
 
 // Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
@@ -2182,41 +1970,75 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
     // Draw the scene gamma-correct (linear-light) and draw sixel images.
     draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
 
-    // Top notification panel. Drawn after draw_scene_linear's encode-out blit
-    // (which overwrites the backbuffer with BLENDMODE_NONE), so it composites as
-    // sRGB UI chrome over the finished terminal frame.
-    if (data->notif_active && data->notif_texture) {
-        SDL_FRect dst = { 0.0f, 0.0f, (float)data->width, (float)data->notif_h };
-        SDL_RenderTexture(data->renderer, data->notif_texture, NULL, &dst);
-
-        // Anti-aliased close "×", blitted on top and tinted by hover state
-        // (brighter on hover) via colour modulation. Drawn from a baked alpha
-        // texture because SDL's 2D renderer can't antialias geometry.
-        if (data->notif_close_tex && data->notif_close_rect.w > 0) {
-            uint8_t lum = data->notif_close_hover ? 245 : 170;
-            SDL_SetTextureColorMod(data->notif_close_tex, lum, lum, lum);
-            SDL_RenderTexture(data->renderer, data->notif_close_tex, NULL,
-                              &data->notif_close_rect);
+    // Build textures for dirty panels (after main terminal atlas work is complete)
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        PanelState *ps = &data->panels.panels[i];
+        if (ps->active && ps->dirty) {
+            build_panel_terminal(data, i);
+            ps->dirty = false;
         }
     }
 
-    // Transient OSC-8 link-hint strip — same sRGB-chrome compositing as the
-    // panel. Anchored at the top; flips to the bottom when the hovered link is
-    // in the top band the strip would cover, and is pushed below an active
-    // notification panel so the two never overlap.
-    if (data->hint_active && data->hint_texture && data->hint_h > 0) {
-        int top_band = data->hint_h;
-        if (data->notif_active && data->notif_h > 0)
-            top_band += data->notif_h;
-        float y;
-        if (data->hint_anchor_py >= 0 && data->hint_anchor_py < top_band)
-            y = (float)(data->height - data->hint_h); // link is up top — flip down
-        else if (data->notif_active && data->notif_h > 0)
-            y = (float)data->notif_h; // stack below the notification panel
-        else
-            y = 0.0f;
-        SDL_FRect dst = { 0.0f, y, (float)data->width, (float)data->hint_h };
-        SDL_RenderTexture(data->renderer, data->hint_texture, NULL, &dst);
+    // Draw active panels (sRGB UI chrome over terminal frame)
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        PanelState *ps = &data->panels.panels[i];
+        if (!ps->active || !data->panel_textures[i])
+            continue;
+
+        // Draw panel background rect
+        SDL_FRect bg_rect = { (float)ps->px, (float)ps->py, (float)ps->pw, (float)ps->ph };
+        SDL_SetRenderDrawColor(data->renderer, 38, 38, 44, 255);
+        SDL_RenderFillRect(data->renderer, &bg_rect);
+
+        // Draw accent stripe (if enabled)
+        if (panel_show_accent(ps->flags)) {
+            uint8_t ar, ag, ab;
+            switch (ps->level) {
+            case PORTTY_NOTIFY_ERROR:
+                ar = 235; /* Sriracha */
+                ag = 66;
+                ab = 104;
+                break;
+            case PORTTY_NOTIFY_WARNING:
+                ar = 245; /* Mustard */
+                ag = 239;
+                ab = 52;
+                break;
+            default:
+                ar = 71; /* Thunder */
+                ag = 118;
+                ab = 255;
+                break;
+            }
+            int accent_px = panel_accent_px(ps->px, data->cell_width);
+            int accent_w = panel_accent_w(data->cell_width);
+            SDL_FRect accent_rect = { (float)accent_px, (float)ps->py,
+                                      (float)accent_w, (float)ps->ph };
+            SDL_SetRenderDrawColor(data->renderer, ar, ag, ab, 255);
+            SDL_RenderFillRect(data->renderer, &accent_rect);
+        }
+
+        // Draw panel text texture at offset position
+        int text_x = panel_term_px(ps->px, data->cell_width, panel_show_accent(ps->flags));
+        int text_y = panel_term_py(ps->py, data->cell_height);
+        float term_w, term_h;
+        SDL_GetTextureSize(data->panel_textures[i], &term_w, &term_h);
+        SDL_FRect tex_dst = { (float)text_x, (float)text_y, term_w, term_h };
+        SDL_RenderTexture(data->renderer, data->panel_textures[i], NULL, &tex_dst);
+
+        // Close button (if enabled)
+        if (panel_show_close(ps->flags) && ps->close_size > 0) {
+            SDL_Texture *close_tex = make_close_x_texture(data->renderer, ps->close_size);
+            if (close_tex) {
+                uint8_t lum = ps->close_hover ? 245 : 170;
+                SDL_SetTextureColorMod(close_tex, lum, lum, lum);
+                SDL_FRect close_dst = { (float)ps->close_px,
+                                        (float)ps->close_py,
+                                        (float)ps->close_size, (float)ps->close_size };
+                SDL_RenderTexture(data->renderer, close_tex, NULL, &close_dst);
+                SDL_DestroyTexture(close_tex);
+            }
+        }
     }
 }
 
@@ -2243,11 +2065,8 @@ void rend_sdl3_resize(RendererSdl3Data *data, int width, int height)
 
     data->width = width;
     data->height = height;
-    // Panel + hint span the full window width, so a resize requires a rebuild.
-    if (data->notif_active)
-        build_notif_texture(data);
-    if (data->hint_active)
-        build_hint_texture(data);
+    // Rebuild active panels on resize (dirty flag set by recompute_layout)
+    panel_mgr_recompute_layout(&data->panels);
 }
 
 bool rend_sdl3_get_cell_size(RendererSdl3Data *data, int *cell_width, int *cell_height)
@@ -2389,75 +2208,68 @@ bool rend_sdl3_has_overlay(RendererSdl3Data *data)
         return false;
     return rend_has_overlay(&data->scroll);
 }
-void rend_sdl3_set_notification(RendererSdl3Data *data, const char *title,
-                                const char *body, int level)
-{
-    if (!data)
-        return;
-    free(data->notif_title);
-    free(data->notif_body);
-    data->notif_title = title ? strdup(title) : NULL;
-    data->notif_body = body ? strdup(body) : NULL;
-    data->notif_level = level;
-    data->notif_active = true;
-    build_notif_texture(data);
-}
 
-void rend_sdl3_clear_notification(RendererSdl3Data *data)
+void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int cols, int rows,
+                          const char *title, const char *body, PorttyNotifyLevel level,
+                          unsigned int flags)
 {
     if (!data)
         return;
-    notif_free(data);
-}
 
-bool rend_sdl3_set_notification_hover(RendererSdl3Data *data, bool hovered)
-{
-    if (!data)
-        return false;
-    if (!data->notif_active)
-        hovered = false;
-    if (data->notif_close_hover == hovered)
-        return false;
-    data->notif_close_hover = hovered;
-    return true;
-}
-
-void rend_sdl3_set_link_hint(RendererSdl3Data *data, const char *url,
-                             int anchor_py)
-{
-    if (!data)
-        return;
-    if (!url || !url[0]) {
-        if (data->hint_active)
-            hint_free(data);
-        return;
+    // Find slot
+    int slot = -1;
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        if (data->panels.panels[i].active && data->panels.panels[i].id == id) {
+            slot = i;
+            break;
+        }
     }
-    // Same URI already shown — just refresh the anchor (link may have moved)
-    // without rebuilding the texture on every motion event.
-    if (data->hint_active && data->hint_text && strcmp(data->hint_text, url) == 0) {
-        data->hint_anchor_py = anchor_py;
-        return;
+    if (slot < 0) {
+        for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+            if (!data->panels.panels[i].active) {
+                slot = i;
+                break;
+            }
+        }
     }
-    free(data->hint_text);
-    data->hint_text = strdup(url);
-    data->hint_active = (data->hint_text != NULL);
-    data->hint_anchor_py = anchor_py;
-    build_hint_texture(data);
+    if (slot < 0)
+        return;
+
+    panel_mgr_set_cell_size(&data->panels, data->cell_width, data->cell_height);
+    PanelState *ps = panel_mgr_show(&data->panels, id, col, row, cols, rows, title, body, level, flags);
+    if (!ps)
+        return;
+
+    // Panel texture will be built during draw pass when dirty flag is checked
+    (void)slot; // Slot index available if needed
 }
 
-int rend_sdl3_notification_hit(RendererSdl3Data *data, int px, int py)
+void rend_sdl3_panel_hide(RendererSdl3Data *data, int id)
+{
+    if (!data)
+        return;
+
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        if (data->panels.panels[i].active && data->panels.panels[i].id == id) {
+            panel_free_slot(data, i);
+            panel_mgr_hide(&data->panels, id);
+            break;
+        }
+    }
+}
+
+int rend_sdl3_panel_hit_test(RendererSdl3Data *data, int px, int py, bool *close_btn)
 {
     if (!data)
         return 0;
-    if (!data->notif_active || !data->notif_texture)
-        return 0;
-    if (px < 0 || px >= data->width || py < 0 || py >= data->notif_h)
-        return 0;
-    SDL_FRect c = data->notif_close_rect;
-    if ((float)px >= c.x && (float)px < c.x + c.w && (float)py >= c.y &&
-        (float)py < c.y + c.h)
-        return 2;
-    return 1;
+    return panel_mgr_hit_test(&data->panels, px, py, close_btn);
+}
+
+void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered)
+{
+    if (!data)
+        return;
+    panel_mgr_set_hover(&data->panels, id, hovered);
 }
 
 int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,

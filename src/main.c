@@ -52,7 +52,6 @@
 int verbose = 0;
 float portty_text_gamma = 1.0f;
 float portty_text_contrast = 0.0f;
-bool portty_notification_transparent = false;
 
 /* ASan/UBSan runtime defaults. */
 #if defined(__SANITIZE_ADDRESS__)
@@ -327,8 +326,6 @@ static void apply_conf_to_args(PorttyArgs *args, PorttyConf *conf)
         portty_text_gamma = conf->text_gamma;
     if (conf->text_contrast >= 0.0f)
         portty_text_contrast = conf->text_contrast;
-    if (conf->notification_transparency == 1)
-        portty_notification_transparent = true;
 }
 
 static TerminalBackend *create_terminal(PorttyArgs *args)

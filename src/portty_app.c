@@ -287,9 +287,11 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
                 display_row = 0;
             anchor_py = display_row * cell_h;
         }
-        app->backend->set_link_hint(app->backend, n > 0 ? url : NULL, anchor_py);
+        // TODO: panel_show - link hint panels coming soon
+        (void)url;
+        (void)anchor_py;
     } else {
-        app->backend->set_link_hint(app->backend, NULL, 0);
+        // TODO: panel_hide - link hint panels coming soon
     }
     return true;
 }
@@ -487,26 +489,19 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
     if (pager_active(app->pager))
         return pager_mouse(app->pager, pixel_x, pixel_y, button, pressed, clicks, mod);
 
-    int notif_hit = app->backend->notification_hit(app->backend, pixel_x, pixel_y);
-    if (notif_hit != 0) {
-        app->backend->set_link_hint(app->backend, NULL, 0);
-        if (pressed && button == 1 && notif_hit == 2) {
-            app->backend->notify_dismiss(app->backend);
-            app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
+    // Check for panel hit first
+    if (button == 1 && pressed) {
+        bool close_btn = false;
+        int panel_id = app->backend->panel_hit_test(app->backend, pixel_x, pixel_y, &close_btn);
+        if (panel_id > 0) {
+            if (close_btn) {
+                app->backend->panel_hide(app->backend, panel_id);
+                return true;
+            }
+            // Clicked on panel but not close button - consume event
             return true;
         }
-        app->backend->set_cursor(app->backend, notif_hit == 2 ? PORTTY_CURSOR_POINTER
-                                                              : PORTTY_CURSOR_TEXT);
-        if (app->backend->set_notification_hover(app->backend, notif_hit == 2))
-            terminal_mark_dirty(app->term);
-        if (terminal_hovered_hyperlink(app->term) != 0) {
-            terminal_set_hovered_hyperlink(app->term, 0);
-            terminal_mark_dirty(app->term);
-        }
-        return true;
     }
-    if (app->backend->set_notification_hover(app->backend, false))
-        terminal_mark_dirty(app->term);
 
     int mouse_mode = terminal_get_mouse_mode(app->term);
     bool shift_held = (mod & TERM_MOD_SHIFT) != 0;
@@ -531,20 +526,22 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
                         snprintf(title, sizeof(title), "Couldn't open %.200s", url);
                         snprintf(body, sizeof(body), "Error is: %.256s", err);
                         fprintf(stderr, "ERROR: %s — %s\n", title, body);
-                        app->backend->notify(app->backend, title, body, PORTTY_NOTIFY_ERROR);
+                        // TODO: panel_show - notification panels coming soon
+                        (void)title;
+                        (void)body;
                     }
                 } else if (n > 0) {
                     char title[256];
                     snprintf(title, sizeof(title), "Refusing to open %.200s", url);
                     fprintf(stderr, "WARNING: %s (disallowed scheme)\n", title);
-                    app->backend->notify(app->backend, title, "Disallowed URL scheme",
-                                         PORTTY_NOTIFY_WARNING);
+                    // TODO: panel_show - notification panels coming soon
+                    (void)title;
                 }
                 return true;
             }
         }
     } else {
-        app->backend->set_link_hint(app->backend, NULL, 0);
+        // TODO: panel_hide - link hint panels coming soon
     }
 
     bool in_altscreen = terminal_is_altscreen(app->term);

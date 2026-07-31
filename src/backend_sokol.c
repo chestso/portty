@@ -24,6 +24,7 @@
 #include "portty_script.h"
 #include "portty_frame_rec.h"
 #include "portty_pty.h"
+#include "portty_panel.h"
 #include "os_compat.h"
 #include "rend_sokol_atlas.h"
 #include "rend_common.h"
@@ -305,25 +306,9 @@ typedef struct
     // Window title state
     char *last_title;
 
-    // Notification panel — PTY-less coffer terminal overlay
-    TerminalBackend *notif_term;
-    bool notif_active;
-    bool notif_close_hover;
-    int notif_level;
-    int notif_x, notif_y;
-    int notif_w, notif_h;
-    int notif_rows, notif_cols;
-    int notif_close_size;
-    float notif_close_x, notif_close_y;
-    char *notif_title;
-    char *notif_body;
-
-    // Hover link hint panel — second instance of the same panel system
-    TerminalBackend *hint_term;
-    bool hint_active;
-    char *hint_text;
-    int hint_anchor_py;
-    int hint_h;
+    // General-purpose panels
+    PanelManager panels;
+    TerminalBackend *panel_terms[PORTTY_PANEL_MAX];
 } SokolData;
 
 static SokolData *sokol_data(PorttyBackend *self)
@@ -521,19 +506,6 @@ static void sokol_destroy(PorttyBackend *self)
     }
     free(d->font_path);
     free(d->last_title);
-    free(d->notif_title);
-    free(d->notif_body);
-    if (d->notif_term) {
-        terminal_destroy(d->notif_term);
-        free(d->notif_term);
-        d->notif_term = NULL;
-    }
-    free(d->hint_text);
-    if (d->hint_term) {
-        terminal_destroy(d->hint_term);
-        free(d->hint_term);
-        d->hint_term = NULL;
-    }
     sg_shutdown();
     free(d->working_dir);
     free(d->exe_path);
@@ -961,206 +933,154 @@ static char *sokol_get_default_font(PorttyBackend *self)
     return NULL;
 }
 
-// ── Notifications & link hints ────────────────────────────────────────────
+// ── Panel ANSI builder ────────────────────────────────────────────────────
 
-static void sokol_notif_rebuild(SokolData *d);
-
-static void sokol_notify(PorttyBackend *self, const char *title,
-                         const char *body, PorttyNotifyLevel level)
+static char *sokol_panel_build_ansi(SokolData *d, const char *title,
+                                    const char *body, PorttyNotifyLevel level)
 {
-    SokolData *d = sokol_data(self);
-    if (!d)
-        return;
-    free(d->notif_title);
-    free(d->notif_body);
-    d->notif_title = title ? strdup(title) : NULL;
-    d->notif_body = body ? strdup(body) : NULL;
-    d->notif_level = (int)level;
-    d->notif_close_hover = false;
-    sokol_notif_rebuild(d);
-    d->notif_active = (d->notif_term != NULL);
-    if (d->notif_active && d->term)
-        terminal_mark_dirty(d->term);
-}
-
-static void sokol_notify_dismiss(PorttyBackend *self)
-{
-    SokolData *d = sokol_data(self);
-    if (!d)
-        return;
-    if (d->notif_term) {
-        terminal_destroy(d->notif_term);
-        free(d->notif_term);
-        d->notif_term = NULL;
-    }
-    d->notif_active = false;
-    d->notif_close_hover = false;
-    d->notif_h = 0;
-    if (d->term)
-        terminal_mark_dirty(d->term);
-}
-
-static void sokol_notif_rebuild(SokolData *d);
-
-static char *sokol_hint_build_ansi(SokolData *d)
-{
+    (void)d;
+    (void)level;
     SokolStrBuf sb;
     if (!sokol_strbuf_init(&sb))
         return NULL;
 
     const char *panel_bg = "\x1b[48;2;38;38;44m";
-    if (!sokol_strbuf_appendf(&sb, "%s\x1b[38;2;210;210;220m%s\x1b[39m",
-                              panel_bg, d->hint_text ? d->hint_text : "")) {
+
+    // Clear screen first in case terminal is being reused
+    if (!sokol_strbuf_appendf(&sb, "\x1b[2J\x1b[H")) {
         sokol_strbuf_free(&sb);
         return NULL;
+    }
+
+    if (title) {
+        if (!sokol_strbuf_appendf(&sb,
+                                  "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
+                                  panel_bg, title)) {
+            sokol_strbuf_free(&sb);
+            return NULL;
+        }
+    }
+    if (body) {
+        if (title) {
+            if (!sokol_strbuf_appendf(&sb, "\r\n%s", panel_bg)) {
+                sokol_strbuf_free(&sb);
+                return NULL;
+            }
+        } else {
+            if (!sokol_strbuf_appendf(&sb, "%s", panel_bg)) {
+                sokol_strbuf_free(&sb);
+                return NULL;
+            }
+        }
+        if (!sokol_strbuf_appendf(&sb, "\x1b[38;2;190;190;198m%s\x1b[39m",
+                                  body)) {
+            sokol_strbuf_free(&sb);
+            return NULL;
+        }
     }
     return sokol_strbuf_finish(&sb);
 }
 
-static void sokol_hint_rebuild(SokolData *d)
-{
-    if (d->hint_term) {
-        terminal_destroy(d->hint_term);
-        free(d->hint_term);
-        d->hint_term = NULL;
-    }
-    d->hint_active = false;
-    d->hint_h = 0;
+// ── Panel functions ─────────────────────────────────────────────────────
 
-    if (!d->hint_text || !d->hint_text[0] || !d->font || d->cell_w <= 0 || d->cell_h <= 0)
-        return;
-
-    int win_w = (int)sapp_width();
-    if (win_w <= 0)
-        return;
-
-    float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
-    int pad = (int)(10.0f * scale + 0.5f);
-    int max_cols = win_w > 2 * pad ? (win_w - 2 * pad) / d->cell_w : 1;
-    if (max_cols < 1)
-        max_cols = 1;
-
-    char *ansi = sokol_hint_build_ansi(d);
-    if (!ansi)
-        return;
-
-    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
-    cfg.cols = max_cols;
-    cfg.rows = 32;
-    cfg.cell_w_px = d->cell_w;
-    cfg.cell_h_px = d->cell_h;
-    d->hint_term = term_cfr_new(&cfg);
-    if (!d->hint_term) {
-        free(ansi);
-        return;
-    }
-
-    terminal_process_input(d->hint_term, ansi, strlen(ansi));
-    free(ansi);
-
-    TerminalPos pos = terminal_get_cursor_pos(d->hint_term);
-    int n_rows = pos.row + 1;
-    if (n_rows < 1)
-        n_rows = 1;
-
-    d->hint_h = pad * 2 + n_rows * d->cell_h;
-    d->hint_active = true;
-}
-
-static int sokol_hint_compute_y(SokolData *d, int anchor_py, int win_h)
-{
-    if (win_h <= 0 || d->hint_h <= 0)
-        return 0;
-
-    bool top_half = anchor_py + d->cell_h / 2 < win_h / 2;
-    int y;
-    if (top_half)
-        y = anchor_py + d->cell_h;
-    else
-        y = anchor_py - d->hint_h;
-
-    int notif_bottom = d->notif_active && d->notif_h > 0 ? d->notif_h : 0;
-
-    if (y < notif_bottom && y + d->hint_h > 0) {
-        int flipped = top_half ? anchor_py - d->hint_h : anchor_py + d->cell_h;
-        if (flipped >= notif_bottom && flipped + d->hint_h <= win_h)
-            y = flipped;
-        else if (flipped + d->hint_h <= win_h && notif_bottom == 0)
-            y = flipped;
-    }
-
-    if (y < notif_bottom)
-        y = notif_bottom;
-    if (y + d->hint_h > win_h)
-        y = win_h - d->hint_h;
-    if (y < 0)
-        y = 0;
-
-    return y;
-}
-
-static void sokol_set_link_hint(PorttyBackend *self, const char *url,
-                                int anchor_py)
+static void sokol_panel_show(PorttyBackend *self, int id,
+                             int col, int row, int cols, int rows,
+                             const char *title, const char *body,
+                             PorttyNotifyLevel level, unsigned int flags)
 {
     SokolData *d = sokol_data(self);
-    if (!d)
+    if (!d || !d->font || d->cell_w <= 0 || d->cell_h <= 0)
         return;
 
-    if (!url || !url[0]) {
-        if (d->hint_term) {
-            terminal_destroy(d->hint_term);
-            free(d->hint_term);
-            d->hint_term = NULL;
+    panel_mgr_set_cell_size(&d->panels, d->cell_w, d->cell_h);
+    PanelState *p = panel_mgr_show(&d->panels, id, col, row, cols, rows,
+                                   title, body, level, flags);
+    if (!p)
+        return;
+
+    // Create or reuse terminal for this panel
+    int idx = p - d->panels.panels;
+    if (idx < 0 || idx >= PORTTY_PANEL_MAX)
+        return;
+
+    // Terminal size = panel size minus decoration cells
+    int term_cols = panel_term_cols(cols, panel_show_accent(flags));
+    int term_rows = panel_term_rows(rows);
+    if (term_cols <= 0 || term_rows <= 0)
+        return;
+
+    // Check if terminal needs recreation (wrong size or doesn't exist)
+    int existing_cols = 0, existing_rows = 0;
+    if (d->panel_terms[idx]) {
+        terminal_get_dimensions(d->panel_terms[idx], &existing_rows, &existing_cols);
+    }
+
+    if (!d->panel_terms[idx] || existing_cols != term_cols || existing_rows != term_rows) {
+        // Destroy old terminal if it exists
+        if (d->panel_terms[idx]) {
+            terminal_destroy(d->panel_terms[idx]);
+            free(d->panel_terms[idx]);
+            d->panel_terms[idx] = NULL;
         }
-        free(d->hint_text);
-        d->hint_text = NULL;
-        d->hint_active = false;
-        d->hint_h = 0;
-        if (d->term)
-            terminal_mark_dirty(d->term);
-        return;
+        // Create new terminal with correct dimensions
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = term_cols;
+        cfg.rows = term_rows;
+        cfg.cell_w_px = d->cell_w;
+        cfg.cell_h_px = d->cell_h;
+        d->panel_terms[idx] = term_cfr_new(&cfg);
     }
 
-    if (d->hint_active && d->hint_text && strcmp(d->hint_text, url) == 0) {
-        d->hint_anchor_py = anchor_py;
-        if (d->term)
-            terminal_mark_dirty(d->term);
-        return;
+    if (d->panel_terms[idx]) {
+        // Build ANSI content
+        char *ansi = sokol_panel_build_ansi(d, title, body, level);
+        if (ansi) {
+            terminal_process_input(d->panel_terms[idx], ansi, strlen(ansi));
+            terminal_flush_damage(d->panel_terms[idx]);
+            free(ansi);
+        }
     }
 
-    free(d->hint_text);
-    d->hint_text = strdup(url);
-    d->hint_anchor_py = anchor_py;
-    sokol_hint_rebuild(d);
     if (d->term)
         terminal_mark_dirty(d->term);
 }
 
-static int sokol_notification_hit(PorttyBackend *self, int px, int py)
-{
-    SokolData *d = sokol_data(self);
-    if (!d || !d->notif_active || d->notif_h <= 0)
-        return 0;
-    if (px < d->notif_x || px >= d->notif_x + d->notif_w ||
-        py < d->notif_y || py >= d->notif_y + d->notif_h)
-        return 0;
-    if (px >= d->notif_close_x && px < d->notif_close_x + d->notif_close_size &&
-        py >= d->notif_close_y && py < d->notif_close_y + d->notif_close_size)
-        return 2;
-    return 1;
-}
-
-static bool sokol_set_notification_hover(PorttyBackend *self, bool hovered)
+static void sokol_panel_hide(PorttyBackend *self, int id)
 {
     SokolData *d = sokol_data(self);
     if (!d)
-        return false;
-    if (!d->notif_active)
-        hovered = false;
-    if (d->notif_close_hover == hovered)
-        return false;
-    d->notif_close_hover = hovered;
-    return true;
+        return;
+
+    PanelState *p = panel_mgr_find(&d->panels, id);
+    if (!p)
+        return;
+
+    int idx = p - d->panels.panels;
+    if (idx >= 0 && idx < PORTTY_PANEL_MAX && d->panel_terms[idx]) {
+        terminal_destroy(d->panel_terms[idx]);
+        free(d->panel_terms[idx]);
+        d->panel_terms[idx] = NULL;
+    }
+
+    panel_mgr_hide(&d->panels, id);
+    if (d->term)
+        terminal_mark_dirty(d->term);
+}
+
+static int sokol_panel_hit_test(PorttyBackend *self, int px, int py, bool *close_btn)
+{
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return -1;
+    return panel_mgr_hit_test(&d->panels, px, py, close_btn);
+}
+
+static void sokol_panel_set_hover(PorttyBackend *self, int id, bool hovered)
+{
+    SokolData *d = sokol_data(self);
+    if (!d)
+        return;
+    panel_mgr_set_hover(&d->panels, id, hovered);
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
@@ -2199,69 +2119,6 @@ static void sokol_draw_strikethrough(SokolData *d, int row, int vis_start,
                          (float)(strike_y + thickness), color);
 }
 
-// Reserved glyph ID for the notification panel close "×" under the
-// box-drawing font-data slot. Real box-drawing codepoints are > 0.
-#define NOTIF_CLOSE_GLYPH_ID 0
-
-static void sokol_emit_notif_close(SokolData *d, int *glyph_vert_count)
-{
-    if (d->notif_close_size <= 0 || !glyph_vert_count)
-        return;
-
-    RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
-        &d->atlas, BOXDRAW_FONT_DATA, NOTIF_CLOSE_GLYPH_ID, 0);
-    if (!entry) {
-        int size = d->notif_close_size;
-        uint8_t *close_buf = calloc((size_t)size * size, 4);
-        if (!close_buf)
-            return;
-        rend_make_close_x_bitmap(close_buf, size);
-        GlyphBitmap gb = {
-            .pixels = close_buf,
-            .width = size,
-            .height = size,
-            .x_offset = 0,
-            .y_offset = 0,
-            .advance = size,
-            .centered = false,
-        };
-        entry = rend_sokol_atlas_insert(
-            &d->atlas, BOXDRAW_FONT_DATA, NOTIF_CLOSE_GLYPH_ID, 0, &gb, false);
-        free(close_buf);
-        if (!entry)
-            return;
-    }
-
-    if (entry->region.w <= 0 || entry->region.h <= 0)
-        return;
-
-    uint8_t lum = d->notif_close_hover ? 245 : 170;
-    uint8_t fg[4] = { lum, lum, lum, 255 };
-    uint8_t bg[4] = { 38, 38, 44, 255 };
-
-    float cx0 = d->notif_close_x;
-    float cy0 = d->notif_close_y;
-    float cx1 = cx0 + (float)entry->region.w;
-    float cy1 = cy0 + (float)entry->region.h;
-
-    float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
-    float u0 = (float)entry->region.x / atlas_size;
-    float v0 = (float)entry->region.y / atlas_size;
-    float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
-    float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
-
-    if (*glyph_vert_count + 6 > SOKOL_MAX_VERTICES)
-        return;
-    GlyphVertex *q = &s_glyph_verts[*glyph_vert_count];
-    q[0] = (GlyphVertex){ cx0, cy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-    q[1] = (GlyphVertex){ cx1, cy0, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-    q[2] = (GlyphVertex){ cx1, cy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-    q[3] = (GlyphVertex){ cx0, cy0, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-    q[4] = (GlyphVertex){ cx1, cy1, u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-    q[5] = (GlyphVertex){ cx0, cy1, u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
-    *glyph_vert_count += 6;
-}
-
 static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
                                         int origin_x, int origin_y,
                                         bool cursor_visible, int scroll_offset,
@@ -2280,7 +2137,7 @@ static void sokol_render_terminal_cells(SokolData *d, TerminalBackend *term,
         return;
 
     float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
-    bool track_index = (term != d->notif_term);
+    bool track_index = true; // Track atlas usage for main terminal
 
     for (int row = 0; row < rows && *vert_count + 12 <= SOKOL_MAX_VERTICES; row++) {
         int unified_row = rend_display_row_to_unified(scroll_offset, row);
@@ -2837,44 +2694,21 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                 &vert_count, &glyph_vert_count, &sel_vert_count,
                                 sel_verts);
 
-    // Notification panel cells (composited on top of primary terminal).
-    // Rendered into the same vertex arrays so the panel shares the bg/glyph
-    // passes with the primary terminal.
-    if (d->notif_active && d->notif_term) {
-        float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
-        int pad = (int)(10.0f * scale + 0.5f);
-        int accent_w = (int)(4.0f * scale + 0.5f);
-        int gap = (int)(8.0f * scale + 0.5f);
-        int text_x = pad + accent_w + gap;
+    // Track where panel glyphs start for multi-pass rendering
+    int panel_glyph_start = glyph_vert_count;
 
-        sokol_render_terminal_cells(d, d->notif_term,
-                                    d->notif_x + text_x, d->notif_y + pad,
-                                    false, 0,
-                                    &vert_count, &glyph_vert_count,
-                                    &sel_vert_count, sel_verts);
-    }
-
-    // Hover link hint panel cells (second instance of the same panel system).
-    // The panel text is rendered through sokol_render_terminal_cells below,
-    // which appends both bg and glyph quads to the shared arrays. The full-width
-    // panel background is emitted separately into the decoration buffer so it is
-    // alpha-blended *after* the terminal grid glyphs, matching the SDL3 backend
-    // where the hint texture is drawn on top of the finished terminal frame.
-    int hint_bg_y = 0;
-    bool hint_bg_valid = false;
-    int hint_glyph_start = glyph_vert_count;
-    if (d->hint_active && d->hint_term && d->hint_h > 0) {
-        float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
-        int pad = (int)(10.0f * scale + 0.5f);
-        int y = sokol_hint_compute_y(d, d->hint_anchor_py, win_h);
-        hint_bg_y = y;
-        hint_bg_valid = true;
-
-        sokol_render_terminal_cells(d, d->hint_term,
-                                    pad, y + pad,
-                                    false, 0,
-                                    &vert_count, &glyph_vert_count,
-                                    &sel_vert_count, sel_verts);
+    // General-purpose panels
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        PanelState *p = &d->panels.panels[i];
+        if (p->active && d->panel_terms[i]) {
+            int text_x = panel_term_px(p->px, d->cell_w, panel_show_accent(p->flags));
+            int text_y = panel_term_py(p->py, d->cell_h);
+            sokol_render_terminal_cells(d, d->panel_terms[i],
+                                        text_x, text_y,
+                                        false, 0,
+                                        &vert_count, &glyph_vert_count,
+                                        &sel_vert_count, sel_verts);
+        }
     }
 
     // Decoration pass: coalesce underlines and strikethroughs by style and
@@ -3010,52 +2844,90 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
         }
     }
 
-    // Notification panel decoration: accent stripe goes into the decoration
-    // buffer; close button goes into the glyph buffer. Both must be emitted
-    // before the glyph/decoration buffers are appended to the frame buffer.
-    if (d->notif_active && d->notif_term) {
-        float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
-        int pad = (int)(10.0f * scale + 0.5f);
-        int accent_w = (int)(4.0f * scale + 0.5f);
+    // General-purpose panels: emit background quads
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        PanelState *p = &d->panels.panels[i];
+        if (p->active) {
+            // Panel background (opaque, same color as panels)
+            uint8_t bg[4] = { 38, 38, 44, 255 };
+            sokol_deco_emit_quad(
+                (float)p->px, (float)p->py,
+                (float)(p->px + p->pw), (float)(p->py + p->ph),
+                bg);
 
-        uint8_t ac[4] = { 0, 0, 0, 255 };
-        switch (d->notif_level) {
-        case 2:
-            ac[0] = 224;
-            ac[1] = 27;
-            ac[2] = 36;
-            break;
-        case 1:
-            ac[0] = 245;
-            ac[1] = 194;
-            ac[2] = 17;
-            break;
-        default:
-            ac[0] = 98;
-            ac[1] = 160;
-            ac[2] = 234;
-            break;
+            // Accent stripe (if enabled, 1 cell wide, full height, offset by 1 cell padding)
+            if (panel_show_accent(p->flags)) {
+                uint8_t ac[4] = { 0, 0, 0, 255 };
+                switch (p->level) {
+                case PORTTY_NOTIFY_ERROR:
+                    ac[0] = 235; /* Sriracha */
+                    ac[1] = 66;
+                    ac[2] = 104;
+                    break;
+                case PORTTY_NOTIFY_WARNING:
+                    ac[0] = 245; /* Mustard */
+                    ac[1] = 239;
+                    ac[2] = 52;
+                    break;
+                default:
+                    ac[0] = 71; /* Thunder */
+                    ac[1] = 118;
+                    ac[2] = 255;
+                    break;
+                }
+                int accent_px = panel_accent_px(p->px, d->cell_w);
+                int accent_w = panel_accent_w(d->cell_w);
+                sokol_deco_emit_quad(
+                    (float)accent_px, (float)p->py,
+                    (float)(accent_px + accent_w), (float)(p->py + p->ph),
+                    ac);
+            }
+
+            // Close button (if enabled, top-right corner of panel)
+            if (panel_show_close(p->flags) && p->close_size > 0 && glyph_vert_count + 6 <= SOKOL_MAX_VERTICES) {
+                // Lookup or insert close button bitmap in atlas
+                uint32_t color_key = 0; // White, no color key needed
+                RendSokolAtlasEntry *entry = rend_sokol_atlas_lookup(
+                    &d->atlas, BOXDRAW_FONT_DATA, CLOSE_BUTTON_GLYPH_ID, color_key);
+                if (!entry) {
+                    // Create the close button bitmap
+                    int size = p->close_size;
+                    GlyphBitmap *bmp = calloc(1, sizeof(*bmp));
+                    if (bmp) {
+                        bmp->pixels = calloc((size_t)size * size, 4);
+                        bmp->width = size;
+                        bmp->height = size;
+                        bmp->glyph_id = CLOSE_BUTTON_GLYPH_ID;
+                        if (bmp->pixels) {
+                            rend_make_close_x_bitmap(bmp->pixels, size);
+                            entry = rend_sokol_atlas_insert(
+                                &d->atlas, BOXDRAW_FONT_DATA,
+                                CLOSE_BUTTON_GLYPH_ID, color_key, bmp, false);
+                        }
+                        free(bmp->pixels);
+                        free(bmp);
+                    }
+                }
+                if (entry && entry->region.w > 0) {
+                    float atlas_size = (float)REND_ATLAS_TEXTURE_SIZE;
+                    float u0 = (float)entry->region.x / atlas_size;
+                    float v0 = (float)entry->region.y / atlas_size;
+                    float u1 = (float)(entry->region.x + entry->region.w) / atlas_size;
+                    float v1 = (float)(entry->region.y + entry->region.h) / atlas_size;
+                    uint8_t lum = p->close_hover ? 245 : 170;
+                    uint8_t fg[4] = { lum, lum, lum, 255 };
+                    uint8_t bg[4] = { 38, 38, 44, 0 }; // Transparent bg for alpha blend
+                    GlyphVertex *q = &s_glyph_verts[glyph_vert_count];
+                    q[0] = (GlyphVertex){ (float)p->close_px, (float)p->close_py, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    q[1] = (GlyphVertex){ (float)(p->close_px + p->close_size), (float)p->close_py, u1, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    q[2] = (GlyphVertex){ (float)(p->close_px + p->close_size), (float)(p->close_py + p->close_size), u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    q[3] = (GlyphVertex){ (float)p->close_px, (float)p->close_py, u0, v0, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    q[4] = (GlyphVertex){ (float)(p->close_px + p->close_size), (float)(p->close_py + p->close_size), u1, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    q[5] = (GlyphVertex){ (float)p->close_px, (float)(p->close_py + p->close_size), u0, v1, { fg[0], fg[1], fg[2], fg[3] }, { bg[0], bg[1], bg[2], bg[3] } };
+                    glyph_vert_count += 6;
+                }
+            }
         }
-        sokol_deco_emit_quad(
-            (float)(d->notif_x + pad), (float)(d->notif_y + pad),
-            (float)(d->notif_x + pad + accent_w), (float)(d->notif_y + d->notif_h - pad),
-            ac);
-
-        sokol_emit_notif_close(d, &glyph_vert_count);
-    }
-
-    // Hover link hint panel background: emit last into the decoration buffer
-    // so it is drawn after the terminal frame (background, glyphs, underlines,
-    // and selection) but before the panel text glyphs. This matches the SDL3
-    // backend where the hint texture is drawn on top of the finished terminal
-    // frame, and keeps the panel text visible on top of its own background.
-    int hint_deco_start = s_deco_vert_count;
-    int hint_deco_count = 0;
-    if (hint_bg_valid) {
-        uint8_t bg[4] = { 38, 38, 44, 255 };
-        sokol_deco_emit_quad(0.0f, (float)hint_bg_y,
-                             (float)win_w, (float)(hint_bg_y + d->hint_h), bg);
-        hint_deco_count = 6;
     }
 
     // Append cursor quads after bg quads (cursor is drawn under glyphs, opaque).
@@ -3075,7 +2947,6 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                (size_t)glyph_vert_count * sizeof(GlyphVertex));
         vert_count += glyph_vert_count;
     }
-    int glyph_end = vert_count;
 
     // Append selection overlay quads after glyph quads so all fit in one
     // buffer update (Sokol allows only one sg_update_buffer per frame).
@@ -3158,16 +3029,14 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             sg_draw(cursor_vert_start, s_cursor_vert_count, 1);
         }
         // Pass 2: draw terminal grid glyph quads (opaque, replace)
-        int terminal_glyph_count = hint_glyph_start;
+        int terminal_glyph_count = panel_glyph_start;
         if (terminal_glyph_count > 0) {
             sg_draw(glyph_vert_start, terminal_glyph_count, 1);
         }
         // Pass 3: draw decoration quads (alpha-blended, on top of terminal
         // glyphs). This includes underlines, strikethroughs, and the
-        // notification accent stripe, but excludes the hover hint panel
-        // background which is drawn later.
-        int deco_main_count = hint_deco_start;
-        if (deco_main_count > 0 && d->sel_pip_created) {
+        // notification accent stripe.
+        if (s_deco_vert_count > 0 && d->sel_pip_created) {
             sg_apply_pipeline(d->sel_pip);
             sg_apply_bindings(&(sg_bindings){
                 .vertex_buffers[0] = d->glyph_vbuf,
@@ -3175,7 +3044,7 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 .samplers[0] = d->atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(deco_vert_start, deco_main_count, 1);
+            sg_draw(deco_vert_start, s_deco_vert_count, 1);
         }
         // Pass 4: draw selection overlay quads (alpha-blended, on top of
         // decorations so selected text remains readable).
@@ -3190,22 +3059,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
             sg_draw(sel_vert_start, sel_count, 1);
         }
-        // Pass 5: draw hover hint panel background (alpha-blended, on top of
-        // the finished terminal frame but behind the panel text).
-        if (hint_deco_count > 0 && d->sel_pip_created) {
-            sg_apply_pipeline(d->sel_pip);
-            sg_apply_bindings(&(sg_bindings){
-                .vertex_buffers[0] = d->glyph_vbuf,
-                .views[0] = d->atlas.texture_view,
-                .samplers[0] = d->atlas.sampler,
-            });
-            sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(deco_vert_start + hint_deco_start, hint_deco_count, 1);
-        }
-        // Pass 6: draw hover hint panel text glyphs (opaque, replace) on top of
-        // the panel background.
-        int hint_glyph_count = glyph_end - (glyph_vert_start + hint_glyph_start);
-        if (hint_glyph_count > 0) {
+        // Pass 5: draw panel glyph quads (opaque, on top of panel backgrounds)
+        int panel_glyph_count = glyph_vert_count - panel_glyph_start;
+        if (panel_glyph_count > 0) {
             sg_apply_pipeline(d->glyph_pip);
             sg_apply_bindings(&(sg_bindings){
                 .vertex_buffers[0] = d->glyph_vbuf,
@@ -3213,9 +3069,9 @@ static void sokol_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                 .samplers[0] = d->atlas.sampler,
             });
             sg_apply_uniforms(0, &SG_RANGE(uniforms));
-            sg_draw(glyph_vert_start + hint_glyph_start, hint_glyph_count, 1);
+            sg_draw(glyph_vert_start + panel_glyph_start, panel_glyph_count, 1);
         }
-        // Pass 7: draw foreground lottie (on top of everything)
+        // Pass 6: draw foreground lottie (on top of everything)
         if (lottie_bg_count >= 0 && has_lottie)
             (void)sokol_render_lottie_layer(d, term, 0, lottie_bg_count);
         // Pass 8: draw sixel images (on top of text and lottie)
@@ -3259,12 +3115,9 @@ static void sokol_resize(PorttyBackend *self, int w, int h)
     if (!d)
         return;
     // Sokol handles the GL swapchain internally via sglue_swapchain().
-    // Rebuild notification panel at new width.
-    if (d->notif_active && (d->notif_title || d->notif_body))
-        sokol_notif_rebuild(d);
-    // Rebuild hover link hint panel at new width.
-    if (d->hint_active)
-        sokol_hint_rebuild(d);
+    // Update panel layout if cell size changed
+    if (d->cell_w > 0 && d->cell_h > 0)
+        panel_mgr_set_cell_size(&d->panels, d->cell_w, d->cell_h);
 }
 
 static bool sokol_get_cell_size(PorttyBackend *self, int *cw, int *ch)
@@ -3337,6 +3190,7 @@ static int sokol_load_fonts(PorttyBackend *self, float size,
     d->cell_h = r.cell_height;
     d->font_size = r.font_size;
     d->font_options = r.font_options;
+    panel_mgr_set_cell_size(&d->panels, d->cell_w, d->cell_h);
     free(d->font_path);
     d->font_path = r.font_path;
     r.font_path = NULL;
@@ -3852,11 +3706,10 @@ PorttyBackend backend_sokol = {
     .get_exe_path = sokol_get_exe_path,
     .get_default_font = sokol_get_default_font,
 
-    .notify = sokol_notify,
-    .notify_dismiss = sokol_notify_dismiss,
-    .set_link_hint = sokol_set_link_hint,
-    .notification_hit = sokol_notification_hit,
-    .set_notification_hover = sokol_set_notification_hover,
+    .panel_show = sokol_panel_show,
+    .panel_hide = sokol_panel_hide,
+    .panel_hit_test = sokol_panel_hit_test,
+    .panel_set_hover = sokol_panel_set_hover,
 
     .load_fonts = sokol_load_fonts,
     .draw_terminal = sokol_draw_terminal,
@@ -3959,11 +3812,20 @@ static void sokol_debug_mousemove(void *app, int x, int y)
         terminal_mark_dirty(p->term);
 }
 
-static void sokol_debug_notify(void *backend, const char *title,
-                               const char *body)
+static void sokol_script_panel(void *backend, int id, int col, int row,
+                               int cols, int rows,
+                               const char *title, const char *body, int level,
+                               unsigned int flags)
 {
     PorttyBackend *self = (PorttyBackend *)backend;
-    sokol_notify(self, title, body, PORTTY_NOTIFY_INFO);
+    self->panel_show(self, id, col, row, cols, rows, title, body,
+                     (PorttyNotifyLevel)level, flags);
+}
+
+static void sokol_script_panel_hide(void *backend, int id)
+{
+    PorttyBackend *self = (PorttyBackend *)backend;
+    self->panel_hide(self, id);
 }
 
 static void sokol_record_start(void *user_data, int fps)
@@ -4217,114 +4079,6 @@ static void sokol_finish_setup(PorttyBackend *self, PorttyApp *app)
     vlog("sokol_finish_setup: complete, win=%dx%d\n", win_w, win_h);
 }
 
-// ── Notification panel ───────────────────────────────────────────────────
-
-static char *sokol_notif_build_ansi(SokolData *d)
-{
-    SokolStrBuf sb;
-    if (!sokol_strbuf_init(&sb))
-        return NULL;
-
-    // Set panel background color on every cell.
-    // Do NOT use \x1b[0m (full reset) — it clears bg to default (black).
-    // Use targeted resets: \x1b[22m (normal intensity), \x1b[39m (default fg).
-    const char *panel_bg = "\x1b[48;2;38;38;44m";
-
-    // Title (bold, bright white on panel bg)
-    if (d->notif_title) {
-        if (!sokol_strbuf_appendf(&sb,
-                                  "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
-                                  panel_bg, d->notif_title)) {
-            sokol_strbuf_free(&sb);
-            return NULL;
-        }
-    }
-    // Body (normal, dim gray on panel bg)
-    if (d->notif_body) {
-        if (d->notif_title) {
-            if (!sokol_strbuf_appendf(&sb, "\r\n%s", panel_bg)) {
-                sokol_strbuf_free(&sb);
-                return NULL;
-            }
-        } else {
-            if (!sokol_strbuf_appendf(&sb, "%s", panel_bg)) {
-                sokol_strbuf_free(&sb);
-                return NULL;
-            }
-        }
-        if (!sokol_strbuf_appendf(&sb, "\x1b[38;2;190;190;198m%s\x1b[39m",
-                                  d->notif_body)) {
-            sokol_strbuf_free(&sb);
-            return NULL;
-        }
-    }
-    return sokol_strbuf_finish(&sb);
-}
-
-static void sokol_notif_rebuild(SokolData *d)
-{
-    if (d->notif_term) {
-        terminal_destroy(d->notif_term);
-        free(d->notif_term);
-        d->notif_term = NULL;
-    }
-    d->notif_active = false;
-    d->notif_h = 0;
-
-    if (!d->notif_title && !d->notif_body)
-        return;
-    if (!d->font || d->cell_w <= 0 || d->cell_h <= 0)
-        return;
-
-    int win_w = (int)sapp_width();
-    if (win_w <= 0)
-        return;
-
-    float scale = d->content_scale > 0 ? d->content_scale : 1.0f;
-    int pad = (int)(10.0f * scale + 0.5f);
-    int accent_w = (int)(4.0f * scale + 0.5f);
-    int gap = (int)(8.0f * scale + 0.5f);
-    int close_size = d->cell_h;
-    int text_w = win_w - 2 * pad - accent_w - gap - close_size - pad;
-    int notif_cols = text_w > 0 ? text_w / d->cell_w : 1;
-    if (notif_cols < 1)
-        notif_cols = 1;
-
-    char *ansi = sokol_notif_build_ansi(d);
-    if (!ansi)
-        return;
-
-    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
-    cfg.cols = notif_cols;
-    cfg.rows = 32;
-    cfg.cell_w_px = d->cell_w;
-    cfg.cell_h_px = d->cell_h;
-    d->notif_term = term_cfr_new(&cfg);
-    if (!d->notif_term) {
-        free(ansi);
-        return;
-    }
-
-    terminal_process_input(d->notif_term, ansi, strlen(ansi));
-    free(ansi);
-
-    TerminalPos pos = terminal_get_cursor_pos(d->notif_term);
-    int n_rows = pos.row + 1;
-    if (n_rows < 1)
-        n_rows = 1;
-
-    d->notif_cols = notif_cols;
-    d->notif_rows = n_rows;
-    d->notif_w = win_w;
-    d->notif_h = pad * 2 + n_rows * d->cell_h;
-    d->notif_x = 0;
-    d->notif_y = 0;
-    d->notif_close_size = close_size;
-    d->notif_close_x = (float)(d->notif_x + win_w - pad - close_size);
-    d->notif_close_y = (float)(d->notif_y + pad + (n_rows * d->cell_h - close_size) / 2);
-    d->notif_active = true;
-}
-
 static void sokol_init_cb(void)
 {
     vlog("sokol_init_cb: backend=%p app=%p\n", (void *)g_sokol.backend, (void *)g_sokol.app);
@@ -4443,7 +4197,7 @@ static void sokol_frame_cb(void)
 
     // === Debug script: pre-render commands ===
     if (d->script && !d->script_done) {
-        DebugExecCtx ctx = {
+        ScriptExecCtx ctx = {
             .backend = g_sokol.backend,
             .term = d->term,
             .pty = d->pty,
@@ -4459,8 +4213,10 @@ static void sokol_frame_cb(void)
             .dumpverts_fn = sokol_debug_dumpverts,
             .mousemove_fn = sokol_debug_mousemove,
             .mousemove_user_data = g_sokol.app,
-            .notify_fn = sokol_debug_notify,
-            .notify_user_data = g_sokol.backend,
+            .panel_fn = sokol_script_panel,
+            .panel_user_data = g_sokol.backend,
+            .panel_hide_fn = sokol_script_panel_hide,
+            .panel_hide_user_data = g_sokol.backend,
             .recorder = d->frame_recorder,
             .pending_record_frame = &d->pending_record_frame,
             .record_start_fn = sokol_record_start,

@@ -1,0 +1,88 @@
+# Panel system demo
+# Run with: portty -S examples/panel-demo.portty
+
+# Clear screen and set up
+emit \e[2J\e[H
+wait 0.3
+
+# Title
+emit \e[1;36m=== Panel System Demo ===\e[0m\r\n\r\n
+
+# Main terminal content
+emit \e[37mMain terminal line 1 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 2 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 3 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 4 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 5 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 6 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 7 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 8 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 9 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 10 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 11 - panels overlay on z-axis\e[0m\r\n
+emit \e[37mMain terminal line 12 - panels overlay on z-axis\e[0m\r\n
+wait 1
+
+# Show info panel (level 0 = info/blue accent)
+emit \r\n\e[33mShowing info panel (blue accent)...\e[0m\r\n
+panel 1 8 2 50 7 "Information" "This is an info panel\r\n\r\nPanels overlay on the Z-axis.\r\nThe main terminal content is behind\r\nthis panel, not displaced."
+wait 4
+
+# Show warning panel (level 1 = warning/yellow accent)
+emit \e[33mShowing warning panel (yellow accent)...\e[0m\r\n
+panel 2 20 8 45 6 "Warning" "This is a warning panel\r\nMultiple panels can be shown\r\nat the same time." 1
+wait 3
+
+# Show error panel (level 2 = error/red accent)
+emit \e[33mShowing error panel (red accent)...\e[0m\r\n
+panel 3 5 10 40 5 "Error" "This is an error panel\r\nIt has a red accent stripe." 2
+wait 3
+
+# Hide panels one by one
+panel_hide 1
+emit \e[32mHidden info panel\e[0m\r\n
+wait 1
+
+panel_hide 2
+emit \e[32mHidden warning panel\e[0m\r\n
+wait 1
+
+panel_hide 3
+emit \e[32mHidden error panel\e[0m\r\n
+wait 1
+
+# === Decoration Flags Demo ===
+emit \r\n\e[1;36m=== Decoration Flags Demo ===\e[0m\r\n
+wait 0.5
+
+# Flag 0: default (accent + close button)
+emit \e[33mFlag 0: accent + close button (default)\e[0m\r\n
+panel 4 5 3 42 6 "Default" "Accent stripe + close button\r\n\r\nClick the X to dismiss." 0 0
+wait 2
+
+# Flag 1: no accent (wider content area)
+emit \e[33mFlag 1: no accent (wider content area)\e[0m\r\n
+panel 5 50 3 42 6 "No Accent" "No accent stripe, but has close button.\r\n\r\nTerminal is 1 cell wider." 0 1
+wait 2
+
+# Flag 2: no close button
+emit \e[33mFlag 2: no close button\e[0m\r\n
+panel 6 5 10 42 6 "No Close" "Has accent stripe but no close button.\r\n\r\nCannot be dismissed by clicking." 0 2
+wait 2
+
+# Flag 3: neither accent nor close (plain panel)
+emit \e[33mFlag 3: no accent, no close (plain panel)\e[0m\r\n
+panel 7 50 10 42 6 "Plain" "No decorations at all.\r\n\r\nMaximum content area." 0 3
+wait 3
+
+# Hide decoration demo panels
+panel_hide 4
+panel_hide 5
+panel_hide 6
+panel_hide 7
+emit \e[32mCleared decoration demo panels\e[0m\r\n
+wait 1
+
+emit \r\n\e[1;36mDemo complete!\e[0m\r\n
+wait 2
+quit

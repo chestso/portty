@@ -4,6 +4,7 @@
 #include "diag.h"
 #include "font.h"
 #include "portty_backend.h"
+#include "portty_panel.h"
 #include "rend_common.h"
 #include "rend_sdl3_atlas.h"
 #include "rend_sdl3_shader.h"
@@ -56,21 +57,9 @@ typedef struct RendererSdl3Data
 
     RendShaderState *glyph_shader;
 
-    bool notif_active;
-    bool notif_close_hover;
-    int notif_level;
-    char *notif_title;
-    char *notif_body;
-    SDL_Texture *notif_texture;
-    SDL_Texture *notif_close_tex;
-    int notif_h;
-    SDL_FRect notif_close_rect;
-
-    bool hint_active;
-    char *hint_text;
-    SDL_Texture *hint_texture;
-    int hint_h;
-    int hint_anchor_py;
+    PanelManager panels;
+    TerminalBackend *panel_terms[PORTTY_PANEL_MAX];
+    SDL_Texture *panel_textures[PORTTY_PANEL_MAX];
 
     struct
     {
@@ -106,11 +95,12 @@ int rend_sdl3_get_scroll_offset(RendererSdl3Data *data);
 void rend_sdl3_set_overlay(RendererSdl3Data *data, TerminalBackend *overlay);
 void rend_sdl3_clear_overlay(RendererSdl3Data *data);
 bool rend_sdl3_has_overlay(RendererSdl3Data *data);
-void rend_sdl3_set_notification(RendererSdl3Data *data, const char *title, const char *body, int level);
-void rend_sdl3_clear_notification(RendererSdl3Data *data);
-bool rend_sdl3_set_notification_hover(RendererSdl3Data *data, bool hovered);
-void rend_sdl3_set_link_hint(RendererSdl3Data *data, const char *url, int anchor_py);
-int rend_sdl3_notification_hit(RendererSdl3Data *data, int px, int py);
+void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int cols, int rows,
+                          const char *title, const char *body, PorttyNotifyLevel level,
+                          unsigned int flags);
+void rend_sdl3_panel_hide(RendererSdl3Data *data, int id);
+int rend_sdl3_panel_hit_test(RendererSdl3Data *data, int px, int py, bool *close_btn);
+void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered);
 int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term, const char *output_path);
 void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale);
 void rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term, const char *data_bytes, size_t len);
