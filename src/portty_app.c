@@ -306,15 +306,15 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
 
                 int panel_rows = 1 + PANEL_DECORATION_ROWS;
 
-                int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
-                if (panel_row < 0)
+                int panel_row;
+                if (display_row - panel_rows >= 0) {
+                    panel_row = display_row - panel_rows;
+                } else if (display_row + 1 + panel_rows <= term_rows) {
+                    panel_row = display_row + 1;
+                } else {
                     panel_row = 0;
-                if (panel_row + panel_rows > term_rows) {
-                    panel_row = term_rows - panel_rows;
-                    if (panel_row < 0) {
-                        panel_row = 0;
+                    if (panel_rows > term_rows)
                         panel_rows = term_rows;
-                    }
                 }
 
                 int panel_col;
