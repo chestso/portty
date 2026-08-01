@@ -2740,12 +2740,64 @@ static void sokol_event_cb(const sapp_event *ev)
             break;
         int term_key = sokol_map_key(ev->key_code);
         int mod = sokol_map_mod(ev->modifiers);
-        // For Ctrl+letter, pass the codepoint so app shortcuts work
+        /* Resolve the codepoint for printable keys. Sokol keycodes for
+         * A-Z, 0-9, and punctuation already match their unshifted ASCII
+         * values. When Shift is held, apply the US-layout shifted symbol
+         * (e.g. ';' -> ':', '5' -> '%'). This mirrors what the SDL3 backend
+         * does with SDL_GetKeyFromScancode. */
         uint32_t cp = 0;
         if (ev->key_code >= SAPP_KEYCODE_A && ev->key_code <= SAPP_KEYCODE_Z) {
             cp = 'a' + (ev->key_code - SAPP_KEYCODE_A);
             if (mod & TERM_MOD_SHIFT)
                 cp = 'A' + (ev->key_code - SAPP_KEYCODE_A);
+        } else if (ev->key_code >= SAPP_KEYCODE_0 && ev->key_code <= SAPP_KEYCODE_9) {
+            cp = '0' + (ev->key_code - SAPP_KEYCODE_0);
+            if (mod & TERM_MOD_SHIFT) {
+                static const char shifted_digits[] = ")!@#$%^&*(";
+                cp = (uint8_t)shifted_digits[ev->key_code - SAPP_KEYCODE_0];
+            }
+        } else if (mod & TERM_MOD_SHIFT) {
+            switch (ev->key_code) {
+            case SAPP_KEYCODE_SEMICOLON:
+                cp = ':';
+                break;
+            case SAPP_KEYCODE_APOSTROPHE:
+                cp = '"';
+                break;
+            case SAPP_KEYCODE_COMMA:
+                cp = '<';
+                break;
+            case SAPP_KEYCODE_PERIOD:
+                cp = '>';
+                break;
+            case SAPP_KEYCODE_SLASH:
+                cp = '?';
+                break;
+            case SAPP_KEYCODE_MINUS:
+                cp = '_';
+                break;
+            case SAPP_KEYCODE_EQUAL:
+                cp = '+';
+                break;
+            case SAPP_KEYCODE_LEFT_BRACKET:
+                cp = '{';
+                break;
+            case SAPP_KEYCODE_RIGHT_BRACKET:
+                cp = '}';
+                break;
+            case SAPP_KEYCODE_BACKSLASH:
+                cp = '|';
+                break;
+            case SAPP_KEYCODE_GRAVE_ACCENT:
+                cp = '~';
+                break;
+            default:
+                break;
+            }
+        } else {
+            /* Unshifted punctuation: use the keycode as ASCII directly */
+            if (ev->key_code >= 32 && ev->key_code < 127)
+                cp = (uint32_t)ev->key_code;
         }
         KeyboardResult kr = portty_app_handle_key(d->app, term_key, mod, cp);
         if (kr.len > 0 && !kr.handled && d->pty)
