@@ -560,6 +560,22 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "assert-hover") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_ASSERT_HOVER;
+        return true;
+    }
+
+    if (strcmp(line, "assert-no-hover") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_ASSERT_NO_HOVER;
+        return true;
+    }
+
     script_set_error(s, line_num, "unknown command: %s", line);
     return false;
 }
@@ -739,7 +755,8 @@ static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
         printf("  col=%3d cp=%04X w=%d rev=%d invis=%d dim=%d "
                "fg(%s %02X%02X%02X) "
                "bg(%s %02X%02X%02X) "
-               "ul=%d ul_color(%s %02X%02X%02X)\n",
+               "ul=%d ul_color(%s %02X%02X%02X) "
+               "hid=%u\n",
                col, cell.cp, cell.width, cell.attrs.reverse,
                cell.attrs.invis, cell.attrs.dim,
                cell.fg.is_default ? "def" : "set",
@@ -748,7 +765,8 @@ static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
                cell.bg.r, cell.bg.g, cell.bg.b,
                cell.attrs.underline,
                cell.ul_color.is_default ? "def" : "set",
-               cell.ul_color.r, cell.ul_color.g, cell.ul_color.b);
+               cell.ul_color.r, cell.ul_color.g, cell.ul_color.b,
+               cell.hyperlink_id);
     }
     printf("=== end dumpcells ===\n");
 }
@@ -1024,6 +1042,38 @@ void portty_script_step(PorttyScript *script,
     {
         if (ctx->backend && ctx->backend->request_quit)
             ctx->backend->request_quit(ctx->backend);
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_ASSERT_HOVER:
+    {
+        if (ctx->term) {
+            uint16_t hid = terminal_hovered_hyperlink(ctx->term);
+            if (hid != 0) {
+                printf("assert-hover: PASS (hid=%u)\n", hid);
+            } else {
+                printf("assert-hover: FAIL (no hover)\n");
+            }
+        } else {
+            fprintf(stderr, "assert-hover: no terminal\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_ASSERT_NO_HOVER:
+    {
+        if (ctx->term) {
+            uint16_t hid = terminal_hovered_hyperlink(ctx->term);
+            if (hid == 0) {
+                printf("assert-no-hover: PASS\n");
+            } else {
+                printf("assert-no-hover: FAIL (hid=%u)\n", hid);
+            }
+        } else {
+            fprintf(stderr, "assert-no-hover: no terminal\n");
+        }
         (*cmd_index)++;
         break;
     }

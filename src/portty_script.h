@@ -31,6 +31,8 @@ typedef enum
     SCRIPT_CMD_PANEL,
     SCRIPT_CMD_PANEL_HIDE,
     SCRIPT_CMD_QUIT,
+    SCRIPT_CMD_ASSERT_HOVER,
+    SCRIPT_CMD_ASSERT_NO_HOVER,
 } ScriptCmdType;
 
 typedef struct

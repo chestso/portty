@@ -1,0 +1,68 @@
+# Test: hover cleared when terminal scrolls
+# Run: build-sokol/src/portty -v -s 1000 -S scripts/test-hover-scroll.script 2>&1 | grep -E "(assert-hover|dumpcells.*hid=)"
+# Scenario: Emit link, hover, verify hover set, scroll, verify hover cleared
+
+wait 0.5
+emit \e[2J\e[H
+
+# Row 0: emit an OSC-8 hyperlink
+emit \e]8;;https://example.com\e\\LINK_TEXT\e]8;;\e\\\r\n
+
+# Fill MOST of screen but not all (terminal is ~30 rows)
+# Row 0 is the link, rows 1-20 are filler
+emit LINE_01\r\n
+emit LINE_02\r\n
+emit LINE_03\r\n
+emit LINE_04\r\n
+emit LINE_05\r\n
+emit LINE_06\r\n
+emit LINE_07\r\n
+emit LINE_08\r\n
+emit LINE_09\r\n
+emit LINE_10\r\n
+emit LINE_11\r\n
+emit LINE_12\r\n
+emit LINE_13\r\n
+emit LINE_14\r\n
+emit LINE_15\r\n
+emit LINE_16\r\n
+emit LINE_17\r\n
+emit LINE_18\r\n
+emit LINE_19\r\n
+emit LINE_20\r\n
+
+wait 0.5
+
+# Check row 0 has the link with hyperlink_id
+dumpcells 0 0 9
+
+# Position mouse over row 0, column 5 (middle of LINK_TEXT)
+# Cell size ~12x27, so y=13 is middle of row 0
+mousemove 60 13
+
+wait 0.3
+
+# Verify hover IS active (should show PASS with hid != 0)
+assert-hover
+
+# Now emit more lines to cause scroll - this should push row 0 into scrollback
+emit SCROLL_LINE_1\r\n
+emit SCROLL_LINE_2\r\n
+emit SCROLL_LINE_3\r\n
+emit SCROLL_LINE_4\r\n
+emit SCROLL_LINE_5\r\n
+emit SCROLL_LINE_6\r\n
+emit SCROLL_LINE_7\r\n
+emit SCROLL_LINE_8\r\n
+emit SCROLL_LINE_9\r\n
+emit SCROLL_LINE_10\r\n
+
+wait 0.3
+
+# Row 0 should now be a different line (was LINE_01, now LINE_11)
+dumpcells 0 0 9
+
+# Verify hover IS cleared (should show PASS with hid == 0)
+assert-no-hover
+
+quit

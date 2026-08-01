@@ -1360,6 +1360,16 @@ static void sdl3_script_winsize(void *user_data, int w, int h)
     fprintf(stderr, "winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
 }
 
+static void sdl3_script_mousemove(void *user_data, int x, int y)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return;
+    portty_app_handle_mouse(d->app, x, y, 0, false, 0, 0);
+    if (portty_app_revalidate_hover(d->app, x, y))
+        terminal_mark_dirty(d->term);
+}
+
 static void sdl3_record_start(void *user_data, int fps)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
@@ -1448,7 +1458,8 @@ static void sdl3_run(PorttyBackend *self)
                 .screendump_path_buf = d->screendump_path,
                 .pending_verifybuf = NULL,
                 .dumpverts_fn = NULL,
-                .mousemove_fn = NULL,
+                .mousemove_fn = sdl3_script_mousemove,
+                .mousemove_user_data = d,
                 .panel_fn = sdl3_script_panel,
                 .panel_user_data = self,
                 .panel_hide_fn = sdl3_script_panel_hide,

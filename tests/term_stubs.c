@@ -54,3 +54,9 @@ int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols)
         *cols = 0;
     return 0;
 }
+
+uint16_t terminal_hovered_hyperlink(const TerminalBackend *term)
+{
+    (void)term;
+    return 0;
+}
