@@ -666,13 +666,17 @@ static void sokol_drain_pty(SokolData *d)
     d->pty_queue_tail = NULL;
     pthread_mutex_unlock(&d->pty_queue_mtx);
 
+    bool pty_scrolled = false;
     while (head) {
         PtyDataNode *next = head->next;
         terminal_consume_pushed_rows(d->term);
         terminal_process_input(d->term, head->data, head->len);
         int pushed = terminal_consume_pushed_rows(d->term);
-        if (pushed > 0 && rend_get_scroll_offset(&d->rend.scroll) > 0)
-            rend_scroll(&d->rend.scroll, d->term, pushed);
+        if (pushed > 0) {
+            pty_scrolled = true;
+            if (rend_get_scroll_offset(&d->rend.scroll) > 0)
+                rend_scroll(&d->rend.scroll, d->term, pushed);
+        }
         free(head);
         head = next;
     }
@@ -682,7 +686,11 @@ static void sokol_drain_pty(SokolData *d)
     // Update window title after PTY data, mirroring SDL3 backend.
     d->self->set_window_title(d->self, terminal_get_title(d->term));
 
-    // Re-resolve OSC-8 hover after PTY output
+    // Re-resolve OSC-8 hover after PTY output. If the terminal content
+    // scrolled, the link under the cursor may have moved, so clear first
+    // then re-resolve to avoid stale hover.
+    if (pty_scrolled)
+        portty_app_clear_hover(d->app);
     if (portty_app_revalidate_hover(d->app, d->last_mouse_x, d->last_mouse_y))
         terminal_mark_dirty(d->term);
 
@@ -2151,6 +2159,12 @@ static void sokol_record_frame(SokolData *d, const char *path)
 static void sokol_debug_mousemove(void *app, int x, int y)
 {
     PorttyApp *p = (PorttyApp *)app;
+    PorttyBackend *backend = p->backend;
+    SokolData *d = backend ? sokol_data(backend) : NULL;
+    if (d) {
+        d->last_mouse_x = x;
+        d->last_mouse_y = y;
+    }
     portty_app_handle_mouse(p, x, y, 0, false, 0, 0);
     if (portty_app_revalidate_hover(p, x, y))
         terminal_mark_dirty(p->term);

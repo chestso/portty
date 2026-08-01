@@ -1469,6 +1469,7 @@ static void sdl3_run(PorttyBackend *self)
         }
 
         bool pty_processed = false;
+        bool pty_scrolled = false;
 
         // === 1. Non-blocking event drain ===
         // SDL_PollEvent on Wayland doesn't dispatch the display queue,
@@ -1483,7 +1484,9 @@ static void sdl3_run(PorttyBackend *self)
                 {
                     PtyDataPayload *payload = (PtyDataPayload *)event.user.data1;
                     if (payload) {
-                        rend_sdl3_process_pty_data(rend, term, payload->data, payload->len);
+                        int pushed = rend_sdl3_process_pty_data(rend, term, payload->data, payload->len);
+                        if (pushed > 0)
+                            pty_scrolled = true;
                         self->set_window_title(self, terminal_get_title(term));
                         free(payload);
                         pty_processed = true;
@@ -1803,7 +1806,9 @@ static void sdl3_run(PorttyBackend *self)
         // Age and prune deferred-clipboard entries
         clipboard_deferred_free_advance();
 
-        // Re-resolve OSC-8 hover after PTY output
+        // Re-resolve OSC-8 hover after PTY output. If the terminal content
+        // scrolled (rows pushed to scrollback), the link under the cursor may
+        // have moved, so clear first then re-resolve to avoid stale hover.
         if (pty_processed) {
             int px = -1, py = -1;
             if (SDL_GetMouseFocus() == d->window) {
@@ -1811,6 +1816,8 @@ static void sdl3_run(PorttyBackend *self)
                 SDL_GetMouseState(&mx, &my);
                 sdl3_scale_mouse_coords(d, mx, my, &px, &py);
             }
+            if (pty_scrolled)
+                portty_app_clear_hover(d->app);
             if (portty_app_revalidate_hover(d->app, px, py))
                 terminal_mark_dirty(term);
         }

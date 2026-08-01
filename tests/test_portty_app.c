@@ -164,6 +164,29 @@ static void test_clear_hover_null_safety(void)
     ASSERT_TRUE(true);
 }
 
+static void test_clear_then_revalidate_no_link(void)
+{
+    // Simulates scroll: clear hover, then revalidate at a position with no link.
+    // The revalidation should NOT re-show the panel or set the pointer cursor.
+    reset_state();
+    TerminalBackend term = { 0 };
+    term.hovered_hyperlink_id = 42;
+    PorttyApp app = { .term = &term, .backend = &g_stub_backend };
+
+    // Step 1: clear hover (simulates scroll-induced clear)
+    portty_app_clear_hover(&app);
+    ASSERT_EQ(terminal_hovered_hyperlink(&term), 0);
+    ASSERT_TRUE(g_state.panel_hide_called);
+
+    // Step 2: revalidate at invalid position (no link under cursor)
+    g_state.panel_hide_called = false;
+    g_state.set_cursor_called = false;
+    bool changed = portty_app_revalidate_hover(&app, -1, -1);
+    ASSERT_FALSE(changed);
+    ASSERT_FALSE(g_state.panel_hide_called);
+    ASSERT_FALSE(g_state.set_cursor_called);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -175,6 +198,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_clear_hover_when_active);
     RUN_TEST(test_clear_hover_noop_when_no_hover);
     RUN_TEST(test_clear_hover_null_safety);
+    RUN_TEST(test_clear_then_revalidate_no_link);
 
     TEST_SUMMARY();
 }

@@ -2358,12 +2358,13 @@ void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale)
     }
 }
 
-void rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term,
-                                const char *data_bytes, size_t len)
+int rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term,
+                               const char *data_bytes, size_t len)
 {
     terminal_consume_pushed_rows(term);
     terminal_process_input(term, data_bytes, len);
     int pushed = terminal_consume_pushed_rows(term);
     if (pushed > 0 && rend_sdl3_get_scroll_offset(data) > 0)
         rend_sdl3_scroll(data, term, pushed);
+    return pushed;
 }

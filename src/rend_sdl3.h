@@ -103,6 +103,6 @@ int rend_sdl3_panel_hit_test(RendererSdl3Data *data, int px, int py, bool *close
 void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered);
 int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term, const char *output_path);
 void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale);
-void rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term, const char *data_bytes, size_t len);
+int rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term, const char *data_bytes, size_t len);
 
 #endif // REND_SDL3_H

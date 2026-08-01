@@ -754,19 +754,17 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
     return hover_changed;
 }
 
-void portty_app_process_pty_data(PorttyApp *app, const char *data, size_t len)
-{
-    terminal_process_input(app->term, data, len);
-    terminal_flush_damage(app->term);
-}
-
 void portty_app_feed_terminal(void *app_ptr, const char *data, size_t len)
 {
     PorttyApp *app = (PorttyApp *)app_ptr;
     if (!app || !app->term || !data || len == 0)
         return;
+    terminal_consume_pushed_rows(app->term);
     terminal_process_input(app->term, data, len);
+    int pushed = terminal_consume_pushed_rows(app->term);
     terminal_flush_damage(app->term);
+    if (pushed > 0)
+        portty_app_clear_hover(app);
 }
 
 void portty_app_handle_pty_closed(PorttyApp *app)

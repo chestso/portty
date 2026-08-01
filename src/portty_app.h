@@ -68,7 +68,6 @@ void portty_app_handle_mouse_enter(PorttyApp *app);
 bool portty_app_revalidate_hover(PorttyApp *app, int px, int py);
 void portty_app_clear_hover(PorttyApp *app);
 void portty_app_handle_autoscroll_tick(PorttyApp *app);
-void portty_app_process_pty_data(PorttyApp *app, const char *data, size_t len);
 void portty_app_feed_terminal(void *app, const char *data, size_t len);
 void portty_app_handle_pty_closed(PorttyApp *app);
 void portty_app_handle_child_exit(PorttyApp *app, int status);
