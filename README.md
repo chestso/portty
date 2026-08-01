@@ -44,7 +44,7 @@ Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeT
 - Reverse video attribute rendering
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation
-- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button. The `notification_transparency` config key makes it translucent instead of opaque
+- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
 - Scrollback navigation with mouse wheel and Shift+PageUp/Down
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
@@ -82,19 +82,19 @@ build/src/portty --demo "Hello, world!"
 
 ### CLI Flags
 
-| Flag                        | Description                                                                 |
-| --------------------------- | --------------------------------------------------------------------------- |
-| `-h`                        | Show help message                                                           |
-| `-v`                        | Verbose output (font resolution, COLR, atlas events)                        |
-| `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)                  |
-| `-g COLSxROWS`              | Initial terminal size (default: 80x24)                                      |
-| `-D PREFIX`                 | COLR layer debug: save each layer as `PREFIX_layer00.png`, etc. (SDL3 only) |
-| `-L` / `--list-fonts`       | List available monospace fonts and exit                                     |
-| `-H S` / `--ft-hinting S`   | FreeType hinting: none/light/normal/mono (default: light)                   |
-| `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing)             |
-| `-V` / `--version`          | Print version and exit                                                      |
-| `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)                      |
-| `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#scripting))                               |
+| Flag                        | Description                                                     |
+| --------------------------- | --------------------------------------------------------------- |
+| `-h`                        | Show help message                                               |
+| `-v`                        | Verbose output (font resolution, COLR, atlas events)            |
+| `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)      |
+| `-g COLSxROWS`              | Initial terminal size (default: 80x24)                          |
+| `--dpi-scale SCALE`         | Multiply detected DPI scale (default: 1.0)                      |
+| `-L` / `--list-fonts`       | List available monospace fonts and exit                         |
+| `-H S` / `--ft-hinting S`   | FreeType hinting: none/light/normal/mono (default: light)       |
+| `-d TEXT` / `--demo TEXT`   | Display TEXT in terminal without spawning a shell (for testing) |
+| `-V` / `--version`          | Print version and exit                                          |
+| `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)          |
+| `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#scripting))                   |
 
 ### Keyboard Shortcuts
 
@@ -141,26 +141,31 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 
 ### Commands
 
-| Command                                 | Description                                                                           |
-| --------------------------------------- | ------------------------------------------------------------------------------------- |
-| `wait <seconds>`                        | Pause script execution for N seconds (monotonic clock)                                |
-| `send <text>`                           | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes. |
-| `sendln <text>`                         | Same as `send`, but appends `\r\n` (as if the user pressed Return)                    |
-| `emit <text>`                           | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.    |
-| `raw <hex bytes>`                       | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)             |
-| `emit-raw <hex bytes>`                  | Write raw binary bytes directly to the terminal emulator                              |
-| `assert-contains <text>`                | Assert the terminal grid contains the given substring (prints PASS/FAIL)              |
-| `assert-not-contains <text>`            | Assert the terminal grid does NOT contain the given substring                         |
-| `screendump <path>`                     | Save the framebuffer to a PNG file (captured after render, before present)            |
-| `dumprow <row>`                         | Print all cells in a terminal row                                                     |
-| `dumpcells <row> <col_start> <col_end>` | Print cells in the given range with codepoint, width, attributes, and fg/bg colors    |
-| `dumpverts <row> <col_start> <col_end>` | Dump GPU vertex data for glyphs (Sokol backend only)                                  |
-| `verifybuf <row> <col_start> <col_end>` | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)      |
-| `mousemove <x> <y>`                     | Simulate a mouse move to logical pixel coordinates (Sokol backend only)               |
-| `notify ["title"] ["body"]`             | Show a transient notification panel (Sokol backend only)                              |
-| `record-start <dir> [fps]`              | Start frame recording to directory at target FPS (default 30), QOI format             |
-| `record-stop`                           | Stop frame recording and close manifest                                               |
-| `quit`                                  | Request application quit                                                              |
+| Command                                                               | Description                                                                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `wait <seconds>`                                                      | Pause script execution for N seconds (monotonic clock)                                |
+| `send <text>`                                                         | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes. |
+| `sendln <text>`                                                       | Same as `send`, but appends `\r\n` (as if the user pressed Return)                    |
+| `emit <text>`                                                         | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.    |
+| `raw <hex bytes>`                                                     | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)             |
+| `emit-raw <hex bytes>`                                                | Write raw binary bytes directly to the terminal emulator                              |
+| `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)              |
+| `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                         |
+| `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)            |
+| `dumprow <row>`                                                       | Print all cells in a terminal row                                                     |
+| `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors    |
+| `dumpverts <row> <col_start> <col_end>`                               | Dump GPU vertex data for glyphs (Sokol backend only)                                  |
+| `verifybuf <row> <col_start> <col_end>`                               | Verify GPU vertex buffer contents (Sokol backend only, deferred to post-present)      |
+| `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                   |
+| `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows                                            |
+| `winsize <width> <height>`                                            | Set window pixel size                                                                 |
+| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                     |
+| `panel_hide <id>`                                                     | Hide panel by ID                                                                      |
+| `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                     |
+| `assert-no-hover`                                                     | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                     |
+| `record-start <dir> [fps]`                                            | Start frame recording to directory at target FPS (default 30), QOI format             |
+| `record-stop`                                                         | Stop frame recording and close manifest                                               |
+| `quit`                                                                | Request application quit                                                              |
 
 ### `send` vs `emit`
 
@@ -241,13 +246,11 @@ wait 5.0
 quit
 ```
 
-### Mouse and notification commands (Sokol backend only)
+### Mouse and hover commands
 
-`mousemove` simulates a mouse move to the given **logical** pixel coordinates. This is useful for testing hover states (such as OSC-8 hyperlink previews) without a real mouse or window server. Coordinates are in the same logical pixel space the app uses for cell math, so they are unaffected by HiDPI content scaling.
+`mousemove` simulates a mouse move to the given **physical** pixel coordinates. This is useful for testing hover states (such as OSC-8 hyperlink previews) without a real mouse or window server. Coordinates are in the same physical pixel space the app uses for cell math, so scale them by the content scale if testing on HiDPI displays.
 
-`notify` shows a transient top notification panel. With one argument it sets the title and leaves the body empty; with `"title" "body"` it sets both. The title and body must each be wrapped in double quotes and separated by a space.
-
-Show a notification and then hover an OSC-8 hyperlink to capture the hover preview:
+Hover an OSC-8 hyperlink to capture the hover preview:
 
 ```
 # Run with: portty -S hover_demo.script
@@ -255,19 +258,20 @@ wait 0.5
 emit \e[2J\e[H
 emit \e]8;;https://example.com/some-long-url-path\e\\Hover me\e]8;;\e\\\r\n
 wait 0.5
-notify "Demo" "Notification body text"
-wait 0.5
 # Hover over the "Hover me" link (adjust x/y to match your layout)
 mousemove 200 40
 wait 1.0
+assert-hover
 screendump /tmp/portty-hover.png
 wait 5.0
 quit
 ```
 
+`assert-hover` and `assert-no-hover` check whether an OSC-8 hyperlink is currently hovered, printing PASS or FAIL. These are useful for regression testing hover state management.
+
 ### Backend Support
 
-The Sokol backend supports all commands. The SDL3 backend supports all commands except `dumpverts`, `verifybuf`, `mousemove`, and `notify` (Sokol-specific), which print "not supported by this backend" and skip.
+The Sokol backend supports all commands. The SDL3 backend supports all commands except `dumpverts` and `verifybuf` (Sokol-specific), which print "not supported by this backend" and skip.
 
 ### Frame Recording
 
@@ -338,7 +342,6 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `scrollback`                | Non-negative integer                                  | `1000`             | Scrollback history lines (0 disables)                                                                                                                |
 | `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC` | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`          | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
-| `notification_transparency` | `true`/`false`                                        | `false`            | Draw the top notification panel translucent instead of opaque                                                                                        |
 | `platform`                  | `sdl3`                                                | _(unset)_          | Select the platform backend (only `sdl3` is accepted; use `--with-backend` at configure time for backend selection)                                  |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
@@ -373,7 +376,7 @@ infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 
 All platforms:
 
-- coffer (VT engine, consumed via `pkg-config coffer`; source at https://github.com/chestso/coffer)
+- coffer (VT engine, consumed via `pkg-config coffer >= 0.1.10`; source at https://github.com/chestso/coffer)
 - SDL3 (when using the SDL3 backend)
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
