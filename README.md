@@ -371,11 +371,53 @@ If you SSH to a remote host that lacks the entry, the remote shell will fall bac
 infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 ```
 
+## GNU Emacs
+
+portty ships `data/portty.el`, installed by `make install` to `$(datadir)/emacs/site-lisp/term/portty.el` (typically `~/.local/share/emacs/site-lisp/term/portty.el`). This directory is in Emacs's default `load-path`.
+
+### Automatic loading
+
+Emacs loads terminal-specific initialization files at startup via `tty-run-terminal-initialization`. It searches for `term/<TERM>.el` in `load-path`, stripping hyphenated suffixes until it finds a match. With `TERM=portty-vty-256color`:
+
+1. Looks for `term/portty-vty-256color.el` — not found
+2. Strips `-vty-256color`, looks for `term/portty.el` — **found**
+
+So `portty.el` loads automatically. No user configuration or `init.el` changes are needed. When loaded, it:
+
+1. Loads Emacs's built-in `term/xterm.el` — reuses the entire xterm terminal initialization (keymaps, 256-color support, bracketed paste, focus tracking)
+2. Explicitly enables `modifyOtherKeys` and `setSelection` via `xterm-extra-capabilities` — this avoids xterm version detection (which would not trigger for portty's `TERM`) and directly activates both features
+
+### Verifying it loaded
+
+To confirm the terminal init ran, check that `xterm-extra-capabilities` is bound (it's defined by `term/xterm.el`, which `portty.el` loads):
+
+```elisp
+(boundp 'xterm-extra-capabilities)  ; => t
+```
+
+### Doom Emacs
+
+Doom's `early-init.el` defers `tty-run-terminal-initialization` to `window-setup-hook` (a performance optimization to avoid blocking startup). This means `portty.el` and its CSI-u keymap entries are not installed until after Emacs finishes starting. Key presses during startup will not be decoded. Once `window-setup-hook` fires, everything works the same as vanilla Emacs.
+
+### Ctrl + non-letter keys (e.g. `Ctrl+Shift+Alt+%`)
+
+The legacy terminal encoding has no way to represent Ctrl combined with keys that lack a traditional ASCII control code (letters `A`–`Z`, `a`–`z`, `@`–`_`, space, `?`). For keys like `%`, `1`, `,`, `.`, `;`, etc., there is simply no corresponding C0 control character. Historically, many terminals (including xterm and VTE) silently swallowed these combinations — the keypress produced nothing, and the Ctrl modifier was lost.
+
+portty (via coffer) follows kitty's convention: for Ctrl + keys with no traditional mapping, it emits a **CSI-u** escape sequence (`ESC [ <codepoint> ; <modifiers> u`) even in legacy mode (i.e. when the kitty keyboard protocol is not explicitly active). This preserves the full modifier state so applications can distinguish e.g. `Ctrl+%` from `%`.
+
+Emacs's `term/xterm.el` already installs `input-decode-map` entries for CSI-u sequences covering a range of non-letter keys (`,`, `.`, `/`, `;`, `=`, `0`–`9`, `!`–`+`, `:`, `<`, `>`, `?`, `\`, tab, return) across multiple modifier combinations (Shift, Ctrl, Alt, and their combinations). Because `portty.el` loads `term/xterm.el`, these bindings are active by default — **no additional packages or configuration are needed** for Emacs to decode CSI-u sequences for these keys.
+
+For example, `Ctrl+Shift+Alt+%` is emitted as `ESC[37;8u` (37 = codepoint for `%`, 8 = 1 + shift(1) + alt(2) + ctrl(4)), which Emacs decodes to `C-M-S-%`.
+
+### Kitty keyboard protocol
+
+When an application explicitly enables the kitty keyboard protocol (Disambiguate or Report-all flags), portty routes all Ctrl and Alt + key combinations through CSI-u, including those with traditional control codes. This is the unambiguous path — `Ctrl+A` becomes `ESC[97;5u` instead of `0x01`, so the application can recover the Shift modifier and distinguish `Ctrl+A` from a literal `0x01` byte.
+
 ## Dependencies
 
 All platforms:
 
-- coffer (VT engine, consumed via `pkg-config coffer >= 0.1.10`; source at https://github.com/chestso/coffer)
+- coffer (VT engine, consumed via `pkg-config coffer >= 0.1.11`; source at https://github.com/chestso/coffer)
 - SDL3 (when using the SDL3 backend)
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
