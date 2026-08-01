@@ -1483,12 +1483,6 @@ static void sdl3_run(PorttyBackend *self)
                 {
                     PtyDataPayload *payload = (PtyDataPayload *)event.user.data1;
                     if (payload) {
-                        // Clear link hover on PTY output — content may have scrolled.
-                        if (terminal_hovered_hyperlink(term) != 0) {
-                            terminal_set_hovered_hyperlink(term, 0);
-                            self->panel_hide(self, PANEL_ID_LINK_HINT);
-                            self->set_cursor(self, PORTTY_CURSOR_TEXT);
-                        }
                         rend_sdl3_process_pty_data(rend, term, payload->data, payload->len);
                         self->set_window_title(self, terminal_get_title(term));
                         free(payload);
@@ -1627,14 +1621,27 @@ static void sdl3_run(PorttyBackend *self)
                 break;
 
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
+                d->has_focus = true;
+                terminal_mark_dirty(term);
+                {
+                    int px = -1, py = -1;
+                    float mx, my;
+                    if (SDL_GetMouseFocus() == d->window) {
+                        SDL_GetMouseState(&mx, &my);
+                        sdl3_scale_mouse_coords(d, mx, my, &px, &py);
+                    }
+                    if (portty_app_revalidate_hover(d->app, px, py))
+                        terminal_mark_dirty(term);
+                }
+                break;
             case SDL_EVENT_WINDOW_FOCUS_LOST:
-                d->has_focus = (event.type == SDL_EVENT_WINDOW_FOCUS_GAINED);
+                d->has_focus = false;
+                portty_app_clear_hover(d->app);
                 terminal_mark_dirty(term);
                 break;
 
             case SDL_EVENT_WINDOW_MOUSE_LEAVE:
-                if (term)
-                    terminal_set_hovered_hyperlink(term, 0);
+                portty_app_clear_hover(d->app);
                 if (d->left_button_up_buffered &&
                     SDL_GetTicks() - d->left_button_up_tick < 100) {
                     d->left_button_up_buffered = false;
@@ -1652,6 +1659,16 @@ static void sdl3_run(PorttyBackend *self)
 
             case SDL_EVENT_WINDOW_MOUSE_ENTER:
                 portty_app_handle_mouse_enter(d->app);
+                {
+                    int px = -1, py = -1;
+                    float mx, my;
+                    if (SDL_GetMouseFocus() == d->window) {
+                        SDL_GetMouseState(&mx, &my);
+                        sdl3_scale_mouse_coords(d, mx, my, &px, &py);
+                    }
+                    if (portty_app_revalidate_hover(d->app, px, py))
+                        terminal_mark_dirty(term);
+                }
                 break;
 
             case SDL_EVENT_MOUSE_WHEEL:

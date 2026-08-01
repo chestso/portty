@@ -1,6 +1,7 @@
 #include "test_helpers.h"
 #include "../src/portty_app.h"
 #include "../src/portty_backend.h"
+#include "../src/portty_panel.h"
 #include "../src/common.h"
 
 float portty_text_gamma = 1.0f;
@@ -15,6 +16,13 @@ typedef struct
     bool resume_called;
     char clipboard_text[64];
     const char *working_dir;
+    // Hover tracking
+    bool panel_show_called;
+    bool panel_hide_called;
+    int panel_hide_id;
+    bool set_cursor_called;
+    PorttyCursor set_cursor_shape;
+    int set_cursor_call_count;
 } StubPlatState;
 
 static StubPlatState g_state = { 0 };
@@ -46,6 +54,21 @@ static void backend_set_working_dir(PorttyBackend *self, const char *dir)
     g_state.working_dir = dir;
 }
 
+static void backend_panel_hide(PorttyBackend *self, int id)
+{
+    (void)self;
+    g_state.panel_hide_called = true;
+    g_state.panel_hide_id = id;
+}
+
+static void backend_set_cursor(PorttyBackend *self, PorttyCursor shape)
+{
+    (void)self;
+    g_state.set_cursor_called = true;
+    g_state.set_cursor_shape = shape;
+    g_state.set_cursor_call_count++;
+}
+
 static void reset_state(void)
 {
     g_state = (StubPlatState){ 0 };
@@ -54,6 +77,8 @@ static void reset_state(void)
         .resume_pty = backend_resume_pty,
         .clipboard_set = backend_clipboard_set,
         .set_working_dir = backend_set_working_dir,
+        .panel_hide = backend_panel_hide,
+        .set_cursor = backend_set_cursor,
     };
 }
 
@@ -102,6 +127,43 @@ static void test_term_output_to_pty_writes(void)
     ASSERT_TRUE(true);
 }
 
+static void test_clear_hover_when_active(void)
+{
+    reset_state();
+    TerminalBackend term = { 0 };
+    term.hovered_hyperlink_id = 42;
+    PorttyApp app = { .term = &term, .backend = &g_stub_backend };
+
+    portty_app_clear_hover(&app);
+
+    ASSERT_EQ(terminal_hovered_hyperlink(&term), 0);
+    ASSERT_TRUE(g_state.panel_hide_called);
+    ASSERT_EQ(g_state.panel_hide_id, PANEL_ID_LINK_HINT);
+    ASSERT_TRUE(g_state.set_cursor_called);
+    ASSERT_EQ(g_state.set_cursor_shape, PORTTY_CURSOR_TEXT);
+}
+
+static void test_clear_hover_noop_when_no_hover(void)
+{
+    reset_state();
+    TerminalBackend term = { 0 };
+    PorttyApp app = { .term = &term, .backend = &g_stub_backend };
+
+    portty_app_clear_hover(&app);
+
+    ASSERT_EQ(terminal_hovered_hyperlink(&term), 0);
+    ASSERT_FALSE(g_state.panel_hide_called);
+    ASSERT_FALSE(g_state.set_cursor_called);
+}
+
+static void test_clear_hover_null_safety(void)
+{
+    reset_state();
+    // Should not crash with NULL app or NULL term.
+    portty_app_clear_hover(NULL);
+    ASSERT_TRUE(true);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -110,6 +172,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_clipboard_set_forwards_text);
     RUN_TEST(test_cwd_change_forwards_dir);
     RUN_TEST(test_term_output_to_pty_writes);
+    RUN_TEST(test_clear_hover_when_active);
+    RUN_TEST(test_clear_hover_noop_when_no_hover);
+    RUN_TEST(test_clear_hover_null_safety);
 
     TEST_SUMMARY();
 }

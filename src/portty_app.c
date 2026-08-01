@@ -348,6 +348,17 @@ bool portty_app_revalidate_hover(PorttyApp *app, int px, int py)
     return resolve_link_hover(app, px, py);
 }
 
+void portty_app_clear_hover(PorttyApp *app)
+{
+    if (!app || !app->term || !app->backend)
+        return;
+    if (terminal_hovered_hyperlink(app->term) == 0)
+        return;
+    terminal_set_hovered_hyperlink(app->term, 0);
+    app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
+    app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
+}
+
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
                                      int mod, uint32_t codepoint)
 {
@@ -508,12 +519,7 @@ void portty_app_handle_scroll(PorttyApp *app, int delta)
     if (delta == 0)
         return;
 
-    // Hide link hint panel on scroll — the hovered link may have moved.
-    if (terminal_hovered_hyperlink(app->term) != 0) {
-        terminal_set_hovered_hyperlink(app->term, 0);
-        app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
-        app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
-    }
+    portty_app_clear_hover(app);
 
     if (pager_active(app->pager)) {
         pager_scroll(app->pager, delta * SCROLL_LINES_PER_TICK);
@@ -752,13 +758,6 @@ void portty_app_process_pty_data(PorttyApp *app, const char *data, size_t len)
 {
     terminal_process_input(app->term, data, len);
     terminal_flush_damage(app->term);
-
-    // Clear link hover on terminal output — the content may have scrolled.
-    if (terminal_hovered_hyperlink(app->term) != 0) {
-        terminal_set_hovered_hyperlink(app->term, 0);
-        app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
-        app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
-    }
 }
 
 void portty_app_feed_terminal(void *app_ptr, const char *data, size_t len)
@@ -768,13 +767,6 @@ void portty_app_feed_terminal(void *app_ptr, const char *data, size_t len)
         return;
     terminal_process_input(app->term, data, len);
     terminal_flush_damage(app->term);
-
-    // Clear link hover on terminal output — the content may have scrolled.
-    if (terminal_hovered_hyperlink(app->term) != 0) {
-        terminal_set_hovered_hyperlink(app->term, 0);
-        app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
-        app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
-    }
 }
 
 void portty_app_handle_pty_closed(PorttyApp *app)

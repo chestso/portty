@@ -668,12 +668,6 @@ static void sokol_drain_pty(SokolData *d)
 
     while (head) {
         PtyDataNode *next = head->next;
-        // Clear link hover on PTY output — content may have scrolled.
-        if (terminal_hovered_hyperlink(d->term) != 0) {
-            terminal_set_hovered_hyperlink(d->term, 0);
-            d->self->panel_hide(d->self, PANEL_ID_LINK_HINT);
-            d->self->set_cursor(d->self, PORTTY_CURSOR_TEXT);
-        }
         terminal_consume_pushed_rows(d->term);
         terminal_process_input(d->term, head->data, head->len);
         int pushed = terminal_consume_pushed_rows(d->term);
@@ -687,6 +681,10 @@ static void sokol_drain_pty(SokolData *d)
 
     // Update window title after PTY data, mirroring SDL3 backend.
     d->self->set_window_title(d->self, terminal_get_title(d->term));
+
+    // Re-resolve OSC-8 hover after PTY output
+    if (portty_app_revalidate_hover(d->app, d->last_mouse_x, d->last_mouse_y))
+        terminal_mark_dirty(d->term);
 
     // Start lottie tick timer if animations are active
     if (d->lottie_timer == TIMER_INVALID && terminal_lottie_count(d->term) > 0) {
@@ -2883,9 +2881,11 @@ static void sokol_event_cb(const sapp_event *ev)
     }
     case SAPP_EVENTTYPE_MOUSE_ENTER:
         portty_app_handle_mouse_enter(d->app);
-        terminal_mark_dirty(d->term);
+        if (portty_app_revalidate_hover(d->app, d->last_mouse_x, d->last_mouse_y))
+            terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_MOUSE_LEAVE:
+        portty_app_clear_hover(d->app);
         portty_app_handle_mouse_leave(d->app, (int)ev->mouse_x,
                                       (int)ev->mouse_y);
         terminal_mark_dirty(d->term);
@@ -2898,9 +2898,12 @@ static void sokol_event_cb(const sapp_event *ev)
     case SAPP_EVENTTYPE_FOCUSED:
         d->has_focus = true;
         terminal_mark_dirty(d->term);
+        if (portty_app_revalidate_hover(d->app, d->last_mouse_x, d->last_mouse_y))
+            terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_UNFOCUSED:
         d->has_focus = false;
+        portty_app_clear_hover(d->app);
         terminal_mark_dirty(d->term);
         break;
     case SAPP_EVENTTYPE_QUIT_REQUESTED:
