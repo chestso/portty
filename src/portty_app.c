@@ -352,11 +352,11 @@ void portty_app_clear_hover(PorttyApp *app)
 {
     if (!app || !app->term || !app->backend)
         return;
-    if (terminal_hovered_hyperlink(app->term) == 0)
-        return;
+    bool was_hovering = terminal_hovered_hyperlink(app->term) != 0;
     terminal_set_hovered_hyperlink(app->term, 0);
     app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
-    app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
+    if (was_hovering)
+        app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
 }
 
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,

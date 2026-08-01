@@ -152,7 +152,7 @@ static void test_clear_hover_noop_when_no_hover(void)
     portty_app_clear_hover(&app);
 
     ASSERT_EQ(terminal_hovered_hyperlink(&term), 0);
-    ASSERT_FALSE(g_state.panel_hide_called);
+    ASSERT_TRUE(g_state.panel_hide_called);
     ASSERT_FALSE(g_state.set_cursor_called);
 }
 

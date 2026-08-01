@@ -689,10 +689,11 @@ static void sokol_drain_pty(SokolData *d)
     // Re-resolve OSC-8 hover after PTY output. If the terminal content
     // scrolled, the link under the cursor may have moved, so clear first
     // then re-resolve to avoid stale hover.
-    if (pty_scrolled)
+    if (pty_scrolled) {
         portty_app_clear_hover(d->app);
-    if (portty_app_revalidate_hover(d->app, d->last_mouse_x, d->last_mouse_y))
+    } else if (portty_app_revalidate_hover(d->app, d->last_mouse_x, d->last_mouse_y)) {
         terminal_mark_dirty(d->term);
+    }
 
     // Start lottie tick timer if animations are active
     if (d->lottie_timer == TIMER_INVALID && terminal_lottie_count(d->term) > 0) {

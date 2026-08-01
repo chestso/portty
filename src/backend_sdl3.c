@@ -1827,10 +1827,11 @@ static void sdl3_run(PorttyBackend *self)
                 SDL_GetMouseState(&mx, &my);
                 sdl3_scale_mouse_coords(d, mx, my, &px, &py);
             }
-            if (pty_scrolled)
+            if (pty_scrolled) {
                 portty_app_clear_hover(d->app);
-            if (portty_app_revalidate_hover(d->app, px, py))
+            } else if (portty_app_revalidate_hover(d->app, px, py)) {
                 terminal_mark_dirty(term);
+            }
         }
 
         // === 3. Render (only blocking call during active rendering) ===
