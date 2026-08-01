@@ -95,7 +95,6 @@ void portty_conf_init(PorttyConf *conf)
     conf->hinting = PORTTY_HINT_UNSET;
     conf->verbose = -1;
     conf->word_chars = NULL;
-    conf->platform = NULL;
     conf->scrollback = -1;
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
@@ -188,15 +187,6 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
         } else if (strcmp(key, "word_chars") == 0) {
             free(conf->word_chars);
             conf->word_chars = strdup(val);
-        } else if (strcmp(key, "platform") == 0) {
-            if (strcmp(val, "sdl3") == 0) {
-                free(conf->platform);
-                conf->platform = strdup(val);
-            } else {
-                fprintf(stderr,
-                        "WARNING: %s:%d: invalid platform '%s' (use sdl3)\n",
-                        path, lineno, val);
-            }
         } else if (strcmp(key, "scrollback") == 0) {
             char *end = NULL;
             long n = strtol(val, &end, 10);
@@ -251,11 +241,11 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
     fclose(fp);
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d verbose=%d"
-         " word_chars=%s platform=%s scrollback=%d shell=%s text_gamma=%.2f"
+         " word_chars=%s scrollback=%d shell=%s text_gamma=%.2f"
          " text_contrast=%.1f\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
          conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
-         conf->platform ? conf->platform : "(unset)", conf->scrollback,
+         conf->scrollback,
          conf->shell ? conf->shell : "(unset)",
          conf->text_gamma, conf->text_contrast);
 
@@ -279,8 +269,6 @@ void portty_conf_free(PorttyConf *conf)
     conf->font = NULL;
     free(conf->word_chars);
     conf->word_chars = NULL;
-    free(conf->platform);
-    conf->platform = NULL;
     free(conf->shell);
     conf->shell = NULL;
     free(conf->source_path);

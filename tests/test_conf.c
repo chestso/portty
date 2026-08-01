@@ -58,7 +58,6 @@ static void test_init_defaults(void)
     ASSERT_EQ(conf.hinting, PORTTY_HINT_UNSET);
     ASSERT_EQ(conf.verbose, -1);
     ASSERT_NULL(conf.word_chars);
-    ASSERT_NULL(conf.platform);
     ASSERT_EQ(conf.scrollback, -1);
 
     portty_conf_free(&conf);
@@ -130,20 +129,6 @@ static void test_parse_word_chars(void)
     portty_conf_init(&conf);
     ASSERT_TRUE(portty_conf_load_path(&conf, path));
     ASSERT_STR_EQ(conf.word_chars, "-_./~");
-
-    portty_conf_free(&conf);
-    cleanup_tmp(path);
-}
-
-static void test_parse_platform(void)
-{
-    char *path = write_tmp_conf("[terminal]\nplatform = sdl3\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyConf conf;
-    portty_conf_init(&conf);
-    ASSERT_TRUE(portty_conf_load_path(&conf, path));
-    ASSERT_STR_EQ(conf.platform, "sdl3");
 
     portty_conf_free(&conf);
     cleanup_tmp(path);
@@ -297,7 +282,6 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_hinting);
     RUN_TEST(test_parse_booleans);
     RUN_TEST(test_parse_word_chars);
-    RUN_TEST(test_parse_platform);
     RUN_TEST(test_parse_scrollback);
     RUN_TEST(test_parse_scrollback_zero);
     RUN_TEST(test_parse_scrollback_invalid);
