@@ -21,6 +21,7 @@ typedef struct
     int verbose;            /* -1 = not set, 0 = false, 1 = true */
     char *word_chars;       /* NULL = not set */
     int scrollback;         /* -1 = not set; >= 0 = lines (0 disables) */
+    int ambiguous_wide;     /* -1 = not set, 0 = false, 1 = true */
     float text_gamma;       /* < 0 = unset (neutral); kitty text_composition_strategy gamma */
     float text_contrast;    /* < 0 = unset (neutral); kitty contrast, 0..100 */
     char *shell;            /* NULL = not set; overrides $SHELL/COMSPEC when no -- args */

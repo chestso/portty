@@ -96,6 +96,7 @@ void portty_conf_init(PorttyConf *conf)
     conf->verbose = -1;
     conf->word_chars = NULL;
     conf->scrollback = -1;
+    conf->ambiguous_wide = -1;
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
     conf->shell = NULL;
@@ -200,6 +201,14 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
         } else if (strcmp(key, "shell") == 0) {
             free(conf->shell);
             conf->shell = strdup(val);
+        } else if (strcmp(key, "ambiguous_wide") == 0) {
+            int b = parse_bool(val);
+            if (b < 0)
+                fprintf(stderr, "WARNING: %s:%d: invalid ambiguous_wide '%s' "
+                                "(expected true/false, yes/no, or 1/0)\n",
+                        path, lineno, val);
+            else
+                conf->ambiguous_wide = b;
         } else if (strcmp(key, "text_composition_strategy") == 0) {
             /* kitty-compatible: "kitty" (gamma 1.7, contrast 30),
              * "neutral"/"correct" (pure linear), or "<gamma> [contrast]". */
@@ -241,11 +250,11 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
     fclose(fp);
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d verbose=%d"
-         " word_chars=%s scrollback=%d shell=%s text_gamma=%.2f"
-         " text_contrast=%.1f\n",
+         " word_chars=%s scrollback=%d ambiguous_wide=%d shell=%s"
+         " text_gamma=%.2f text_contrast=%.1f\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
          conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
-         conf->scrollback,
+         conf->scrollback, conf->ambiguous_wide,
          conf->shell ? conf->shell : "(unset)",
          conf->text_gamma, conf->text_contrast);
 

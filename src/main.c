@@ -127,6 +127,7 @@ static void print_usage(const char *progname)
     printf("  -d TEXT               Demo mode: feed TEXT into the terminal\n");
     printf("  -S, --script FILE     Run debug script FILE (see docs/debug-infrastructure-design.md)\n");
     printf("  --dpi-scale SCALE     Multiply detected DPI scale (default: 1.0)\n");
+    printf("  -W, --ambiguous-wide   Render ambiguous-width chars as 2 cells\n");
 }
 
 static void print_version(void)
@@ -151,6 +152,7 @@ typedef struct
     int init_scrollback;
     const char *script_path;
     float dpi_scale;
+    int ambiguous_wide;
 } PorttyArgs;
 
 static void portty_args_init(PorttyArgs *args)
@@ -162,6 +164,7 @@ static void portty_args_init(PorttyArgs *args)
     args->init_rows = DEFAULT_ROWS;
     args->init_scrollback = -1;
     args->dpi_scale = 1.0f;
+    args->ambiguous_wide = -1;
 }
 
 /* Helper for --dpi-scale parsing (shared with tests) */
@@ -188,10 +191,11 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
         { "scrollback", required_argument, NULL, 's' },
         { "script", required_argument, NULL, 'S' },
         { "dpi-scale", required_argument, NULL, 'D' },
+        { "ambiguous-wide", no_argument, NULL, 'W' },
         { NULL, 0, NULL, 0 }
     };
 
-    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:", long_options, NULL)) != -1) {
+    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:W", long_options, NULL)) != -1) {
         switch (args->opt) {
         case 'h':
             print_usage(argv[0]);
@@ -201,6 +205,9 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
             return 0;
         case 'v':
             verbose = 1;
+            break;
+        case 'W':
+            args->ambiguous_wide = 1;
             break;
         case 'd':
             args->demo_text = optarg;
@@ -326,6 +333,10 @@ static void apply_conf_to_args(PorttyArgs *args, PorttyConf *conf)
         portty_text_gamma = conf->text_gamma;
     if (conf->text_contrast >= 0.0f)
         portty_text_contrast = conf->text_contrast;
+    if (args->ambiguous_wide == -1 && conf->ambiguous_wide >= 0)
+        args->ambiguous_wide = conf->ambiguous_wide;
+    if (args->ambiguous_wide == -1)
+        args->ambiguous_wide = 0;
 }
 
 static TerminalBackend *create_terminal(PorttyArgs *args)
@@ -337,6 +348,7 @@ static TerminalBackend *create_terminal(PorttyArgs *args)
     cfg.cell_w_px = 10;
     cfg.cell_h_px = 20;
     cfg.reflow = true;
+    cfg.ambiguous_wide = (args->ambiguous_wide > 0);
     TerminalBackend *term = terminal_init(vt_backend, &cfg);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");

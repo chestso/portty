@@ -95,6 +95,7 @@ build/src/portty --demo "Hello, world!"
 | `-V` / `--version`          | Print version and exit                                          |
 | `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)          |
 | `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#scripting))                   |
+| `-W` / `--ambiguous-wide`   | Render ambiguous-width chars as 2 cells                         |
 
 ### Keyboard Shortcuts
 
@@ -326,6 +327,7 @@ word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/
 scrollback = 1000
 shell = /bin/bash
 text_composition_strategy = kitty
+ambiguous_wide = false
 ```
 
 ### Available Keys
@@ -342,6 +344,7 @@ All keys are optional. Only the `[terminal]` section is recognized.
 | `scrollback`                | Non-negative integer                                  | `1000`             | Scrollback history lines (0 disables)                                                                                                                |
 | `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC` | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`          | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
+| `ambiguous_wide`            | `true`/`false`                                        | `false`            | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 
