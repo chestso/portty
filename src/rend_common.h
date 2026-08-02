@@ -275,7 +275,7 @@ void rend_make_close_x_bitmap(uint8_t *buf, int size);
 // Fallback font resolution — GPU-agnostic
 // =============================================================================
 
-#define REND_FALLBACK_CACHE_SIZE  64
+#define REND_FALLBACK_CACHE_SIZE  2048
 #define REND_MAX_LOADED_FALLBACKS 8
 
 typedef struct
