@@ -116,3 +116,6 @@ crush.json
 CLAUDE.md
 AGENTS.md
 .claude/
+
+# Vendored third-party headers (fetched by scripts/fetch-*.sh at configure time)
+third_party/

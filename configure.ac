@@ -120,6 +120,13 @@ AS_CASE([$portty_backend],
     CFLAGS="$SOKOL_CFLAGS $CFLAGS"
     AC_SUBST([SOKOL_CFLAGS])
     AC_DEFINE([PORTTY_BACKEND_SOKOL], [1], [Use Sokol backend])
+    # Auto-fetch Sokol headers if missing so --with-backend=sokol works
+    # without a manual scripts/fetch-sokol.sh step.
+    AS_IF([test ! -f "$srcdir/third_party/sokol/sokol_app.h"],
+      [AC_MSG_NOTICE([Sokol headers not found, fetching via scripts/fetch-sokol.sh])
+       AS_IF([$srcdir/scripts/fetch-sokol.sh "$srcdir/third_party/sokol"],
+         [AC_MSG_NOTICE([Sokol headers fetched successfully])],
+         [AC_MSG_ERROR([Failed to fetch Sokol headers. Run scripts/fetch-sokol.sh manually or check network access.])])])
     AS_CASE([$host_os],
       [*linux*], [
         AC_DEFINE([SOKOL_GLCORE], [1], [Use Sokol OpenGL core profile])
@@ -140,6 +147,16 @@ AS_CASE([$portty_backend],
 AM_CONDITIONAL([BACKEND_SDL3], [test "x$portty_backend" = xsdl3])
 AM_CONDITIONAL([BACKEND_SOKOL], [test "x$portty_backend" = xsokol])
 AC_SUBST([portty_backend])
+
+# The QOI single-header library (used by the frame recorder's qoi_writer.c)
+# lives in third_party/qoi/qoi.h. It is fetched by scripts/fetch-qoi.sh and
+# is required by both backends. Auto-fetch it at configure time if missing
+# so a fresh checkout builds without a manual fetch step.
+AS_IF([test ! -f "$srcdir/third_party/qoi/qoi.h"],
+  [AC_MSG_NOTICE([QOI header not found, fetching via scripts/fetch-qoi.sh])
+   AS_IF([$srcdir/scripts/fetch-qoi.sh "$srcdir/third_party/qoi"],
+     [AC_MSG_NOTICE([QOI header fetched successfully])],
+     [AC_MSG_ERROR([Failed to fetch QOI header. Run scripts/fetch-qoi.sh manually or check network access.])])])
 
 AS_IF([test "x$portty_backend" = xsdl3], [
   # Check for libraries
