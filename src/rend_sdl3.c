@@ -643,6 +643,32 @@ static void render_cell_bg(RendererSdl3Data *data, int row, int vis_col,
     SDL_RenderFillRect(data->renderer, &bg_rect);
 }
 
+// Draw the selection highlight overlay for a single cell if it is inside
+// the active selection range. Called from every exit path in render_cell
+// so that shaped glyphs, box-drawing, and empty cells all get highlighted.
+static void render_cell_selection(RendererSdl3Data *data, TerminalBackend *term,
+                                  int row, int vt_col, int vis_col,
+                                  int columns_to_consume, bool populate_only)
+{
+    if (populate_only)
+        return;
+    int scroll_offset = data->scroll.scroll_offset;
+    int scrollback_row = scroll_offset - 1 - row;
+    int unified_row = (scrollback_row >= 0) ? -(scrollback_row + 1) : (row - scroll_offset);
+    if (!terminal_cell_in_selection(term, unified_row, vt_col))
+        return;
+    float sx = (float)(vis_col * data->cell_width);
+    float sy = (float)(row * data->cell_height);
+    float sw = (float)(columns_to_consume * data->cell_width);
+    float sh = (float)data->cell_height;
+    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
+    SDL_SetRenderDrawColor(data->renderer, TERM_SELECTION_R, TERM_SELECTION_G,
+                           TERM_SELECTION_B, TERM_SELECTION_A);
+    SDL_FRect sel_rect = { sx, sy, sw, sh };
+    SDL_RenderFillRect(data->renderer, &sel_rect);
+    SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
+}
+
 // Render a single cell (glyphs only; cursor is drawn separately).
 // Cell must be pre-fetched by the caller (typically via TerminalRowIter).
 // row:     display row (for draw position).
@@ -684,7 +710,9 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int columns_to_consume = pres_w > 0 ? pres_w : 1;
 
     if (cell.cp == 0) {
-        // Empty cell - nothing to render
+        // Empty cell - nothing to render, but still draw selection highlight
+        render_cell_selection(data, term, row, vt_col, vis_col,
+                              columns_to_consume, populate_only);
         return;
     }
 
@@ -757,6 +785,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                        avail_w, avail_h, data->font_ascent,
                        false, r, g, b, data->glyph_shader, bg_luma);
         }
+        render_cell_selection(data, term, row, vt_col, vis_col,
+                              columns_to_consume, populate_only);
         return;
     }
 
@@ -929,6 +959,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             free(shaped->y_positions);
             free(shaped->x_advances);
             free(shaped);
+            render_cell_selection(data, term, row, vt_col, vis_col,
+                                  columns_to_consume, populate_only);
             return;
         }
     }
@@ -1001,24 +1033,8 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     }
 
     // Selection highlight
-    if (!populate_only) {
-        int scroll_offset = data->scroll.scroll_offset;
-        int scrollback_row = scroll_offset - 1 - row;
-        int unified_row = (scrollback_row >= 0) ? -(scrollback_row + 1) : (row - scroll_offset);
-        if (terminal_cell_in_selection(term, unified_row, vt_col)) {
-            float sx = (float)(vis_col * data->cell_width);
-            float sy = (float)(row * data->cell_height);
-            float sw = (float)(columns_to_consume * data->cell_width);
-            float sh = (float)data->cell_height;
-
-            SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-            SDL_SetRenderDrawColor(data->renderer, TERM_SELECTION_R, TERM_SELECTION_G,
-                                   TERM_SELECTION_B, TERM_SELECTION_A);
-            SDL_FRect sel_rect = { sx, sy, sw, sh };
-            SDL_RenderFillRect(data->renderer, &sel_rect);
-            SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
-        }
-    }
+    render_cell_selection(data, term, row, vt_col, vis_col,
+                          columns_to_consume, populate_only);
 }
 
 // Flush one coalesced SGR-underline run [vis_start, vis_end) on `row`, in the
