@@ -98,6 +98,14 @@ GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
 
     int dst_w = (int)(src->width * scale + 0.5f);
     int dst_h = (int)(src->height * scale + 0.5f);
+    // Clamp to the cell box. The +0.5f-to-int round can occasionally push
+    // a single pixel above the bounding box when src dims have awkward
+    // ratios. Callers assume `region.w <= avail_w`; honour that contract so
+    // downstream placement math doesn't have to defend against overflow.
+    if (dst_w > max_w)
+        dst_w = max_w;
+    if (dst_h > max_h)
+        dst_h = max_h;
     if (dst_w <= 0)
         dst_w = 1;
     if (dst_h <= 0)

@@ -1,5 +1,11 @@
 #include "test_helpers.h"
 #include "../src/rend_common.h"
+#include <stdlib.h>
+#include <string.h>
+
+/* Forward declarations */
+static void test_nf_translate_known_mappings(void);
+static void test_downscale_output_fits_cell_box(void);
 
 static void test_nf_translate_known_mappings(void)
 {
@@ -97,6 +103,50 @@ int main(int argc, char *argv[])
     RUN_TEST(test_display_row_to_unified_no_scroll);
     RUN_TEST(test_display_row_to_unified_with_scrollback);
     RUN_TEST(test_clamp_pixel_to_viewport);
+    RUN_TEST(test_downscale_output_fits_cell_box);
 
     TEST_SUMMARY();
+}
+
+// The downscaler contract: result bitmap always fits within (max_w, max_h).
+// The +0.5 round can push a stray pixel above the box for awkward source
+// ratios; the clamp in rend_common.c keeps it honest so backend placement
+// math doesn't have to defend against overflow.
+static void test_downscale_output_fits_cell_box(void)
+{
+    int targets[][2] = {
+        { 16, 17 }, // square-ish
+        { 8, 16 },  // tall
+        { 16, 8 },  // wide
+        { 1, 1 },   // minimum (degenerate)
+        { 64, 65 }, // odd aspect
+    };
+    int source_sizes[][2] = {
+        { 128, 256 }, // 4x emoji pipeline
+        { 64, 64 },
+        { 33, 33 }, // prime-numbered source — round-up hazard
+        { 7, 11 },  // tiny primes
+    };
+    for (int ti = 0; ti < (int)(sizeof(targets) / sizeof(targets[0])); ti++) {
+        int mw = targets[ti][0], mh = targets[ti][1];
+        for (int si = 0; si < (int)(sizeof(source_sizes) / sizeof(source_sizes[0])); si++) {
+            int sw = source_sizes[si][0], sh = source_sizes[si][1];
+            GlyphBitmap src = { 0 };
+            src.width = sw;
+            src.height = sh;
+            src.pixels = calloc((size_t)sw * sh * 4, 1);
+            for (int p = 0; p < sw * sh; p++) {
+                src.pixels[p * 4 + 0] = 200;
+                src.pixels[p * 4 + 3] = 200;
+            }
+            GlyphBitmap *out = rend_downscale_bitmap(&src, mw, mh);
+            if (out) {
+                ASSERT_TRUE(out->width <= mw);
+                ASSERT_TRUE(out->height <= mh);
+                free(out->pixels);
+                free(out);
+            }
+            free(src.pixels);
+        }
+    }
 }
