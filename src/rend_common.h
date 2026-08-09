@@ -109,7 +109,8 @@ GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
                                    bool height_only_fit);
 
 // Check if a codepoint is a symbol/dingbat that may overflow the text cell
-// and needs downscaling or centered placement.
+// and needs centered placement (no downscale — symbol glyphs are rasterized
+// at the text font's native metrics, like ASCII, so they stay crisp).
 bool rend_is_symbol_cell_cp(uint32_t cp);
 
 // Check if a font style produces color (COLR v1 or emoji) glyphs.

@@ -177,9 +177,15 @@ GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
     return result;
 }
 
-// Symbol/dingbat codepoints whose glyphs frequently exceed the text cell.
-// Box Drawing (0x2500-0x257F) and Block Elements (0x2580-0x259F) are drawn
-// procedurally elsewhere and intentionally excluded.
+// Symbol/dingbat codepoints whose horizontal metrics differ from the text-
+// font baseline path: Dingbats, Misc Symbols, Geometric Shapes, etc.
+// These glyphs often have a font advance wider than 1 cell (mono fonts
+// calibrate emoji/symbol advances against a wider em). Override the
+// bitmap_left-anchored placement so the ink sits centered horizontally
+// in the cell while FreeType's bitmap_top still anchors it to the
+// typographic baseline. No downscale is applied — symbol glyphs are
+// rendered at the text font's native metrics like ASCII, so they stay
+// crisp on the same vertical scale as surrounding letters.
 bool rend_is_symbol_cell_cp(uint32_t cp)
 {
     return is_emoji_presentation(cp) || is_regional_indicator(cp) ||

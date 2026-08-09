@@ -2,6 +2,18 @@
 #include "rend_common.h"
 #include <stdlib.h>
 
+/* Forward declarations so main() can register tests via RUN_TEST. */
+static void test_unicode_cell_has_vs15(void);
+static void test_vs15_routes_to_emoji_when_glyph_available(void);
+static void test_vs15_routes_to_emoji_for_emoji_default(void);
+static void test_vs15_does_not_force_emoji_via_vs16(void);
+static void test_vs16_forces_emoji(void);
+static void test_regional_indicator_routes_to_emoji(void);
+static void test_emoji_default_without_vs15(void);
+static void test_text_default_without_vs15_stays_text(void);
+static void test_no_emoji_font_available(void);
+static void test_empty_or_invalid_input(void);
+
 /* --- VS15 detection --- */
 
 static void test_unicode_cell_has_vs15(void)

@@ -1229,8 +1229,16 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
 
                 bool emoji_render = (style == FONT_STYLE_EMOJI);
                 bool symbol_cell = rend_is_symbol_cell_cp(cell.cp);
-                bool downscale_glyph = (emoji_render && color_baked) || symbol_cell;
-                bool height_only_fit = symbol_cell && !color_baked;
+                bool downscale_glyph = (emoji_render && color_baked);
+                bool center_horizontally = symbol_cell && !color_baked;
+                // Downscale policy rides on emoji rasterization, not glyph
+                // class. 4x supersampling (REND_EMOJI_FONT_SCALE) feeds the
+                // min-fit downscale for color-emoji output. Every other
+                // glyph (symbol-class, Nerd Fonts outline icons, plain
+                // text) renders at FreeType's native metrics: bitmap_left
+                // honored on the baseline, no resampling, overhang into
+                // neighbor cells absorbed by the row draw. Nerd Fonts sit
+                // at the same vertical size as surrounding text.
 
                 int cache_w = avail_w;
                 int cache_h = avail_h;
@@ -1314,18 +1322,15 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                                 if (gb) {
                                     GlyphBitmap *scaled = NULL;
                                     if (downscale_glyph) {
-                                        scaled = rend_downscale_bitmap(gb, cache_w, cache_h, height_only_fit);
-                                        bool centered = !height_only_fit;
-                                        gb->centered = centered;
+                                        vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
+                                             gid, gb->width, gb->height, cache_w, cache_h);
+                                        scaled = rend_downscale_bitmap(gb, cache_w, cache_h, false);
+                                        gb->centered = true;
                                         if (scaled)
-                                            scaled->centered = centered;
-                                        if (height_only_fit) {
-                                            int eff_w = scaled ? scaled->width : gb->width;
-                                            int x_off = (cache_w - eff_w) / 2;
-                                            gb->x_offset = x_off;
-                                            if (scaled)
-                                                scaled->x_offset = x_off;
-                                        }
+                                            scaled->centered = true;
+                                    } else if (center_horizontally) {
+                                        int x_off = (cache_w - gb->width) / 2;
+                                        gb->x_offset = x_off;
                                     }
                                     uint32_t insert_id = atlas_gid ? atlas_gid
                                                                    : (uint32_t)gb->glyph_id;
@@ -1429,18 +1434,15 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                     if (bmp) {
                         GlyphBitmap *scaled = NULL;
                         if (downscale_glyph) {
-                            scaled = rend_downscale_bitmap(bmp, cache_w, cache_h, height_only_fit);
-                            bool centered = !height_only_fit;
-                            bmp->centered = centered;
+                            vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
+                                 (unsigned)cell.cp, bmp->width, bmp->height, cache_w, cache_h);
+                            scaled = rend_downscale_bitmap(bmp, cache_w, cache_h, false);
+                            bmp->centered = true;
                             if (scaled)
-                                scaled->centered = centered;
-                            if (height_only_fit) {
-                                int eff_w = scaled ? scaled->width : bmp->width;
-                                int x_off = (cache_w - eff_w) / 2;
-                                bmp->x_offset = x_off;
-                                if (scaled)
-                                    scaled->x_offset = x_off;
-                            }
+                                scaled->centered = true;
+                        } else if (center_horizontally) {
+                            int x_off = (cache_w - bmp->width) / 2;
+                            bmp->x_offset = x_off;
                         }
                         uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
                                                             : (uint32_t)bmp->glyph_id;

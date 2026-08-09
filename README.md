@@ -43,7 +43,7 @@ Currently ships with coffer (terminal), SDL3 or Sokol (renderer/platform), FreeT
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
-- Nerd Fonts v2 to v3 codepoint translation
+- Nerd Fonts v2 to v3 codepoint translation, with icons rendered inline alongside text
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
 - Scrollback navigation with mouse wheel and Shift+PageUp/Down
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
@@ -356,7 +356,9 @@ portty's renderer deliberately breaks the Unicode rule that VS15 (text presentat
 
 **Coverage-aware emoji selection.** A codepoint routes to the color emoji font whenever the emoji font carries the glyph, regardless of VS15. Regional indicators are always emoji. When VS15 (U+FE0E) is present, the cell width is 1 column (as computed by coffer), but routing to the color emoji font still happens if the glyph is available. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
 
-**Symbol-class glyphs preserve font design.** Dingbats, Misc Symbols, Misc Technical, Geometric Shapes, Supplemental Arrows-B, and Misc Symbols & Arrows rendered through a text font keep their natural design width, sit on the typographic baseline vertically, and are centered horizontally in the cell (FreeType's left bearing is intentionally discarded because mono fonts often calibrate it to an oversized advance — e.g. Noto Sans Mono ✶ has advance 1.2×em with the ink centered in that wider advance). Only vertical overflow triggers a downscale; horizontal overhang into neighbor cells is allowed and handled cleanly by the two-pass row draw (backgrounds first, then glyphs).
+**Symbol-class glyphs preserve font design.** Dingbats, Misc Symbols, Misc Technical, Geometric Shapes, Supplemental Arrows-B, and Misc Symbols & Arrows rendered through a text font keep their natural design width and are centered horizontally in the cell (FreeType's left bearing is intentionally discarded because mono fonts often calibrate it to an oversized advance — e.g. Noto Sans Mono ✶ has advance 1.2×em with the ink centered in that wider advance). They sit on the typographic baseline vertically. No downscale is applied: portty never resamples non-emoji glyphs, which would visibly destroy crispness. Horizontal overhang into neighbor cells is allowed and handled cleanly by the two-pass row draw (backgrounds first, then glyphs).
+
+**Nerd Fonts render inline as icon-class text glyphs.** NF codepoints live in the BMP Private Use Area and Supplementary PUA (U+E000–U+F8FF, U+F0000–U+FFFFD, U+100000–U+10FFFD). NF glyphs are sized like text — the font's outline data renders them at native cap-height, the same as a letter `A`. They take the plain text rendering path: no downscale, no min-fit clamp, FreeType's `bitmap_left` honored on the typographic baseline, horizontal overhang into neighbor cells absorbed by the two-pass row draw. Nerd Fonts v2 codepoints in U+F900–U+FAFF are translated to their v3 SPUA equivalents before this check, so apps emitting the obsolete range get the same correct rendering as native v3 codepoints. The icons are color-modulated by the foreground SGR color (NF glyphs are plain outlines, not COLR color emoji), unlike pre-modulated emoji.
 
 ## Terminfo
 

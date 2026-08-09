@@ -500,7 +500,7 @@ int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *fo
 static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
                                        uint32_t glyph_id, uint32_t color_key,
                                        GlyphBitmap *bitmap, bool downscale,
-                                       int max_w, int max_h, bool height_only_fit,
+                                       int max_w, int max_h, bool center_horizontally,
                                        bool is_color)
 {
     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(atlas, font_data, glyph_id, color_key);
@@ -509,31 +509,26 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
 
     GlyphBitmap *scaled = NULL;
     if (downscale) {
-        vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d%s\n",
-             glyph_id, bitmap->width, bitmap->height, max_w, max_h,
-             height_only_fit ? " (height-only)" : "");
-        scaled = rend_downscale_bitmap(bitmap, max_w, max_h, height_only_fit);
-        // Color emoji are placed by cell-center, not baseline. Symbol-class
-        // glyphs from a text font (height_only_fit) use the baseline branch
-        // of blit_glyph but with x_offset overridden: FreeType's bitmap_left
-        // is calibrated against the font's natural advance, which for many
-        // mono fonts is wider than our 1-cell allocation (Noto Sans Mono ✶
-        // U+2736: advance 1200/1000 em). Honoring it directly drops the ink
-        // into the right half of the cell with the rest overhanging into
-        // the next cell. Centering the bitmap horizontally restores a
-        // symmetric placement while bitmap_top still anchors the glyph to
-        // the typographic baseline.
-        bool centered = !height_only_fit;
-        bitmap->centered = centered;
+        vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
+             glyph_id, bitmap->width, bitmap->height, max_w, max_h);
+        // Only the 4x-rasterized emoji pipeline (color-baked FONT_STYLE_EMOJI)
+        // is allowed to downscale — it supersamples before clamping so detail
+        // survives. Other glyphs render at FreeType's native metrics and must
+        // never be downscaled, which would visibly destroy crispness.
+        scaled = rend_downscale_bitmap(bitmap, max_w, max_h, false);
+        bitmap->centered = true;
         if (scaled)
-            scaled->centered = centered;
-        if (height_only_fit) {
-            int eff_w = scaled ? scaled->width : bitmap->width;
-            int x_off = (max_w - eff_w) / 2;
-            bitmap->x_offset = x_off;
-            if (scaled)
-                scaled->x_offset = x_off;
-        }
+            scaled->centered = true;
+    } else if (center_horizontally) {
+        // Symbol-class glyphs (Dingbats, Misc Symbols, NF outline icons) come
+        // back from FreeType with bitmap_left calibrated against the font's
+        // natural advance, which for many mono fonts is wider than the cell
+        // (Noto Sans Mono ✶: advance 1200/1000 em, ink centered in the wider
+        // box). Override x_offset so the ink sits centered in the cell while
+        // bitmap_top still anchors the glyph to the typographic baseline.
+        int eff_w = bitmap->width;
+        int x_off = (max_w - eff_w) / 2;
+        bitmap->x_offset = x_off;
     }
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
                                    scaled ? scaled : bitmap, is_color);
@@ -849,13 +844,15 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                      : 0xFFFFFF;
     bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
     bool symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
-    bool downscale_glyph = (emoji_render && color_baked) || symbol_cell;
-    // Symbol-class glyphs rendered through a text/fallback font keep their
-    // natural design width — only height drives the (rare) downscale, and
-    // they are placed on the typographic baseline instead of cell-center.
-    // Color-baked emoji-font output keeps the existing centered min-fit
-    // policy because emoji fonts are designed for a square cell.
-    bool height_only_fit = symbol_cell && !color_baked;
+    bool downscale_glyph = (emoji_render && color_baked);
+    bool center_horizontally = symbol_cell && !color_baked;
+    // Downscale policy is driven by emoji rasterization, not glyph class.
+    // 4x supersampling (REND_EMOJI_FONT_SCALE) feeds a min-fit downscale
+    // for color-emoji output so detail survives small sizes. Every other
+    // glyph — symbol-class, Nerd Fonts outline icons, plain text — renders
+    // at FreeType's native metrics: bitmap_left honored on the baseline,
+    // no resampling, overhang into neighbor cells handled by the two-pass
+    // row draw. Nerd Fonts return to the plain-text rendering path.
 
     // For regional indicators, cache at square size for consistent high-quality scaling
     int cache_w = avail_w;
@@ -939,7 +936,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     if (gb) {
                         entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
                                             gb, downscale_glyph,
-                                            cache_w, cache_h, height_only_fit, color_baked);
+                                            cache_w, cache_h, center_horizontally, color_baked);
                         data->font->free_glyph_bitmap(data->font, gb);
                     } else {
                         rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
@@ -1018,7 +1015,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                     : (uint32_t)glyph_bitmap->glyph_id;
                 entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
                                     glyph_bitmap, downscale_glyph,
-                                    cache_w, cache_h, height_only_fit, color_baked);
+                                    cache_w, cache_h, center_horizontally, color_baked);
                 data->font->free_glyph_bitmap(data->font, glyph_bitmap);
             } else if (atlas_glyph_id != 0) {
                 rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
