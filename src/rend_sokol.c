@@ -1211,7 +1211,6 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                 uint8_t render_b = plan.render_b;
                 uint32_t color_key = plan.color_key;
                 int avail_w = plan.avail_w;
-                int avail_h = plan.avail_h;
                 int cache_w = plan.cache_w;
                 int cache_h = plan.cache_h;
                 bool downscale_glyph = plan.downscale_glyph;
