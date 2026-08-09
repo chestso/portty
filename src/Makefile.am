@@ -36,7 +36,7 @@ FONT_RESOLVE_SOURCE = font_resolve_fc.c
 endif
 endif
 
-# Shared sources — compiled for both backends
+# Shared sources
 PORTTY_COMMON_SRC = \
     portty_app.c \
     portty_panel.c \
@@ -56,36 +56,12 @@ PORTTY_COMMON_CFLAGS = $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
 PORTTY_COMMON_LDADD = $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) \
     $(LIBPNG_LIBS) $(COFFER_LIBS) -lm
 
-if BACKEND_SDL3
 portty_SOURCES = main.c $(PORTTY_COMMON_SRC) \
     backend_sdl3.c rend_sdl3.c rend_sdl3_atlas.c \
     rend_sdl3_shader.c
 portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) $(SDL3_CFLAGS) \
     -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
-portty_LDADD = $(PORTTY_COMMON_LDADD)
-endif
-
-if BACKEND_SOKOL
-portty_SOURCES = main.c $(PORTTY_COMMON_SRC) \
-    backend_sokol.c rend_sokol.c rend_sokol_atlas.c
-portty_CFLAGS = $(PORTTY_COMMON_CFLAGS) -I$(top_srcdir)/third_party -I$(top_srcdir) \
-    -DPORTTY_DATADIR='"$(datadir)"' -Wall -Wextra
-portty_LDADD = $(PORTTY_COMMON_LDADD)
-
-# On macOS, Sokol's Metal backend requires Objective-C for AppKit/Foundation
-# headers. Compile backend_sokol.c as Objective-C via a per-file override.
-if HOST_MACOS
-portty-backend_sokol.o: backend_sokol.c
-	$(COMPILE) -x objective-c $(portty_CFLAGS) -c $< -o $@
-endif
-endif
-
-if BACKEND_SDL3
-portty_LDADD += $(SDL3_LIBS)
-endif
-if BACKEND_SOKOL
-portty_LDADD += $(PLATFORM_LIBS)
-endif
+portty_LDADD = $(PORTTY_COMMON_LDADD) $(SDL3_LIBS)
 
 if HAVE_RC
 portty_resources = portty-resources.o
@@ -93,12 +69,7 @@ else
 portty_resources =
 endif
 
-if BACKEND_SDL3
-portty_LDADD += $(SDL3_LIBS) $(portty_resources)
-endif
-if BACKEND_SOKOL
-portty_LDADD += $(PLATFORM_LIBS) $(portty_resources)
-endif
+portty_LDADD += $(portty_resources)
 
 # Fontconfig is Linux-only (not on macOS or Windows)
 if !HOST_WINDOWS
@@ -115,14 +86,14 @@ endif
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
 EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h \
-    shaders/glyph_coverage_sokol.h portty.rc portty_icon_png.h \
-    backend_sdl3.h backend_sokol.h base64.h common.h diag.h display_info.h \
+    portty.rc portty_icon_png.h \
+    backend_sdl3.h base64.h common.h diag.h display_info.h \
     font_ft.h font_ft_internal.h font.h font_resolve_ct.h font_resolve_fc.h \
     font_resolve.h font_resolve_w32.h heap_harden.h os_compat.h pager.h \
     path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
-    rend_sokol_atlas.h rend_sokol.h term_cfr.h term.h timer.h
+    term_cfr.h term.h timer.h
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:
@@ -159,25 +130,14 @@ BUILT_SOURCES += portty-resources.o
 endif HAVE_RC
 
 if HOST_WINDOWS
-if BACKEND_SDL3
 portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite -lwinpthread
-endif
-if BACKEND_SOKOL
-portty_LDADD += -ld3d11 -ldxgi -lkernel32 -luser32 -lshell32 -lole32 -ladvapi32 -ldwrite -lgdi32 -ldwmapi -lwinpthread
-endif
 portty_LDFLAGS = -mwindows
 else !HOST_WINDOWS
 if HOST_MACOS
-if BACKEND_SDL3
 portty_LDFLAGS = -framework CoreText -framework CoreFoundation \
     -framework GameController -framework CoreHaptics \
     -framework CoreMotion -framework CoreMedia \
     -framework ApplicationServices
-else
-portty_LDFLAGS = -framework AppKit -framework QuartzCore -framework Metal \
-    -framework CoreText -framework CoreFoundation \
-    -framework ApplicationServices
-endif
 else
 portty_LDFLAGS =
 endif

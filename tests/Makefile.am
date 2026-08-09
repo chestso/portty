@@ -7,16 +7,15 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
 EXTRA_DIST = test_helpers.h font_stubs.c
 
-check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_sokol_deco test_dpi_scale test_content_scale test_panel test_link_hint
+check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_dpi_scale test_content_scale test_panel test_link_hint
 
-if BACKEND_SDL3
+# test_atlas — SDL3 GPU atlas packing. Requires SDL3 backend.
 check_PROGRAMS += test_atlas
 test_atlas_SOURCES = test_atlas.c $(TEST_COMMON) $(SDL_STUBS) $(TERM_STUBS) \
     ../src/rend_sdl3_atlas.c ../src/rend_common.c ../src/font.c font_stubs.c
 test_atlas_CFLAGS = $(TEST_CFLAGS) $(SDL3_CFLAGS)
 # rend_sdl3_atlas.c uses pow() for the sRGB->linear LUT.
 test_atlas_LDADD = -lm
-endif
 
 test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/portty_conf.c
 test_conf_CFLAGS = $(TEST_CFLAGS)
@@ -70,14 +69,11 @@ test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_lottie_LDADD = $(COFFER_LIBS)
 
 
-# test_pty_pause depends on POSIX PTY APIs. It is only relevant when
-# the SDL3 backend is active. Under the Sokol backend this is excluded.
-if BACKEND_SDL3
+# test_pty_pause depends on POSIX PTY APIs.
 if !HOST_WINDOWS
 check_PROGRAMS += test_pty_pause
 test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) ../src/term.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS)
-endif
 endif
 
 # Lottie cache logic (pure C, no GPU dependency). Tests cache lookup,
@@ -89,11 +85,6 @@ test_lottie_cache_CFLAGS = $(TEST_CFLAGS)
 # or SDL dependency). Compiles term.c for the selection logic.
 test_selection_extend_SOURCES = test_selection_extend.c $(TEST_COMMON) ../src/term.c
 test_selection_extend_CFLAGS = $(TEST_CFLAGS)
-
-# Sokol decoration coalescing logic. Pure C — replicates the underline and
-# strikethrough run coalescing algorithms without GPU dependencies.
-test_sokol_deco_SOURCES = test_sokol_deco.c $(TEST_COMMON)
-test_sokol_deco_CFLAGS = $(TEST_CFLAGS)
 
 test_dpi_scale_SOURCES = test_dpi_scale.c $(TEST_COMMON)
 test_dpi_scale_CFLAGS = $(TEST_CFLAGS)
@@ -115,10 +106,7 @@ test_boxdraw_SOURCES = test_boxdraw.c $(TEST_COMMON) $(TERM_STUBS) ../src/rend_b
 test_boxdraw_CFLAGS = $(TEST_CFLAGS)
 test_boxdraw_LDADD = -lm
 
-# Cursor-only render regression test. Pure C — replicates the clip-rect
-# and blit-rect computation from sdl3_draw_cursor inline, verifying that
-# the blit rect matches the cursor cell (not the full screen) and that
-# no full-screen clear is performed.
+# Cursor-only render regression test. Pure C.
 test_cursor_render_SOURCES = test_cursor_render.c $(TEST_COMMON)
 test_cursor_render_CFLAGS = $(TEST_CFLAGS)
 

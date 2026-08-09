@@ -37,12 +37,10 @@
 #include <unistd.h>
 #endif
 
-#if defined(PORTTY_BACKEND_SOKOL)
-#include "backend_sokol.h"
-#elif defined(PORTTY_BACKEND_SDL3)
+#if defined(PORTTY_BACKEND_SDL3)
 #include "backend_sdl3.h"
 #else
-#error "No backend selected; define PORTTY_BACKEND_SDL3 or PORTTY_BACKEND_SOKOL"
+#error "No backend selected; define PORTTY_BACKEND_SDL3"
 #endif
 
 #define DEFAULT_COLS 80
@@ -502,49 +500,6 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
 }
 #endif
 
-#if defined(PORTTY_BACKEND_SOKOL)
-static sapp_desc portty_run_sokol(PorttyArgs *args, PorttyConf *conf)
-{
-    TerminalBackend *term = create_terminal(args);
-    if (!term) {
-        return (sapp_desc){ 0 };
-    }
-
-    if (conf->word_chars)
-        terminal_selection_set_word_chars(term, conf->word_chars);
-    if (args->init_scrollback >= 0)
-        terminal_set_scrollback_size(term, args->init_scrollback);
-
-    PorttyBackend *backend = calloc(1, sizeof(*backend));
-    if (!backend) {
-        fprintf(stderr, "ERROR: Out of memory\n");
-        terminal_destroy(term);
-        return (sapp_desc){ 0 };
-    }
-    *backend = backend_sokol;
-
-    PorttyApp *app = calloc(1, sizeof(*app));
-    if (!app) {
-        fprintf(stderr, "ERROR: Out of memory\n");
-        free(backend);
-        terminal_destroy(term);
-        return (sapp_desc){ 0 };
-    }
-    app->term = term;
-    app->conf = conf;
-    app->backend = backend;
-    app->demo_text = args->demo_text;
-    app->exec_argv = args->exec_argv;
-    app->font_size = args->font_size;
-    app->font_name = args->font_name;
-    app->script_path = args->script_path;
-    app->dpi_scale = args->dpi_scale;
-    backend->data = app;
-
-    return backend_sokol_desc(app, backend, "portty", 800, 600);
-}
-#endif
-
 #if defined(PORTTY_BACKEND_SDL3)
 int main(int argc, char *argv[])
 {
@@ -607,53 +562,5 @@ int main(int argc, char *argv[])
 #endif
 
     return ret;
-}
-#endif
-
-#if defined(PORTTY_BACKEND_SOKOL)
-sapp_desc sokol_main(int argc, char *argv[])
-{
-    PorttyConf *conf = malloc(sizeof(PorttyConf));
-    if (!conf) {
-        fprintf(stderr, "ERROR: Out of memory\n");
-        return (sapp_desc){ 0 };
-    }
-    portty_conf_init(conf);
-    portty_conf_load(conf);
-
-    PorttyArgs args;
-    portty_args_init(&args);
-    apply_conf_to_args(&args, conf);
-
-    int ret = parse_args(&args, argc, argv);
-    if (ret >= 0) {
-        portty_conf_free(conf);
-        free(conf);
-        exit(ret);
-    }
-
-    resolve_exec_argv(&args, conf, argc, argv);
-
-    if (args.list_fonts) {
-        FontResolveBackend *resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
-        if (!resolve) {
-            fprintf(stderr, "ERROR: Failed to initialize font resolver\n");
-            portty_conf_free(conf);
-            free(conf);
-            return (sapp_desc){ 0 };
-        }
-        font_resolve_list_monospace(resolve);
-        font_resolve_destroy(resolve);
-        portty_conf_free(conf);
-        free(conf);
-        return (sapp_desc){ 0 };
-    }
-
-    if (args.colr_debug_path) {
-        colr_set_debug_prefix(args.colr_debug_path);
-        vlog("COLR layer debug enabled, prefix: %s\n", args.colr_debug_path);
-    }
-
-    return portty_run_sokol(&args, conf);
 }
 #endif

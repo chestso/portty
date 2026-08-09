@@ -12,15 +12,11 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build & Test (${{ matrix.backend }})
+    name: Build & Test
     runs-on: windows-latest
     defaults:
       run:
         shell: msys2 {0}
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [sdl3, sokol]
 
     steps:
       - name: Checkout portty
@@ -53,18 +49,11 @@ jobs:
             mingw-w64-ucrt-x86_64-freetype
             mingw-w64-ucrt-x86_64-harfbuzz
             mingw-w64-ucrt-x86_64-libpng
+            mingw-w64-ucrt-x86_64-sdl3
             mingw-w64-ucrt-x86_64-thorvg
             ncurses
             zip
             p7zip
-
-      - name: Install SDL3 (SDL3 backend only)
-        if: matrix.backend == 'sdl3'
-        run: pacman -S --noconfirm mingw-w64-ucrt-x86_64-sdl3
-
-      - name: Fetch Sokol headers (Sokol backend only)
-        if: matrix.backend == 'sokol'
-        run: sh scripts/fetch-sokol.sh
 
       - name: Fetch QOI header
         run: sh scripts/fetch-qoi.sh
@@ -84,9 +73,6 @@ jobs:
           ./autogen.sh
           mkdir build && cd build
           CONFIGURE_ARGS=""
-          if [ "${{ matrix.backend }}" = "sokol" ]; then
-            CONFIGURE_ARGS="--with-backend=sokol"
-          fi
           if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
             sh ../configure --enable-release $CONFIGURE_ARGS
           else
@@ -103,8 +89,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: portty-windows-x86_64-${{ matrix.backend }}
-          path: portty-*-windows-*-${{ matrix.backend }}.zip
+          name: portty-windows-x86_64-sdl3
+          path: portty-*-windows-*-sdl3.zip
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 1 || 30 }}
-

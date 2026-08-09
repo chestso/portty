@@ -103,7 +103,7 @@ fi
 
 # Backend selection (SDL3 is the default).
 AC_ARG_WITH([backend],
-  [AS_HELP_STRING([--with-backend=sdl3|sokol],
+  [AS_HELP_STRING([--with-backend=sdl3],
     [Windowing+GPU backend @<:@default=sdl3@:>@])],
   [portty_backend="$withval"],
   [portty_backend="sdl3"])
@@ -113,39 +113,9 @@ AS_CASE([$portty_backend],
     PKG_CHECK_MODULES([SDL3], [sdl3])
     AC_DEFINE([PORTTY_BACKEND_SDL3], [1], [Use SDL3 backend])
   ],
-  [sokol], [
-    # Sokol headers live in third_party/sokol/ (fetched by scripts/fetch-sokol.sh).
-    # Use -I for the parent so #include <sokol/sokol_app.h> resolves.
-    SOKOL_CFLAGS="-I${srcdir}/third_party"
-    CFLAGS="$SOKOL_CFLAGS $CFLAGS"
-    AC_SUBST([SOKOL_CFLAGS])
-    AC_DEFINE([PORTTY_BACKEND_SOKOL], [1], [Use Sokol backend])
-    # Auto-fetch Sokol headers if missing so --with-backend=sokol works
-    # without a manual scripts/fetch-sokol.sh step.
-    AS_IF([test ! -f "$srcdir/third_party/sokol/sokol_app.h"],
-      [AC_MSG_NOTICE([Sokol headers not found, fetching via scripts/fetch-sokol.sh])
-       AS_IF([$srcdir/scripts/fetch-sokol.sh "$srcdir/third_party/sokol"],
-         [AC_MSG_NOTICE([Sokol headers fetched successfully])],
-         [AC_MSG_ERROR([Failed to fetch Sokol headers. Run scripts/fetch-sokol.sh manually or check network access.])])])
-    AS_CASE([$host_os],
-      [*linux*], [
-        AC_DEFINE([SOKOL_GLCORE], [1], [Use Sokol OpenGL core profile])
-        PLATFORM_LIBS="-lX11 -lXi -lXcursor -lGL -ldl -lpthread -lm"
-      ],
-      [*mingw*|*msys*], [
-        AC_DEFINE([SOKOL_D3D11], [1], [Use Sokol D3D11 backend])
-        PLATFORM_LIBS="-ld3d11 -ldxgi -ldxguid -lkernel32 -luser32 -lshell32 -lole32 -ladvapi32 -ldwrite -lgdi32 -ldwmapi -lwinpthread"
-      ],
-      [*darwin*], [
-        AC_DEFINE([SOKOL_METAL], [1], [Use Sokol Metal backend])
-        PLATFORM_LIBS="-framework AppKit -framework QuartzCore -framework Metal -framework CoreText -framework CoreFoundation"
-      ])
-    AC_SUBST([PLATFORM_LIBS])
-  ],
   [AC_MSG_ERROR([Unknown backend: $portty_backend])])
 
 AM_CONDITIONAL([BACKEND_SDL3], [test "x$portty_backend" = xsdl3])
-AM_CONDITIONAL([BACKEND_SOKOL], [test "x$portty_backend" = xsokol])
 AC_SUBST([portty_backend])
 
 # The QOI single-header library (used by the frame recorder's qoi_writer.c)
@@ -158,10 +128,7 @@ AS_IF([test ! -f "$srcdir/third_party/qoi/qoi.h"],
      [AC_MSG_NOTICE([QOI header fetched successfully])],
      [AC_MSG_ERROR([Failed to fetch QOI header. Run scripts/fetch-qoi.sh manually or check network access.])])])
 
-AS_IF([test "x$portty_backend" = xsdl3], [
-  # Check for libraries
-  PKG_CHECK_MODULES([SDL3], [sdl3])
-])
+PKG_CHECK_MODULES([SDL3], [sdl3])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
 fi
@@ -170,10 +137,8 @@ PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 PKG_CHECK_MODULES([COFFER], [coffer >= 0.1.11])
 
-AS_IF([test "x$portty_backend" = xsdl3], [
-  DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
-  AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
-])
+DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
+AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
 
 # Capture dependency versions and build info for --help output
 BUILD_CC_VERSION=$($CC --version 2>/dev/null | head -1 || echo "$CC")

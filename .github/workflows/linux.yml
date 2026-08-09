@@ -9,12 +9,8 @@ on:
 
 jobs:
   build-and-test:
-    name: Build & Test (${{ matrix.backend }})
+    name: Build & Test
     runs-on: ubuntu-26.04
-    strategy:
-      fail-fast: false
-      matrix:
-        backend: [sdl3, sokol]
 
     steps:
       - name: Checkout portty
@@ -64,10 +60,6 @@ jobs:
           make check || true
           sudo make install
 
-      - name: Fetch Sokol headers (Sokol backend only)
-        if: matrix.backend == 'sokol'
-        run: sh scripts/fetch-sokol.sh
-
       - name: Fetch QOI header
         run: sh scripts/fetch-qoi.sh
 
@@ -76,9 +68,9 @@ jobs:
           ./autogen.sh
           mkdir build && cd build
           if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            ../configure --enable-release --with-backend=${{ matrix.backend }}
+            ../configure --enable-release
           else
-            ../configure --with-backend=${{ matrix.backend }}
+            ../configure
           fi
           make -j"$(nproc)"
 

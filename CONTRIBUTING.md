@@ -17,16 +17,6 @@ make install
 
 Use `--enable-release` for an optimized build or `--enable-debug` for unsanitized debug.
 
-To build the Sokol backend instead of SDL3:
-
-```bash
-./autogen.sh
-mkdir build-sokol && cd build-sokol
-../configure --with-backend=sokol
-make -j$(nproc)
-make check
-```
-
 ## Make targets
 
 - `make` — build everything
@@ -56,11 +46,10 @@ make check
 
 portty uses a modular backend abstraction design:
 
-- **PorttyBackend**: Unified platform + rendering backend — handles windowing, input events, clipboard, PTY lifecycle, the main event loop, and graphics output. Selected at configure time via `--with-backend=sdl3|sokol` (default: `sdl3`).
+- **PorttyBackend**: Unified platform + rendering backend — handles windowing, input events, clipboard, PTY lifecycle, the main event loop, and graphics output.
   - **SDL3** (`backend_sdl3.c`) — uses SDL3 for both windowing and GPU rendering. Draws the frame into an `RGBA64_FLOAT` / `SRGB_LINEAR` target via SDL's GPU renderer (Vulkan/D3D12/Metal), so glyph coverage is blended in linear light and re-encoded to sRGB on present. Uses libdecor for Wayland decorations. The SDL3 renderer (`rend_sdl3.c`) is called directly — no separate renderer vtable.
     - Texture atlas with shelf packing and FNV-1a hash-based lookup; LRU eviction when the atlas fills
     - Color-glyph (emoji) texels are sRGB→linear decoded as they enter the atlas: SDL linearizes draw/vertex colors on this path but not sampled texels, so without the decode the present-time re-encode would double-encode color emoji and wash them out. White text-coverage texels are gamma-invariant, so text is unaffected
-  - **Sokol** (`backend_sokol.c`) — uses sokol_app for windowing and sokol_gfx for rendering (OpenGL Core on Linux, Metal on macOS, D3D11 on Windows, WebGPU on web). Renders inline within the backend; uses shared atlas packing from `rend_common.c` and a Sokol-specific atlas adapter (`rend_sokol_atlas.c`)
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: coffer (`terminal_backend_cfr`) — external VT engine consumed via `pkg-config coffer`, bridged through `term_cfr.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring

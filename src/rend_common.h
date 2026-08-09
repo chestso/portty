@@ -65,7 +65,7 @@ void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport
 // PHYSICAL (backend-internal):
 //   - Window/framebuffer dimensions
 //   - cell_w, cell_h: scaled by content_scale during font load
-//   - Mouse coordinates: from SDL/sokol in physical pixels
+//   - Mouse coordinates: from SDL in physical pixels
 //   - All rendering coordinates
 //
 // content_scale multiplies logical → physical.

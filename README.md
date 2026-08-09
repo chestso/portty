@@ -360,7 +360,7 @@ portty's renderer deliberately breaks the Unicode rule that VS15 (text presentat
 
 **Nerd Fonts render inline as icon-class text glyphs.** NF codepoints live in the BMP Private Use Area and Supplementary PUA (U+E000–U+F8FF, U+F0000–U+FFFFD, U+100000–U+10FFFD). NF glyphs are sized like text — the font's outline data renders them at native cap-height, the same as a letter `A`. They take the plain text rendering path: no downscale, no min-fit clamp, FreeType's `bitmap_left` honored on the typographic baseline, horizontal overhang into neighbor cells absorbed by the two-pass row draw. Nerd Fonts v2 codepoints in U+F900–U+FAFF are translated to their v3 SPUA equivalents before this check, so apps emitting the obsolete range get the same correct rendering as native v3 codepoints. The icons are color-modulated by the foreground SGR color (NF glyphs are plain outlines, not COLR color emoji), unlike pre-modulated emoji.
 
-**Renderer policy lives in `rend_common`.** The three decisions above (emoji coverage, downscale gating, NF v2→v3, symbol-class horizontal centering) are factored into three shared helpers — `rend_resolve_cell_style`, `rend_plan_glyph`, `rend_apply_glyph_layout`, plus `rend_downscale_bitmap`. The two renderers (`rend_sdl3.c` and `rend_sokol.c`) share these and diverge only in atlas insertion and final placement. The invariant these helpers enforce: only the color-emoji pipeline ever resamples; everything else renders at FreeType's native metrics so crispness is preserved.
+**Renderer policy lives in `rend_common`.** The three decisions above (emoji coverage routing, downscale gating, NF v2→v3, symbol-class horizontal centering) are factored into three shared helpers — `rend_resolve_cell_style`, `rend_plan_glyph`, `rend_apply_glyph_layout`, plus `rend_downscale_bitmap`. The renderer (`rend_sdl3.c`) uses these and diverges from them only in atlas insertion and final placement. The invariant these helpers enforce: only the color-emoji pipeline ever resamples; everything else renders at FreeType's native metrics so crispness is preserved.
 
 ## Terminfo
 
@@ -431,8 +431,6 @@ All platforms:
 - libpng
 
 The SDL3 backend uses SDL's GPU renderer for gamma-correct linear-light blending, so a working GPU backend is required **at runtime**: Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS.
-
-The Sokol backend uses sokol_gfx instead of SDL3 for rendering (OpenGL Core on Linux, Metal on macOS, D3D11 on Windows), so no Vulkan/D3D12 runtime is needed.
 
 Linux only:
 

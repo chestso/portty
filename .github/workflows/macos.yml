@@ -12,12 +12,11 @@ permissions:
 
 jobs:
   build-and-test:
-    name: Build & Test (${{ matrix.backend }}, ${{ matrix.arch }})
+    name: Build & Test (${{ matrix.arch }})
     runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        backend: [sdl3, sokol]
         arch: [arm64]
         include:
           - arch: arm64
@@ -40,14 +39,7 @@ jobs:
       - name: Install dependencies
         run: |
           brew install autoconf automake libtool pkg-config \
-            freetype harfbuzz libpng zip librsvg
-          if [ "${{ matrix.backend }}" = "sdl3" ]; then
-            brew install sdl3
-          fi
-
-      - name: Fetch Sokol headers (Sokol backend only)
-        if: matrix.backend == 'sokol'
-        run: sh scripts/fetch-sokol.sh
+            freetype harfbuzz libpng zip librsvg sdl3
 
       - name: Fetch QOI header
         run: sh scripts/fetch-qoi.sh
@@ -67,9 +59,6 @@ jobs:
           ./autogen.sh
           mkdir build && cd build
           CONFIGURE_ARGS=""
-          if [ "${{ matrix.backend }}" = "sokol" ]; then
-            CONFIGURE_ARGS="--with-backend=sokol"
-          fi
           if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
             ../configure --enable-release $CONFIGURE_ARGS
           else
@@ -86,8 +75,7 @@ jobs:
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
-          name: portty-macos-${{ matrix.arch }}-${{ matrix.backend }}
-          path: portty-*-macos-*-${{ matrix.backend }}.zip
+          name: portty-macos-${{ matrix.arch }}-sdl3
+          path: portty-*-macos-*-sdl3.zip
           if-no-files-found: error
           retention-days: ${{ startsWith(github.ref, 'refs/tags/v') && 1 || 30 }}
-
