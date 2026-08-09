@@ -9,6 +9,25 @@ static void test_downscale_output_fits_cell_box(void);
 static void test_apply_glyph_layout_passthrough(void);
 static void test_apply_glyph_layout_center_only(void);
 static void test_apply_glyph_layout_downscale_centered(void);
+static void test_resolve_cell_style_normal_default(void);
+static void test_resolve_cell_style_bold_italic_cascade(void);
+static void test_resolve_cell_style_bold_loads_when_only_bold_present(void);
+static void test_resolve_cell_style_emoji_overrides_bold(void);
+static void test_resolve_cell_style_emoji_falls_back_when_glyph_missing(void);
+static void test_plan_glyph_sets_emoji_flags(void);
+static void test_plan_glyph_emoji_square_clamps_avail(void);
+static void test_plan_glyph_regional_square_clamps_cache_w(void);
+
+/* Helpers exported by font_stubs.c for testing the policy functions in
+ * rend_common.c that consult the FontBackend for style/emoji decisions. */
+FontBackend make_test_font_backend(void);
+void test_font_set_loaded_styles(uint32_t mask);
+void test_font_reset(void);
+
+/* Helper: a letter 'A' trivially falls through the bold/italic cascade. */
+#define TEST_LATIN_A ((uint32_t)'A')
+/* Helper: lightning emoji, which the test stubs claim is in the emoji font. */
+#define TEST_EMOJI_CP ((uint32_t)0x26A1)
 
 static void test_nf_translate_known_mappings(void)
 {
@@ -94,6 +113,140 @@ static void test_clamp_pixel_to_viewport(void)
     ASSERT_EQ(y, 25);
 }
 
+/* Helper: a letter 'A' trivially falls through the bold/italic cascade. */
+#define TEST_LATIN_A ((uint32_t)'A')
+/* Helper: ⚡ which the test stubs claim is in the emoji font. */
+#define TEST_EMOJI_CP ((uint32_t)0x26A1)
+
+static void test_resolve_cell_style_normal_default(void)
+{
+    // No SGR bits, no emoji glyph: stays on NORMAL.
+    FontBackend fb = make_test_font_backend();
+    test_font_set_loaded_styles(0); // nothing loaded — all queries false
+    uint32_t cps[] = { TEST_LATIN_A };
+    RendCellStyle s = rend_resolve_cell_style(&fb, false, false, cps, 1);
+    ASSERT_EQ(s.style, FONT_STYLE_NORMAL);
+    ASSERT_FALSE(s.use_emoji);
+    test_font_reset();
+}
+
+static void test_resolve_cell_style_bold_italic_cascade(void)
+{
+    // bold+italic SGR with only NORMAL loaded: cascade prefers NORMAL
+    // (no BOLD_ITALIC, no BOLD, no ITALIC). Confirms the cascade tolerates
+    // a partial backend install.
+    FontBackend fb = make_test_font_backend();
+    test_font_set_loaded_styles(1u << FONT_STYLE_NORMAL);
+    uint32_t cps[] = { TEST_LATIN_A };
+    RendCellStyle s = rend_resolve_cell_style(&fb, true, true, cps, 1);
+    ASSERT_EQ(s.style, FONT_STYLE_NORMAL);
+    ASSERT_FALSE(s.use_emoji);
+    test_font_reset();
+}
+
+static void test_resolve_cell_style_bold_loads_when_only_bold_present(void)
+{
+    // Cascade should grab BOLD when BOLD_ITALIC isn't loaded but BOLD is.
+    test_font_reset();
+    test_font_set_loaded_styles((1u << FONT_STYLE_NORMAL) | (1u << FONT_STYLE_BOLD));
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { TEST_LATIN_A };
+    RendCellStyle s = rend_resolve_cell_style(&fb, true, true, cps, 1);
+    ASSERT_EQ(s.style, FONT_STYLE_BOLD);
+}
+
+static void test_resolve_cell_style_emoji_overrides_bold(void)
+{
+    // Even when the SGR cascade picks BOLD, an emoji-presentation
+    // codepoint whose char also lives in the emoji font forces
+    // FONT_STYLE_EMOJI. The stub claims ⚡ has a glyph in emoji.
+    test_font_reset();
+    test_font_set_loaded_styles((1u << FONT_STYLE_NORMAL) |
+                                (1u << FONT_STYLE_BOLD) |
+                                (1u << FONT_STYLE_EMOJI));
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { TEST_EMOJI_CP };
+    RendCellStyle s = rend_resolve_cell_style(&fb, true, false, cps, 1);
+    ASSERT_EQ(s.style, FONT_STYLE_EMOJI);
+    ASSERT_TRUE(s.use_emoji);
+}
+
+static void test_resolve_cell_style_emoji_falls_back_when_glyph_missing(void)
+{
+    // Emoji font loaded but the emoji codepoint has no glyph in the
+    // stub (returns 0). Helper stays on whatever the cascade picked.
+    FontBackend fb = make_test_font_backend();
+    test_font_set_loaded_styles((1u << FONT_STYLE_NORMAL) | (1u << FONT_STYLE_EMOJI));
+    uint32_t cps[] = { TEST_LATIN_A }; // not in the emoji stub
+    RendCellStyle s = rend_resolve_cell_style(&fb, false, false, cps, 1);
+    ASSERT_EQ(s.style, FONT_STYLE_NORMAL);
+    ASSERT_FALSE(s.use_emoji);
+    test_font_reset();
+}
+
+static void test_plan_glyph_sets_emoji_flags(void)
+{
+    // For an emoji-style glyph that's color-baked, downscale_glyph must
+    // be true (the 4x emoji pipeline is the only place that may resample)
+    // and center_horizontally false.
+    FontBackend fb = make_test_font_backend();
+    test_font_set_loaded_styles(1u << FONT_STYLE_EMOJI);
+    uint32_t cps[] = { TEST_EMOJI_CP };
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_EMOJI, true, cps, 1,
+                    8, 16, 1, /*fg*/ 255, 128, 64, &p);
+    ASSERT_TRUE(p.downscale_glyph);
+    ASSERT_FALSE(p.center_horizontally);
+    ASSERT_TRUE(p.color_baked);
+    ASSERT_EQ(p.render_r, 255);
+    ASSERT_EQ(p.render_g, 128);
+    ASSERT_EQ(p.render_b, 64);
+    ASSERT_TRUE(p.color_key != 0);
+    test_font_reset();
+}
+
+static void test_plan_glyph_emoji_square_clamps_avail(void)
+{
+    // avail_w is columns_to_consume * cell_w; for emoji the helper
+    // clamps avail_w to the smaller axis so we get a square atlas entry.
+    // cell_w = 14, cell_h = 24, columns_to_consume = 2 -> avail_w starts
+    // at 28. avail_h = 24. expect avail_w clamped down to 24.
+    FontBackend fb = make_test_font_backend();
+    test_font_set_loaded_styles(1u << FONT_STYLE_EMOJI);
+    uint32_t cps[] = { TEST_EMOJI_CP };
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_EMOJI, true, cps, 1,
+                    14, 24, 2, 255, 255, 255, &p);
+    ASSERT_EQ(p.avail_w, 24);
+    ASSERT_EQ(p.avail_h, 24);
+    test_font_reset();
+}
+
+static void test_plan_glyph_regional_square_clamps_cache_w(void)
+{
+    // Regional indicator codepoint (range U+1F1E6..1F1FF) forces
+    // cache_w = cache_h = min(avail_w, avail_h). For EMOJI style, the
+    // emoji-square clamp runs first and clamps avail_w to avail_h.
+    // After that, the regional clamp fires on the already-clamped
+    // avail_w, so all four dims end up at the cell_h value (24).
+    test_font_reset();
+    test_font_set_loaded_styles(1u << FONT_STYLE_EMOJI);
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { 0x1F1FA }; // regional indicator letter
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_EMOJI, true, cps, 1,
+                    14, 24, 2, 255, 255, 255, &p);
+    // Two stacked clamps both clamp down to avail_h=24 here:
+    //   columns_to_consume*cell_w = 28 (avail_w before emoji clamp)
+    //   emoji clamp: avail_w = min(28, 24) = 24
+    //   regional clamp: cache_w = cache_h = min(24, 24) = 24
+    ASSERT_EQ(p.avail_w, 24);
+    ASSERT_EQ(p.avail_h, 24);
+    ASSERT_EQ(p.cache_w, 24);
+    ASSERT_EQ(p.cache_h, 24);
+    ASSERT_TRUE(p.is_regional);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -110,6 +263,14 @@ int main(int argc, char *argv[])
     RUN_TEST(test_apply_glyph_layout_passthrough);
     RUN_TEST(test_apply_glyph_layout_center_only);
     RUN_TEST(test_apply_glyph_layout_downscale_centered);
+    RUN_TEST(test_resolve_cell_style_normal_default);
+    RUN_TEST(test_resolve_cell_style_bold_italic_cascade);
+    RUN_TEST(test_resolve_cell_style_bold_loads_when_only_bold_present);
+    RUN_TEST(test_resolve_cell_style_emoji_overrides_bold);
+    RUN_TEST(test_resolve_cell_style_emoji_falls_back_when_glyph_missing);
+    RUN_TEST(test_plan_glyph_sets_emoji_flags);
+    RUN_TEST(test_plan_glyph_emoji_square_clamps_avail);
+    RUN_TEST(test_plan_glyph_regional_square_clamps_cache_w);
 
     TEST_SUMMARY();
 }
