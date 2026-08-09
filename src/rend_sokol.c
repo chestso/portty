@@ -1179,17 +1179,6 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                 if (!data->font)
                     goto selection_check;
 
-                FontStyle style = FONT_STYLE_NORMAL;
-                if (cell.attrs.bold && cell.attrs.italic)
-                    style = FONT_STYLE_BOLD_ITALIC;
-                else if (cell.attrs.bold)
-                    style = FONT_STYLE_BOLD;
-                else if (cell.attrs.italic)
-                    style = FONT_STYLE_ITALIC;
-
-                if (!font_has_style(data->font, style))
-                    style = FONT_STYLE_NORMAL;
-
                 uint32_t cps[32];
                 int cp_count;
                 if (cell.grapheme_id == 0) {
@@ -1204,11 +1193,12 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                     }
                     cp_count = (int)n;
                 }
-                bool emoji_available = font_has_style(data->font, FONT_STYLE_EMOJI);
-                bool emoji_has_glyph = emoji_available &&
-                                       font_get_glyph_index(data->font, FONT_STYLE_EMOJI, cell.cp) != 0;
-                if (rend_should_use_emoji(cps, cp_count, emoji_available, emoji_has_glyph))
-                    style = FONT_STYLE_EMOJI;
+                RendCellStyle cell_style = rend_resolve_cell_style(data->font,
+                                                                   cell.attrs.bold,
+                                                                   cell.attrs.italic,
+                                                                   cps, cp_count);
+                FontStyle style = cell_style.style;
+                bool emoji_render = cell_style.use_emoji;
 
                 int avail_w = cell.width * cell_w;
                 int avail_h = cell_h;
@@ -1227,7 +1217,6 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                                          ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
                                          : 0xFFFFFF;
 
-                bool emoji_render = (style == FONT_STYLE_EMOJI);
                 bool symbol_cell = rend_is_symbol_cell_cp(cell.cp);
                 bool downscale_glyph = (emoji_render && color_baked);
                 bool center_horizontally = symbol_cell && !color_baked;

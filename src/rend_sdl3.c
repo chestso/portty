@@ -781,30 +781,12 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     }
 
     // Select font style
-    FontStyle style = FONT_STYLE_NORMAL;
-    if (cell.attrs.bold && cell.attrs.italic) {
-        if (font_has_style(data->font, FONT_STYLE_BOLD_ITALIC))
-            style = FONT_STYLE_BOLD_ITALIC;
-        else if (font_has_style(data->font, FONT_STYLE_BOLD))
-            style = FONT_STYLE_BOLD;
-        else if (font_has_style(data->font, FONT_STYLE_ITALIC))
-            style = FONT_STYLE_ITALIC;
-    } else if (cell.attrs.bold) {
-        if (font_has_style(data->font, FONT_STYLE_BOLD))
-            style = FONT_STYLE_BOLD;
-    } else if (cell.attrs.italic) {
-        if (font_has_style(data->font, FONT_STYLE_ITALIC))
-            style = FONT_STYLE_ITALIC;
-    }
-    if (cp_count > 0) {
-        bool emoji_available = font_has_style(data->font, FONT_STYLE_EMOJI);
-        bool emoji_has_glyph = emoji_available &&
-                               font_get_glyph_index(data->font, FONT_STYLE_EMOJI, cps[0]) != 0;
-        if (rend_should_use_emoji(cps, cp_count, emoji_available, emoji_has_glyph))
-            style = FONT_STYLE_EMOJI;
-    }
-
-    bool emoji_render = (style == FONT_STYLE_EMOJI);
+    RendCellStyle cell_style = rend_resolve_cell_style(data->font,
+                                                       cell.attrs.bold,
+                                                       cell.attrs.italic,
+                                                       cps, cp_count);
+    FontStyle style = cell_style.style;
+    bool emoji_render = cell_style.use_emoji;
 
     // Width is authoritative from cell.width (the term backend enforces the
     // "VS16 → 2 cells" rule in convert_vterm_screen_cell). No render-time

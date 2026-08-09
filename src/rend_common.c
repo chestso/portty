@@ -234,6 +234,52 @@ bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
     return false;
 }
 
+// Resolve the FontStyle to use for a cell. Wraps the bold/italic cascade
+// with graceful fallback when a requested style isn't loaded (bold+italic
+// prefers bold or italic before falling back to NORMAL — preserves glyph
+// styling instead of dropping it), then consults rend_should_use_emoji to
+// route through the color emoji font when applicable. Shared between SDL3
+// and Sokol renderers.
+RendCellStyle rend_resolve_cell_style(FontBackend *font,
+                                      bool cell_bold, bool cell_italic,
+                                      const uint32_t *cps, int cp_count)
+{
+    RendCellStyle out = { FONT_STYLE_NORMAL, false };
+
+    // Bold/italic cascade — prefer the most-specific style available so
+    // bold+italic doesn't degrade to plain text when only BOLD or only
+    // ITALIC is loaded.
+    if (cell_bold && cell_italic) {
+        if (font_has_style(font, FONT_STYLE_BOLD_ITALIC))
+            out.style = FONT_STYLE_BOLD_ITALIC;
+        else if (font_has_style(font, FONT_STYLE_BOLD))
+            out.style = FONT_STYLE_BOLD;
+        else if (font_has_style(font, FONT_STYLE_ITALIC))
+            out.style = FONT_STYLE_ITALIC;
+    } else if (cell_bold) {
+        if (font_has_style(font, FONT_STYLE_BOLD))
+            out.style = FONT_STYLE_BOLD;
+    } else if (cell_italic) {
+        if (font_has_style(font, FONT_STYLE_ITALIC))
+            out.style = FONT_STYLE_ITALIC;
+    }
+
+    // Emoji routing overrides the SGR cascade: if the codepoint cluster
+    // routes to the color emoji font, the emoji style is used no matter
+    // what bold/italic chose above.
+    if (cp_count > 0) {
+        bool emoji_available = font_has_style(font, FONT_STYLE_EMOJI);
+        bool emoji_has_glyph = emoji_available &&
+                               font_get_glyph_index(font, FONT_STYLE_EMOJI, cps[0]) != 0;
+        if (rend_should_use_emoji(cps, cp_count, emoji_available, emoji_has_glyph)) {
+            out.style = FONT_STYLE_EMOJI;
+            out.use_emoji = true;
+        }
+    }
+
+    return out;
+}
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================

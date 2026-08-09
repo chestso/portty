@@ -126,6 +126,23 @@ bool rend_is_color_font(FontBackend *font, FontStyle style);
 bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
                            bool emoji_font_available, bool emoji_has_glyph);
 
+// Resolve the FontStyle to use for a cell from its SGR attributes and
+// codepoint sequence. Wraps the bold/italic cascade with graceful fallback
+// when a requested style isn't loaded (bold+italic prefers bold or italic
+// before falling back to NORMAL — preserves exising glyph styling instead
+// of dropping it altogether), then consults `rend_should_use_emoji` to
+// route through the color emoji font when applicable. Shared between
+// SDL3 and Sokol backends.
+typedef struct
+{
+    FontStyle style;
+    bool use_emoji;
+} RendCellStyle;
+
+RendCellStyle rend_resolve_cell_style(FontBackend *font,
+                                      bool cell_bold, bool cell_italic,
+                                      const uint32_t *cps, int cp_count);
+
 #define REND_ATLAS_HASH_SIZE    8192
 #define REND_ATLAS_TEXTURE_SIZE 2048
 #define REND_ATLAS_MAX_SHELVES  128
