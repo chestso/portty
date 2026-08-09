@@ -16,7 +16,7 @@ static void test_resolve_cell_style_emoji_overrides_bold(void);
 static void test_resolve_cell_style_emoji_falls_back_when_glyph_missing(void);
 static void test_plan_glyph_sets_emoji_flags(void);
 static void test_plan_glyph_emoji_square_clamps_avail(void);
-static void test_plan_glyph_regional_square_clamps_cache_w(void);
+static void test_plan_glyph_regional_passes_through(void);
 
 /* Helpers exported by font_stubs.c for testing the policy functions in
  * rend_common.c that consult the FontBackend for style/emoji decisions. */
@@ -222,13 +222,13 @@ static void test_plan_glyph_emoji_square_clamps_avail(void)
     test_font_reset();
 }
 
-static void test_plan_glyph_regional_square_clamps_cache_w(void)
+static void test_plan_glyph_regional_passes_through(void)
 {
-    // Regional indicator codepoint (range U+1F1E6..1F1FF) forces
-    // cache_w = cache_h = min(avail_w, avail_h). For EMOJI style, the
-    // emoji-square clamp runs first and clamps avail_w to avail_h.
-    // After that, the regional clamp fires on the already-clamped
-    // avail_w, so all four dims end up at the cell_h value (24).
+    // A regional indicator codepoint routes through rend_plan_glyph and
+    // gets the now-uniform cache=avail paths. The plan no longer
+    // wraps regional codepoints in a square clamp — FreeType's output
+    // is the font's intent (same principle applied to NF / symbol-class
+    // glyphs in commits 848b5df and dbfda7a).
     test_font_reset();
     test_font_set_loaded_styles(1u << FONT_STYLE_EMOJI);
     FontBackend fb = make_test_font_backend();
@@ -236,15 +236,12 @@ static void test_plan_glyph_regional_square_clamps_cache_w(void)
     RendGlyphPlan p = { 0 };
     rend_plan_glyph(&fb, FONT_STYLE_EMOJI, true, cps, 1,
                     14, 24, 2, 255, 255, 255, &p);
-    // Two stacked clamps both clamp down to avail_h=24 here:
-    //   columns_to_consume*cell_w = 28 (avail_w before emoji clamp)
-    //   emoji clamp: avail_w = min(28, 24) = 24
-    //   regional clamp: cache_w = cache_h = min(24, 24) = 24
+    // Emoji square clamp pulls avail_w down to avail_h=24; cache_w /
+    // cache_h track avail without further reduction.
     ASSERT_EQ(p.avail_w, 24);
     ASSERT_EQ(p.avail_h, 24);
     ASSERT_EQ(p.cache_w, 24);
     ASSERT_EQ(p.cache_h, 24);
-    ASSERT_TRUE(p.is_regional);
 }
 
 int main(int argc, char *argv[])
@@ -270,7 +267,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_resolve_cell_style_emoji_falls_back_when_glyph_missing);
     RUN_TEST(test_plan_glyph_sets_emoji_flags);
     RUN_TEST(test_plan_glyph_emoji_square_clamps_avail);
-    RUN_TEST(test_plan_glyph_regional_square_clamps_cache_w);
+    RUN_TEST(test_plan_glyph_regional_passes_through);
 
     TEST_SUMMARY();
 }

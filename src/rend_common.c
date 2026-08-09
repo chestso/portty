@@ -316,7 +316,6 @@ void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
                          ? ((uint32_t)fg_r << 16) | ((uint32_t)fg_g << 8) | (uint32_t)fg_b
                          : 0xFFFFFF;
 
-    out->is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
     out->symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
     out->downscale_glyph = (emoji_render && out->color_baked);
     // Symbol-class glyphs from a text font have a FreeType bitmap_left
@@ -326,16 +325,8 @@ void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
 
     out->avail_w = avail_w;
     out->avail_h = avail_h;
-
-    // Regional indicators: cache at square size for consistent scaling.
-    int cache_w = avail_w;
-    int cache_h = avail_h;
-    if (out->is_regional) {
-        int side = avail_w < avail_h ? avail_w : avail_h;
-        cache_w = cache_h = side;
-    }
-    out->cache_w = cache_w;
-    out->cache_h = cache_h;
+    out->cache_w = avail_w;
+    out->cache_h = avail_h;
 }
 
 // Apply the downscale-or-center policy (see header). Whichever of

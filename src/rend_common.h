@@ -173,8 +173,8 @@ GlyphBitmap *rend_apply_glyph_layout(GlyphBitmap *bitmap,
                                      int max_w, int max_h);
 
 // Per-cell glyph rendering decisions: presentation sizes, color-baked
-// flag, atlas color key, render colors, regional/symbol-class flags, and
-// the downscale-or-center policy. Caller already picked a FontStyle via
+// flag, atlas color key, render colors, symbol-class flag, and the
+// downscale-or-center policy. Caller already picked a FontStyle via
 // rend_resolve_cell_style. The helper also pushes font_set_presentation_width
 // into the font backend for every style — backends must call this once at
 // the top of render_cell before font_render_*.
@@ -184,12 +184,13 @@ typedef struct
     bool color_baked;
     uint8_t render_r, render_g, render_b; // for font_render_*
     uint32_t color_key;                   // for atlas lookup
-    bool is_regional;
     bool symbol_cell;
     bool downscale_glyph;     // 4x emoji pipeline only
     bool center_horizontally; // symbol-class without color-baked
     int avail_w, avail_h;     // post-emoji square clamp
-    int cache_w, cache_h;     // post-regional square clamp
+    int cache_w, cache_h;     // — initially equals avail_w/avail_h.
+                              // Kept as a separate field so backends can
+                              // override without recomputing presentation_width.
 } RendGlyphPlan;
 
 void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
