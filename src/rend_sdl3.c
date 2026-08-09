@@ -552,31 +552,15 @@ static void blit_glyph(SDL_Renderer *renderer, RendSdl3Atlas *atlas,
                       (float)entry->region.w, (float)entry->region.h };
     SDL_FRect dst;
     if (entry->centered) {
-        // Cell-center placement. The atlas bitmap is already at its final
-        // display size: cache_glyph runs the box-filter when the rasterized
-        // glyph overflows the cell, and small glyphs stay on their native
-        // pixel grid. Blit is always 1:1 — no GPU scaling.
-        //
-        // For padded bitmaps (diagonals with region > cell), use integer
-        // division for padding calculation to match Sokol's exact placement
-        // and ensure seamless tiling. Normal centered glyphs use floorf.
-        int pad_x = (entry->region.w - avail_w) / 2;
-        int pad_y = (entry->region.h - avail_h) / 2;
-        if (pad_x > 0 || pad_y > 0) {
-            // Padded bitmap - extend beyond cell bounds for seamless overhang
-            dst = (SDL_FRect){
-                (float)(cell_x - pad_x),
-                (float)(cell_y - pad_y),
-                (float)entry->region.w, (float)entry->region.h
-            };
-        } else {
-            // Normal centered glyph - center within cell
-            dst = (SDL_FRect){
-                floorf((float)cell_x + ((float)avail_w - (float)entry->region.w) * 0.5f),
-                floorf((float)cell_y + ((float)avail_h - (float)entry->region.h) * 0.5f),
-                (float)entry->region.w, (float)entry->region.h
-            };
-        }
+        // Cell-center placement. After Commit A's clamp in
+        // rend_downscale_bitmap, entry->region.{w,h} is provably bounded
+        // by avail_{w,h}, so the bitmap fits inside the cell — no pad
+        // branch needed. Blit is always 1:1 (no GPU scaling).
+        dst = (SDL_FRect){
+            floorf((float)cell_x + ((float)avail_w - (float)entry->region.w) * 0.5f),
+            floorf((float)cell_y + ((float)avail_h - (float)entry->region.h) * 0.5f),
+            (float)entry->region.w, (float)entry->region.h
+        };
     } else {
         // Trust FreeType's bitmap bounds: anchor at cell_x + bitmap_left and
         // let the glyph overhang the cell. Row draw is two-pass — all cell
