@@ -280,6 +280,64 @@ RendCellStyle rend_resolve_cell_style(FontBackend *font,
     return out;
 }
 
+// Plan per-cell glyph rendering decisions. Wraps everything that depends
+// only on the cell inputs (SGR-resolved style + codepoint sequence + cell
+// sizes + foreground color), so both renderers can skip boilerplate and
+// disagree only on the final placement / atlas-insert path.
+//
+// Downscale policy is gated on emoji: only `(emoji_render && color_baked)`
+// may resample, because that path supersamples at 4x first (via
+// REND_EMOJI_FONT_SCALE) so the downscale preserves detail. Every other
+// glyph — symbol-class, Nerd Fonts outline icons, plain text — renders
+// at FreeType's native metrics, no resampling, baseline-anchored.
+void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
+                     const uint32_t *cps, int cp_count,
+                     int cell_w, int cell_h, int columns_to_consume,
+                     uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
+                     RendGlyphPlan *out)
+{
+    // Tell the font backend the pixel budget for every style. Oversized
+    // glyphs (CJK via fallback, etc.) use this when sizing their output.
+    int avail_w = columns_to_consume * cell_w;
+    int avail_h = cell_h;
+    for (int s = 0; s < FONT_STYLE_COUNT; s++)
+        font_set_presentation_width(font, s, avail_w);
+
+    // Emoji prefers a square aspect ratio within the cell box.
+    if (style == FONT_STYLE_EMOJI && avail_h < avail_w)
+        avail_w = avail_h;
+
+    out->font_data = font->font_data[style];
+    out->color_baked = rend_is_color_font(font, style);
+    out->render_r = out->color_baked ? fg_r : 255;
+    out->render_g = out->color_baked ? fg_g : 255;
+    out->render_b = out->color_baked ? fg_b : 255;
+    out->color_key = out->color_baked
+                         ? ((uint32_t)fg_r << 16) | ((uint32_t)fg_g << 8) | (uint32_t)fg_b
+                         : 0xFFFFFF;
+
+    out->is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
+    out->symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
+    out->downscale_glyph = (emoji_render && out->color_baked);
+    // Symbol-class glyphs from a text font have a FreeType bitmap_left
+    // calibrated against an oversized advance (mono fonts often use
+    // 1.2em+). Override x_offset so the ink sits centered horizontally.
+    out->center_horizontally = out->symbol_cell && !out->color_baked;
+
+    out->avail_w = avail_w;
+    out->avail_h = avail_h;
+
+    // Regional indicators: cache at square size for consistent scaling.
+    int cache_w = avail_w;
+    int cache_h = avail_h;
+    if (out->is_regional) {
+        int side = avail_w < avail_h ? avail_w : avail_h;
+        cache_w = cache_h = side;
+    }
+    out->cache_w = cache_w;
+    out->cache_h = cache_h;
+}
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================

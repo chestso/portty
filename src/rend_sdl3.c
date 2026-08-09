@@ -796,48 +796,25 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         vlog("render_cell: U+%04X style=%d emoji=%d cols=%d cell.w=%d\n",
              cps[0], style, emoji_render, columns_to_consume, cell.width);
 
+    RendGlyphPlan plan;
+    rend_plan_glyph(data->font, style, emoji_render, cps, cp_count,
+                    data->cell_width, data->cell_height, columns_to_consume,
+                    r, g, b, &plan);
+
     int cell_x = vis_col * data->cell_width;
     int cell_y = row * data->cell_height;
-    int avail_w = columns_to_consume * data->cell_width;
-    int avail_h = data->cell_height;
-
-    // Tell the font backend the pixel budget for this glyph so oversized
-    // glyphs (e.g. double-advance symbols, CJK via fallback) get scaled.
-    for (int s = 0; s < FONT_STYLE_COUNT; s++)
-        font_set_presentation_width(data->font, s, avail_w);
-
-    // Emoji: prefer square aspect ratio (avail_h) but never exceed
-    // the allocated cell space (columns_to_consume * cell_width).
-    if (style == FONT_STYLE_EMOJI && avail_h < avail_w) {
-        avail_w = avail_h;
-    }
-
-    void *font_data = data->font->font_data[style];
-    bool color_baked = rend_is_color_font(data->font, style);
-    uint8_t render_r = color_baked ? r : 255;
-    uint8_t render_g = color_baked ? g : 255;
-    uint8_t render_b = color_baked ? b : 255;
-    uint32_t color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                     : 0xFFFFFF;
-    bool is_regional = (cp_count > 0 && is_regional_indicator(cps[0]));
-    bool symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
-    bool downscale_glyph = (emoji_render && color_baked);
-    bool center_horizontally = symbol_cell && !color_baked;
-    // Downscale policy is driven by emoji rasterization, not glyph class.
-    // 4x supersampling (REND_EMOJI_FONT_SCALE) feeds a min-fit downscale
-    // for color-emoji output so detail survives small sizes. Every other
-    // glyph — symbol-class, Nerd Fonts outline icons, plain text — renders
-    // at FreeType's native metrics: bitmap_left honored on the baseline,
-    // no resampling, overhang into neighbor cells handled by the two-pass
-    // row draw. Nerd Fonts return to the plain-text rendering path.
-
-    // For regional indicators, cache at square size for consistent high-quality scaling
-    int cache_w = avail_w;
-    int cache_h = avail_h;
-    if (is_regional) {
-        int side = avail_w < avail_h ? avail_w : avail_h;
-        cache_w = cache_h = side;
-    }
+    void *font_data = plan.font_data;
+    bool color_baked = plan.color_baked;
+    uint8_t render_r = plan.render_r;
+    uint8_t render_g = plan.render_g;
+    uint8_t render_b = plan.render_b;
+    uint32_t color_key = plan.color_key;
+    int avail_w = plan.avail_w;
+    int avail_h = plan.avail_h;
+    int cache_w = plan.cache_w;
+    int cache_h = plan.cache_h;
+    bool downscale_glyph = plan.downscale_glyph;
+    bool center_horizontally = plan.center_horizontally;
 
     // Shaped rendering path (multiple codepoints)
     if (cp_count > 1 && data->font->render_shaped) {

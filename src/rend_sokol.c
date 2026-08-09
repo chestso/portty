@@ -1200,45 +1200,24 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                 FontStyle style = cell_style.style;
                 bool emoji_render = cell_style.use_emoji;
 
-                int avail_w = cell.width * cell_w;
-                int avail_h = cell_h;
-
-                for (int s = 0; s < FONT_STYLE_COUNT; s++)
-                    font_set_presentation_width(data->font, s, avail_w);
-
-                if (style == FONT_STYLE_EMOJI && avail_h < avail_w)
-                    avail_w = avail_h;
-
-                bool color_baked = rend_is_color_font(data->font, style);
-                uint8_t render_r = color_baked ? fg[0] : 255;
-                uint8_t render_g = color_baked ? fg[1] : 255;
-                uint8_t render_b = color_baked ? fg[2] : 255;
-                uint32_t color_key = color_baked
-                                         ? ((uint32_t)fg[0] << 16) | ((uint32_t)fg[1] << 8) | (uint32_t)fg[2]
-                                         : 0xFFFFFF;
-
-                bool symbol_cell = rend_is_symbol_cell_cp(cell.cp);
-                bool downscale_glyph = (emoji_render && color_baked);
-                bool center_horizontally = symbol_cell && !color_baked;
-                // Downscale policy rides on emoji rasterization, not glyph
-                // class. 4x supersampling (REND_EMOJI_FONT_SCALE) feeds the
-                // min-fit downscale for color-emoji output. Every other
-                // glyph (symbol-class, Nerd Fonts outline icons, plain
-                // text) renders at FreeType's native metrics: bitmap_left
-                // honored on the baseline, no resampling, overhang into
-                // neighbor cells absorbed by the row draw. Nerd Fonts sit
-                // at the same vertical size as surrounding text.
-
-                int cache_w = avail_w;
-                int cache_h = avail_h;
-                bool is_regional = is_regional_indicator(cell.cp);
-                if (is_regional) {
-                    int side = avail_w < avail_h ? avail_w : avail_h;
-                    cache_w = cache_h = side;
-                }
+                RendGlyphPlan plan;
+                rend_plan_glyph(data->font, style, emoji_render, cps, cp_count,
+                                cell_w, cell_h, cell.width,
+                                fg[0], fg[1], fg[2], &plan);
+                void *sh_font_data = plan.font_data;
+                bool color_baked = plan.color_baked;
+                uint8_t render_r = plan.render_r;
+                uint8_t render_g = plan.render_g;
+                uint8_t render_b = plan.render_b;
+                uint32_t color_key = plan.color_key;
+                int avail_w = plan.avail_w;
+                int avail_h = plan.avail_h;
+                int cache_w = plan.cache_w;
+                int cache_h = plan.cache_h;
+                bool downscale_glyph = plan.downscale_glyph;
+                bool center_horizontally = plan.center_horizontally;
 
                 if (cp_count > 1 && data->font->render_shaped) {
-                    void *sh_font_data = data->font->font_data[style];
                     ShapedGlyphs *shaped = font_render_shaped_text(
                         data->font, style, cps, cp_count,
                         render_r, render_g, render_b);
