@@ -2587,46 +2587,55 @@ static void sokol_frame_cb(void)
             d->script_done = true;
     }
 
+    // Always render every frame. Sokol's X11 event loop calls glXSwapBuffers
+    // unconditionally every frame (in _sapp_linux_frame, after sokol_frame_cb
+    // returns). If we skip the render pass when the terminal hasn't changed,
+    // the back buffer retains stale content from the previous swap cycle.
+    // With double-buffering, the compositor alternates between a correctly-
+    // rendered buffer and a stale one, producing visible flicker on new text
+    // that takes 5-10 seconds to settle as cursor blink redraws eventually
+    // populate both buffers. By always rendering, both GL back buffers always
+    // contain correct content, so the unconditional glXSwapBuffers is always
+    // a no-op swap of identical content when nothing has changed.
     double elapsed_ms = (double)sapp_frame_duration() * 1000.0;
-    bool should_render = sokol_should_render(d, elapsed_ms);
-    if (should_render) {
-        // Compute cursor visibility: always shown when unfocused or blink off,
-        // otherwise follows the blink toggle.
-        bool cursor_vis = !d->has_focus ||
-                          !terminal_get_cursor_blink(d->term) ||
-                          d->cursor_blink_visible;
+    (void)sokol_should_render(d, elapsed_ms);
 
-        d->self->draw_terminal(d->self, d->term, cursor_vis);
+    // Compute cursor visibility: always shown when unfocused or blink off,
+    // otherwise follows the blink toggle.
+    bool cursor_vis = !d->has_focus ||
+                      !terminal_get_cursor_blink(d->term) ||
+                      d->cursor_blink_visible;
 
-        // === Debug script: pre-commit deferred commands ===
-        // screendump must run after sg_end_pass but BEFORE sg_commit (SwapBuffers),
-        // otherwise glReadPixels reads the previous frame's back buffer.
-        if (d->pending_screendump) {
-            d->pending_screendump = false;
-            sokol_debug_screendump(d, d->screendump_path);
-            if (d->screenshot_saved)
-                d->quit_requested = true;
-        }
+    d->self->draw_terminal(d->self, d->term, cursor_vis);
 
-        // === Debug script: frame capture ===
-        if (d->pending_record_frame) {
-            d->pending_record_frame = false;
-            frame_recorder_build_path(d->frame_recorder, d->screendump_path,
-                                      sizeof(d->screendump_path));
-            sokol_record_frame(d, d->screendump_path);
-            frame_recorder_advance(d->frame_recorder);
-        }
+    // === Debug script: pre-commit deferred commands ===
+    // screendump must run after sg_end_pass but BEFORE sg_commit (SwapBuffers),
+    // otherwise glReadPixels reads the previous frame's back buffer.
+    if (d->pending_screendump) {
+        d->pending_screendump = false;
+        sokol_debug_screendump(d, d->screendump_path);
+        if (d->screenshot_saved)
+            d->quit_requested = true;
+    }
 
-        d->self->present(d->self);
-        terminal_clear_redraw(d->term);
+    // === Debug script: frame capture ===
+    if (d->pending_record_frame) {
+        d->pending_record_frame = false;
+        frame_recorder_build_path(d->frame_recorder, d->screendump_path,
+                                  sizeof(d->screendump_path));
+        sokol_record_frame(d, d->screendump_path);
+        frame_recorder_advance(d->frame_recorder);
+    }
 
-        // === Debug script: post-present deferred commands ===
-        if (d->pending_verifybuf) {
-            d->pending_verifybuf = false;
-            sokol_debug_verifybuf(d, d->verify_row,
-                                  d->verify_col_start,
-                                  d->verify_col_end);
-        }
+    d->self->present(d->self);
+    terminal_clear_redraw(d->term);
+
+    // === Debug script: post-present deferred commands ===
+    if (d->pending_verifybuf) {
+        d->pending_verifybuf = false;
+        sokol_debug_verifybuf(d, d->verify_row,
+                              d->verify_col_start,
+                              d->verify_col_end);
     }
 }
 
