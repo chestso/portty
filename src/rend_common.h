@@ -102,11 +102,10 @@ static inline float logical_to_physical_f(float logical, float scale)
 #include "font.h"
 
 // Downscale a glyph bitmap to fit within max_w × max_h using area-averaging.
-// When height_only_fit is true, only vertical overflow triggers downscaling.
-// Returns a new GlyphBitmap (caller frees pixels + struct), or NULL if no
-// scaling was needed or on allocation failure.
-GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
-                                   bool height_only_fit);
+// The bitmap is scaled by the smaller ratio to preserve aspect. Returns a
+// new GlyphBitmap (caller frees pixels + struct), or NULL if no scaling was
+// needed or on allocation failure.
+GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h);
 
 // Check if a codepoint is a symbol/dingbat that may overflow the text cell
 // and needs centered placement (no downscale — symbol glyphs are rasterized

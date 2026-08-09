@@ -81,26 +81,20 @@ uint8_t rend_linear_to_srgb(float lin)
 // =============================================================================
 //
 // Scales a rasterized glyph bitmap to fit within max_w × max_h using
-// area-averaging. When height_only_fit is true, only vertical overflow
-// triggers a downscale (for symbol-class glyphs whose natural advance is
-// wider than the cell — horizontal overhang is allowed and handled by the
-// two-pass row draw). Otherwise both dimensions are checked and the
-// bitmap is scaled by the smaller ratio to preserve aspect.
-GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h,
-                                   bool height_only_fit)
+// area-averaging. Caller filters for whether downscaling is allowed — this
+// function unconditionally attempts min-fit; only the color-emoji pipeline
+// (which supersamples at 4x via REND_EMOJI_FONT_SCALE) is permitted to call
+// it, since non-emoji glyphs must not be resampled.
+GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
 {
     if (!src || !src->pixels || src->width <= 0 || src->height <= 0)
         return NULL;
-    if (height_only_fit) {
-        if (src->height <= max_h)
-            return NULL;
-    } else if (src->width <= max_w && src->height <= max_h) {
+    if (src->width <= max_w && src->height <= max_h)
         return NULL;
-    }
 
     float scale_x = (float)max_w / (float)src->width;
     float scale_y = (float)max_h / (float)src->height;
-    float scale = height_only_fit ? scale_y : fminf(scale_x, scale_y);
+    float scale = fminf(scale_x, scale_y);
 
     int dst_w = (int)(src->width * scale + 0.5f);
     int dst_h = (int)(src->height * scale + 0.5f);

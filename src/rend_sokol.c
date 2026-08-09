@@ -1324,7 +1324,7 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                                     if (downscale_glyph) {
                                         vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
                                              gid, gb->width, gb->height, cache_w, cache_h);
-                                        scaled = rend_downscale_bitmap(gb, cache_w, cache_h, false);
+                                        scaled = rend_downscale_bitmap(gb, cache_w, cache_h);
                                         gb->centered = true;
                                         if (scaled)
                                             scaled->centered = true;
@@ -1436,7 +1436,7 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                         if (downscale_glyph) {
                             vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
                                  (unsigned)cell.cp, bmp->width, bmp->height, cache_w, cache_h);
-                            scaled = rend_downscale_bitmap(bmp, cache_w, cache_h, false);
+                            scaled = rend_downscale_bitmap(bmp, cache_w, cache_h);
                             bmp->centered = true;
                             if (scaled)
                                 scaled->centered = true;

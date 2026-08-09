@@ -46,13 +46,8 @@ typedef struct
     void *font_data; // FtFontData*, kept alive for pointer stability
 } LoadedFallbackFont;
 
-// Box-filter downscale a glyph bitmap to fit within max_w x max_h.
-// Returns a newly allocated GlyphBitmap, or NULL if no downscale is needed.
-// When height_only_fit is true, only the height is constrained: a glyph that
-// fits vertically passes through unchanged regardless of width (overhang is
-// handled by the renderer's two-pass row draw). When the glyph overflows
-// vertically, scale uniformly by the height ratio so aspect is preserved.
-// (Implementation moved to rend_common.c as rend_downscale_bitmap)
+// See rend_common.c for the (4x emoji only) glyph downscaler
+// `rend_downscale_bitmap`. SDL3 caches glyphs via `cache_glyph` below.
 
 // Draw a filled rounded rectangle
 static void draw_rounded_rect(SDL_Renderer *renderer, float x, float y,
@@ -515,7 +510,7 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
         // is allowed to downscale — it supersamples before clamping so detail
         // survives. Other glyphs render at FreeType's native metrics and must
         // never be downscaled, which would visibly destroy crispness.
-        scaled = rend_downscale_bitmap(bitmap, max_w, max_h, false);
+        scaled = rend_downscale_bitmap(bitmap, max_w, max_h);
         bitmap->centered = true;
         if (scaled)
             scaled->centered = true;
