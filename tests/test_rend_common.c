@@ -6,6 +6,9 @@
 /* Forward declarations */
 static void test_nf_translate_known_mappings(void);
 static void test_downscale_output_fits_cell_box(void);
+static void test_apply_glyph_layout_passthrough(void);
+static void test_apply_glyph_layout_center_only(void);
+static void test_apply_glyph_layout_downscale_centered(void);
 
 static void test_nf_translate_known_mappings(void)
 {
@@ -104,6 +107,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_display_row_to_unified_with_scrollback);
     RUN_TEST(test_clamp_pixel_to_viewport);
     RUN_TEST(test_downscale_output_fits_cell_box);
+    RUN_TEST(test_apply_glyph_layout_passthrough);
+    RUN_TEST(test_apply_glyph_layout_center_only);
+    RUN_TEST(test_apply_glyph_layout_downscale_centered);
 
     TEST_SUMMARY();
 }
@@ -149,4 +155,69 @@ static void test_downscale_output_fits_cell_box(void)
             free(src.pixels);
         }
     }
+}
+
+// The downscale-or-center policy helper decides per-cell what to do
+// with a freshly rasterized glyph bitmap. The integration tests cover
+// the policy decision in render_cell, but the helper's branching is
+// small and high-impact — locking the three branches down keeps the
+// refactor honest.
+static GlyphBitmap *make_alpha_bitmap(int w, int h)
+{
+    GlyphBitmap *b = calloc(1, sizeof(GlyphBitmap));
+    b->width = w;
+    b->height = h;
+    b->pixels = calloc((size_t)w * h * 4, 1);
+    for (int p = 0; p < w * h; p++)
+        b->pixels[p * 4 + 3] = 200;
+    return b;
+}
+
+static void test_apply_glyph_layout_passthrough(void)
+{
+    // Neither downscale nor center: helper leaves the bitmap untouched
+    // and returns NULL. Caller inserts the input bitmap itself.
+    GlyphBitmap *b = make_alpha_bitmap(7, 11);
+    GlyphBitmap *out = rend_apply_glyph_layout(b, false, false, 16, 16);
+    ASSERT_NULL(out);
+    ASSERT_FALSE(b->centered);
+    ASSERT_EQ(b->x_offset, 0);
+    ASSERT_EQ(b->width, 7); // not mutated
+    ASSERT_EQ(b->height, 11);
+    free(b->pixels);
+    free(b);
+}
+
+static void test_apply_glyph_layout_center_only(void)
+{
+    // Center only (no downscale): the bitmap's x_offset is rewritten so a
+    // mono font whose FreeType bitmap_left is calibrated against an
+    // oversized advance has its ink centered in the cell. The bitmap is
+    // returned as NULL — caller inserts the (now-mutated) input.
+    GlyphBitmap *b = make_alpha_bitmap(6, 14);
+    GlyphBitmap *out = rend_apply_glyph_layout(b, false, true, 16, 16);
+    ASSERT_NULL(out);
+    ASSERT_FALSE(b->centered);            // center_horizontal sets x_offset, not the centered bit
+    ASSERT_EQ(b->x_offset, (16 - 6) / 2); // just the horizontal centering
+    ASSERT_EQ(b->width, 6);
+    free(b->pixels);
+    free(b);
+}
+
+static void test_apply_glyph_layout_downscale_centered(void)
+{
+    // Downscale path: a fresh bitmap is returned (the original is left
+    // untouched), centered bit is set on both, fits within max_w x max_h.
+    GlyphBitmap *b = make_alpha_bitmap(48, 48);
+    GlyphBitmap *out = rend_apply_glyph_layout(b, true, false, 16, 16);
+    ASSERT_NOT_NULL(out);
+    ASSERT_TRUE(out->centered);
+    ASSERT_TRUE(b->centered);
+    // Downscale fits (clamp invariant from commit 27b55a2 holds).
+    ASSERT_TRUE(out->width <= 16);
+    ASSERT_TRUE(out->height <= 16);
+    free(out->pixels);
+    free(out);
+    free(b->pixels);
+    free(b);
 }
