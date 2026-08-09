@@ -1287,18 +1287,9 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                                     data->font, style, gid,
                                     render_r, render_g, render_b);
                                 if (gb) {
-                                    GlyphBitmap *scaled = NULL;
-                                    if (downscale_glyph) {
-                                        vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
-                                             gid, gb->width, gb->height, cache_w, cache_h);
-                                        scaled = rend_downscale_bitmap(gb, cache_w, cache_h);
-                                        gb->centered = true;
-                                        if (scaled)
-                                            scaled->centered = true;
-                                    } else if (center_horizontally) {
-                                        int x_off = (cache_w - gb->width) / 2;
-                                        gb->x_offset = x_off;
-                                    }
+                                    GlyphBitmap *scaled = rend_apply_glyph_layout(
+                                        gb, downscale_glyph, center_horizontally,
+                                        cache_w, cache_h);
                                     uint32_t insert_id = atlas_gid ? atlas_gid
                                                                    : (uint32_t)gb->glyph_id;
                                     entry = rend_sokol_atlas_insert(
@@ -1399,18 +1390,9 @@ void rend_sokol_render_terminal_cells(RendererSokolData *data, TerminalBackend *
                     GlyphBitmap *bmp = font_render_glyphs(
                         data->font, style, &cell.cp, 1, render_r, render_g, render_b);
                     if (bmp) {
-                        GlyphBitmap *scaled = NULL;
-                        if (downscale_glyph) {
-                            vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
-                                 (unsigned)cell.cp, bmp->width, bmp->height, cache_w, cache_h);
-                            scaled = rend_downscale_bitmap(bmp, cache_w, cache_h);
-                            bmp->centered = true;
-                            if (scaled)
-                                scaled->centered = true;
-                        } else if (center_horizontally) {
-                            int x_off = (cache_w - bmp->width) / 2;
-                            bmp->x_offset = x_off;
-                        }
+                        GlyphBitmap *scaled = rend_apply_glyph_layout(
+                            bmp, downscale_glyph, center_horizontally,
+                            cache_w, cache_h);
                         uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
                                                             : (uint32_t)bmp->glyph_id;
                         entry = rend_sokol_atlas_insert(

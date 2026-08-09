@@ -143,6 +143,35 @@ RendCellStyle rend_resolve_cell_style(FontBackend *font,
                                       bool cell_bold, bool cell_italic,
                                       const uint32_t *cps, int cp_count);
 
+// Apply the downscale-or-center policy to a freshly rasterized glyph
+// bitmap before it goes into the per-backend atlas. Both the SDL3
+// `cache_glyph` wrapper and the inked blocks in Sokol's shaped/single
+// paths do the same three things:
+//
+//   * if downscale: scale the bitmap to fit max_w x max_h via the 4x emoji
+//     pipeline (which supersampled before clamping) and mark the result
+//     as centered;
+//   * else if center_horizontally: override x_offset so the ink sits
+//     centered in the cell while bitmap_top still anchors to the
+//     typographic baseline — for mono fonts whose freeType bitmap_left
+//     is calibrated against an oversized advance;
+//   * else: leave the bitmap untouched and let the backend position
+//     it by FreeType's natural metrics on the baseline.
+//
+// Downscale is reserved for the 4x emoji path; never applied to plain
+// text, Nerd Fonts, or symbol-class glyphs (they render at FreeType's
+// native metrics, so resampling would destroy crispness). Consumes
+// `bitmap` and returns either a freshly-allocated scaled copy or NULL
+// if neither downscale nor center_horizontal was requested (caller
+// inserts `bitmap` itself in that case).
+//
+// Caller frees the returned bitmap's pixels + struct (if non-NULL) and
+// inserts itself — the helper does not touch any atlas.
+GlyphBitmap *rend_apply_glyph_layout(GlyphBitmap *bitmap,
+                                     bool downscale,
+                                     bool center_horizontally,
+                                     int max_w, int max_h);
+
 // Per-cell glyph rendering decisions: presentation sizes, color-baked
 // flag, atlas color key, render colors, regional/symbol-class flags, and
 // the downscale-or-center policy. Caller already picked a FontStyle via

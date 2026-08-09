@@ -502,29 +502,9 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
     if (entry)
         return entry;
 
-    GlyphBitmap *scaled = NULL;
-    if (downscale) {
-        vlog("Cache glyph %u: bitmap=%dx%d max=%dx%d (min-fit)\n",
-             glyph_id, bitmap->width, bitmap->height, max_w, max_h);
-        // Only the 4x-rasterized emoji pipeline (color-baked FONT_STYLE_EMOJI)
-        // is allowed to downscale — it supersamples before clamping so detail
-        // survives. Other glyphs render at FreeType's native metrics and must
-        // never be downscaled, which would visibly destroy crispness.
-        scaled = rend_downscale_bitmap(bitmap, max_w, max_h);
-        bitmap->centered = true;
-        if (scaled)
-            scaled->centered = true;
-    } else if (center_horizontally) {
-        // Symbol-class glyphs (Dingbats, Misc Symbols, NF outline icons) come
-        // back from FreeType with bitmap_left calibrated against the font's
-        // natural advance, which for many mono fonts is wider than the cell
-        // (Noto Sans Mono ✶: advance 1200/1000 em, ink centered in the wider
-        // box). Override x_offset so the ink sits centered in the cell while
-        // bitmap_top still anchors the glyph to the typographic baseline.
-        int eff_w = bitmap->width;
-        int x_off = (max_w - eff_w) / 2;
-        bitmap->x_offset = x_off;
-    }
+    GlyphBitmap *scaled = rend_apply_glyph_layout(bitmap, downscale,
+                                                  center_horizontally,
+                                                  max_w, max_h);
     entry = rend_sdl3_atlas_insert(atlas, font_data, glyph_id, color_key,
                                    scaled ? scaled : bitmap, is_color);
     if (scaled) {

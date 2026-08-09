@@ -338,6 +338,34 @@ void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
     out->cache_h = cache_h;
 }
 
+// Apply the downscale-or-center policy (see header). Whichever of
+// downscale / center_horizontally is true mutates the bitmap and returns
+// it; if neither flag is set the function returns NULL and the caller
+// inserts `bitmap` unchanged. Propagates the centered bit to the scaled
+// bitmap (or to the input bitmap in the center-only case) so backend
+// placement runs from the cell center.
+GlyphBitmap *rend_apply_glyph_layout(GlyphBitmap *bitmap,
+                                     bool downscale,
+                                     bool center_horizontally,
+                                     int max_w, int max_h)
+{
+    if (downscale) {
+        vlog("Cache glyph: bitmap=%dx%d max=%dx%d (min-fit)\n",
+             bitmap->width, bitmap->height, max_w, max_h);
+        GlyphBitmap *scaled = rend_downscale_bitmap(bitmap, max_w, max_h);
+        bitmap->centered = true;
+        if (scaled)
+            scaled->centered = true;
+        return scaled;
+    }
+    if (center_horizontally) {
+        int x_off = (max_w - bitmap->width) / 2;
+        bitmap->x_offset = x_off;
+        return NULL;
+    }
+    return NULL;
+}
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================
