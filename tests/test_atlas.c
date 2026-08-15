@@ -1,3 +1,10 @@
+/*
+ * portty — Texture atlas insertion, lookup, and eviction tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "rend_sdl3_atlas.h"
 #include "test_helpers.h"
 #include <stdlib.h>

@@ -1,3 +1,10 @@
+/*
+ * portty — FreeType font backend interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef FONT_FT_H
 #define FONT_FT_H
 

@@ -1,3 +1,10 @@
+/*
+ * portty — INI-style configuration parsing interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_CONF_H
 #define PORTTY_CONF_H
 

@@ -1,4 +1,11 @@
 /*
+ * portty — Coffer terminal backend bridging tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_term_cfr — covers the TerminalBackend bridge for coffer.
  *
  * Two regressions motivated this file:

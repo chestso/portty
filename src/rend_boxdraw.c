@@ -1,3 +1,10 @@
+/*
+ * portty — Procedural box-drawing glyph rasterization
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "rend_common.h"
 #include "font.h"
 

@@ -1,3 +1,10 @@
+/*
+ * portty — RGBA pixel buffers to PNG encoding interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PNG_WRITER_H
 #define PNG_WRITER_H
 

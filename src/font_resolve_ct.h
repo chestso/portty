@@ -1,3 +1,10 @@
+/*
+ * portty — Core Text font resolver interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef FONT_RESOLVE_CT_H
 #define FONT_RESOLVE_CT_H
 

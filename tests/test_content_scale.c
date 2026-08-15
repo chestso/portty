@@ -1,3 +1,10 @@
+/*
+ * portty — Content scale calculation tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 /* Test for content scale calculation (TDD) */
 #include "test_helpers.h"
 #include <stdio.h>

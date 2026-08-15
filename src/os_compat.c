@@ -1,4 +1,11 @@
 /*
+ * portty — Cross-platform OS helpers: exe path lookup and detached processes
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * os_compat.c — cross-platform OS abstraction for exe path resolution
  * and detached process spawning.
  */

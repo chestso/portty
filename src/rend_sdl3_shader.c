@@ -1,3 +1,10 @@
+/*
+ * portty — SDL_GPU glyph-coverage shader plumbing
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 // GPU glyph-coverage shader plumbing. Keeps the SDL_gpu / SDL_GPURenderState
 // calls out of rend_sdl3.c. See rend_sdl3_shader.h and
 // src/shaders/glyph_coverage.frag.glsl.

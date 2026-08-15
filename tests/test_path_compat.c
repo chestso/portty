@@ -1,4 +1,11 @@
 /*
+ * portty — MSYS2/Unix to Windows path conversion tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_path_compat.c — tests for MSYS2/Windows path conversion
  *
  * Pure C, no SDL/coffer dependency.

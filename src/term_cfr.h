@@ -1,3 +1,10 @@
+/*
+ * portty — Coffer-backed VT terminal bridge interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef TERM_CFR_H
 #define TERM_CFR_H
 

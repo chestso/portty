@@ -1,3 +1,10 @@
+/*
+ * portty — Hardened heap allocator wrapping coffer's allocator
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "heap_harden.h"
 
 #include "portty_bug.h"

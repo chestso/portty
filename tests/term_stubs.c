@@ -1,4 +1,11 @@
 /*
+ * portty — Test stubs for terminal backend functions
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * Stub translation unit for tests that don't link term.c.
  *
  * Provides minimal implementations of terminal functions that rend_common.c

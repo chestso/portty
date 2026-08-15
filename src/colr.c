@@ -1,3 +1,10 @@
+/*
+ * portty — COLR v1 paint-tree traversal and compositing for color fonts
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 /* Custom COLR v1 paint tree traversal code.
  *
  * FreeType exposes COLR v1 paint data via FT_Get_Color_Glyph_Paint and

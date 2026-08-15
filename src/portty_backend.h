@@ -1,3 +1,10 @@
+/*
+ * portty — PorttyBackend function-pointer interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_BACKEND_H
 #define PORTTY_BACKEND_H
 

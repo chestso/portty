@@ -1,3 +1,10 @@
+/*
+ * portty — Poll-based event timer manager interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef TIMER_H
 #define TIMER_H
 

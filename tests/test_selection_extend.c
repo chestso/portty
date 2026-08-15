@@ -1,3 +1,10 @@
+/*
+ * portty — Shift+Click selection extension tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "term.h"
 #include "test_helpers.h"
 #include <stdlib.h>

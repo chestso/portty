@@ -1,3 +1,10 @@
+/*
+ * portty — Font backend abstraction interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef FONT_H
 #define FONT_H
 

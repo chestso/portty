@@ -1,3 +1,10 @@
+/*
+ * portty — Font resolver backend dispatch and shared resolution helpers
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "font_resolve.h"
 #include <ft2build.h>
 #include FT_FREETYPE_H

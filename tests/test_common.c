@@ -1,3 +1,10 @@
+/*
+ * portty — Shared test helpers: vlog stub and CLI parsing
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "common.h"
 #include <stdarg.h>
 #include <stdio.h>

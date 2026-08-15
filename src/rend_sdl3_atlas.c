@@ -1,3 +1,10 @@
+/*
+ * portty — Texture atlas: shelf packing, hashing, and LRU eviction
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif

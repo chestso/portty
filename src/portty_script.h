@@ -1,3 +1,10 @@
+/*
+ * portty — Debug/automation script interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_SCRIPT_H
 #define PORTTY_SCRIPT_H
 

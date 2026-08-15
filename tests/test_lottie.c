@@ -1,4 +1,11 @@
 /*
+ * portty — Lottie animation end-to-end tests through the host bridge
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_lottie — Lottie animation end-to-end through the host bridge.
  *
  * The protocol/state logic is unit-tested in coffer itself.

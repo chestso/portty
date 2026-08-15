@@ -1,4 +1,11 @@
 /*
+ * portty — MSYS2/Unix to native Windows path conversion
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * path_compat.c — MSYS2/Unix to native Windows path conversion
  *
  * No dependency on MSYS2 runtime or SDL. Pure C99 + Win32 API for

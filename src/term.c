@@ -1,3 +1,10 @@
+/*
+ * portty — Terminal abstraction: wrappers, selection, and shared logic
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "term.h"
 #include <stdlib.h>
 #include <string.h>

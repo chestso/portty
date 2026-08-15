@@ -1,3 +1,10 @@
+/*
+ * portty — Application-level glue interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_APP_H
 #define PORTTY_APP_H
 

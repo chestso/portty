@@ -1,3 +1,10 @@
+/*
+ * portty — FreeType font backend internal structs shared with the renderer
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef FONT_FT_INTERNAL_H
 #define FONT_FT_INTERNAL_H
 

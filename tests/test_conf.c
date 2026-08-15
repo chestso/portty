@@ -1,3 +1,10 @@
+/*
+ * portty — Configuration parser tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "portty_conf.h"
 #include "test_helpers.h"
 #include <stdio.h>

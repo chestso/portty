@@ -1,3 +1,10 @@
+/*
+ * portty — Diagnostics report builder for bug reporting
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 // Diagnostics report builder. Produces a styled, self-contained UTF-8 document
 // (ANSI-palette SGR, box-drawing, bold/underline) for bug reporting — shown
 // through the system pager by the Ctrl+Shift+F6 binding in main.c. See diag.h.

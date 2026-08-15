@@ -1,3 +1,10 @@
+/*
+ * portty — Terminal abstraction interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef TERM_H
 #define TERM_H
 

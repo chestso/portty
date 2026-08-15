@@ -1,4 +1,11 @@
 /*
+ * portty — CharmTone palette of brand colors as packed RGBA32
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * CharmTone palette — 70 brand colors from charm.land
  *
  * Packed as RGBA32 (0xRRGGBBAA) for direct use in rendering.

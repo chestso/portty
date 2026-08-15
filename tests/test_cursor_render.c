@@ -1,3 +1,10 @@
+/*
+ * portty — Cursor blink handler render regression tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 /* Regression test for the cursor blink handler.
  *
  * The blink handler in platform_sdl3.c (EVENT_CURSOR_BLINK) toggles

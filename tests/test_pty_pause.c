@@ -1,3 +1,10 @@
+/*
+ * portty — PTY pause/resume during selection tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "term.h"
 #include "portty_pty.h"
 #include "test_helpers.h"

@@ -1,3 +1,10 @@
+/*
+ * portty — Font backend abstraction and lifecycle wrappers
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "font.h"
 #include "common.h"
 #include <string.h>

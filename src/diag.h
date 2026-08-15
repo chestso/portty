@@ -1,3 +1,10 @@
+/*
+ * portty — Diagnostics report builder interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef DIAG_H
 #define DIAG_H
 

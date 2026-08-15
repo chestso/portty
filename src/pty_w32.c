@@ -1,3 +1,10 @@
+/*
+ * portty — Windows ConPTY pseudo-terminal (PTY) management
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifdef _WIN32
 
 #include "common.h"

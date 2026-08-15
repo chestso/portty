@@ -1,3 +1,10 @@
+/*
+ * portty — GPU-agnostic renderer helper interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef REND_COMMON_H
 #define REND_COMMON_H
 

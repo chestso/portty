@@ -1,3 +1,10 @@
+/*
+ * portty — Diagnostics report generation tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "diag.h"
 #include "portty_version.h"
 #include "test_helpers.h"

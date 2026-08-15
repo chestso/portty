@@ -1,3 +1,10 @@
+/*
+ * portty — In-process pager interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PAGER_H
 #define PAGER_H
 

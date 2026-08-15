@@ -1,3 +1,10 @@
+/*
+ * portty — FreeType and HarfBuzz font rasterization and text shaping
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #define FT_CONFIG_OPTION_SUBPIXEL_RENDERING
 #include <ft2build.h>
 #include FT_FREETYPE_H

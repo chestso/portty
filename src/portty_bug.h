@@ -1,3 +1,10 @@
+/*
+ * portty — Crash policy and diagnostic dump registration interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_BUG_H
 #define PORTTY_BUG_H
 

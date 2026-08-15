@@ -1,3 +1,10 @@
+/*
+ * portty — Shared GPU-agnostic renderer helper tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "test_helpers.h"
 #include "../src/rend_common.h"
 #include <stdlib.h>

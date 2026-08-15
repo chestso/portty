@@ -1,3 +1,10 @@
+/*
+ * portty — PNG decoding into RGBA pixel buffers
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "png_reader.h"
 #include <png.h>
 #include <stdio.h>

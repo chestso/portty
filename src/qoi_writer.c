@@ -1,3 +1,10 @@
+/*
+ * portty — RGBA pixel buffers to QOI encoding
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #define QOI_IMPLEMENTATION
 #include "qoi.h"
 

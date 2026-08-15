@@ -1,3 +1,10 @@
+/*
+ * portty — Debug script parser tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "portty_script.h"
 #include "test_helpers.h"
 #include <stdio.h>

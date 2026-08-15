@@ -1,3 +1,10 @@
+/*
+ * portty — Texture atlas interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef REND_SDL3_ATLAS_H
 #define REND_SDL3_ATLAS_H
 

@@ -1,3 +1,10 @@
+/*
+ * portty — Frame recording interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_FRAME_REC_H
 #define PORTTY_FRAME_REC_H
 

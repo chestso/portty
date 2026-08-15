@@ -1,3 +1,10 @@
+/*
+ * portty — GDI font resolver for Windows
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifdef _WIN32
 
 #define INITGUID

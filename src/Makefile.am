@@ -12,7 +12,7 @@ portty_version.h: portty_version_force
 	@v=`"$(top_srcdir)/build-aux/git-version.sh" "$(top_srcdir)" 2>/dev/null`; \
 	test -n "$$v" || v="$(PORTTY_VERSION)"; \
 	test -n "$$v" || v="unknown"; \
-	printf '#ifndef PORTTY_VERSION_H\n#define PORTTY_VERSION_H\n#define PORTTY_VERSION "%s"\n#endif\n' "$$v" > $@.tmp; \
+	printf '/*\n * portty — Build-generated version header.\n *\n * SPDX-License-Identifier: MIT\n * Copyright (c) 2026 Thomas Christensen\n */\n#ifndef PORTTY_VERSION_H\n#define PORTTY_VERSION_H\n#define PORTTY_VERSION "%s"\n#endif\n' "$$v" > $@.tmp; \
 	if cmp -s $@.tmp $@ 2>/dev/null; then \
 	  rm -f $@.tmp; \
 	else \

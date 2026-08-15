@@ -1,4 +1,11 @@
 /*
+ * portty — OSC 52 clipboard sequence tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_osc52 — covers the OSC 52 (clipboard set) wiring through coffer
  * into TerminalBackend.clipboard_set_cb, plus the base64 decoder it sits
  * on top of. Query form ('?') must be silently refused; malformed payloads

@@ -1,3 +1,10 @@
+/*
+ * portty — Poll-based timer manager tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "test_helpers.h"
 #include "../src/timer.h"
 #include <string.h>

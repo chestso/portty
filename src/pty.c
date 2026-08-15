@@ -1,3 +1,10 @@
+/*
+ * portty — POSIX pseudo-terminal (PTY) management
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #define _GNU_SOURCE
 #include "common.h"
 #include "portty_pty.h"

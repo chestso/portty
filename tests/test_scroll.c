@@ -1,4 +1,11 @@
 /*
+ * portty — Mouse-wheel scroll logic tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_scroll — tests for the consolidated mouse-wheel scroll logic.
  *
  * Two concerns are tested:

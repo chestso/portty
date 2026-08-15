@@ -1,3 +1,10 @@
+/*
+ * portty — Hardened heap allocator interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef HEAP_HARDEN_H
 #define HEAP_HARDEN_H
 

@@ -1,3 +1,10 @@
+/*
+ * portty — PTY abstraction interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PTY_H
 #define PTY_H
 

@@ -1,3 +1,10 @@
+/*
+ * portty — Crash policy: dump callbacks and abort on invariant violation
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "portty_bug.h"
 
 #define PORTTY_BUG_MAX_DUMPERS 8

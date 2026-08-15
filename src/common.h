@@ -1,3 +1,10 @@
+/*
+ * portty — Shared macros, logging, and common utilities
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef COMMON_H
 #define COMMON_H
 

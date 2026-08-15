@@ -1,3 +1,10 @@
+/*
+ * portty — Box-drawing glyph alignment tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "test_helpers.h"
 #include "rend_common.h"
 #include "font.h"

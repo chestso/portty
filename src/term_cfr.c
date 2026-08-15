@@ -1,4 +1,11 @@
 /*
+ * portty — Coffer-backed VT terminal bridge (TerminalBackend)
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * term_cfr.c — TerminalBackend bridge to coffer.
  *
  * Mirrors term_vt.c but routes everything through coffer instead of

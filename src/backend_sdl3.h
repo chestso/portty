@@ -1,3 +1,10 @@
+/*
+ * portty — SDL3 platform backend interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef BACKEND_SDL3_H
 #define BACKEND_SDL3_H
 

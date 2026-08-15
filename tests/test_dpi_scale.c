@@ -1,3 +1,10 @@
+/*
+ * portty — DPI scale argument parsing tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 /* Test for --dpi-scale argument parsing (TDD) */
 #include "test_helpers.h"
 #include <stdio.h>

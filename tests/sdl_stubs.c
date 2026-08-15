@@ -1,3 +1,10 @@
+/*
+ * portty — SDL3 stubs to keep tests free of a real SDL dependency
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include <SDL3/SDL.h>
 #include <stdbool.h>
 

@@ -1,4 +1,11 @@
 /*
+ * portty — OSC-8 link hint panel positioning tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_link_hint.c — unit tests for OSC-8 link hint panel positioning
  *
  * Tests:

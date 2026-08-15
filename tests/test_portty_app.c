@@ -1,3 +1,10 @@
+/*
+ * portty — PorttyApp terminal callback tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "test_helpers.h"
 #include "../src/portty_app.h"
 #include "../src/portty_backend.h"

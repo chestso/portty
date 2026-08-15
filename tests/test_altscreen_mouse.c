@@ -1,4 +1,11 @@
 /*
+ * portty — Regression tests for altscreen and mouse-tracking mode state
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_altscreen_mouse — regression tests for altscreen and mouse-tracking
  * mode state through the coffer backend.
  *

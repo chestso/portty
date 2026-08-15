@@ -1,3 +1,10 @@
+/*
+ * portty — Base64 encoder and decoder
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "base64.h"
 
 #include <stdlib.h>

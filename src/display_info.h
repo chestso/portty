@@ -1,3 +1,10 @@
+/*
+ * portty — Physical display and DPI information interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef DISPLAY_INFO_H
 #define DISPLAY_INFO_H
 

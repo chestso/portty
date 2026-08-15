@@ -1,3 +1,10 @@
+/*
+ * portty — MSYS2/Unix to native Windows path conversion interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PATH_COMPAT_H
 #define PATH_COMPAT_H
 

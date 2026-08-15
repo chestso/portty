@@ -1,3 +1,10 @@
+/*
+ * portty — SDL_GPU glyph-coverage shader interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef REND_SDL3_SHADER_H
 #define REND_SDL3_SHADER_H
 

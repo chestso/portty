@@ -1,3 +1,10 @@
+/*
+ * portty — VS15 emoji routing regression tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "test_helpers.h"
 #include "rend_common.h"
 #include <stdlib.h>

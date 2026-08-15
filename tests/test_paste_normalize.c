@@ -1,4 +1,11 @@
 /*
+ * portty — Clipboard line-ending normalization regression tests
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_paste_normalize — regression tests for clipboard line-ending
  * normalization (the fix for blank lines appearing after every pasted
  * line on Windows CRLF clipboards).

@@ -1,3 +1,10 @@
+/*
+ * portty — Fontconfig font resolver for Linux
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #include "font_resolve_fc.h"
 #include "common.h"
 #include <fontconfig/fontconfig.h>

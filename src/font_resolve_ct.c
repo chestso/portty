@@ -1,3 +1,10 @@
+/*
+ * portty — Core Text font resolver for macOS
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifdef __APPLE__
 
 #include "font_resolve_ct.h"

@@ -1,4 +1,11 @@
 /*
+ * portty — Regression tests for the deferred-clipboard-free linked list
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * test_clipboard_deferred — regression tests for the deferred-clipboard-free
  * linked list used in platform_sdl3.c.
  *

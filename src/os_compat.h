@@ -1,3 +1,10 @@
+/*
+ * portty — Cross-platform OS helpers interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef OS_COMPAT_H
 #define OS_COMPAT_H
 

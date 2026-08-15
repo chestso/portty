@@ -1,3 +1,10 @@
+/*
+ * portty — Test stubs for font resolution functions
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 // Stubs for font_resolve functions used by rend_common.c's font loading
 // code. The atlas/rend_common tests don't actually call rend_load_fonts,
 // but the linker pulls in all symbols from rend_common.o.

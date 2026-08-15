@@ -1,3 +1,10 @@
+/*
+ * portty — In-process pager backed by an overlay coffer terminal
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 // General-purpose in-process pager — see pager.h.
 //
 // The document is fed into a dedicated, PTY-less coffer terminal (the

@@ -1,4 +1,11 @@
 /*
+ * portty — Portty-specific terminal color defaults
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
+/*
  * Terminal color defaults — portty-specific, not ANSI palette.
  *
  * The ANSI 0-15 palette lives in coffer's palette.c (CharmTone-based).

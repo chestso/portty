@@ -1,3 +1,10 @@
+/*
+ * portty — Panel layout and state management interface
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef PORTTY_PANEL_H
 #define PORTTY_PANEL_H
 
