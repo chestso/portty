@@ -45,10 +45,8 @@ jobs:
             libxcursor-dev \
             libgl-dev \
             libncurses-dev \
+            libsdl3-dev \
             curl
-          if [ "${{ matrix.backend }}" = "sdl3" ]; then
-            sudo apt-get install -y libsdl3-dev
-          fi
 
       - name: Build & install coffer
         working-directory: coffer
@@ -78,11 +76,9 @@ jobs:
         run: make -C build check
 
       - name: Create distribution tarball
-        if: matrix.backend == 'sdl3'
         run: make -C build dist
 
       - name: Upload tarball artifact
-        if: matrix.backend == 'sdl3'
         uses: actions/upload-artifact@v7
         with:
           name: portty-source-tarball
