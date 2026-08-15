@@ -53,6 +53,21 @@ TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
                   uint32_t event_code, void *event_data);
 
 /**
+ * Add a one-shot timer.
+ *
+ * Fires exactly once after `delay_ms`, then removes itself. Identical to
+ * timer_add() except the timer is not repeating.
+ *
+ * @param mgr Timer manager
+ * @param delay_ms Delay in milliseconds before firing
+ * @param event_code Event code returned by timer_poll()
+ * @param event_data Optional data pointer returned by timer_poll()
+ * @return Timer ID on success, TIMER_INVALID on failure
+ */
+TimerId timer_add_once(TimerManager *mgr, uint32_t delay_ms,
+                       uint32_t event_code, void *event_data);
+
+/**
  * Remove a timer.
  *
  * @param mgr Timer manager
@@ -67,6 +82,18 @@ void timer_remove(TimerManager *mgr, TimerId id);
  * @param id Timer ID to reset
  */
 void timer_reset(TimerManager *mgr, TimerId id);
+
+/**
+ * Milliseconds until the next active timer fires.
+ *
+ * Returns UINT32_MAX when no timers are active. Backends use this to arm
+ * a blocking wait (SDL_AddTimer, poll timeout, etc.) so the event loop
+ * can sleep instead of busy-polling. Does not modify timer state.
+ *
+ * @param mgr Timer manager
+ * @return Delay to the earliest deadline in milliseconds, or UINT32_MAX
+ */
+uint32_t timer_manager_next_delay_ms(TimerManager *mgr);
 
 /**
  * Advance time by `elapsed_ms` and fill `events` with timers that fired.

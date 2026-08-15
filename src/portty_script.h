@@ -166,6 +166,14 @@ void portty_script_step(PorttyScript *script,
                         int *cmd_index,
                         ScriptExecCtx *ctx);
 
+/* Milliseconds until the current command can advance, for the event loop's
+ * deadline scheduler. Returns UINT32_MAX when `script`/`cmd_index` are
+ * invalid or the command at `cmd_index` is not an active SCRIPT_CMD_WAIT.
+ * Does not mutate any state. The backend folds this into its blocking wait
+ * (e.g. SDL_AddTimer) so a lone "wait N" script still wakes the loop. */
+uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
+                                         int cmd_index);
+
 #ifdef __cplusplus
 }
 #endif

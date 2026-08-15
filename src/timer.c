@@ -15,6 +15,7 @@ typedef struct Timer
     uint32_t event_code;
     void *event_data;
     bool active;
+    bool one_shot;
 } Timer;
 
 struct TimerManager
@@ -57,8 +58,9 @@ static Timer *find_timer(TimerManager *mgr, TimerId id)
     return NULL;
 }
 
-TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
-                  uint32_t event_code, void *event_data)
+static TimerId timer_add_internal(TimerManager *mgr, uint32_t interval_ms,
+                                  uint32_t event_code, void *event_data,
+                                  bool one_shot)
 {
     if (!mgr || interval_ms == 0)
         return TIMER_INVALID;
@@ -90,11 +92,24 @@ TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
     timer->event_code = event_code;
     timer->event_data = event_data;
     timer->active = true;
+    timer->one_shot = one_shot;
 
-    vlog("Timer added: id=%u interval=%ums event_code=%u\n",
-         timer->id, interval_ms, event_code);
+    vlog("Timer added: id=%u interval=%ums event_code=%u one_shot=%d\n",
+         timer->id, interval_ms, event_code, one_shot);
 
     return timer->id;
+}
+
+TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
+                  uint32_t event_code, void *event_data)
+{
+    return timer_add_internal(mgr, interval_ms, event_code, event_data, false);
+}
+
+TimerId timer_add_once(TimerManager *mgr, uint32_t delay_ms,
+                       uint32_t event_code, void *event_data)
+{
+    return timer_add_internal(mgr, delay_ms, event_code, event_data, true);
 }
 
 void timer_remove(TimerManager *mgr, TimerId id)
@@ -151,9 +166,30 @@ size_t timer_poll(TimerManager *mgr, uint32_t elapsed_ms,
             // we advance their state so they do not fire again on the
             // next poll. The caller can detect overflow by comparing the
             // return value to max_events.
+
+            if (timer->one_shot) {
+                timer->active = false;
+                break;
+            }
         }
         timer->remaining_ms -= remaining;
     }
 
     return emitted;
+}
+
+uint32_t timer_manager_next_delay_ms(TimerManager *mgr)
+{
+    if (!mgr)
+        return UINT32_MAX;
+
+    uint32_t earliest = UINT32_MAX;
+    for (size_t i = 0; i < mgr->count; i++) {
+        Timer *timer = &mgr->timers[i];
+        if (!timer->active)
+            continue;
+        if (timer->remaining_ms < earliest)
+            earliest = timer->remaining_ms;
+    }
+    return earliest;
 }

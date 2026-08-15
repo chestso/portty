@@ -157,6 +157,88 @@ static void test_reuse_slot_after_remove(void)
     timer_manager_destroy(mgr);
 }
 
+static void test_next_delay_empty_returns_max(void)
+{
+    TimerManager *mgr = timer_manager_create();
+    ASSERT_NOT_NULL(mgr);
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), UINT32_MAX);
+    timer_manager_destroy(mgr);
+}
+
+static void test_next_delay_returns_earliest(void)
+{
+    TimerManager *mgr = timer_manager_create();
+    ASSERT_NOT_NULL(mgr);
+
+    timer_add(mgr, 100, 1, NULL);
+    timer_add(mgr, 25, 2, NULL);
+    timer_add(mgr, 50, 3, NULL);
+
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), 25);
+    timer_manager_destroy(mgr);
+}
+
+static void test_next_delay_tracks_poll(void)
+{
+    TimerManager *mgr = timer_manager_create();
+    ASSERT_NOT_NULL(mgr);
+
+    timer_add(mgr, 100, 1, NULL);
+    timer_add(mgr, 30, 2, NULL);
+
+    TimerEvent events[4];
+    timer_poll(mgr, 30, events, 4);
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), 30);
+
+    timer_poll(mgr, 40, events, 4);
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), 20);
+
+    timer_manager_destroy(mgr);
+}
+
+static void test_next_delay_ignores_inactive(void)
+{
+    TimerManager *mgr = timer_manager_create();
+    ASSERT_NOT_NULL(mgr);
+
+    TimerId a = timer_add(mgr, 10, 1, NULL);
+    TimerId b = timer_add(mgr, 50, 2, NULL);
+    timer_remove(mgr, a);
+
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), 50);
+
+    timer_remove(mgr, b);
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), UINT32_MAX);
+
+    timer_manager_destroy(mgr);
+}
+
+static void test_add_once_fires_once(void)
+{
+    TimerManager *mgr = timer_manager_create();
+    ASSERT_NOT_NULL(mgr);
+
+    int data = 7;
+    TimerId id = timer_add_once(mgr, 20, 5, &data);
+    ASSERT_NEQ(id, TIMER_INVALID);
+
+    TimerEvent events[4];
+    size_t n = timer_poll(mgr, 10, events, 4);
+    ASSERT_EQ(n, 0);
+
+    n = timer_poll(mgr, 15, events, 4);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(events[0].code, 5);
+    ASSERT_EQ(events[0].data, &data);
+
+    n = timer_poll(mgr, 100, events, 4);
+    ASSERT_EQ(n, 0);
+
+    ASSERT_EQ(timer_manager_next_delay_ms(mgr), UINT32_MAX);
+
+    timer_manager_destroy(mgr);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -170,6 +252,11 @@ int main(int argc, char *argv[])
     RUN_TEST(test_overflow_event_count);
     RUN_TEST(test_zero_elapsed_no_fire);
     RUN_TEST(test_reuse_slot_after_remove);
+    RUN_TEST(test_next_delay_empty_returns_max);
+    RUN_TEST(test_next_delay_returns_earliest);
+    RUN_TEST(test_next_delay_tracks_poll);
+    RUN_TEST(test_next_delay_ignores_inactive);
+    RUN_TEST(test_add_once_fires_once);
 
     TEST_SUMMARY();
 }

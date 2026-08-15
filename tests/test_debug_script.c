@@ -47,6 +47,15 @@ static void cleanup_tmp(char *path)
     }
 }
 
+static void sleep_ms(int ms)
+{
+#ifdef _WIN32
+    Sleep(ms);
+#else
+    usleep(ms * 1000);
+#endif
+}
+
 /* ── Parser tests ── */
 
 static void test_load_empty_file(void)
@@ -690,6 +699,39 @@ static void test_parse_panel_with_level(void)
     cleanup_tmp(path);
 }
 
+static void test_wait_remaining_ms_reports(void)
+{
+    char *path = write_tmp_script("wait 0.05\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+
+    uint32_t before = portty_script_wait_remaining_ms(s, 0);
+    ASSERT_TRUE(before > 0 && before <= 60);
+
+    sleep_ms(20);
+    uint32_t after = portty_script_wait_remaining_ms(s, 0);
+    ASSERT_TRUE(after < before);
+    ASSERT_TRUE(after <= 40);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_wait_remaining_ms_non_wait_returns_max(void)
+{
+    char *path = write_tmp_script("send \"hi\"\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_wait_remaining_ms(s, 0), UINT32_MAX);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -728,6 +770,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_error_message);
     RUN_TEST(test_parse_panel);
     RUN_TEST(test_parse_panel_with_level);
+    RUN_TEST(test_wait_remaining_ms_reports);
+    RUN_TEST(test_wait_remaining_ms_non_wait_returns_max);
 
     TEST_SUMMARY();
 }

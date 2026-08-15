@@ -54,6 +54,7 @@ enum PorttyEventCode
     EVENT_LOTTIE_TICK,
     EVENT_NOTIFY_SHOW,
     EVENT_RECORD_TICK,
+    EVENT_TIMER_WAKE,
 };
 
 // PTY data event payload
@@ -150,6 +151,7 @@ typedef struct
     TimerId cursor_blink_timer;
     TimerId autoscroll_timer;
     TimerId lottie_timer;
+    SDL_TimerID wake_timer;
     bool cursor_blink_visible;
     bool has_focus;
 
@@ -512,6 +514,48 @@ static void sdl3_wakeup_reader(Sdl3BackendData *d)
 #endif
 }
 
+// ── Blocking-wake timer ──────────────────────────────────────────────────
+
+static uint32_t sdl3_timer_wake_cb(void *userdata, SDL_TimerID id,
+                                   uint32_t interval)
+{
+    (void)id;
+    (void)interval;
+    Sdl3BackendData *d = (Sdl3BackendData *)userdata;
+    if (!d)
+        return 0;
+    SDL_Event ev = { 0 };
+    ev.type = SDL_EVENT_USER;
+    ev.user.code = EVENT_TIMER_WAKE;
+    SDL_PushEvent(&ev);
+    return 0; // one-shot; the loop re-arms
+}
+
+/* Arm a single SDL timer for the earliest pending deadline so the blocking
+ * SDL_WaitEvent wakes just in time to service it. Must be called on the
+ * main thread. It factors in both the TimerManager and a pending script
+ * wait. */
+static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
+{
+    if (d->wake_timer) {
+        SDL_RemoveTimer(d->wake_timer);
+        d->wake_timer = 0;
+    }
+
+    uint32_t delay = timer_manager_next_delay_ms(d->timers);
+
+    if (d->script && !d->script_done) {
+        uint32_t wait_ms = portty_script_wait_remaining_ms(d->script, d->cmd_index);
+        if (wait_ms < delay)
+            delay = wait_ms;
+    }
+
+    if (delay == UINT32_MAX)
+        return;
+
+    d->wake_timer = SDL_AddTimer(delay, sdl3_timer_wake_cb, d);
+}
+
 // ── Lifecycle ────────────────────────────────────────────────────────────
 
 static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
@@ -530,6 +574,7 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     d->cursor_blink_timer = TIMER_INVALID;
     d->lottie_timer = TIMER_INVALID;
     d->autoscroll_timer = TIMER_INVALID;
+    d->wake_timer = 0;
     d->cursor_blink_visible = true;
     d->has_focus = true;
 
@@ -1446,6 +1491,8 @@ static void sdl3_run(PorttyBackend *self)
     Uint64 last_tick = SDL_GetTicks();
     while (!SDL_GetAtomicInt(&d->quit_requested)) {
         // === Debug script: pre-render commands ===
+        // Run before we block so a script that does not emit events (e.g. a
+        // bare "wait") can still register its own wake deadline below.
         if (d->script && !d->script_done) {
             ScriptExecCtx ctx = {
                 .backend = self,
@@ -1482,10 +1529,15 @@ static void sdl3_run(PorttyBackend *self)
         bool pty_processed = false;
         bool pty_scrolled = false;
 
-        // === 1. Non-blocking event drain ===
-        // SDL_PollEvent on Wayland doesn't dispatch the display queue,
-        // so resize configure events never arrive. SDL_PumpEvents forces
-        // the Wayland event queue to be pumped before polling.
+        // === 0. Arm the wake timer, then block until real work arrives ===
+        sdl3_arm_timer_wakeup(d);
+        // SDL_WaitEvent (infinite) blocks until a real event is posted (PTY
+        // data, input, or our wake timer). Passing NULL blocks without
+        // removing the event, so the drain loop below consumes everything.
+        // SDL_PollEvent on Wayland doesn't dispatch the display queue, so
+        // resize configure events never arrive; SDL_PumpEvents after the wake
+        // forces the Wayland event queue to be dispatched before polling.
+        SDL_WaitEvent(NULL);
         SDL_PumpEvents();
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -1542,6 +1594,11 @@ static void sdl3_run(PorttyBackend *self)
 
                 case EVENT_NOTIFY_SHOW:
                     terminal_mark_dirty(term);
+                    break;
+
+                case EVENT_TIMER_WAKE:
+                    // Timer callback posted this; the deadline is serviced
+                    // below by advancing timer_poll by measured elapsed time.
                     break;
                 }
                 break;
@@ -1814,7 +1871,9 @@ static void sdl3_run(PorttyBackend *self)
         // Flush buffered button-up if no more events pending
         sdl3_flush_buffered_button_up(d, term);
 
-        // Age and prune deferred-clipboard entries
+        // Age and prune deferred-clipboard entries (event-based: once per
+        // wake, matching the Wayland use-after-free workaround that requires
+        // an entry to survive one full SDL_WaitEvent before it is freed).
         clipboard_deferred_free_advance();
 
         // Re-resolve OSC-8 hover after PTY output. If the terminal content
@@ -1836,13 +1895,11 @@ static void sdl3_run(PorttyBackend *self)
 
         // === 3. Render (only blocking call during active rendering) ===
         terminal_flush_damage(term);
-        bool rendered = false;
         if (terminal_needs_redraw(term)) {
             bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
             rend_sdl3_draw_terminal(rend, term, cursor_vis);
             SDL_RenderPresent(d->sdl_renderer);
             terminal_clear_redraw(term);
-            rendered = true;
         }
 
         // === Debug script: post-render screendump ===
@@ -1859,19 +1916,16 @@ static void sdl3_run(PorttyBackend *self)
             sdl3_record_frame(d, d->screendump_path);
             frame_recorder_advance(d->frame_recorder);
         }
-
-        // === 4. Idle: sleep briefly to avoid busy-looping ===
-        // SDL_WaitEventTimeout on Wayland can block far longer than the
-        // requested timeout (known SDL3 issue with wl_display_dispatch).
-        // Use SDL_Delay instead so we always return within 2ms.
-        if (!pty_processed && !rendered) {
-            SDL_Delay(2);
-        }
     }
 
     vlog("Event loop exiting\n");
 
     SDL_StopTextInput(d->window);
+
+    if (d->wake_timer) {
+        SDL_RemoveTimer(d->wake_timer);
+        d->wake_timer = 0;
+    }
 
     // Free debug script
     portty_script_free(d->script);

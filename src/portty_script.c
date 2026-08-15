@@ -775,7 +775,41 @@ static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
 
 /* Static-local wait deadline (safe because only one script runs at a time) */
 static double s_wait_deadline = 0;
-static bool s_waiting = false;
+static bool s_wait_deadline_valid = false;
+
+static double script_wait_deadline_for(const ScriptCmd *cmd)
+{
+    if (!s_wait_deadline_valid) {
+        s_wait_deadline = portty_now_seconds() + cmd->wait_seconds;
+        s_wait_deadline_valid = true;
+    }
+    return s_wait_deadline;
+}
+
+uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
+                                         int cmd_index)
+{
+    if (!script || cmd_index < 0 || cmd_index >= script->count)
+        return UINT32_MAX;
+
+    const ScriptCmd *cmd = &script->cmds[cmd_index];
+    if (cmd->type != SCRIPT_CMD_WAIT)
+        return UINT32_MAX;
+
+    double deadline = script_wait_deadline_for(cmd);
+    double remaining = deadline - portty_now_seconds();
+    if (remaining <= 0)
+        return 0;
+
+    double ms = remaining * 1000.0;
+    uint32_t rounded = (uint32_t)ms;
+    if ((double)rounded < ms)
+        rounded++; // ceil so we never wake before the deadline
+    if (rounded == 0)
+        rounded = 1;
+
+    return rounded;
+}
 
 void portty_script_step(PorttyScript *script,
                         int *cmd_index,
@@ -792,12 +826,9 @@ void portty_script_step(PorttyScript *script,
     switch (cmd->type) {
     case SCRIPT_CMD_WAIT:
     {
-        if (!s_waiting) {
-            s_wait_deadline = portty_now_seconds() + cmd->wait_seconds;
-            s_waiting = true;
-        }
-        if (portty_now_seconds() >= s_wait_deadline) {
-            s_waiting = false;
+        double deadline = script_wait_deadline_for(cmd);
+        if (portty_now_seconds() >= deadline) {
+            s_wait_deadline_valid = false;
             (*cmd_index)++;
         }
         break;
