@@ -368,30 +368,6 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
-    if (strcmp(line, "dumpverts") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_DUMPVERTS;
-        if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
-            script_set_error(s, line_num, "dumpverts: requires row col_start col_end");
-            return false;
-        }
-        return true;
-    }
-
-    if (strcmp(line, "verifybuf") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_VERIFYBUF;
-        if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
-            script_set_error(s, line_num, "verifybuf: requires row col_start col_end");
-            return false;
-        }
-        return true;
-    }
-
     if (strcmp(line, "panel") == 0) {
         ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -952,32 +928,6 @@ void portty_script_step(PorttyScript *script,
     {
         execute_dumpcells(ctx->term, ctx->scroll_offset,
                           cmd->row, cmd->col_start, cmd->col_end);
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_DUMPVERTS:
-    {
-        if (ctx->dumpverts_fn) {
-            ctx->dumpverts_fn(cmd->row, cmd->col_start, cmd->col_end);
-        } else {
-            fprintf(stderr, "dumpverts: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_VERIFYBUF:
-    {
-        if (ctx->pending_verifybuf && ctx->verify_row &&
-            ctx->verify_col_start && ctx->verify_col_end) {
-            *ctx->pending_verifybuf = true;
-            *ctx->verify_row = cmd->row;
-            *ctx->verify_col_start = cmd->col_start;
-            *ctx->verify_col_end = cmd->col_end;
-        } else {
-            fprintf(stderr, "verifybuf: not supported by this backend\n");
-        }
         (*cmd_index)++;
         break;
     }

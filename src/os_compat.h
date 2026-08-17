@@ -15,7 +15,7 @@
  * os_compat.h — cross-platform OS abstraction for exe path resolution
  * and detached process spawning.
  *
- * Used by both the SDL3 and Sokol backends to avoid duplicating
+ * Used by the SDL3 backend to avoid duplicating
  * platform-specific #ifdef blocks.
  */
 

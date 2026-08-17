@@ -97,7 +97,7 @@ cd build && make check
 | `test_cursor_render`      | Cursor-only render regression                                         |
 | `test_scroll`             | Mouse-wheel scroll logic: sub-tick accumulation                       |
 
-The test count differs by backend: 20 tests on SDL3 (POSIX), 19 on Sokol/Windows — `test_pty_pause` is SDL3+POSIX only.
+The test suite runs 20 tests on SDL3 (POSIX) — `test_pty_pause` is SDL3+POSIX only.
 
 Run individual tests with `-v` for verbose output, e.g. `./build/tests/test_atlas -v`.
 

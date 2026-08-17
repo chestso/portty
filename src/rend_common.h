@@ -97,7 +97,7 @@ static inline float logical_to_physical_f(float logical, float scale)
 // Glyph atlas packing — GPU-agnostic
 // =============================================================================
 //
-// Shared between SDL3 and Sokol backends. The packing algorithm (shelf-based
+// Used by the SDL3 backend. The packing algorithm (shelf-based
 // bin packing, hash table, eviction) is pure integer math. Only the texture
 // upload path differs between backends (SDL_Texture vs sg_image).
 //
@@ -138,8 +138,8 @@ bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
 // when a requested style isn't loaded (bold+italic prefers bold or italic
 // before falling back to NORMAL — preserves exising glyph styling instead
 // of dropping it altogether), then consults `rend_should_use_emoji` to
-// route through the color emoji font when applicable. Shared between
-// SDL3 and Sokol backends.
+// route through the color emoji font when applicable.
+// Used by the SDL3 renderer.
 typedef struct
 {
     FontStyle style;
@@ -151,10 +151,8 @@ RendCellStyle rend_resolve_cell_style(FontBackend *font,
                                       const uint32_t *cps, int cp_count);
 
 // Apply the downscale-or-center policy to a freshly rasterized glyph
-// bitmap before it goes into the per-backend atlas. Both the SDL3
-// `cache_glyph` wrapper and the inked blocks in Sokol's shaped/single
-// paths do the same three things:
-//
+// bitmap before it goes into the per-backend atlas. The SDL3
+// `cache_glyph` wrapper does the same three things://
 //   * if downscale: scale the bitmap to fit max_w x max_h via the 4x emoji
 //     pipeline (which supersampled before clamping) and mark the result
 //     as centered;
@@ -278,7 +276,7 @@ void rend_atlas_log_stats(RendAtlas *atlas);
 // Font loading orchestration — GPU-agnostic
 // =============================================================================
 //
-// Shared between SDL3 and Sokol backends. Resolves font paths via the
+// Used by the SDL3 backend. Resolves font paths via the
 // platform-specific FontResolveBackend, loads all styles via FreeType,
 // and computes cell metrics. The backend provides the font resolver
 // and font backend; the function fills in the result struct.
@@ -343,9 +341,8 @@ GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
 #define CLOSE_BUTTON_GLYPH_ID 0xFFFFFFFE
 
 // =============================================================================
-// Close "×" bitmap helper — shared between SDL3 and Sokol backends
+// Close "×" bitmap helper — used by the SDL3 backend
 // =============================================================================
-
 // Fill a `size`×`size` RGBA buffer with an anti-aliased white "×".
 // The bitmap is white (255,255,255) with alpha coverage in the A channel;
 // callers tint it via their renderer. `buf` must hold `size*size*4` bytes.

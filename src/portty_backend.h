@@ -43,7 +43,7 @@ typedef enum
 // Read-only snapshot for diagnostics report.
 typedef struct
 {
-    const char *platform_name; // windowing/platform system: "SDL3", "Sokol", etc.
+    const char *platform_name; // windowing/platform system: "SDL3", etc.
     const char *backend_name;  // renderer name: "gpu", "vulkan", etc.
     const char *gpu_device;
     const char *gpu_driver;

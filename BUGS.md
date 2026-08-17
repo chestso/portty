@@ -12,7 +12,7 @@ This is a fundamental Wayland protocol limitation ([SDL issue #14980](https://gi
 
 ## Wayland: SDL3 interactive window resize is laggy
 
-When dragging the window border to resize on Wayland, the resize feels sluggish compared to the Sokol backend. Programmatic resize via `SDL_SetWindowSize` (used by the `winsize` debug command) is smooth and immediate, but manual dragging via the compositor's `xdg_toplevel` configure events has noticeable lag.
+When dragging the window border to resize on Wayland, the resize feels sluggish. Programmatic resize via `SDL_SetWindowSize` (used by the `winsize` debug command) is smooth and immediate, but manual dragging via the compositor's `xdg_toplevel` configure events has noticeable lag.
 
 The root cause is the Wayland resize protocol interaction with SDL3's event loop:
 
@@ -21,7 +21,7 @@ The root cause is the Wayland resize protocol interaction with SDL3's event loop
 3. `SDL_PollEvent` does not dispatch the Wayland display queue on its own — `SDL_PumpEvents` must be called first (fixed in portty v0.5.5).
 4. After processing the resize, `SDL_RenderPresent` blocks on the compositor's `wl_surface.frame` callback, which is throttled during continuous resize dragging.
 
-The Sokol backend avoids this because its frame callback is driven by the compositor's vsync — events are processed within the frame callback, so there is no extra blocking round-trip.
+An event-loop-driven frame callback driven by the compositor's vsync would avoid this — events would be processed within the frame callback, with no extra blocking round-trip.
 
 **Related SDL issues:**
 

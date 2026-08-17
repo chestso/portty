@@ -307,46 +307,6 @@ static void test_parse_dumpcells(void)
     cleanup_tmp(path);
 }
 
-static void test_parse_dumpverts(void)
-{
-    char *path = write_tmp_script("dumpverts 5 3 6\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPVERTS);
-    ASSERT_EQ(cmd->row, 5);
-    ASSERT_EQ(cmd->col_start, 3);
-    ASSERT_EQ(cmd->col_end, 6);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_verifybuf(void)
-{
-    char *path = write_tmp_script("verifybuf 5 3 6\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_VERIFYBUF);
-    ASSERT_EQ(cmd->row, 5);
-    ASSERT_EQ(cmd->col_start, 3);
-    ASSERT_EQ(cmd->col_end, 6);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
 static void test_parse_quit(void)
 {
     char *path = write_tmp_script("quit\n");
@@ -764,8 +724,6 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_screendump);
     RUN_TEST(test_parse_dumprow);
     RUN_TEST(test_parse_dumpcells);
-    RUN_TEST(test_parse_dumpverts);
-    RUN_TEST(test_parse_verifybuf);
     RUN_TEST(test_parse_quit);
     RUN_TEST(test_parse_multi_command);
     RUN_TEST(test_parse_unknown_command);

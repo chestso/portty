@@ -28,8 +28,6 @@ typedef enum
     SCRIPT_CMD_SCREENDUMP,
     SCRIPT_CMD_DUMPROW,
     SCRIPT_CMD_DUMPCELLS,
-    SCRIPT_CMD_DUMPVERTS,
-    SCRIPT_CMD_VERIFYBUF,
     SCRIPT_CMD_MOUSEMOVE,
     SCRIPT_CMD_RESIZE,
     SCRIPT_CMD_WINSIZE,
@@ -49,7 +47,7 @@ typedef struct
     double wait_seconds;
     /* SEND / RAW / ASSERT_* */
     char *text; /* heap-allocated, freed by script_free */
-    /* DUMPROW / DUMPCELLS / DUMPVERTS / VERIFYBUF */
+    /* DUMPROW / DUMPCELLS */
     int row;
     int col_start; /* -1 = all columns (for dumprow) */
     int col_end;
@@ -113,7 +111,8 @@ bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
 
 /* Context for the shared step function. Each backend fills this with
  * its own state pointers. NULL pointers mean the backend doesn't support
- * that deferred action (e.g. SDL3 passes NULL for verifybuf). */
+ * that deferred action (e.g. screendump is only usable during the
+ * renderer's deferred command phase). */
 typedef struct
 {
     PorttyBackend *backend;
@@ -128,10 +127,6 @@ typedef struct
     /* Deferred action flags — backend points these at its own fields: */
     bool *pending_screendump;
     char *screendump_path_buf; /* backend's destination buffer */
-    bool *pending_verifybuf;
-    int *verify_row, *verify_col_start, *verify_col_end;
-    /* Vertex dump callback (Sokol only, NULL on SDL3) */
-    void (*dumpverts_fn)(int row, int col_start, int col_end);
     /* Mouse move callback (NULL if unsupported) */
     void (*mousemove_fn)(void *app, int x, int y);
     void *mousemove_user_data;
@@ -163,8 +158,8 @@ typedef struct
 
 /* Execute one script step. Called each frame by the backend's main loop.
  * Handles wait/send/raw/assert/dumpcells/dumprow.
- * Sets *pending_screendump / *pending_verifybuf for deferred commands
- * that need GL access (screendump, verifybuf).
+ * Sets *pending_screendump for the deferred command that needs GL
+ * access (screendump).
  * When pending pointers are NULL, unsupported commands print a warning
  * and are skipped.
  * Advances *cmd_index; when all commands are done, sets *cmd_index to

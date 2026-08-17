@@ -1,5 +1,5 @@
 # Test: hover cleared when terminal scrolls
-# Run: build-sokol/src/portty -v -s 1000 -S scripts/test-hover-scroll.script 2>&1 | grep -E "(assert-hover|dumpcells.*hid=)"
+# Run: build/src/portty -v -s 1000 -S scripts/test-hover-scroll.script 2>&1 | grep -E "(assert-hover|dumpcells.*hid=)"
 # Scenario: Emit link, hover, verify hover set, scroll, verify hover cleared
 
 wait 0.5

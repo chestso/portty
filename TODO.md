@@ -215,16 +215,15 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
 but are not yet rendered by portty.
 
-### Not rendered by either backend
+### Not rendered
 
-These attributes are parsed and stored by coffer but not rendered by
-either backend.
+These attributes are parsed and stored by coffer but not rendered.
 
-| Attribute        | Stored in `TerminalCellAttr` | SDL3     | Sokol    |
-| ---------------- | ---------------------------- | -------- | -------- |
-| font (SGR 10-19) | `font:4`                     | Not read | Not read |
-| dwl (DECDWL)     | `dwl:1`                      | Not read | Not read |
-| dhl (DECDHL)     | `dhl:2`                      | Not read | Not read |
+| Attribute        | Stored in `TerminalCellAttr` | Rendered by |
+| ---------------- | ---------------------------- | ----------- |
+| font (SGR 10-19) | `font:4`                     | Not read    |
+| dwl (DECDWL)     | `dwl:1`                      | Not read    |
+| dhl (DECDHL)     | `dhl:2`                      | Not read    |
 
 ---
 

@@ -245,8 +245,8 @@ bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
 // with graceful fallback when a requested style isn't loaded (bold+italic
 // prefers bold or italic before falling back to NORMAL — preserves glyph
 // styling instead of dropping it), then consults rend_should_use_emoji to
-// route through the color emoji font when applicable. Shared between SDL3
-// and Sokol renderers.
+// route through the color emoji font when applicable.
+// Used by the SDL3 renderer.
 RendCellStyle rend_resolve_cell_style(FontBackend *font,
                                       bool cell_bold, bool cell_italic,
                                       const uint32_t *cps, int cp_count)
@@ -1551,7 +1551,7 @@ void rend_format_gpu_driver(char *buf, size_t bufsz,
 }
 
 // =============================================================================
-// Close "×" bitmap helper — shared between SDL3 and Sokol backends
+// Close "×" bitmap helper — used by the SDL3 backend
 // =============================================================================
 
 // Shortest distance from point (px,py) to the segment (ax,ay)-(bx,by).

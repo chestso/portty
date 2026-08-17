@@ -1510,8 +1510,6 @@ static void sdl3_run(PorttyBackend *self)
                 .emit_user_data = d->app,
                 .pending_screendump = &d->pending_screendump,
                 .screendump_path_buf = d->screendump_path,
-                .pending_verifybuf = NULL,
-                .dumpverts_fn = NULL,
                 .mousemove_fn = sdl3_script_mousemove,
                 .mousemove_user_data = d,
                 .panel_fn = sdl3_script_panel,

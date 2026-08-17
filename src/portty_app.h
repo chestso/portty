@@ -19,7 +19,7 @@
 struct Pager;
 typedef struct Pager Pager;
 
-// Shared application state used by both SDL3 and Sokol backends.
+// Shared application state used by the SDL3 backend.
 // Backends call the portty_app_handle_*() functions when input arrives;
 // those handlers call back into the backend via app->backend.
 //
@@ -47,7 +47,7 @@ typedef struct PorttyApp
     PorttyBackend *backend;           // selected backend (filled by entry point)
     FontResolveBackend *font_resolve; // platform-specific via #ifdef
 
-    // Fields previously in SokolLaunchConfig, now unified for both backends.
+    // Command-line launch configuration.
     const char *demo_text;   // -d TEXT, NULL if none
     char **exec_argv;        // fully-resolved command for pty_create
     float font_size;         // default 12.0f, not in PorttyConf
