@@ -72,7 +72,7 @@ static void test_init_defaults(void)
 
 static void test_parse_font(void)
 {
-    char *path = write_tmp_conf("[terminal]\nfont = monospace-14\n");
+    char *path = write_tmp_conf("font = monospace-14\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -86,7 +86,7 @@ static void test_parse_font(void)
 
 static void test_parse_geometry(void)
 {
-    char *path = write_tmp_conf("[terminal]\ngeometry = 120x40\n");
+    char *path = write_tmp_conf("geometry = 120x40\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -101,7 +101,7 @@ static void test_parse_geometry(void)
 
 static void test_parse_hinting(void)
 {
-    char *path = write_tmp_conf("[terminal]\nhinting = mono\n");
+    char *path = write_tmp_conf("hinting = mono\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -115,7 +115,7 @@ static void test_parse_hinting(void)
 
 static void test_parse_booleans(void)
 {
-    char *path = write_tmp_conf("[terminal]\nverbose = yes\n");
+    char *path = write_tmp_conf("verbose = yes\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -129,7 +129,7 @@ static void test_parse_booleans(void)
 
 static void test_parse_word_chars(void)
 {
-    char *path = write_tmp_conf("[terminal]\nword_chars = -_./~\n");
+    char *path = write_tmp_conf("word_chars = -_./~\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -143,7 +143,7 @@ static void test_parse_word_chars(void)
 
 static void test_parse_scrollback(void)
 {
-    char *path = write_tmp_conf("[terminal]\nscrollback = 5000\n");
+    char *path = write_tmp_conf("scrollback = 5000\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -157,7 +157,7 @@ static void test_parse_scrollback(void)
 
 static void test_parse_scrollback_zero(void)
 {
-    char *path = write_tmp_conf("[terminal]\nscrollback = 0\n");
+    char *path = write_tmp_conf("scrollback = 0\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -171,7 +171,7 @@ static void test_parse_scrollback_zero(void)
 
 static void test_parse_scrollback_invalid(void)
 {
-    char *path = write_tmp_conf("[terminal]\nscrollback = -5\n");
+    char *path = write_tmp_conf("scrollback = -5\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -188,7 +188,6 @@ static void test_comments_and_blank_lines(void)
     char *path = write_tmp_conf(
         "# Top comment\n"
         "\n"
-        "[terminal]\n"
         "; semicolon comment\n"
         "font = test-font\n"
         "\n"
@@ -208,7 +207,7 @@ static void test_comments_and_blank_lines(void)
 
 static void test_parse_shell(void)
 {
-    char *path = write_tmp_conf("[terminal]\nshell = /usr/bin/bash --norc\n");
+    char *path = write_tmp_conf("shell = /usr/bin/bash --norc\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -222,7 +221,7 @@ static void test_parse_shell(void)
 
 static void test_unknown_keys_ignored(void)
 {
-    char *path = write_tmp_conf("[terminal]\nunknown_key = whatever\nfont = ok\n");
+    char *path = write_tmp_conf("unknown_key = whatever\nfont = ok\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -234,9 +233,9 @@ static void test_unknown_keys_ignored(void)
     cleanup_tmp(path);
 }
 
-static void test_wrong_section_ignored(void)
+static void test_section_headers_tolerated(void)
 {
-    char *path = write_tmp_conf("[other]\nfont = ignored\n[terminal]\nfont = kept\n");
+    char *path = write_tmp_conf("[other]\nfont = ignored\nfont = kept\n");
     ASSERT_NOT_NULL(path);
 
     PorttyConf conf;
@@ -264,7 +263,7 @@ static void test_all_hinting_modes(void)
 
     for (int i = 0; i < 4; i++) {
         char buf[128];
-        snprintf(buf, sizeof(buf), "[terminal]\nhinting = %s\n", modes[i]);
+        snprintf(buf, sizeof(buf), "hinting = %s\n", modes[i]);
         char *path = write_tmp_conf(buf);
         ASSERT_NOT_NULL(path);
 
@@ -295,7 +294,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_comments_and_blank_lines);
     RUN_TEST(test_parse_shell);
     RUN_TEST(test_unknown_keys_ignored);
-    RUN_TEST(test_wrong_section_ignored);
+    RUN_TEST(test_section_headers_tolerated);
     RUN_TEST(test_nonexistent_file);
     RUN_TEST(test_all_hinting_modes);
 

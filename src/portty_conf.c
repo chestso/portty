@@ -122,7 +122,6 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
     conf->source_path = strdup(path);
 
     char line[MAX_LINE];
-    int in_terminal_section = 0;
     int lineno = 0;
 
     while (fgets(line, sizeof(line), fp)) {
@@ -140,14 +139,8 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
                 fprintf(stderr, "WARNING: %s:%d: malformed section header\n", path, lineno);
                 continue;
             }
-            *end = '\0';
-            in_terminal_section = (strcmp(s + 1, "terminal") == 0);
             continue;
         }
-
-        /* Only process keys inside [terminal] */
-        if (!in_terminal_section)
-            continue;
 
         /* Parse key = value */
         char *eq = strchr(s, '=');

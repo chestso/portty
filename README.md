@@ -314,7 +314,6 @@ The first file found is used:
 
 ```ini
 # portty.conf
-[terminal]
 font = Cascadia Code-14
 geometry = 120x40
 hinting = light
@@ -328,7 +327,7 @@ ambiguous_wide = false
 
 ### Available Keys
 
-All keys are optional. Only the `[terminal]` section is recognized.
+All keys are optional. Keys appear directly at the top level.
 
 | Key                         | Values                                                | Default            | Description                                                                                                                                          |
 | --------------------------- | ----------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
