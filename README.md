@@ -45,7 +45,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation, with icons rendered inline alongside text
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
-- Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down
+- Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down (page) / Ctrl+Shift+Up/Down (line)
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title — sets platform window title from coffer-parsed OSC 2
@@ -105,6 +105,7 @@ build/src/portty --demo "Hello, world!"
 | `Ctrl+Shift+C`           | Copy selection to clipboard                                                  |
 | `Ctrl+Shift+V`           | Paste from clipboard                                                         |
 | `Ctrl+Shift+PageUp/Down` | Scroll through scrollback buffer (one page)                                  |
+| `Ctrl+Shift+Up/Down`     | Scroll one line through scrollback buffer                                    |
 | `Shift+drag`             | Override: select text when app owns the pointer (mouse mode) or in altscreen |
 | Right-click              | Copy selection if active, otherwise paste (works in altscreen too)           |
 | `Ctrl+click` on link     | Open OSC-8 URL via the system handler                                        |

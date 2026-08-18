@@ -443,6 +443,14 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
             result.handled = true;
             return result;
         }
+        if (term_key == TERM_KEY_UP || term_key == TERM_KEY_DOWN) {
+            portty_app_clear_hover(app);
+            app->backend->scroll(app->backend, app->term,
+                                 term_key == TERM_KEY_UP ? 1 : -1);
+            result.force_redraw = true;
+            result.handled = true;
+            return result;
+        }
     }
 
     // Ctrl+Shift+F6 → diagnostics report in the internal pager
