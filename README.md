@@ -45,7 +45,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation, with icons rendered inline alongside text
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
-- Scrollback navigation with mouse wheel and Shift+PageUp/Down
+- Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements)
 - Window title — sets platform window title from coffer-parsed OSC 2
@@ -99,17 +99,17 @@ build/src/portty --demo "Hello, world!"
 
 ### Keyboard Shortcuts
 
-| Shortcut             | Action                                                                       |
-| -------------------- | ---------------------------------------------------------------------------- |
-| `Ctrl+C`             | Copy selection to clipboard (sends SIGINT otherwise)                         |
-| `Ctrl+Shift+C`       | Copy selection to clipboard                                                  |
-| `Ctrl+Shift+V`       | Paste from clipboard                                                         |
-| `Shift+PageUp/Down`  | Scroll through scrollback buffer                                             |
-| `Shift+drag`         | Override: select text when app owns the pointer (mouse mode) or in altscreen |
-| Right-click          | Copy selection if active, otherwise paste (works in altscreen too)           |
-| `Ctrl+click` on link | Open OSC-8 URL via the system handler                                        |
-| `Ctrl+Shift+F6`      | Open the diagnostics report (built-in pager)                                 |
-| `Ctrl+Shift+N`       | Spawn a new terminal window in the shell's CWD                               |
+| Shortcut                 | Action                                                                       |
+| ------------------------ | ---------------------------------------------------------------------------- |
+| `Ctrl+C`                 | Copy selection to clipboard (sends SIGINT otherwise)                         |
+| `Ctrl+Shift+C`           | Copy selection to clipboard                                                  |
+| `Ctrl+Shift+V`           | Paste from clipboard                                                         |
+| `Ctrl+Shift+PageUp/Down` | Scroll through scrollback buffer (one page)                                  |
+| `Shift+drag`             | Override: select text when app owns the pointer (mouse mode) or in altscreen |
+| Right-click              | Copy selection if active, otherwise paste (works in altscreen too)           |
+| `Ctrl+click` on link     | Open OSC-8 URL via the system handler                                        |
+| `Ctrl+Shift+F6`          | Open the diagnostics report (built-in pager)                                 |
+| `Ctrl+Shift+N`           | Spawn a new terminal window in the shell's CWD                               |
 
 ### Diagnostics Report
 

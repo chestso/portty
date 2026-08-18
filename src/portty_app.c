@@ -431,8 +431,8 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
         return result;
     }
 
-    // Shift+PageUp/Down: scrollback navigation (normal screen only)
-    if ((mod & TERM_MOD_SHIFT) && !terminal_is_altscreen(app->term)) {
+    // Ctrl+Shift+PageUp/Down: scrollback navigation (normal screen only)
+    if ((mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT) && !terminal_is_altscreen(app->term)) {
         if (term_key == TERM_KEY_PAGEUP || term_key == TERM_KEY_PAGEDOWN) {
             portty_app_clear_hover(app);
             int rows, cols;
