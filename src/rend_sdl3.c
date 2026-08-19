@@ -354,6 +354,7 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Rende
     const char *rname = SDL_GetRendererName(data->renderer);
     data->linear_ok = (rname && (strcmp(rname, "gpu") == 0 || strcmp(rname, "vulkan") == 0));
     data->linear_selfcheck_done = false;
+    term_colors_init(&data->colors);
     vlog("Renderer '%s': linear-light compositing %s\n", rname ? rname : "(null)",
          data->linear_ok ? "enabled" : "disabled (sRGB blending)");
 
@@ -623,8 +624,8 @@ static void render_cell_selection(RendererSdl3Data *data, TerminalBackend *term,
     float sw = (float)(columns_to_consume * data->cell_width);
     float sh = (float)data->cell_height;
     SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_BLEND);
-    SDL_SetRenderDrawColor(data->renderer, TERM_SELECTION_R, TERM_SELECTION_G,
-                           TERM_SELECTION_B, TERM_SELECTION_A);
+    SDL_SetRenderDrawColor(data->renderer, data->colors.selection_r, data->colors.selection_g,
+                           data->colors.selection_b, data->colors.selection_a);
     SDL_FRect sel_rect = { sx, sy, sw, sh };
     SDL_RenderFillRect(data->renderer, &sel_rect);
     SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
@@ -976,7 +977,7 @@ static void flush_underline_run(RendererSdl3Data *data, int row, int vis_start,
         underline_y = cell_y + data->cell_height - thickness;
     int run_x = vis_start * data->cell_width;
     int run_w = (vis_end - vis_start) * data->cell_width;
-    SDL_SetRenderDrawColor(data->renderer, r, g, b, TERM_UNDERLINE_A);
+    SDL_SetRenderDrawColor(data->renderer, r, g, b, data->colors.underline_a);
     switch (style) {
     case UNDERLINE_SINGLE:
         draw_underline_single(data->renderer, run_x, underline_y, run_w, pd);
@@ -1041,8 +1042,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                     float cy = (float)(row * data->cell_height);
                     float cw = (float)(it.pres_w * data->cell_width);
                     float ch = (float)data->cell_height;
-                    SDL_SetRenderDrawColor(data->renderer, TERM_CURSOR_R, TERM_CURSOR_G,
-                                           TERM_CURSOR_B, 255);
+                    SDL_SetRenderDrawColor(data->renderer, data->colors.cursor_r, data->colors.cursor_g,
+                                           data->colors.cursor_b, 255);
                     draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
                     break;
                 }
@@ -1066,9 +1067,9 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
             Uint8 run_r = 0, run_g = 0, run_b = 0;
             while (terminal_row_iter_next(&it)) {
                 unsigned int cs = it.cell.attrs.underline;
-                Uint8 cr = it.cell.ul_color.is_default ? TERM_UNDERLINE_R : it.cell.ul_color.r;
-                Uint8 cg = it.cell.ul_color.is_default ? TERM_UNDERLINE_G : it.cell.ul_color.g;
-                Uint8 cb = it.cell.ul_color.is_default ? TERM_UNDERLINE_B : it.cell.ul_color.b;
+                Uint8 cr = it.cell.ul_color.is_default ? data->colors.underline_r : it.cell.ul_color.r;
+                Uint8 cg = it.cell.ul_color.is_default ? data->colors.underline_g : it.cell.ul_color.g;
+                Uint8 cb = it.cell.ul_color.is_default ? data->colors.underline_b : it.cell.ul_color.b;
                 bool same_run = (run_style != 0 && cs == run_style && cr == run_r &&
                                  cg == run_g && cb == run_b);
                 if (run_style != 0 && !same_run) {
@@ -1641,7 +1642,8 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
         SDL_SetRenderTarget(data->renderer, data->linear_target);
     }
 
-    SDL_SetRenderDrawColor(data->renderer, TERM_BG_R, TERM_BG_G, TERM_BG_B, TERM_BG_A);
+    SDL_SetRenderDrawColor(data->renderer, data->colors.bg_r, data->colors.bg_g,
+                           data->colors.bg_b, data->colors.bg_a);
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, data->scroll.scroll_offset);
     render_lottie_layer(data, term, 1); /* background lottie */

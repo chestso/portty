@@ -86,19 +86,14 @@ static void fire_cwd_cb(CfrBackendData *d, const char *path)
 /* Color conversion                                                    */
 /* ------------------------------------------------------------------ */
 
-/* Default foreground is charm.land's body-text cream (#fffdf5), a nod to
- * Charmbracelet — whose CharmTone palette also seeds coffer's ANSI 0-15. 🌸 */
-static const uint8_t default_fg[3] = { 0xff, 0xfd, 0xf5 };
-static const uint8_t default_bg[3] = { 0x00, 0x00, 0x00 };
-
 static TerminalColor unpack_rgb(uint32_t rgb, bool is_default,
-                                const uint8_t fallback[3])
+                                uint32_t fallback)
 {
     TerminalColor out;
     if (is_default) {
-        out.r = fallback[0];
-        out.g = fallback[1];
-        out.b = fallback[2];
+        out.r = (uint8_t)((fallback >> 16) & 0xFF);
+        out.g = (uint8_t)((fallback >> 8) & 0xFF);
+        out.b = (uint8_t)(fallback & 0xFF);
         out.is_default = true;
     } else {
         out.r = (uint8_t)((rgb >> 16) & 0xFF);
@@ -494,9 +489,9 @@ static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
     /* Style. */
     const CfrStyle *st = cfr_cell_style(vt, src);
     if (!st) {
-        dst->fg = unpack_rgb(0, true, default_fg);
-        dst->bg = unpack_rgb(0, true, default_bg);
-        dst->ul_color = unpack_rgb(0, true, default_fg);
+        dst->fg = unpack_rgb(0, true, cfr_default_fg_rgb());
+        dst->bg = unpack_rgb(0, true, cfr_default_bg_rgb());
+        dst->ul_color = unpack_rgb(0, true, cfr_default_fg_rgb());
         return;
     }
     dst->attrs.bold = (st->attrs & CFR_ATTR_BOLD) ? 1 : 0;
@@ -516,13 +511,13 @@ static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
 
     dst->fg = unpack_rgb(st->fg_rgb,
                          (st->color_flags & CFR_COLOR_DEFAULT_FG) != 0,
-                         default_fg);
+                         cfr_default_fg_rgb());
     dst->bg = unpack_rgb(st->bg_rgb,
                          (st->color_flags & CFR_COLOR_DEFAULT_BG) != 0,
-                         default_bg);
+                         cfr_default_bg_rgb());
     dst->ul_color = unpack_rgb(st->ul_rgb,
                                (st->color_flags & CFR_COLOR_DEFAULT_UL) != 0,
-                               default_fg);
+                               cfr_default_fg_rgb());
 
     /* Match libvterm backend: pre-swap fg/bg for reverse video so the
      * renderer sees visual colors. */

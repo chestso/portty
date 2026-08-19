@@ -6,8 +6,9 @@
 # the file — above existing block comments, #define directives, and include
 # guards — per SPDX best practice.
 #
-# Idempotent: if the file already contains "SPDX-License-Identifier: MIT"
-# (anywhere), it is left untouched.
+# If the file already has a banner (contains "SPDX-License-Identifier: MIT"),
+# the description line is updated in-place to match DESCRIPTION. This keeps
+# descriptions in sync with descriptions.tsv across renames and edits.
 #
 # Usage is intentionally bare (no flags): the description passed on the
 # command line is embedded verbatim, so a helper can wrap this script with
@@ -28,10 +29,6 @@ if [ ! -f "$file" ]; then
 	exit 1
 fi
 
-if grep -q 'SPDX-License-Identifier: MIT' "$file"; then
-	exit 0
-fi
-
 banner="/*
  * portty — $description
  *
@@ -39,13 +36,34 @@ banner="/*
  * Copyright (c) 2026 Thomas Christensen
  */"
 
-tmp="${file}.header_tmp"
-{
-	printf '%s\n' "$banner"
-	printf '\n'
-	# Preserve the original first line (e.g. "#define _GNU_SOURCE" or a
-	# pre-existing comment). 'cat' under set -e is fine here: we only read.
-	cat "$file"
-} >"$tmp"
+if ! grep -q 'SPDX-License-Identifier: MIT' "$file"; then
+	# No banner yet — prepend.
+	tmp="${file}.header_tmp"
+	{
+		printf '%s\n' "$banner"
+		printf '\n'
+		# Preserve the original first line (e.g. "#define _GNU_SOURCE" or a
+		# pre-existing comment). 'cat' under set -e is fine here: we only read.
+		cat "$file"
+	} >"$tmp"
+	mv "$tmp" "$file"
+	exit 0
+fi
 
+# Banner exists — update the description line if stale.
+# The description lives on the second line of the banner:
+#   line 1: /*
+#   line 2:  * portty — <description>
+#   line 3:  *
+#   line 4:  * SPDX-License-Identifier: MIT
+#   line 5:  * Copyright (c) 2026 Thomas Christensen
+#   line 6:  */
+current=$(sed -n '2p' "$file")
+want=" * portty — $description"
+if [ "$current" = "$want" ]; then
+	exit 0
+fi
+# Replace line 2 in-place.
+tmp="${file}.header_tmp"
+sed "2s|.*|$want|" "$file" >"$tmp"
 mv "$tmp" "$file"

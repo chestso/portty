@@ -46,7 +46,7 @@ PORTTY_COMMON_SRC = \
     font_resolve.c font.c font_ft.c \
     colr.c base64.c \
     png_writer.c png_reader.c qoi_writer.c \
-    portty_conf.c diag.c pager.c timer.c path_compat.c os_compat.c display_info.c \
+    portty_conf.c diag.c pager.c timer.c path_compat.c os_compat.c display_info.c term_colors.c \
     portty_bug.c heap_harden.c \
     rend_common.c rend_boxdraw.c \
     portty_script.c portty_frame_rec.c

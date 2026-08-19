@@ -676,7 +676,9 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
             int backdrop = 2;
             DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE,
                                   &backdrop, sizeof(backdrop));
-            COLORREF caption = RGB(TERM_CAPTION_R, TERM_CAPTION_G, TERM_CAPTION_B);
+            COLORREF caption = RGB((DRACULA_SELECTION >> 16) & 0xFF,
+                                   (DRACULA_SELECTION >> 8) & 0xFF,
+                                   DRACULA_SELECTION & 0xFF);
             DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR,
                                   &caption, sizeof(caption));
             DWM_WINDOW_CORNER_PREFERENCE corner = DWMWCP_ROUND;

@@ -20,6 +20,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "term_colors.h"
 
 #define SIXEL_CACHE_MAX  256
 #define LOTTIE_CACHE_MAX 64
@@ -85,6 +86,8 @@ typedef struct RendererSdl3Data
         int w, h;
     } lottie_cache[LOTTIE_CACHE_MAX];
     int lottie_cache_count;
+
+    TermColors colors;
 } RendererSdl3Data;
 
 bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window, SDL_Renderer *renderer);

@@ -73,7 +73,6 @@ tests/test_vs15_routing.c	VS15 emoji routing regression tests
 
 src/backend_sdl3.h	SDL3 platform backend interface
 src/base64.h	Base64 encoder and decoder interface
-src/charmtones.h	CharmTone palette of brand colors as packed RGBA32
 src/common.h	Shared macros, logging, and common utilities
 src/diag.h	Diagnostics report builder interface
 src/display_info.h	Physical display and DPI information interface
@@ -105,5 +104,6 @@ src/rend_sdl3_atlas.h	Texture atlas interface
 src/rend_sdl3_shader.h	SDL_GPU glyph-coverage shader interface
 src/term.h	Terminal abstraction interface
 src/term_cfr.h	Coffer-backed VT terminal bridge interface
-src/term_colors.h	Portty-specific terminal color defaults
+src/term_colors.c	Portty-specific terminal color defaults sourced from coffer
+src/term_colors.h	Portty-specific terminal color defaults sourced from coffer
 src/timer.h	Poll-based event timer manager interface

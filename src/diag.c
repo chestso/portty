@@ -34,7 +34,7 @@
 
 // ---- styling ---------------------------------------------------------------
 // Attributes plus 3/4-bit ANSI colour SGR. Colours resolve against the host
-// terminal's own palette (CharmTone inside portty) — no hardcoded RGB,
+// terminal's own palette (Dracula inside portty) — no hardcoded RGB,
 // so the report inherits whatever theme the viewing terminal uses.
 #define RST       "\x1b[0m"
 #define BOLD      "\x1b[1m"
