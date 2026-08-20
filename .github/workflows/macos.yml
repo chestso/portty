@@ -25,7 +25,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: chestso/coffer
-          ref: v0.1.13
+          ref: v0.1.14
           path: coffer
           fetch-depth: 0
 
