@@ -308,7 +308,14 @@ char *diag_build_report(const DiagSources *s)
     kv(&sb, "capabilities", "sixel " FG_RULE "·" RST " OSC 8 " FG_RULE "·" RST " grapheme clusters " FG_RULE "·" RST " reflow");
     kv_bool(&sb, "lottie rasterizer", s->lottie_rasterizer, "ThorVG", "unavailable (blank frames)");
     kv_bool(&sb, "OSC 52 (clipboard)", s->osc52, "wired", "not wired");
-    kv_bool(&sb, "hardened heap", s->hardened_heap, "enabled", "disabled");
+    // Neutral state — not enabled isn't an error, so use DIM rather than red.
+    sb_printf(&sb, DIM "  %-20s" RST, "hardened heap");
+    if (s->hardened_heap) {
+        sb_puts(&sb, "\x1b[1m"
+                     "enabled" RST "\n");
+    } else {
+        sb_puts(&sb, "disabled\n");
+    }
     subsection(&sb, "runtime modes", "toggled by the running application via DECSET");
     kv(&sb, "bracketed paste", s->bracketed_paste ? "on" : "off");
     kv(&sb, "sync output", s->sync_output ? "on" : "off");
