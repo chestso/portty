@@ -25,7 +25,82 @@ struct PtyContext
     HANDLE waiter_thread;
     int rows;
     int cols;
+    bool use_openconsole; /* true if hpc was created via conpty.dll */
 };
+
+/* ── conpty.dll sideloading ───────────────────────────────────────────
+ *
+ * The system CreatePseudoConsole (kernel32.dll) always launches the
+ * OS-level conhost.exe, whose legacy VtEngine strips DCS sequences
+ * (used for sixel graphics).  The ConPTY rewrite (Windows Terminal
+ * PR #17510) that fixes this is in conpty.dll + OpenConsole.exe from
+ * the Microsoft.Windows.Console.ConPTY NuGet package.
+ *
+ * When conpty.dll is bundled alongside portty.exe, it automatically
+ * finds OpenConsole.exe in the same directory and uses it instead of
+ * the system conhost.exe.  We load CreatePseudoConsole etc. from
+ * conpty.dll at runtime, falling back to kernel32.dll if the DLL
+ * is not present. */
+
+typedef HRESULT(WINAPI *CreatePseudoConsole_t)(COORD, HANDLE, HANDLE,
+                                               DWORD, HPCON *);
+typedef HRESULT(WINAPI *ResizePseudoConsole_t)(HPCON, COORD);
+typedef void(WINAPI *ClosePseudoConsole_t)(HPCON);
+
+static CreatePseudoConsole_t fn_CreatePseudoConsole = NULL;
+static ResizePseudoConsole_t fn_ResizePseudoConsole = NULL;
+static ClosePseudoConsole_t fn_ClosePseudoConsole = NULL;
+static HMODULE g_conpty_dll = NULL;
+static bool g_conpty_initialized = false;
+
+static void init_conpty(void)
+{
+    if (g_conpty_initialized)
+        return;
+    g_conpty_initialized = true;
+
+    /* Look for conpty.dll alongside portty.exe */
+    wchar_t exe_path[MAX_PATH];
+    DWORD len = GetModuleFileNameW(NULL, exe_path, MAX_PATH);
+    if (!len || len >= MAX_PATH)
+        return;
+
+    wchar_t *slash = wcsrchr(exe_path, L'\\');
+    if (!slash)
+        return;
+    slash[1] = L'\0';
+    wcscat(exe_path, L"conpty.dll");
+
+    g_conpty_dll = LoadLibraryW(exe_path);
+    if (!g_conpty_dll)
+        return;
+
+    fn_CreatePseudoConsole = (CreatePseudoConsole_t)
+        GetProcAddress(g_conpty_dll, "CreatePseudoConsole");
+    fn_ResizePseudoConsole = (ResizePseudoConsole_t)
+        GetProcAddress(g_conpty_dll, "ResizePseudoConsole");
+    fn_ClosePseudoConsole = (ClosePseudoConsole_t)
+        GetProcAddress(g_conpty_dll, "ClosePseudoConsole");
+
+    if (!fn_CreatePseudoConsole || !fn_ResizePseudoConsole ||
+        !fn_ClosePseudoConsole) {
+        FreeLibrary(g_conpty_dll);
+        g_conpty_dll = NULL;
+        fn_CreatePseudoConsole = NULL;
+        fn_ResizePseudoConsole = NULL;
+        fn_ClosePseudoConsole = NULL;
+        return;
+    }
+
+    vlog("ConPTY: using bundled conpty.dll + OpenConsole.exe\n");
+}
+
+/* Check if a bundled conpty.dll (with OpenConsole.exe) is available. */
+static bool has_bundled_conpty(void)
+{
+    init_conpty();
+    return g_conpty_dll != NULL;
+}
 
 /* Waiter thread: when the child process exits, close the pseudo-console
  * so that ReadFile on the output pipe returns instead of blocking. */
@@ -35,7 +110,10 @@ static DWORD WINAPI pty_waiter_thread(LPVOID param)
     WaitForSingleObject(ctx->process, INFINITE);
     vlog("PTY waiter: child exited, closing pseudo-console\n");
     if (ctx->hpc != INVALID_HANDLE_VALUE) {
-        ClosePseudoConsole(ctx->hpc);
+        if (ctx->use_openconsole && fn_ClosePseudoConsole)
+            fn_ClosePseudoConsole(ctx->hpc);
+        else
+            ClosePseudoConsole(ctx->hpc);
         ctx->hpc = INVALID_HANDLE_VALUE;
     }
     return 0;
@@ -91,37 +169,61 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         goto fail;
     }
 
-    /* Create the pseudo-console with passthrough mode if available.
-     * ConPTY normally intercepts and re-serialises VT output via VtEngine,
-     * which silently drops escape sequences it doesn't understand (e.g.
-     * APC / ESC _ used for Lottie and other extensions).  Passthrough mode
-     * (flag 0x8, Windows 11 22H2+) relays the raw VT stream from the child
-     * process directly, preserving unknown sequences. */
+    /* Try to use a bundled conpty.dll + OpenConsole.exe (from the
+     * Microsoft.Windows.Console.ConPTY NuGet package) as the ConPTY
+     * host.  conpty.dll's CreatePseudoConsole automatically finds
+     * OpenConsole.exe in the same directory and uses it instead of the
+     * system conhost.exe.  OpenConsole.exe has the VtEngine rewrite
+     * (PR #17510) that passes DCS (sixel) sequences through unmodified.
+     *
+     * If conpty.dll is not present, fall back to the system
+     * CreatePseudoConsole (kernel32.dll) which uses conhost.exe. */
     COORD size;
     size.X = (SHORT)cols;
     size.Y = (SHORT)rows;
-    DWORD pty_flags = 0;
+
+    init_conpty();
+    if (fn_CreatePseudoConsole) {
+        DWORD pty_flags = 0;
 #ifndef PSEUDOCONSOLE_PASSTHROUGH_MODE
 #define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
 #endif
-    pty_flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
-    vlog("ConPTY: requesting passthrough mode (flags=0x%lx)\n",
-         (unsigned long)pty_flags);
-    HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
-                                     pty_flags, &ctx->hpc);
-    if (FAILED(hr)) {
-        vlog("ConPTY: passthrough failed (0x%lx), retrying without\n",
-             (unsigned long)hr);
-        /* Passthrough may not be supported on older Windows; retry without */
-        hr = CreatePseudoConsole(size, input_read, output_write,
-                                 0, &ctx->hpc);
-    } else {
-        vlog("ConPTY: passthrough mode accepted\n");
+        pty_flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
+        HRESULT hr = fn_CreatePseudoConsole(size, input_read,
+                                            output_write, pty_flags,
+                                            &ctx->hpc);
+        if (SUCCEEDED(hr)) {
+            ctx->use_openconsole = true;
+            vlog("ConPTY: conpty.dll pseudoconsole created (passthrough)\n");
+        } else {
+            vlog("ConPTY: conpty.dll failed (0x%lx), falling back\n",
+                 (unsigned long)hr);
+        }
     }
-    if (FAILED(hr)) {
-        fprintf(stderr, "ERROR: CreatePseudoConsole failed: 0x%lx\n",
-                (unsigned long)hr);
-        goto fail;
+
+    if (!ctx->use_openconsole) {
+        DWORD pty_flags = 0;
+#ifndef PSEUDOCONSOLE_PASSTHROUGH_MODE
+#define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
+#endif
+        pty_flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
+        vlog("ConPTY: requesting passthrough mode (flags=0x%lx)\n",
+             (unsigned long)pty_flags);
+        HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
+                                         pty_flags, &ctx->hpc);
+        if (FAILED(hr)) {
+            vlog("ConPTY: passthrough failed (0x%lx), retrying without\n",
+                 (unsigned long)hr);
+            hr = CreatePseudoConsole(size, input_read, output_write,
+                                     0, &ctx->hpc);
+        } else {
+            vlog("ConPTY: passthrough mode accepted\n");
+        }
+        if (FAILED(hr)) {
+            fprintf(stderr, "ERROR: CreatePseudoConsole failed: 0x%lx\n",
+                    (unsigned long)hr);
+            goto fail;
+        }
     }
 
     /* ConPTY now owns these pipe ends — close our copies */
@@ -387,7 +489,10 @@ void pty_destroy(PtyContext *ctx)
 
     /* Close pseudo-console (waiter thread may have already done this) */
     if (ctx->hpc != INVALID_HANDLE_VALUE) {
-        ClosePseudoConsole(ctx->hpc);
+        if (ctx->use_openconsole && fn_ClosePseudoConsole)
+            fn_ClosePseudoConsole(ctx->hpc);
+        else
+            ClosePseudoConsole(ctx->hpc);
         ctx->hpc = INVALID_HANDLE_VALUE;
     }
 
@@ -459,7 +564,11 @@ int pty_resize(PtyContext *ctx, int rows, int cols)
     size.X = (SHORT)cols;
     size.Y = (SHORT)rows;
 
-    HRESULT hr = ResizePseudoConsole(ctx->hpc, size);
+    HRESULT hr;
+    if (ctx->use_openconsole && fn_ResizePseudoConsole)
+        hr = fn_ResizePseudoConsole(ctx->hpc, size);
+    else
+        hr = ResizePseudoConsole(ctx->hpc, size);
     if (FAILED(hr)) {
         /* Wine returns E_NOTIMPL (0x80004001) — not fatal */
         vlog("ResizePseudoConsole returned 0x%lx (may be unimplemented)\n",
@@ -506,79 +615,27 @@ void pty_close_console(PtyContext *ctx)
     if (!ctx)
         return;
     if (ctx->hpc != INVALID_HANDLE_VALUE) {
-        ClosePseudoConsole(ctx->hpc);
+        if (ctx->use_openconsole && fn_ClosePseudoConsole)
+            fn_ClosePseudoConsole(ctx->hpc);
+        else
+            ClosePseudoConsole(ctx->hpc);
         ctx->hpc = INVALID_HANDLE_VALUE;
     }
 }
 
-/* Probe whether the OS-level ConPTY passes DCS (Device Control String)
- * sequences through unmodified.  ConPTY's legacy VtEngine strips DCS
- * sequences (used for sixel graphics) even when
- * PSEUDOCONSOLE_PASSTHROUGH_MODE is accepted.  The rewrite in Windows
- * Terminal 1.22 (PR #17510) fixes this, but the fix may not be in the
- * OS-level conhost.exe on all builds.
+/* Check whether the ConPTY host passes DCS (Device Control String)
+ * sequences through unmodified.  The system conhost.exe strips DCS
+ * (used for sixel graphics) even with PSEUDOCONSOLE_PASSTHROUGH_MODE.
+ * The ConPTY rewrite (PR #17510) that fixes this is in the bundled
+ * conpty.dll + OpenConsole.exe from the Microsoft.Windows.Console.ConPTY
+ * NuGet package.
  *
- * We create a temporary ConPTY, send a DCS sequence through its input
- * pipe, and check whether it appears on the output pipe. */
+ * Returns true if a bundled conpty.dll is loaded (which uses
+ * OpenConsole.exe with the fix), false if only the system conhost.exe
+ * is used. */
 bool pty_conpty_dcs_passthrough(void)
 {
-    HANDLE input_read, input_write, output_read, output_write;
-    if (!CreatePipe(&input_read, &input_write, NULL, 0))
-        return false;
-    if (!CreatePipe(&output_read, &output_write, NULL, 0)) {
-        CloseHandle(input_read);
-        CloseHandle(input_write);
-        return false;
-    }
-
-    COORD size = { 10, 10 };
-    HPCON hpc;
-    DWORD flags = 0;
-#ifndef PSEUDOCONSOLE_PASSTHROUGH_MODE
-#define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
-#endif
-    flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
-    HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
-                                     flags, &hpc);
-    if (FAILED(hr)) {
-        hr = CreatePseudoConsole(size, input_read, output_write, 0, &hpc);
-        if (FAILED(hr)) {
-            CloseHandle(input_read);
-            CloseHandle(input_write);
-            CloseHandle(output_read);
-            CloseHandle(output_write);
-            return false;
-        }
-    }
-
-    CloseHandle(input_read);
-    CloseHandle(output_write);
-
-    /* Send a minimal DCS sequence: ESC P q ESC \ */
-    const char dcs[] = "\x1bPq\x1b\\";
-    DWORD written;
-    WriteFile(input_write, dcs, sizeof(dcs) - 1, &written, NULL);
-
-    /* Give ConPTY a moment to process */
-    Sleep(50);
-
-    /* Read the output and look for ESC P */
-    char buf[256];
-    DWORD bytes_read = 0;
-    bool found = false;
-    if (ReadFile(output_read, buf, sizeof(buf), &bytes_read, NULL)) {
-        for (DWORD i = 0; i + 1 < bytes_read; i++) {
-            if ((unsigned char)buf[i] == 0x1b && buf[i + 1] == 'P') {
-                found = true;
-                break;
-            }
-        }
-    }
-
-    ClosePseudoConsole(hpc);
-    CloseHandle(input_write);
-    CloseHandle(output_read);
-    return found;
+    return has_bundled_conpty();
 }
 
 #endif /* _WIN32 */

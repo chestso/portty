@@ -1,0 +1,6 @@
+wait 5
+send "chafa -f sixel C:/msys64/tmp/test.png"
+sendln ""
+wait 3
+dump-sixel
+quit

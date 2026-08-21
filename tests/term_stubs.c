@@ -67,3 +67,11 @@ uint16_t terminal_hovered_hyperlink(const TerminalBackend *term)
     (void)term;
     return 0;
 }
+
+const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count)
+{
+    (void)term;
+    if (count)
+        *count = 0;
+    return NULL;
+}

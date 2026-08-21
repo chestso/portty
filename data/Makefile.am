@@ -15,6 +15,11 @@ EXTRA_DIST = portty.ti portty.el \
     icons/hicolor/symbolic/apps/portty-symbolic.svg \
     applications/portty.desktop
 
+if HOST_WINDOWS
+conptydir = $(bindir)
+conpty_DATA = conpty/OpenConsole.exe conpty/conpty.dll
+endif
+
 if !HOST_WINDOWS
 install-data-local:
 	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti

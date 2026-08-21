@@ -10,6 +10,7 @@
 #endif
 
 #include "portty_script.h"
+#include "common.h"
 #include "rend_common.h"
 
 #include <ctype.h>
@@ -559,6 +560,14 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "dump-sixel") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_DUMP_SIXEL;
+        return true;
+    }
+
     script_set_error(s, line_num, "unknown command: %s", line);
     return false;
 }
@@ -1061,6 +1070,25 @@ void portty_script_step(PorttyScript *script,
             }
         } else {
             fprintf(stderr, "assert-no-hover: no terminal\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_DUMP_SIXEL:
+    {
+        if (ctx->term) {
+            int count = 0;
+            const CfrSixel *imgs = terminal_get_sixels(ctx->term, &count);
+            vlog("dump-sixel: %d image(s)\n", count);
+            for (int i = 0; i < count; i++) {
+                vlog("  [%d] id=%llu row=%d col=%d %dx%dpx\n",
+                     i, (unsigned long long)imgs[i].id,
+                     imgs[i].row, imgs[i].col,
+                     imgs[i].width_px, imgs[i].height_px);
+            }
+        } else {
+            vlog("dump-sixel: no terminal\n");
         }
         (*cmd_index)++;
         break;
