@@ -307,6 +307,7 @@ char *diag_build_report(const DiagSources *s)
     kv(&sb, "engine", or_unset(s->vt_backend));
     kv(&sb, "capabilities", "sixel " FG_RULE "·" RST " OSC 8 " FG_RULE "·" RST " grapheme clusters " FG_RULE "·" RST " reflow");
 #ifdef _WIN32
+    kv(&sb, "conpty host", or_unset(s->conpty_host));
     if (s->conpty_dcs_ok)
         kv(&sb, "conpty DCS", "passthrough");
     else

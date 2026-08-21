@@ -55,6 +55,7 @@ static DiagSources sample(void)
         .hardened_heap = false,
 #ifdef _WIN32
         .conpty_dcs_ok = true,
+        .conpty_host = "conpty.dll + OpenConsole.exe",
 #endif
         .display_session = "wayland",
         .display_xwayland = "yes",
@@ -267,6 +268,7 @@ static void test_vt_features_section(void)
     ASSERT_TRUE(strstr(r, "sixel scrolling") != NULL);
     ASSERT_TRUE(strstr(r, "hardened heap") != NULL);
 #ifdef _WIN32
+    ASSERT_TRUE(strstr(r, "conpty host") != NULL);
     ASSERT_TRUE(strstr(r, "conpty DCS") != NULL);
 #endif
     free(r);

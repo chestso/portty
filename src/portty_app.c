@@ -850,6 +850,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .sixel_scrolling = terminal_get_mode(app->term, CFR_MODE_SIXEL_SCROLLING),
 #ifdef _WIN32
         .conpty_dcs_ok = pty_conpty_dcs_passthrough(),
+        .conpty_host = pty_conpty_host_name(),
 #endif
 #ifdef PORTTY_HARDEN_HEAP
         .hardened_heap = true,

@@ -625,4 +625,11 @@ bool pty_conpty_dcs_passthrough(void)
     return has_bundled_conpty();
 }
 
+const char *pty_conpty_host_name(void)
+{
+    return has_bundled_conpty()
+               ? "conpty.dll + OpenConsole.exe"
+               : "system conhost.exe";
+}
+
 #endif /* _WIN32 */

@@ -73,7 +73,8 @@ typedef struct
     bool hardened_heap;     // PORTTY_HARDEN_HEAP compile-time guard
 
 #ifdef _WIN32
-    bool conpty_dcs_ok; // ConPTY passes DCS (sixel) sequences through
+    bool conpty_dcs_ok;      // ConPTY passes DCS (sixel) sequences through
+    const char *conpty_host; // "conpty.dll + OpenConsole.exe" or "system conhost.exe"
 #endif
 
     // Display / scaling (all platforms, NULL if unavailable)

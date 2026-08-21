@@ -160,6 +160,14 @@ void pty_close_console(PtyContext *ctx);
  * it appears on the output pipe. Returns true if DCS passthrough works.
  */
 bool pty_conpty_dcs_passthrough(void);
+
+/**
+ * Get a human-readable name for the ConPTY host in use.
+ *
+ * Returns "conpty.dll + OpenConsole.exe" if the bundled DLL is loaded,
+ * or "system conhost.exe" if using the OS-level host.
+ */
+const char *pty_conpty_host_name(void);
 #endif
 
 #endif /* PTY_H */
