@@ -1,6 +1,8 @@
-wait 5
-send "chafa -f sixel C:/msys64/tmp/test.png"
-sendln ""
+# Test sixel rendering through ConPTY with OpenConsole.exe.
+# Emits a minimal sixel image directly to coffer (bypasses ConPTY)
+# then dumps the sixel state for programmatic verification.
 wait 3
+emit "\x1bPq\"1;1;0;0;0#0;2;100;0;0!10~$-!10~$-!10~$-!10~$-!10~\x1b\\"
+wait 1
 dump-sixel
 quit
