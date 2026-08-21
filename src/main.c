@@ -86,6 +86,15 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
     if (!verbose)
         return;
 
+    static FILE *vlog_fp = NULL;
+    if (!vlog_fp) {
+        const char *path = getenv("PORTTY_VLOG_FILE");
+        if (path)
+            vlog_fp = fopen(path, "a");
+        else
+            vlog_fp = stderr;
+    }
+
     const char *basename = strrchr(file, '/');
 #ifdef _WIN32
     const char *basename2 = strrchr(file, '\\');
@@ -110,9 +119,10 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
 
     va_list args;
     va_start(args, format);
-    fprintf(stderr, "[%02d:%02d:%02d.%03ld] %s:%s:%d ", hour, min, sec, ms, basename, func,
+    fprintf(vlog_fp, "[%02d:%02d:%02d.%03ld] %s:%s:%d ", hour, min, sec, ms, basename, func,
             line);
-    vfprintf(stderr, format, args);
+    vfprintf(vlog_fp, format, args);
+    fflush(vlog_fp);
     va_end(args);
 }
 

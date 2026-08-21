@@ -15,6 +15,7 @@
 #include "pager.h"
 #include "portty_backend.h"
 #include "portty_panel.h"
+#include "portty_pty.h"
 #include "rend_common.h"
 #include "term.h"
 #include <coffer/coffer.h>
@@ -847,6 +848,9 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .sync_output = terminal_get_mode(app->term, CFR_MODE_SYNC_OUTPUT),
         .focus_reporting = terminal_get_mode(app->term, CFR_MODE_FOCUS_REPORTING),
         .sixel_scrolling = terminal_get_mode(app->term, CFR_MODE_SIXEL_SCROLLING),
+#ifdef _WIN32
+        .conpty_dcs_ok = pty_conpty_dcs_passthrough(),
+#endif
 #ifdef PORTTY_HARDEN_HEAP
         .hardened_heap = true,
 #else

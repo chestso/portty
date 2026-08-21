@@ -152,6 +152,14 @@ void *pty_get_process_handle(PtyContext *ctx);
  * Safe to call multiple times.
  */
 void pty_close_console(PtyContext *ctx);
+
+/**
+ * Probe whether the OS-level ConPTY passes DCS sequences through.
+ *
+ * Creates a temporary ConPTY, sends a DCS sequence, and checks whether
+ * it appears on the output pipe. Returns true if DCS passthrough works.
+ */
+bool pty_conpty_dcs_passthrough(void);
 #endif
 
 #endif /* PTY_H */

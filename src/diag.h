@@ -72,6 +72,10 @@ typedef struct
     bool sixel_scrolling;   // CFR_MODE_SIXEL_SCROLLING active
     bool hardened_heap;     // PORTTY_HARDEN_HEAP compile-time guard
 
+#ifdef _WIN32
+    bool conpty_dcs_ok; // ConPTY passes DCS (sixel) sequences through
+#endif
+
     // Display / scaling (all platforms, NULL if unavailable)
     const char *display_session;  // "wayland", "x11", "macOS", "windows", or NULL
     const char *display_xwayland; // "yes" / "no" / NULL (Linux only)

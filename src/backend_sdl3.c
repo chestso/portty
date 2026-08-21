@@ -594,10 +594,10 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
 
     if (verbose) {
         int sdl_version = SDL_GetVersion();
-        fprintf(stderr, "DEBUG: SDL version %d.%d.%d\n",
-                SDL_VERSIONNUM_MAJOR(sdl_version),
-                SDL_VERSIONNUM_MINOR(sdl_version),
-                SDL_VERSIONNUM_MICRO(sdl_version));
+        vlog("SDL version %d.%d.%d\n",
+             SDL_VERSIONNUM_MAJOR(sdl_version),
+             SDL_VERSIONNUM_MINOR(sdl_version),
+             SDL_VERSIONNUM_MICRO(sdl_version));
     }
 
     SDL_ClearError();
@@ -1394,7 +1394,7 @@ static void sdl3_script_resize(void *user_data, int cols, int rows)
     int pixel_w = cols * cell_w;
     int pixel_h = rows * cell_h;
     portty_app_handle_resize(d->app, pixel_w, pixel_h);
-    fprintf(stderr, "resize: %d cols x %d rows\n", cols, rows);
+    vlog("resize: %d cols x %d rows\n", cols, rows);
 }
 
 static void sdl3_script_winsize(void *user_data, int w, int h)
@@ -1411,7 +1411,7 @@ static void sdl3_script_winsize(void *user_data, int w, int h)
     int logical_w = physical_to_logical(w, scale);
     int logical_h = physical_to_logical(h, scale);
     SDL_SetWindowSize(d->window, logical_w, logical_h);
-    fprintf(stderr, "winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
+    vlog("winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
 }
 
 static void sdl3_script_mousemove(void *user_data, int x, int y)

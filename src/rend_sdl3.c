@@ -2280,7 +2280,7 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     SDL_DestroyTexture(target);
 
     if (rc == 0) {
-        fprintf(stderr, "STATUS: png_output=%s (%dx%d)\n", output_path, img_w, img_h);
+        vlog("STATUS: png_output=%s (%dx%d)\n", output_path, img_w, img_h);
     } else {
         fprintf(stderr, "ERROR: Failed to write PNG to %s\n", output_path);
     }

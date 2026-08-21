@@ -105,12 +105,18 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
 #define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
 #endif
     pty_flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
+    vlog("ConPTY: requesting passthrough mode (flags=0x%lx)\n",
+         (unsigned long)pty_flags);
     HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
                                      pty_flags, &ctx->hpc);
     if (FAILED(hr)) {
+        vlog("ConPTY: passthrough failed (0x%lx), retrying without\n",
+             (unsigned long)hr);
         /* Passthrough may not be supported on older Windows; retry without */
         hr = CreatePseudoConsole(size, input_read, output_write,
                                  0, &ctx->hpc);
+    } else {
+        vlog("ConPTY: passthrough mode accepted\n");
     }
     if (FAILED(hr)) {
         fprintf(stderr, "ERROR: CreatePseudoConsole failed: 0x%lx\n",
@@ -503,6 +509,76 @@ void pty_close_console(PtyContext *ctx)
         ClosePseudoConsole(ctx->hpc);
         ctx->hpc = INVALID_HANDLE_VALUE;
     }
+}
+
+/* Probe whether the OS-level ConPTY passes DCS (Device Control String)
+ * sequences through unmodified.  ConPTY's legacy VtEngine strips DCS
+ * sequences (used for sixel graphics) even when
+ * PSEUDOCONSOLE_PASSTHROUGH_MODE is accepted.  The rewrite in Windows
+ * Terminal 1.22 (PR #17510) fixes this, but the fix may not be in the
+ * OS-level conhost.exe on all builds.
+ *
+ * We create a temporary ConPTY, send a DCS sequence through its input
+ * pipe, and check whether it appears on the output pipe. */
+bool pty_conpty_dcs_passthrough(void)
+{
+    HANDLE input_read, input_write, output_read, output_write;
+    if (!CreatePipe(&input_read, &input_write, NULL, 0))
+        return false;
+    if (!CreatePipe(&output_read, &output_write, NULL, 0)) {
+        CloseHandle(input_read);
+        CloseHandle(input_write);
+        return false;
+    }
+
+    COORD size = { 10, 10 };
+    HPCON hpc;
+    DWORD flags = 0;
+#ifndef PSEUDOCONSOLE_PASSTHROUGH_MODE
+#define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
+#endif
+    flags |= PSEUDOCONSOLE_PASSTHROUGH_MODE;
+    HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
+                                     flags, &hpc);
+    if (FAILED(hr)) {
+        hr = CreatePseudoConsole(size, input_read, output_write, 0, &hpc);
+        if (FAILED(hr)) {
+            CloseHandle(input_read);
+            CloseHandle(input_write);
+            CloseHandle(output_read);
+            CloseHandle(output_write);
+            return false;
+        }
+    }
+
+    CloseHandle(input_read);
+    CloseHandle(output_write);
+
+    /* Send a minimal DCS sequence: ESC P q ESC \ */
+    const char dcs[] = "\x1bPq\x1b\\";
+    DWORD written;
+    WriteFile(input_write, dcs, sizeof(dcs) - 1, &written, NULL);
+
+    /* Give ConPTY a moment to process */
+    Sleep(50);
+
+    /* Read the output and look for ESC P */
+    char buf[256];
+    DWORD bytes_read = 0;
+    bool found = false;
+    if (ReadFile(output_read, buf, sizeof(buf), &bytes_read, NULL)) {
+        for (DWORD i = 0; i + 1 < bytes_read; i++) {
+            if ((unsigned char)buf[i] == 0x1b && buf[i + 1] == 'P') {
+                found = true;
+                break;
+            }
+        }
+    }
+
+    ClosePseudoConsole(hpc);
+    CloseHandle(input_write);
+    CloseHandle(output_read);
+    return found;
 }
 
 #endif /* _WIN32 */

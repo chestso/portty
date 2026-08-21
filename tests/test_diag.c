@@ -53,6 +53,9 @@ static DiagSources sample(void)
         .focus_reporting = false,
         .sixel_scrolling = false,
         .hardened_heap = false,
+#ifdef _WIN32
+        .conpty_dcs_ok = true,
+#endif
         .display_session = "wayland",
         .display_xwayland = "yes",
         .display_screen = "3072x1728 px, 812x457 mm",
@@ -263,6 +266,9 @@ static void test_vt_features_section(void)
     ASSERT_TRUE(strstr(r, "focus reporting") != NULL);
     ASSERT_TRUE(strstr(r, "sixel scrolling") != NULL);
     ASSERT_TRUE(strstr(r, "hardened heap") != NULL);
+#ifdef _WIN32
+    ASSERT_TRUE(strstr(r, "conpty DCS") != NULL);
+#endif
     free(r);
 }
 

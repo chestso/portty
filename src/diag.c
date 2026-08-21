@@ -306,6 +306,12 @@ char *diag_build_report(const DiagSources *s)
     section(&sb, "VT FEATURES");
     kv(&sb, "engine", or_unset(s->vt_backend));
     kv(&sb, "capabilities", "sixel " FG_RULE "·" RST " OSC 8 " FG_RULE "·" RST " grapheme clusters " FG_RULE "·" RST " reflow");
+#ifdef _WIN32
+    if (s->conpty_dcs_ok)
+        kv(&sb, "conpty DCS", "passthrough");
+    else
+        kvf(&sb, "conpty DCS", "\x1b[31mstripped\x1b[0m (sixel images blocked)");
+#endif
     kv_bool(&sb, "lottie rasterizer", s->lottie_rasterizer, "ThorVG", "unavailable (blank frames)");
     kv_bool(&sb, "OSC 52 (clipboard)", s->osc52, "wired", "not wired");
     // Neutral state — not enabled isn't an error, so use DIM rather than red.
