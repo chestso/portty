@@ -7,7 +7,7 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
 EXTRA_DIST = test_helpers.h font_stubs.c
 
-check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_dpi_scale test_content_scale test_panel test_link_hint
+check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_vs15_routing test_dpi_scale test_content_scale test_panel test_link_hint
 
 # test_atlas — SDL3 GPU atlas packing. Requires SDL3 backend.
 check_PROGRAMS += test_atlas
@@ -60,6 +60,12 @@ test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
     ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_sixel_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_sixel_LDADD = $(COFFER_LIBS)
+
+# iTerm2 inline images (OSC 1337) end-to-end through the host bridge.
+test_osc1337_SOURCES = test_osc1337.c $(TEST_COMMON) \
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+test_osc1337_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
+test_osc1337_LDADD = $(COFFER_LIBS)
 
 # Lottie end-to-end through the host bridge: feed an APC sequence via
 # terminal_process_input and read animations back via terminal_get_lotties.
