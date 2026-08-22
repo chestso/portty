@@ -126,7 +126,6 @@ if HAVE_RC
 # provide an explicit one and link the resulting object into portty.
 portty-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico
 	$(AM_V_GEN)$(RC) $(RCFLAGS) -I$(srcdir) -I$(top_srcdir)/data/icons -i $< -o $@
-BUILT_SOURCES += portty-resources.o
 endif HAVE_RC
 
 if HOST_WINDOWS

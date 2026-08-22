@@ -128,7 +128,6 @@ AS_IF([test ! -f "$srcdir/third_party/qoi/qoi.h"],
      [AC_MSG_NOTICE([QOI header fetched successfully])],
      [AC_MSG_ERROR([Failed to fetch QOI header. Run scripts/fetch-qoi.sh manually or check network access.])])])
 
-PKG_CHECK_MODULES([SDL3], [sdl3])
 if test "x$host_windows" = "xno" && test "x$host_macos" = "xno"; then
   PKG_CHECK_MODULES([FONTCONFIG], [fontconfig])
 fi
