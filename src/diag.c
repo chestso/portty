@@ -305,7 +305,7 @@ char *diag_build_report(const DiagSources *s)
     // VT engine features
     section(&sb, "VT FEATURES");
     kv(&sb, "engine", or_unset(s->vt_backend));
-    kv(&sb, "capabilities", "sixel " FG_RULE "·" RST " OSC 8 " FG_RULE "·" RST " grapheme clusters " FG_RULE "·" RST " reflow");
+    kv(&sb, "capabilities", "sixel " FG_RULE "·" RST " iTerm2 images " FG_RULE "·" RST " kitty graphics " FG_RULE "·" RST " OSC 8 " FG_RULE "·" RST " grapheme clusters " FG_RULE "·" RST " reflow");
 #ifdef _WIN32
     kv(&sb, "conpty host", or_unset(s->conpty_host));
     if (s->conpty_dcs_ok)

@@ -257,6 +257,8 @@ static void test_vt_features_section(void)
     ASSERT_TRUE(strstr(r, "coffer") != NULL);
     // sixel, OSC 8 appear in the static capabilities line; lottie in the boolean
     ASSERT_TRUE(strstr(r, "sixel") != NULL);
+    ASSERT_TRUE(strstr(r, "iTerm2 images") != NULL);
+    ASSERT_TRUE(strstr(r, "kitty graphics") != NULL);
     ASSERT_TRUE(strstr(r, "lottie rasterizer") != NULL);
     ASSERT_TRUE(strstr(r, "ThorVG") != NULL);
     ASSERT_TRUE(strstr(r, "OSC 8") != NULL);
