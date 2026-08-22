@@ -58,6 +58,10 @@ compile_commands.json
 bloom-terminal
 src/bloom-terminal
 
+# Bundled ConPTY binaries (pre-built from Microsoft.Windows.Console.ConPTY NuGet)
+!data/conpty/OpenConsole.exe
+!data/conpty/conpty.dll
+
 # Test binaries
 tests/*.log
 tests/*.trs
