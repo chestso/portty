@@ -741,14 +741,13 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int pad_x, int pad_y,
                                 uint8_t r, uint8_t g, uint8_t b)
 {
-    int light = cell_w / 5;
-    if (light < 1)
-        light = 1;
+    float stroke = (float)cell_w / 5.0f;
+    if (stroke < 1.0f)
+        stroke = 1.0f;
 
     int bmp_w = cell_w + pad_x * 2;
     int bmp_h = cell_h + pad_y * 2;
 
-    float stroke = (float)light;
     float half_stroke = stroke * 0.5f;
     float aa = 0.5f;
 
