@@ -73,7 +73,6 @@ static void test_panel_position_above_link(void)
     /* Link at row 5 should show panel above at row 5 - 3 = 2 */
     int display_row = 5;
     int panel_rows = 3;
-    int term_rows = 24;
 
     int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
     ASSERT_EQ(panel_row, 2);
@@ -86,7 +85,6 @@ static void test_panel_position_at_top_row(void)
     /* Link at row 0 should show panel below at row 1 */
     int display_row = 0;
     int panel_rows = 3;
-    int term_rows = 24;
 
     int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
     ASSERT_EQ(panel_row, 1);
@@ -99,7 +97,6 @@ static void test_panel_position_at_row_1(void)
      * Implementation should clamp to 0. */
     int display_row = 1;
     int panel_rows = 3;
-    int term_rows = 24;
 
     int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
     /* Raw calculation gives -2, implementation must clamp */

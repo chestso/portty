@@ -57,6 +57,13 @@ static ClosePseudoConsole_t fn_ClosePseudoConsole = NULL;
 static HMODULE g_conpty_dll = NULL;
 static bool g_conpty_initialized = false;
 
+/* Load a ConPTY entry point. Casting through void (*)(void) avoids
+ * -Wcast-function-type on MinGW (FARPROC is intptr_t). */
+static void *conpty_load(HMODULE dll, const char *name)
+{
+    return (void *)(void (*)(void))GetProcAddress(dll, name);
+}
+
 static void init_conpty(void)
 {
     if (g_conpty_initialized)
@@ -80,11 +87,11 @@ static void init_conpty(void)
         return;
 
     fn_CreatePseudoConsole = (CreatePseudoConsole_t)
-        GetProcAddress(g_conpty_dll, "CreatePseudoConsole");
+        conpty_load(g_conpty_dll, "CreatePseudoConsole");
     fn_ResizePseudoConsole = (ResizePseudoConsole_t)
-        GetProcAddress(g_conpty_dll, "ResizePseudoConsole");
+        conpty_load(g_conpty_dll, "ResizePseudoConsole");
     fn_ClosePseudoConsole = (ClosePseudoConsole_t)
-        GetProcAddress(g_conpty_dll, "ClosePseudoConsole");
+        conpty_load(g_conpty_dll, "ClosePseudoConsole");
 
     if (!fn_CreatePseudoConsole || !fn_ResizePseudoConsole ||
         !fn_ClosePseudoConsole) {

@@ -4,8 +4,14 @@
 #include <stdio.h>
 #include <string.h>
 
-static int test_pass_count = 0;
-static int test_fail_count = 0;
+#if defined(__GNUC__) || defined(__clang__)
+#define TEST_HELPERS_UNUSED __attribute__((unused))
+#else
+#define TEST_HELPERS_UNUSED
+#endif
+
+static TEST_HELPERS_UNUSED int test_pass_count = 0;
+static TEST_HELPERS_UNUSED int test_fail_count = 0;
 
 #define ASSERT_TRUE(expr)                                                      \
     do {                                                                       \

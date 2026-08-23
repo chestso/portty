@@ -516,7 +516,8 @@ static void sdl3_wakeup_reader(Sdl3BackendData *d)
 #else
     if (d->wakeup_pipe[1] >= 0) {
         char c = 1;
-        (void)write(d->wakeup_pipe[1], &c, 1);
+        ssize_t r = write(d->wakeup_pipe[1], &c, 1);
+        (void)r;
     }
 #endif
 }
@@ -930,7 +931,7 @@ static bool sdl3_clipboard_set(PorttyBackend *self, const char *text)
     char *copy = strdup(text ? text : "");
     if (!copy)
         return false;
-    static const char *const mime_types[] = { "text/plain;charset=utf-8" };
+    static const char *mime_types[] = { "text/plain;charset=utf-8" };
     if (!SDL_SetClipboardData(clipboard_data_callback, clipboard_cleanup_callback,
                               copy, mime_types, 1)) {
         free(copy);

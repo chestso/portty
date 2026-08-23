@@ -44,7 +44,8 @@ static void sigchld_handler(int sig)
     // write() is async-signal-safe
     char c = 1;
     int saved_errno = errno;
-    write(sigchld_pipe[1], &c, 1);
+    ssize_t r = write(sigchld_pipe[1], &c, 1);
+    (void)r;
     errno = saved_errno;
 }
 

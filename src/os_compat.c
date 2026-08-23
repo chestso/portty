@@ -141,8 +141,10 @@ bool os_compat_spawn_process(const char *exe_path, const char *cwd)
     }
     if (pid == 0) {
         setsid();
-        if (cwd && cwd[0])
-            chdir(cwd);
+        if (cwd && cwd[0]) {
+            int cr = chdir(cwd);
+            (void)cr;
+        }
         execl(exe_path, exe_path, NULL);
         _exit(1);
     }
