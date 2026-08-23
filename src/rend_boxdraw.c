@@ -846,8 +846,8 @@ GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                  uint8_t r, uint8_t g, uint8_t b)
 {
     bool is_diagonal = (cp >= 0x2571 && cp <= 0x2573);
-    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.15f) : 0;
-    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.15f) : 0;
+    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.20f) : 0;
+    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.20f) : 0;
     int bmp_w = cell_w + margin_x * 2;
     int bmp_h = cell_h + margin_y * 2;
 
