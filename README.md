@@ -13,8 +13,8 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, page-based scrollback ring
 - Sixel graphics — DCS sixel decoding, grid anchoring, RLE/RGB/HLS color, transparency, raster attributes; capability advertising (DA1 reports `4`, DECSET 80/1070/8452, XTSMGRAPHICS); animated in-place updates (DECSDM mode 80) with frame swapping via image id + version
 - iTerm2 inline images — OSC 1337 (`File=`/multipart) parsing, PNG/JPEG/BMP/GIF/TGA decode, full 8-bit alpha, cursor-anchored placement
-- Kitty graphics — APC `G` protocol (transmit/display/delete/query/frame/transparency), chunked transfer (`m=1/0`), zlib (`o=z`) payloads, virtual and relative placements, z-index layering; responses leave via OSC 5556 on Windows (ConPTY strips APC)
-- Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization; Windows ConPTY workaround routes OSC 5555 to APC dispatch
+- Kitty graphics — APC `G` protocol (transmit/display/delete/query/frame/transparency), chunked transfer (`m=1/0`), zlib (`o=z`) payloads, virtual and relative placements, z-index layering. On Windows, ConPTY strips APC, so commands ride OSC 5555 and responses leave via OSC 5556
+- Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization. On Windows, ConPTY strips APC, so commands ride OSC 5555 and responses leave via OSC 5556
 - OSC-8 hyperlinks — parsing and tracking
 - OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
 - Kitty keyboard protocol — push/pop/set/query plus Disambiguate and Report-all flags
