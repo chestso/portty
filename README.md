@@ -17,6 +17,8 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization. On Windows, ConPTY strips APC, so commands ride OSC 5555 and responses leave via OSC 5556
 - OSC-8 hyperlinks — parsing and tracking
 - OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
+- OSC 10/11 color queries — responds to foreground/background color queries with the terminal's default colors
+- XTWINOPS (CSI `t`) — reports text-area size in cells (mode 18), pixels (mode 14), and cell size (mode 16)
 - Kitty keyboard protocol — push/pop/set/query plus Disambiguate and Report-all flags
 - Working-directory tracking — OSC 7 (`file://` URI) and OSC 9;9 (ConEmu protocol)
 - Window title — OSC 2 parsing
@@ -145,30 +147,30 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 
 ### Commands
 
-| Command                                 | Description                                                                           |
-| --------------------------------------- | ------------------------------------------------------------------------------------- |
-| `wait <seconds>`                        | Pause script execution for N seconds (monotonic clock)                                |
-| `send <text>`                           | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes. |
-| `sendln <text>`                         | Same as `send`, but appends `\r\n` (as if the user pressed Return)                    |
-| `emit <text>`                           | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.    |
-| `raw <hex bytes>`                       | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)             |
-| `emit-raw <hex bytes>`                  | Write raw binary bytes directly to the terminal emulator                              |
-| `assert-contains <text>`                | Assert the terminal grid contains the given substring (prints PASS/FAIL)              |
-| `assert-not-contains <text>`            | Assert the terminal grid does NOT contain the given substring                         |
-| `screendump <path>`                     | Save the framebuffer to a PNG file (captured after render, before present)            |
-| `dumprow <row>`                         | Print all cells in a terminal row                                                     |
-| `dumpcells <row> <col_start> <col_end>` | Print cells in the given range with codepoint, width, attributes, and fg/bg colors    |
-
-| `mousemove <x> <y>` | Simulate a mouse move to physical pixel coordinates |
-| `resize <cols> <rows>` | Resize terminal grid to given columns/rows |
-| `winsize <width> <height>` | Set window pixel size |
-| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body |
-| `panel_hide <id>` | Hide panel by ID |
-| `assert-hover` | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL) |
-| `assert-no-hover` | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL) |
-| `record-start <dir> [fps]` | Start frame recording to directory at target FPS (default 30), QOI format |
-| `record-stop` | Stop frame recording and close manifest |
-| `quit` | Request application quit |
+| Command                                                               | Description                                                                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| `wait <seconds>`                                                      | Pause script execution for N seconds (monotonic clock)                                |
+| `send <text>`                                                         | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes. |
+| `sendln <text>`                                                       | Same as `send`, but appends `\r\n` (as if the user pressed Return)                    |
+| `emit <text>`                                                         | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.    |
+| `raw <hex bytes>`                                                     | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)             |
+| `emit-raw <hex bytes>`                                                | Write raw binary bytes directly to the terminal emulator                              |
+| `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)              |
+| `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                         |
+| `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)            |
+| `dumprow <row>`                                                       | Print all cells in a terminal row                                                     |
+| `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors    |
+| `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                        |
+| `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                   |
+| `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows                                            |
+| `winsize <width> <height>`                                            | Set window pixel size                                                                 |
+| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                     |
+| `panel_hide <id>`                                                     | Hide panel by ID                                                                      |
+| `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                     |
+| `assert-no-hover`                                                     | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                     |
+| `record-start <dir> [fps]`                                            | Start frame recording to directory at target FPS (default 30), QOI format             |
+| `record-stop`                                                         | Stop frame recording and close manifest                                               |
+| `quit`                                                                | Request application quit                                                              |
 
 ### `send` vs `emit`
 
