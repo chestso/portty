@@ -233,7 +233,7 @@ static void draw_strikethrough(SDL_Renderer *renderer, int x, int y, int width,
 }
 
 // Forward declaration for sixel cache cleanup (used in rend_sdl3_destroy)
-static void sixel_cache_clear(RendererSdl3Data *data);
+static void image_cache_clear(RendererSdl3Data *data);
 static void lottie_cache_clear(RendererSdl3Data *data);
 
 // Linearize RGBA data for upload to the linear render target.
@@ -406,7 +406,7 @@ void rend_sdl3_destroy(RendererSdl3Data *data)
         return;
 
     // Destroy sixel texture cache
-    sixel_cache_clear(data);
+    image_cache_clear(data);
 
     // Destroy lottie texture cache
     lottie_cache_clear(data);
@@ -1123,25 +1123,25 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
 }
 
 // Destroy all cached sixel textures
-static void sixel_cache_clear(RendererSdl3Data *data)
+static void image_cache_clear(RendererSdl3Data *data)
 {
-    for (int i = 0; i < data->sixel_cache_count; i++) {
-        if (data->sixel_cache[i].texture)
-            SDL_DestroyTexture(data->sixel_cache[i].texture);
-        data->sixel_cache[i].texture = NULL;
+    for (int i = 0; i < data->image_cache_count; i++) {
+        if (data->image_cache[i].texture)
+            SDL_DestroyTexture(data->image_cache[i].texture);
+        data->image_cache[i].texture = NULL;
     }
-    data->sixel_cache_count = 0;
+    data->image_cache_count = 0;
 }
 
 // Drop cached textures whose image id is no longer live, so the cache
 // tracks the engine's current image set (and frees textures for evicted /
 // scrolled-off / cleared images). O(cache * live) but both are small.
-static void sixel_cache_reconcile(RendererSdl3Data *data, const CfrSixel *imgs, int count)
+static void image_cache_reconcile(RendererSdl3Data *data, const CfrImage *imgs, int count)
 {
-    for (int i = 0; i < data->sixel_cache_count;) {
+    for (int i = 0; i < data->image_cache_count;) {
         bool live = false;
         for (int j = 0; j < count; j++) {
-            if (imgs[j].id == data->sixel_cache[i].id) {
+            if (imgs[j].id == data->image_cache[i].id) {
                 live = true;
                 break;
             }
@@ -1149,9 +1149,9 @@ static void sixel_cache_reconcile(RendererSdl3Data *data, const CfrSixel *imgs, 
         if (live) {
             i++;
         } else {
-            if (data->sixel_cache[i].texture)
-                SDL_DestroyTexture(data->sixel_cache[i].texture);
-            data->sixel_cache[i] = data->sixel_cache[--data->sixel_cache_count];
+            if (data->image_cache[i].texture)
+                SDL_DestroyTexture(data->image_cache[i].texture);
+            data->image_cache[i] = data->image_cache[--data->image_cache_count];
         }
     }
 }
@@ -1159,105 +1159,165 @@ static void sixel_cache_reconcile(RendererSdl3Data *data, const CfrSixel *imgs, 
 // Find or create an SDL_Texture for a sixel image, keyed by its stable id.
 // On a version change (animation) the texture is re-uploaded in place; a
 // dimension change forces a recreate.
-static SDL_Texture *sixel_get_texture(RendererSdl3Data *data, const CfrSixel *img)
+static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *img)
 {
-    uint8_t *linear = linearize_for_upload(data, img->rgba, img->width_px, img->height_px);
+    // CfrImage dimensions are physical (coffer pre-converts). Use buf_w/buf_h
+    // for the texture (native pixel buffer size) and width_px/height_px for
+    // the display (destination rect, handled by the caller).
+    int bw = img->buf_w > 0 ? img->buf_w : img->width_px;
+    int bh = img->buf_h > 0 ? img->buf_h : img->height_px;
+    uint8_t *linear = linearize_for_upload(data, img->rgba, bw, bh);
     const uint8_t *pixels = linear ? linear : img->rgba;
 
-    for (int i = 0; i < data->sixel_cache_count; i++) {
-        if (data->sixel_cache[i].id != img->id)
+    for (int i = 0; i < data->image_cache_count; i++) {
+        if (data->image_cache[i].id != img->id)
             continue;
-        if (data->sixel_cache[i].w != img->width_px ||
-            data->sixel_cache[i].h != img->height_px) {
+        if (data->image_cache[i].w != bw ||
+            data->image_cache[i].h != bh) {
             // Dimensions changed — recreate the texture object.
-            if (data->sixel_cache[i].texture)
-                SDL_DestroyTexture(data->sixel_cache[i].texture);
-            data->sixel_cache[i].texture = NULL;
-        } else if (data->sixel_cache[i].version != img->version) {
+            if (data->image_cache[i].texture)
+                SDL_DestroyTexture(data->image_cache[i].texture);
+            data->image_cache[i].texture = NULL;
+        } else if (data->image_cache[i].version != img->version) {
             // Same size, new pixels — re-upload in place (no churn).
-            SDL_UpdateTexture(data->sixel_cache[i].texture, NULL, pixels,
-                              img->width_px * 4);
-            data->sixel_cache[i].version = img->version;
+            SDL_UpdateTexture(data->image_cache[i].texture, NULL, pixels,
+                              bw * 4);
+            data->image_cache[i].version = img->version;
             free(linear);
-            return data->sixel_cache[i].texture;
+            return data->image_cache[i].texture;
         } else {
             free(linear);
-            return data->sixel_cache[i].texture;
+            return data->image_cache[i].texture;
         }
         // Fall through to recreate into this slot.
         SDL_Texture *t = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                           SDL_TEXTUREACCESS_STATIC, img->width_px,
-                                           img->height_px);
+                                           SDL_TEXTUREACCESS_STATIC, bw, bh);
         if (!t) {
             free(linear);
             return NULL;
         }
-        SDL_UpdateTexture(t, NULL, pixels, img->width_px * 4);
+        SDL_UpdateTexture(t, NULL, pixels, bw * 4);
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
-        data->sixel_cache[i].texture = t;
-        data->sixel_cache[i].version = img->version;
-        data->sixel_cache[i].w = img->width_px;
-        data->sixel_cache[i].h = img->height_px;
+        data->image_cache[i].texture = t;
+        data->image_cache[i].version = img->version;
+        data->image_cache[i].w = bw;
+        data->image_cache[i].h = bh;
         free(linear);
         return t;
     }
 
     // Not cached — create and insert.
     SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                         SDL_TEXTUREACCESS_STATIC, img->width_px,
-                                         img->height_px);
+                                         SDL_TEXTUREACCESS_STATIC, bw, bh);
     if (!tex) {
         free(linear);
         return NULL;
     }
-    SDL_UpdateTexture(tex, NULL, pixels, img->width_px * 4);
+    SDL_UpdateTexture(tex, NULL, pixels, bw * 4);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
     free(linear);
 
-    if (data->sixel_cache_count >= SIXEL_CACHE_MAX) {
+    if (data->image_cache_count >= IMAGE_CACHE_MAX) {
         // Cache full (>256 simultaneous images — effectively never). Skip
         // rather than leak an uncached texture.
         SDL_DestroyTexture(tex);
         return NULL;
     }
-    int n = data->sixel_cache_count++;
-    data->sixel_cache[n].texture = tex;
-    data->sixel_cache[n].id = img->id;
-    data->sixel_cache[n].version = img->version;
-    data->sixel_cache[n].w = img->width_px;
-    data->sixel_cache[n].h = img->height_px;
+    int n = data->image_cache_count++;
+    data->image_cache[n].texture = tex;
+    data->image_cache[n].id = img->id;
+    data->image_cache[n].version = img->version;
+    data->image_cache[n].w = bw;
+    data->image_cache[n].h = bh;
     return tex;
 }
 
-// Render sixel images on top of the terminal. The engine returns each
+// Render inline images on top of the terminal. The engine returns each
 // image's anchor as a unified row (>= 0 visible, < 0 scrollback); the
 // display row is unified_row + scroll_offset, identical to how cells map.
-static void render_sixel_images(RendererSdl3Data *data, TerminalBackend *term)
+//
+// negative_z selects the render pass: kitty draws z_index < 0 placements
+// behind text (before the cell pass) and z_index >= 0 placements on top
+// (after). Sixel/iTerm2 images are 1:1 (z_index 0) and always draw in the
+// non-negative pass. Lottie is a separate subsystem (own cache).
+static void render_images(RendererSdl3Data *data, TerminalBackend *term,
+                          bool negative_z)
 {
     int count = 0;
-    const CfrSixel *imgs = terminal_get_sixels(term, &count);
-    sixel_cache_reconcile(data, imgs, count);
+    const CfrImage *imgs = terminal_get_images(term, &count);
+    image_cache_reconcile(data, imgs, count);
     if (count == 0)
         return;
 
-    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
+    // CfrImage dimensions are already physical (coffer pre-converts in
+    // cfr_img_get). No content_scale conversion needed here.
+    int pl_count = 0;
+    const CfrImagePlacement *pls =
+        terminal_get_image_placements(term, &pl_count);
 
     for (int i = 0; i < count; i++) {
-        const CfrSixel *img = &imgs[i];
+        const CfrImage *img = &imgs[i];
+
+        if (img->source == IMG_SRC_KITTY) {
+            // Kitty images have no intrinsic anchor; they render only via
+            // their placements. Draw the ones matching this pass.
+            for (int j = 0; j < pl_count; j++) {
+                const CfrImagePlacement *pl = &pls[j];
+                if (pl->image_id != img->id)
+                    continue;
+                bool neg = pl->z_index < 0;
+                if (neg != negative_z)
+                    continue;
+
+                int screen_row = pl->row + data->scroll.scroll_offset;
+                int px = pl->col * data->cell_width;
+                int py = screen_row * data->cell_height;
+                int box_w = pl->cols * data->cell_width;
+                int box_h = pl->rows * data->cell_height;
+
+                if (py + box_h <= 0 || py >= data->height)
+                    continue;
+                if (px + box_w <= 0 || px >= data->width)
+                    continue;
+
+                SDL_Texture *tex = image_get_texture(data, img);
+                if (!tex)
+                    continue;
+
+                // Source rectangle (kitty crops/sub-rects); default whole.
+                int src_x = pl->src_x;
+                int src_y = pl->src_y;
+                int src_w = pl->src_w > 0 ? pl->src_w : img->width_px;
+                int src_h = pl->src_h > 0 ? pl->src_h : img->height_px;
+
+                SDL_FRect src = { (float)src_x, (float)src_y,
+                                  (float)src_w, (float)src_h };
+                SDL_FRect dst = {
+                    (float)px, (float)py, (float)box_w, (float)box_h
+                };
+                SDL_RenderTexture(data->renderer, tex, &src, &dst);
+            }
+            continue;
+        }
+
+        // Sixel / iTerm2: 1:1, z_index == 0 (non-negative pass only).
+        if (negative_z)
+            continue;
 
         int screen_row = img->row + data->scroll.scroll_offset;
         int px = img->col * data->cell_width;
         int py = screen_row * data->cell_height;
 
-        int scaled_w = logical_to_physical(img->width_px, scale);
-        int scaled_h = logical_to_physical(img->height_px, scale);
+        // width_px/height_px are already physical — use directly.
+        int scaled_w = img->width_px;
+        int scaled_h = img->height_px;
 
         if (py + scaled_h <= 0 || py >= data->height)
             continue;
         if (px + scaled_w <= 0 || px >= data->width)
             continue;
 
-        SDL_Texture *tex = sixel_get_texture(data, img);
+        SDL_Texture *tex = image_get_texture(data, img);
         if (!tex)
             continue;
 
@@ -1648,8 +1708,10 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, data->scroll.scroll_offset);
     render_lottie_layer(data, term, 1); /* background lottie */
     render_lottie_layer(data, term, 0); /* foreground lottie */
-    if (with_sixel)
-        render_sixel_images(data, term);
+    if (with_sixel) {
+        render_images(data, term, true);  /* kitty z<0 behind text */
+        render_images(data, term, false); /* sixel/iTerm2 + kitty z>=0 on top */
+    }
 
     if (linear) {
         SDL_FlushRenderer(data->renderer);
@@ -2198,7 +2260,7 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     // text to size from).
     {
         int sc = 0;
-        const CfrSixel *si = terminal_get_sixels(term, &sc);
+        const CfrImage *si = terminal_get_images(term, &sc);
         for (int i = 0; i < sc; i++) {
             if (si[i].row < 0)
                 continue; // anchored in scrollback, above the snapshot
@@ -2214,7 +2276,7 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     vlog("PNG render: %d cols x %d rows = %dx%d pixels\n",
          render_cols, render_rows, img_w, img_h);
 
-    // render_sixel_images() culls against data->width/height (the 1x1 hidden
+    // render_images() culls against data->width/height (the 1x1 hidden
     // window in PNG mode). Point them at the render canvas for the snapshot.
     int saved_w = data->width, saved_h = data->height;
     int saved_scroll = data->scroll.scroll_offset;

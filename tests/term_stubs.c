@@ -68,7 +68,7 @@ uint16_t terminal_hovered_hyperlink(const TerminalBackend *term)
     return 0;
 }
 
-const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count)
+const CfrImage *terminal_get_images(TerminalBackend *term, int *count)
 {
     (void)term;
     if (count)

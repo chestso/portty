@@ -560,10 +560,16 @@ static bool cfr_back_get_cursor_visible(TerminalBackend *term)
     CfrBackendData *d = term->backend_data;
     return cfr_get_cursor(d->vt).visible;
 }
-static const CfrSixel *cfr_back_get_sixels(TerminalBackend *term, int *count)
+static const CfrImage *cfr_back_get_images(TerminalBackend *term, int *count)
 {
     CfrBackendData *d = term->backend_data;
-    return cfr_get_sixels(d->vt, count);
+    return cfr_get_images(d->vt, count);
+}
+static const CfrImagePlacement *cfr_back_get_image_placements(
+    TerminalBackend *term, int *count)
+{
+    CfrBackendData *d = term->backend_data;
+    return cfr_get_image_placements(d->vt, count);
 }
 static const CfrLottie *cfr_back_get_lotties(TerminalBackend *term, int *count)
 {
@@ -976,7 +982,8 @@ TerminalBackend terminal_backend_cfr = {
     .end_paste = cfr_back_end_paste,
     .get_line_continuation = cfr_back_get_line_continuation,
     .set_scrollback_size = cfr_back_set_scrollback_size,
-    .get_sixels = cfr_back_get_sixels,
+    .get_images = cfr_back_get_images,
+    .get_image_placements = cfr_back_get_image_placements,
     .set_cell_px = cfr_back_set_cell_px,
     .set_content_scale = cfr_back_set_content_scale,
     .get_lotties = cfr_back_get_lotties,

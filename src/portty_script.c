@@ -1079,7 +1079,7 @@ void portty_script_step(PorttyScript *script,
     {
         if (ctx->term) {
             int count = 0;
-            const CfrSixel *imgs = terminal_get_sixels(ctx->term, &count);
+            const CfrImage *imgs = terminal_get_images(ctx->term, &count);
             vlog("dump-sixel: %d image(s)\n", count);
             for (int i = 0; i < count; i++) {
                 vlog("  [%d] id=%llu row=%d col=%d %dx%dpx\n",
