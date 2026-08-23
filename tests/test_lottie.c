@@ -600,6 +600,44 @@ static void test_place_rescale_seamless(void)
     destroy_term(t);
 }
 
+/* Chunked upload (load-chunk with seq/total) assembles a Lottie across
+ * multiple APCs through the bridge. */
+static void test_load_chunk(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+
+    const char *part0 = "{\"v\":\"5.6.0\",\"fr\":30,";
+    const char *part1 = "\"ip\":0,\"op\":30,";
+    const char *part2 = "\"w\":20,\"h\":20,\"layers\":[]}";
+
+    for (int i = 0; i < 3; i++) {
+        const char *part = i == 0 ? part0 : i == 1 ? part1
+                                                   : part2;
+        char json[8192];
+        char part_b64[4096];
+        b64_encode((const uint8_t *)part, strlen(part), part_b64,
+                   sizeof(part_b64));
+        snprintf(json, sizeof(json),
+                 "{\"cmd\":\"load-chunk\",\"id\":1,\"seq\":%d,\"total\":3,"
+                 "\"data\":\"%s\"}",
+                 i, part_b64);
+        apc(t, json);
+    }
+
+    int n = -1;
+    const CfrLottie *l = terminal_get_lotties(t, &n);
+    ASSERT_NOT_NULL(l);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(l[0].id, 1);
+    ASSERT_EQ(l[0].canvas_w, 20);
+    ASSERT_EQ(l[0].canvas_h, 20);
+    ASSERT_EQ(l[0].frame_count, 30);
+    ASSERT_TRUE(l[0].playing);
+
+    destroy_term(t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -622,5 +660,6 @@ int main(int argc, char *argv[])
     RUN_TEST(test_contain_pixel_constraints);
     RUN_TEST(test_region_fit);
     RUN_TEST(test_place_rescale_seamless);
+    RUN_TEST(test_load_chunk);
     TEST_SUMMARY();
 }

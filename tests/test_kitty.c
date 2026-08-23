@@ -163,6 +163,62 @@ static void test_bridge_mixed_sources(void)
     terminal_destroy(&t);
 }
 
+/* Chunked transmit (m=1/m=0) with a=T (transmit-and-place) where
+ * continuation chunks omit the action key and all metadata — the exact
+ * form chafa emits. The image must be stored AND placed at the cursor. */
+static void test_bridge_chunked_transmit_no_action(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    terminal_set_cell_px(&t, 10, 6);
+
+    uint8_t rgba[16] = { 255, 0, 0, 255, 255, 0, 0, 255,
+                         255, 0, 0, 255, 255, 0, 0, 255 };
+    char b64[64];
+    b64_encode(rgba, sizeof(rgba), b64);
+    size_t half = strlen(b64) / 2;
+    char first[64], second[64];
+    memcpy(first, b64, half);
+    first[half] = '\0';
+    strcpy(second, b64 + half);
+
+    char seq[512];
+    snprintf(seq, sizeof(seq),
+             "\x1b_Ga=T,f=32,s=2,v=2,i=1,m=1;%s\x1b\\", first);
+    feed(&t, seq);
+    snprintf(seq, sizeof(seq),
+             "\x1b_Gm=1;%s\x1b\\", second);
+    feed(&t, seq);
+    snprintf(seq, sizeof(seq), "\x1b_Gm=0\x1b\\");
+    feed(&t, seq);
+
+    int n = 0;
+    const CfrImage *s = terminal_get_images(&t, &n);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(s[0].source, IMG_SRC_KITTY);
+    ASSERT_EQ(s[0].width_px, 2);
+    ASSERT_EQ(s[0].height_px, 2);
+    ASSERT_EQ(s[0].rgba[0], 255);
+    ASSERT_EQ(s[0].rgba[3], 255);
+
+    int pn = 0;
+    const CfrImagePlacement *pls =
+        terminal_get_image_placements(&t, &pn);
+    ASSERT_NOT_NULL(pls);
+    ASSERT_EQ(pn, 1);
+    ASSERT_EQ((long long)pls[0].image_id, 1);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -171,6 +227,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_bridge_transmit);
     RUN_TEST(test_bridge_place);
     RUN_TEST(test_bridge_mixed_sources);
+    RUN_TEST(test_bridge_chunked_transmit_no_action);
 
     TEST_SUMMARY();
 }

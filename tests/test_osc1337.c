@@ -171,6 +171,56 @@ static void test_bridge_mixed_sources(void)
     terminal_destroy(&t);
 }
 
+/* A 4x4 green PNG, base64-encoded (matches coffer test fixture). */
+static const char *PNG_4X4_GREEN_B64 =
+    "iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAD0lEQVR4nGNg+I8GSRcAACxQH+H81I9XAAAAAElFTkSuQmCC";
+
+/* Multipart transfer (MultipartFile/FilePart/FileEnd) assembles the
+ * image across multiple OSC 1337 sequences through the bridge. */
+static void test_bridge_multipart(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    terminal_set_cell_px(&t, 10, 6);
+
+    const char *b64 = PNG_4X4_GREEN_B64;
+    size_t b64_len = strlen(b64);
+    size_t chunk_size = 32;
+
+    feed(&t, "\x1b]1337;MultipartFile=inline=1\x07");
+
+    for (size_t off = 0; off < b64_len; off += chunk_size) {
+        char seq[128];
+        size_t this_len = b64_len - off;
+        if (this_len > chunk_size)
+            this_len = chunk_size;
+        snprintf(seq, sizeof(seq), "\x1b]1337;FilePart=%.*s\x07",
+                 (int)this_len, b64 + off);
+        feed(&t, seq);
+    }
+
+    feed(&t, "\x1b]1337;FileEnd\x07");
+
+    int n = 0;
+    const CfrImage *s = terminal_get_images(&t, &n);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(s[0].source, IMG_SRC_ITERM);
+    ASSERT_EQ(s[0].width_px, 4);
+    ASSERT_EQ(s[0].height_px, 4);
+    ASSERT_EQ(s[0].rgba[1], 255);
+    ASSERT_EQ(s[0].rgba[3], 255);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -180,6 +230,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_bridge_alpha);
     RUN_TEST(test_bridge_download_ignored);
     RUN_TEST(test_bridge_mixed_sources);
+    RUN_TEST(test_bridge_multipart);
 
     TEST_SUMMARY();
 }
