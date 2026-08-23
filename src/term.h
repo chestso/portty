@@ -12,7 +12,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#include <coffer/coffer.h> // CfrSixel — sixel images are owned by the VT engine
+#include <coffer/coffer.h> // CfrImage — sixel images are owned by the VT engine
 
 // Forward declarations
 struct TerminalBackend;
@@ -209,10 +209,12 @@ struct TerminalBackend
     // Configure scrollback ring capacity (0 disables scrollback).
     void (*set_scrollback_size)(TerminalBackend *term, int lines);
 
-    // Sixel graphics (owned by the VT engine). get_sixels returns the live
+    // Sixel graphics (owned by the VT engine). get_images returns the live
     // images for this frame (NULL/0 if none); set_cell_px tells the engine
     // the pixel size of a character cell so it can place images in rows.
-    const CfrSixel *(*get_sixels)(TerminalBackend *term, int *count);
+    const CfrImage *(*get_images)(TerminalBackend *term, int *count);
+    const CfrImagePlacement *(*get_image_placements)(TerminalBackend *term,
+                                                     int *count);
     void (*set_cell_px)(TerminalBackend *term, int cell_w, int cell_h);
     void (*set_content_scale)(TerminalBackend *term, float scale);
 
@@ -412,7 +414,9 @@ int terminal_vis_col_to_vt_col(TerminalBackend *term, int unified_row, int vis_c
 // Sixel image API. Images are decoded, stored, scrolled, and cleared by
 // the VT engine (coffer); the host just queries them each frame and
 // tells the engine the cell pixel size for row placement.
-const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count);
+const CfrImage *terminal_get_images(TerminalBackend *term, int *count);
+const CfrImagePlacement *terminal_get_image_placements(TerminalBackend *term,
+                                                       int *count);
 void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h);
 void terminal_set_content_scale(TerminalBackend *term, float scale);
 

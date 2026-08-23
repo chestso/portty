@@ -11,7 +11,7 @@
  * The decode/store/placement logic is unit-tested in coffer itself
  * (tests/test_cfr_sixel.c). This file checks the portty side:
  * that a DCS sixel sequence fed through terminal_process_input() reaches
- * the engine and comes back out through terminal_get_sixels() with the
+ * the engine and comes back out through terminal_get_images() with the
  * right pixels, that the cell-pixel size plumbing drives row placement,
  * and that animation coalesces.
  */
@@ -31,7 +31,7 @@ static void feed(TerminalBackend *t, const char *s)
     terminal_process_input(t, s, strlen(s));
 }
 
-static const uint8_t *px(const CfrSixel *s, int x, int y)
+static const uint8_t *px(const CfrImage *s, int x, int y)
 {
     return s->rgba + ((size_t)y * s->width_px + x) * 4;
 }
@@ -53,7 +53,7 @@ static void test_bridge_decode(void)
     feed(&t, "\x1bPq#1;2;100;0;0#1BB\x1b\\");
 
     int n = -1;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].width_px, 2);
@@ -87,7 +87,7 @@ static void test_bridge_no_cell_size(void)
     feed(&t, "\x1bPq#1;2;0;100;0#1~\x1b\\");
 
     int n = -1;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].width_px, 1);
     terminal_destroy(&t);
@@ -110,13 +110,13 @@ static void test_bridge_animation(void)
 
     feed(&t, "\x1bPq#1;2;100;0;0#1~\x1b\\");
     int n = -1;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_EQ(n, 1);
     uint64_t id0 = s[0].id;
     uint32_t v0 = s[0].version;
 
     feed(&t, "\x1bPq#1;2;0;100;0#1~\x1b\\");
-    s = terminal_get_sixels(&t, &n);
+    s = terminal_get_images(&t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].id, id0);
     ASSERT_EQ(s[0].version, v0 + 1);
@@ -139,11 +139,11 @@ static void test_bridge_clear(void)
     terminal_set_cell_px(&t, 10, 6);
     feed(&t, "\x1bPq#1;2;100;0;0#1~\x1b\\");
     int n = -1;
-    terminal_get_sixels(&t, &n);
+    terminal_get_images(&t, &n);
     ASSERT_EQ(n, 1);
 
     feed(&t, "\x1b[2J");
-    terminal_get_sixels(&t, &n);
+    terminal_get_images(&t, &n);
     ASSERT_EQ(n, 0);
     terminal_destroy(&t);
 }

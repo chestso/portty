@@ -11,7 +11,7 @@
  * The decode/store logic is unit-tested in coffer (test_cfr_osc_1337.c).
  * This file checks the portty side: that an OSC 1337 sequence fed through
  * terminal_process_input() reaches the engine and comes back out through
- * terminal_get_sixels() with the right pixels and IMG_SRC_ITERM source.
+ * terminal_get_images() with the right pixels and IMG_SRC_ITERM source.
  */
 
 #include "test_helpers.h"
@@ -59,7 +59,7 @@ static void test_bridge_inline_png(void)
     feed(&t, seq);
 
     int n = 0;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].source, IMG_SRC_ITERM);
@@ -94,7 +94,7 @@ static void test_bridge_alpha(void)
     feed(&t, seq);
 
     int n = 0;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(s[0].source, IMG_SRC_ITERM);
@@ -130,7 +130,7 @@ static void test_bridge_download_ignored(void)
     feed(&t, seq);
 
     int n = 0;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_EQ(n, 0);
     ASSERT_NULL(s);
 
@@ -161,7 +161,7 @@ static void test_bridge_mixed_sources(void)
     feed(&t, seq);
 
     int n = 0;
-    const CfrSixel *s = terminal_get_sixels(&t, &n);
+    const CfrImage *s = terminal_get_images(&t, &n);
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(n, 2);
     /* First image is sixel, second is iTerm2 */

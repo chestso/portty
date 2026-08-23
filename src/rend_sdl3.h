@@ -22,7 +22,7 @@
 #include <stdint.h>
 #include "term_colors.h"
 
-#define SIXEL_CACHE_MAX  256
+#define IMAGE_CACHE_MAX  256
 #define LOTTIE_CACHE_MAX 64
 
 typedef struct RendererSdl3Data
@@ -75,8 +75,8 @@ typedef struct RendererSdl3Data
         uint64_t id;
         uint32_t version;
         int w, h;
-    } sixel_cache[SIXEL_CACHE_MAX];
-    int sixel_cache_count;
+    } image_cache[IMAGE_CACHE_MAX];
+    int image_cache_count;
 
     struct
     {
