@@ -1161,14 +1161,19 @@ static void image_cache_reconcile(RendererSdl3Data *data, const CfrImage *imgs, 
 // dimension change forces a recreate.
 static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *img)
 {
-    uint8_t *linear = linearize_for_upload(data, img->rgba, img->width_px, img->height_px);
+    // CfrImage dimensions are physical (coffer pre-converts). Use buf_w/buf_h
+    // for the texture (native pixel buffer size) and width_px/height_px for
+    // the display (destination rect, handled by the caller).
+    int bw = img->buf_w > 0 ? img->buf_w : img->width_px;
+    int bh = img->buf_h > 0 ? img->buf_h : img->height_px;
+    uint8_t *linear = linearize_for_upload(data, img->rgba, bw, bh);
     const uint8_t *pixels = linear ? linear : img->rgba;
 
     for (int i = 0; i < data->image_cache_count; i++) {
         if (data->image_cache[i].id != img->id)
             continue;
-        if (data->image_cache[i].w != img->width_px ||
-            data->image_cache[i].h != img->height_px) {
+        if (data->image_cache[i].w != bw ||
+            data->image_cache[i].h != bh) {
             // Dimensions changed — recreate the texture object.
             if (data->image_cache[i].texture)
                 SDL_DestroyTexture(data->image_cache[i].texture);
@@ -1176,7 +1181,7 @@ static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *im
         } else if (data->image_cache[i].version != img->version) {
             // Same size, new pixels — re-upload in place (no churn).
             SDL_UpdateTexture(data->image_cache[i].texture, NULL, pixels,
-                              img->width_px * 4);
+                              bw * 4);
             data->image_cache[i].version = img->version;
             free(linear);
             return data->image_cache[i].texture;
@@ -1186,31 +1191,29 @@ static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *im
         }
         // Fall through to recreate into this slot.
         SDL_Texture *t = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                           SDL_TEXTUREACCESS_STATIC, img->width_px,
-                                           img->height_px);
+                                           SDL_TEXTUREACCESS_STATIC, bw, bh);
         if (!t) {
             free(linear);
             return NULL;
         }
-        SDL_UpdateTexture(t, NULL, pixels, img->width_px * 4);
+        SDL_UpdateTexture(t, NULL, pixels, bw * 4);
         SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
         data->image_cache[i].texture = t;
         data->image_cache[i].version = img->version;
-        data->image_cache[i].w = img->width_px;
-        data->image_cache[i].h = img->height_px;
+        data->image_cache[i].w = bw;
+        data->image_cache[i].h = bh;
         free(linear);
         return t;
     }
 
     // Not cached — create and insert.
     SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                         SDL_TEXTUREACCESS_STATIC, img->width_px,
-                                         img->height_px);
+                                         SDL_TEXTUREACCESS_STATIC, bw, bh);
     if (!tex) {
         free(linear);
         return NULL;
     }
-    SDL_UpdateTexture(tex, NULL, pixels, img->width_px * 4);
+    SDL_UpdateTexture(tex, NULL, pixels, bw * 4);
     SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
     free(linear);
 
@@ -1224,8 +1227,8 @@ static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *im
     data->image_cache[n].texture = tex;
     data->image_cache[n].id = img->id;
     data->image_cache[n].version = img->version;
-    data->image_cache[n].w = img->width_px;
-    data->image_cache[n].h = img->height_px;
+    data->image_cache[n].w = bw;
+    data->image_cache[n].h = bh;
     return tex;
 }
 
@@ -1246,10 +1249,8 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
     if (count == 0)
         return;
 
-    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
-
-    // Single pass over kitty placements (1:N model). Sixel/iTerm2 draw
-    // directly from the image record (implicit single placement).
+    // CfrImage dimensions are already physical (coffer pre-converts in
+    // cfr_img_get). No content_scale conversion needed here.
     int pl_count = 0;
     const CfrImagePlacement *pls =
         terminal_get_image_placements(term, &pl_count);
@@ -1307,8 +1308,9 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
         int px = img->col * data->cell_width;
         int py = screen_row * data->cell_height;
 
-        int scaled_w = logical_to_physical(img->width_px, scale);
-        int scaled_h = logical_to_physical(img->height_px, scale);
+        // width_px/height_px are already physical — use directly.
+        int scaled_w = img->width_px;
+        int scaled_h = img->height_px;
 
         if (py + scaled_h <= 0 || py >= data->height)
             continue;
