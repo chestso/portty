@@ -63,7 +63,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          sh ../configure --prefix="$MINGW_PREFIX"
+          sh ../configure --prefix="$MINGW_PREFIX" --enable-release
           make -j"$(nproc)"
           make check
           make install
@@ -72,12 +72,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          CONFIGURE_ARGS=""
-          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            sh ../configure --enable-release $CONFIGURE_ARGS
-          else
-            sh ../configure $CONFIGURE_ARGS
-          fi
+          sh ../configure --enable-release
           make -j"$(nproc)"
 
       - name: Run tests

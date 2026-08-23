@@ -42,11 +42,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            ../configure --prefix="$(brew --prefix)" --enable-release
-          else
-            ../configure --prefix="$(brew --prefix)"
-          fi
+          ../configure --prefix="$(brew --prefix)" --enable-release
           make -j"$(sysctl -n hw.ncpu)"
           make check || true
           make install
@@ -55,12 +51,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          CONFIGURE_ARGS=""
-          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            ../configure --enable-release $CONFIGURE_ARGS
-          else
-            ../configure $CONFIGURE_ARGS
-          fi
+          ../configure --enable-release
           make -j"$(sysctl -n hw.ncpu)"
 
       - name: Run tests

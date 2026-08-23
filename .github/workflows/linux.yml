@@ -53,7 +53,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          ../configure --prefix=/usr/local
+          ../configure --prefix=/usr/local --enable-release
           make -j"$(nproc)"
           make check || true
           sudo make install
@@ -65,11 +65,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
-            ../configure --enable-release
-          else
-            ../configure
-          fi
+          ../configure --enable-release
           make -j"$(nproc)"
 
       - name: Run tests
