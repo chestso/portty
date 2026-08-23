@@ -53,7 +53,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          ../configure --prefix=/usr/local --enable-release
+          ../configure --prefix=/usr/local
           make -j"$(nproc)"
           make check || true
           sudo make install
@@ -65,7 +65,7 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          ../configure --enable-release
+          ../configure
           make -j"$(nproc)"
 
       - name: Run tests
