@@ -42,7 +42,11 @@ jobs:
         run: |
           ./autogen.sh
           mkdir build && cd build
-          ../configure --prefix="$(brew --prefix)"
+          if [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            ../configure --prefix="$(brew --prefix)" --enable-release
+          else
+            ../configure --prefix="$(brew --prefix)"
+          fi
           make -j"$(sysctl -n hw.ncpu)"
           make check || true
           make install
