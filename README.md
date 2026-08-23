@@ -419,7 +419,7 @@ When an application explicitly enables the kitty keyboard protocol (Disambiguate
 
 All platforms:
 
-- coffer (VT engine, consumed via `pkg-config coffer >= 0.1.14`; source at https://github.com/chestso/coffer)
+- coffer (VT engine, consumed via `pkg-config coffer >= 0.2.1`; source at https://github.com/chestso/coffer)
 - SDL3
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)

@@ -763,13 +763,23 @@ char *terminal_selection_get_text(TerminalBackend *term)
 // Decode, storage, scrolling, and clearing all live in the VT engine
 // (coffer); these are thin pass-throughs to the backend.
 
-const CfrSixel *terminal_get_sixels(TerminalBackend *term, int *count)
+const CfrImage *terminal_get_images(TerminalBackend *term, int *count)
 {
     if (count)
         *count = 0;
-    if (!term || !term->get_sixels)
+    if (!term || !term->get_images)
         return NULL;
-    return term->get_sixels(term, count);
+    return term->get_images(term, count);
+}
+
+const CfrImagePlacement *terminal_get_image_placements(TerminalBackend *term,
+                                                       int *count)
+{
+    if (count)
+        *count = 0;
+    if (!term || !term->get_image_placements)
+        return NULL;
+    return term->get_image_placements(term, count);
 }
 
 void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h)
