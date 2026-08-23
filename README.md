@@ -12,6 +12,8 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 
 - UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, page-based scrollback ring
 - Sixel graphics — DCS sixel decoding, grid anchoring, RLE/RGB/HLS color, transparency, raster attributes; capability advertising (DA1 reports `4`, DECSET 80/1070/8452, XTSMGRAPHICS); animated in-place updates (DECSDM mode 80) with frame swapping via image id + version
+- iTerm2 inline images — OSC 1337 (`File=`/multipart) parsing, PNG/JPEG/BMP/GIF/TGA decode, full 8-bit alpha, cursor-anchored placement
+- Kitty graphics — APC `G` protocol (transmit/display/delete/query/frame/transparency), chunked transfer (`m=1/0`), zlib (`o=z`) payloads, virtual and relative placements, z-index layering; responses leave via OSC 5556 on Windows (ConPTY strips APC)
 - Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization; Windows ConPTY workaround routes OSC 5555 to APC dispatch
 - OSC-8 hyperlinks — parsing and tracking
 - OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
@@ -32,9 +34,9 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
-- Sixel rendering — texture upload and compositing of coffer-decoded images
+- Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering
 - Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_tick()`), foreground/background layer compositing
-- Procedural box drawing and block element rendering (U+2500–U+257F)
+- Procedural box drawing and block element rendering (U+2500–U+257F), with float stroke thickness and proportional margins for seamless diagonal tiling
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
 - Soft-wrap aware word selection and copy
@@ -51,7 +53,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Window title — sets platform window title from coffer-parsed OSC 2
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
 - Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
-- Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
+- Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. The capabilities line lists all three inline image protocols (sixel, iTerm2, kitty graphics) alongside OSC 8, grapheme clusters, and reflow. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
 - Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs
 - Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
 
