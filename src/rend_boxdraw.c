@@ -732,10 +732,17 @@ static void draw_rounded_corner(BoxDrawCtx *ctx, uint32_t cp,
 // Draw diagonal lines for U+2571 (╱), U+2572 (╲), U+2573 (╳).
 // Uses SDF-based rendering for uniform thickness matching normal box lines.
 //
-// The bitmap has 10% proportional margins on all sides. Lines extend from
-// bitmap corner to corner, creating overhang that fills gaps when cells
-// are stacked. The atlas stores the oversized bitmap and blits it with
-// negative offsets so overhang overlaps adjacent cells.
+// The bitmap has 10% proportional margins on all sides, creating overhang
+// that fills gaps when cells are stacked.  The atlas stores the oversized
+// bitmap and blits it with negative offsets so overhang overlaps adjacent
+// cells.
+//
+// Line direction uses the exact (unrounded) cell dimensions, not the rounded
+// bitmap dimensions.  The rounded margins would shift the bitmap's aspect
+// ratio away from the cell's, causing a slight slope error that breaks
+// seamless tiling.  By using the exact cell aspect ratio for the line
+// equation and positioning through the bitmap center, the line slope
+// matches the true cell geometry regardless of margin rounding.
 static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
                                 int cell_w, int cell_h,
                                 int pad_x, int pad_y,
@@ -757,15 +764,19 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
     float nx, ny, c;
 
     // Draw bottom-left to top-right diagonal (╱)
-    // From (0, bmp_h-1) to (bmp_w-1, 0)
+    // Direction from exact cell dimensions (not rounded bitmap dimensions)
+    // so the slope matches the true cell aspect ratio for seamless stacking.
+    // Line passes through the bitmap center (bmp_w/2, bmp_h/2).
     if (cp == 0x2571 || cp == 0x2573) {
-        float dx = (float)(bmp_w - 1);
-        float dy = (float)(-(bmp_h - 1));
+        float dx = (float)cell_w;
+        float dy = (float)(-cell_h);
         len = sqrtf(dx * dx + dy * dy);
         if (len > 0.001f) {
             nx = -dy / len;
             ny = dx / len;
-            c = -(nx * 0.0f + ny * (float)(bmp_h - 1));
+            float cx = (float)bmp_w * 0.5f;
+            float cy = (float)bmp_h * 0.5f;
+            c = -(nx * cx + ny * cy);
 
             for (int py = 0; py < bmp_h; py++) {
                 for (int px = 0; px < bmp_w; px++) {
@@ -783,15 +794,19 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
     }
 
     // Draw top-left to bottom-right diagonal (╲)
-    // From (0, 0) to (bmp_w-1, bmp_h-1)
+    // Direction from exact cell dimensions (not rounded bitmap dimensions)
+    // so the slope matches the true cell aspect ratio for seamless stacking.
+    // Line passes through the bitmap center (bmp_w/2, bmp_h/2).
     if (cp == 0x2572 || cp == 0x2573) {
-        float dx = (float)(bmp_w - 1);
-        float dy = (float)(bmp_h - 1);
+        float dx = (float)cell_w;
+        float dy = (float)cell_h;
         len = sqrtf(dx * dx + dy * dy);
         if (len > 0.001f) {
             nx = -dy / len;
             ny = dx / len;
-            c = -(nx * 0.0f + ny * 0.0f);
+            float cx = (float)bmp_w * 0.5f;
+            float cy = (float)bmp_h * 0.5f;
+            c = -(nx * cx + ny * cy);
 
             for (int py = 0; py < bmp_h; py++) {
                 for (int px = 0; px < bmp_w; px++) {
@@ -812,8 +827,9 @@ static void draw_diagonal_lines(BoxDrawCtx *ctx, uint32_t cp,
 }
 
 // Internal: draw into a BoxDrawCtx at the given cell-local coordinates.
-// For diagonals, the lines are drawn from (0,0) to (bmp_w-1, bmp_h-1) to ensure
-// they reach the padded bitmap edges and create the overhang needed for seamless tiling.
+// For diagonals, the line direction uses the exact cell aspect ratio
+// while the bitmap is clipped to the 10% padded bounds, ensuring the
+// slope matches the true cell geometry for seamless tiling.
 static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
                                   int cell_w, int cell_h,
                                   int pad_x, int pad_y,
@@ -839,15 +855,15 @@ static void boxdraw_render_to_ctx(BoxDrawCtx *ctx, uint32_t cp,
 // and is intended to be inserted into the texture atlas like a font glyph.
 //
 // Diagonal characters (U+2571-U+2573) get 10% proportional margins on all
-// sides. This ensures lines drawn across margin bounds connect seamlessly
-// when cells are tiled. Lines extend to bitmap corners for continuous
-// coverage at cell boundaries.
+// sides.  The line direction uses the exact cell aspect ratio rather than
+// the rounded bitmap dimensions, so the slope is not distorted by margin
+// rounding and stacked cells produce seamless diagonals.
 GlyphBitmap *rend_boxdraw_render(uint32_t cp, int cell_w, int cell_h,
                                  uint8_t r, uint8_t g, uint8_t b)
 {
     bool is_diagonal = (cp >= 0x2571 && cp <= 0x2573);
-    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.20f) : 0;
-    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.20f) : 0;
+    int margin_x = is_diagonal ? (int)roundf((float)cell_w * 0.10f) : 0;
+    int margin_y = is_diagonal ? (int)roundf((float)cell_h * 0.10f) : 0;
     int bmp_w = cell_w + margin_x * 2;
     int bmp_h = cell_h + margin_y * 2;
 

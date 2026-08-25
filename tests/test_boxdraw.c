@@ -316,8 +316,8 @@ static void test_rounded_corner_large_cell(void)
     free_bmp(bmp);
 }
 
-/* Test: diagonal bitmaps (╱╲╳) have 20% proportional margins.
- * Bitmap size should be cell_w * 1.4 x cell_h * 1.4 (cell + 2 * 20% margin). */
+/* Test: diagonal bitmaps (╱╲╳) have 10% proportional margins.
+ * Bitmap size should be cell_w * 1.2 x cell_h * 1.2 (cell + 2 * 10% margin). */
 static void test_diagonal_proportional_margins(void)
 {
     int cell_w = 32, cell_h = 96;
@@ -326,8 +326,8 @@ static void test_diagonal_proportional_margins(void)
     GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
 
-    int expected_margin_x = (int)roundf((float)cell_w * 0.20f);
-    int expected_margin_y = (int)roundf((float)cell_h * 0.20f);
+    int expected_margin_x = (int)roundf((float)cell_w * 0.10f);
+    int expected_margin_y = (int)roundf((float)cell_h * 0.10f);
     int expected_w = cell_w + 2 * expected_margin_x;
     int expected_h = cell_h + 2 * expected_margin_y;
 
@@ -356,8 +356,8 @@ static void test_diagonal_proportional_margins(void)
 static void test_diagonal_lines_reach_bitmap_corners(void)
 {
     int cell_w = 32, cell_h = 96;
-    int margin_x = (int)roundf((float)cell_w * 0.20f);
-    int margin_y = (int)roundf((float)cell_h * 0.20f);
+    int margin_x = (int)roundf((float)cell_w * 0.10f);
+    int margin_y = (int)roundf((float)cell_h * 0.10f);
     int bmp_w = cell_w + 2 * margin_x;
     int bmp_h = cell_h + 2 * margin_y;
 
@@ -413,15 +413,15 @@ static void test_diagonal_lines_reach_bitmap_corners(void)
 }
 
 /* Test: diagonal bitmaps scale margins proportionally at different cell sizes.
- * 20% margin should work at various DPI/font sizes. */
+ * 10% margin should work at various DPI/font sizes. */
 static void test_diagonal_margins_scale_with_cell_size(void)
 {
     /* Small cell (low DPI) */
     int cell_w = 10, cell_h = 22;
     GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
-    int margin_x = (int)roundf((float)cell_w * 0.20f);
-    int margin_y = (int)roundf((float)cell_h * 0.20f);
+    int margin_x = (int)roundf((float)cell_w * 0.10f);
+    int margin_y = (int)roundf((float)cell_h * 0.10f);
     ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
     ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
     free_bmp(bmp);
@@ -431,8 +431,8 @@ static void test_diagonal_margins_scale_with_cell_size(void)
     cell_h = 44;
     bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
-    margin_x = (int)roundf((float)cell_w * 0.20f);
-    margin_y = (int)roundf((float)cell_h * 0.20f);
+    margin_x = (int)roundf((float)cell_w * 0.10f);
+    margin_y = (int)roundf((float)cell_h * 0.10f);
     ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
     ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
     free_bmp(bmp);
@@ -442,10 +442,90 @@ static void test_diagonal_margins_scale_with_cell_size(void)
     cell_h = 88;
     bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
     ASSERT_NOT_NULL(bmp);
-    margin_x = (int)roundf((float)cell_w * 0.20f);
-    margin_y = (int)roundf((float)cell_h * 0.20f);
+    margin_x = (int)roundf((float)cell_w * 0.10f);
+    margin_y = (int)roundf((float)cell_h * 0.10f);
     ASSERT_EQ(bmp->width, cell_w + 2 * margin_x);
     ASSERT_EQ(bmp->height, cell_h + 2 * margin_y);
+    free_bmp(bmp);
+}
+
+/* Test: diagonal line slope matches the exact cell aspect ratio, not the
+ * rounded bitmap aspect ratio.  The 10% margins are rounded to integers,
+ * which shifts the bitmap's aspect ratio away from the cell's.  The line
+ * direction must use the exact (unrounded) cell dimensions so that stacked
+ * cells produce a seamless diagonal.
+ *
+ * We measure the rendered line's slope via least-squares regression through
+ * all set pixels, then check it is closer to cell_h/cell_w than to
+ * bmp_h/bmp_w.
+ *
+ * cell_w=12, cell_h=55 maximizes the rounding discrepancy:
+ *   margin_x = round(1.2) = 1, margin_y = round(5.5) = 6
+ *   bmp = 14 x 67,  bmp slope = 67/14 = 4.786
+ *   cell slope = 55/12 = 4.583  ← what we want
+ */
+static void test_diagonal_slope_matches_cell_aspect_ratio(void)
+{
+    int cell_w = 12, cell_h = 55;
+
+    /* ╱ U+2571: bottom-left to top-right (negative slope) */
+    GlyphBitmap *bmp = rend_boxdraw_render(0x2571, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+
+    /* Least-squares regression: slope = (N*Sxy - Sx*Sy) / (N*Sxx - Sx*Sx) */
+    long n = 0;
+    double sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (int y = 0; y < bmp->height; y++) {
+        for (int x = 0; x < bmp->width; x++) {
+            if (px_set(bmp, x, y)) {
+                n++;
+                sx += x;
+                sy += y;
+                sxx += (double)x * x;
+                sxy += (double)x * y;
+            }
+        }
+    }
+    ASSERT_TRUE(n > 0);
+    double denom = (double)n * sxx - sx * sx;
+    ASSERT_TRUE(denom != 0.0);
+    double measured_slope = ((double)n * sxy - sx * sy) / denom;
+    double measured_abs = fabs(measured_slope);
+    double cell_slope = (double)cell_h / (double)cell_w;
+    double bmp_slope = (double)bmp->height / (double)bmp->width;
+    double err_to_cell = fabs(measured_abs - cell_slope);
+    double err_to_bmp = fabs(measured_abs - bmp_slope);
+    ASSERT_TRUE(err_to_cell < err_to_bmp);
+    free_bmp(bmp);
+
+    /* ╲ U+2572: top-left to bottom-right (positive slope) */
+    bmp = rend_boxdraw_render(0x2572, cell_w, cell_h, 255, 255, 255);
+    ASSERT_NOT_NULL(bmp);
+
+    n = 0;
+    sx = 0;
+    sy = 0;
+    sxx = 0;
+    sxy = 0;
+    for (int y = 0; y < bmp->height; y++) {
+        for (int x = 0; x < bmp->width; x++) {
+            if (px_set(bmp, x, y)) {
+                n++;
+                sx += x;
+                sy += y;
+                sxx += (double)x * x;
+                sxy += (double)x * y;
+            }
+        }
+    }
+    ASSERT_TRUE(n > 0);
+    denom = (double)n * sxx - sx * sx;
+    ASSERT_TRUE(denom != 0.0);
+    measured_slope = ((double)n * sxy - sx * sy) / denom;
+    measured_abs = fabs(measured_slope);
+    err_to_cell = fabs(measured_abs - cell_slope);
+    err_to_bmp = fabs(measured_abs - bmp_slope);
+    ASSERT_TRUE(err_to_cell < err_to_bmp);
     free_bmp(bmp);
 }
 
@@ -466,6 +546,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_diagonal_proportional_margins);
     RUN_TEST(test_diagonal_lines_reach_bitmap_corners);
     RUN_TEST(test_diagonal_margins_scale_with_cell_size);
+    RUN_TEST(test_diagonal_slope_matches_cell_aspect_ratio);
 
     TEST_SUMMARY();
 }
