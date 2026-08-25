@@ -317,8 +317,28 @@ static int pty_reader_thread_func(void *data)
 
     HANDLE hProcess = (HANDLE)pty_get_process_handle(d->pty);
 
+    /* Manual-reset event for overlapped read completion. */
+    HANDLE read_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    if (!read_event) {
+        vlog("PTY reader: failed to create read event: %lu\n",
+             GetLastError());
+        goto done;
+    }
+
+    OVERLAPPED ovl = { 0 };
+    ovl.hEvent = read_event;
+
+    /* Track whether we have a pending overlapped read. */
+    bool read_pending = false;
+
     while (SDL_GetAtomicInt(&d->running)) {
         if (SDL_GetAtomicInt(&d->pty_paused)) {
+            /* If a read is pending, cancel it so we don't leak it. */
+            if (read_pending) {
+                pty_cancel_read(d->pty);
+                WaitForSingleObject(read_event, 100);
+                read_pending = false;
+            }
             HANDLE wait_h[2] = { d->wakeup_event, hProcess };
             DWORD wr = WaitForMultipleObjects(2, wait_h, FALSE, INFINITE);
             ResetEvent(d->wakeup_event);
@@ -339,45 +359,95 @@ static int pty_reader_thread_func(void *data)
             break;
         }
 
-        ssize_t n = pty_read(d->pty, buf, sizeof(buf));
-        if (n > 0) {
-            PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
-            if (payload) {
-                payload->len = n;
-                memcpy(payload->data, buf, n);
-                SDL_Event ev = { 0 };
-                ev.type = SDL_EVENT_USER;
-                ev.user.code = EVENT_PTY_DATA;
-                ev.user.data1 = payload;
-                if (!SDL_PushEvent(&ev)) {
-                    vlog("PTY reader thread: failed to push event: %s\n",
-                         SDL_GetError());
-                    free(payload);
+        /* Initiate an overlapped read if not already pending. */
+        if (!read_pending) {
+            ResetEvent(read_event);
+            ssize_t n = pty_read_overlapped(d->pty, buf, sizeof(buf), &ovl);
+            if (n > 0) {
+                /* Data available immediately. */
+                PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
+                if (payload) {
+                    payload->len = n;
+                    memcpy(payload->data, buf, n);
+                    SDL_Event ev = { 0 };
+                    ev.type = SDL_EVENT_USER;
+                    ev.user.code = EVENT_PTY_DATA;
+                    ev.user.data1 = payload;
+                    if (!SDL_PushEvent(&ev)) {
+                        free(payload);
+                    }
                 }
-            }
-        } else if (n == 0) {
-            vlog("PTY reader thread: EOF from PTY\n");
-            break;
-        } else {
-            DWORD err = GetLastError();
-            if (err == ERROR_BROKEN_PIPE) {
-                vlog("PTY reader thread: pipe closed\n");
+                continue;
+            } else if (n == 0) {
+                /* I/O pending — wait for completion or wakeup. */
+                read_pending = true;
             } else {
-                vlog("PTY reader thread: read error: %lu\n", err);
+                /* Error. */
+                DWORD err = GetLastError();
+                if (err == ERROR_BROKEN_PIPE)
+                    vlog("PTY reader thread: pipe closed\n");
+                else
+                    vlog("PTY reader thread: read error: %lu\n", err);
+                break;
             }
-            break;
         }
 
-        if (!pty_is_running(d->pty)) {
-            vlog("PTY reader thread: child exited after read\n");
-            SDL_Event ev = { 0 };
-            ev.type = SDL_EVENT_USER;
-            ev.user.code = EVENT_PTY_CHILD_EXIT;
-            SDL_PushEvent(&ev);
-            break;
+        /* Wait for overlapped read completion or wakeup event. */
+        HANDLE wait_h[2] = { read_event, d->wakeup_event };
+        DWORD wr = WaitForMultipleObjects(2, wait_h, FALSE, INFINITE);
+        ResetEvent(d->wakeup_event);
+        read_pending = false;
+
+        if (wr == WAIT_OBJECT_0) {
+            /* Read completed — get the result. */
+            ssize_t n = 0;
+            if (pty_get_overlapped_result(d->pty, &ovl, &n) && n > 0) {
+                PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
+                if (payload) {
+                    payload->len = n;
+                    memcpy(payload->data, buf, n);
+                    SDL_Event ev = { 0 };
+                    ev.type = SDL_EVENT_USER;
+                    ev.user.code = EVENT_PTY_DATA;
+                    ev.user.data1 = payload;
+                    if (!SDL_PushEvent(&ev)) {
+                        free(payload);
+                    }
+                }
+            } else if (n <= 0) {
+                /* Check for error. */
+                DWORD err = GetLastError();
+                if (err == ERROR_BROKEN_PIPE || err == ERROR_OPERATION_ABORTED) {
+                    if (err == ERROR_OPERATION_ABORTED)
+                        continue; /* cancelled by pause */
+                    vlog("PTY reader thread: pipe closed\n");
+                    break;
+                }
+            }
+
+            if (!pty_is_running(d->pty)) {
+                vlog("PTY reader thread: child exited after read\n");
+                SDL_Event ev = { 0 };
+                ev.type = SDL_EVENT_USER;
+                ev.user.code = EVENT_PTY_CHILD_EXIT;
+                SDL_PushEvent(&ev);
+                break;
+            }
+        } else if (wr == WAIT_OBJECT_0 + 1) {
+            /* Wakeup — check running/pause flags. */
+            if (!SDL_GetAtomicInt(&d->running))
+                break;
+            /* The pending read is still active; we'll re-check it
+             * at the top of the loop. But if paused, we cancel it. */
+            read_pending = true;
+            continue;
         }
     }
 
+    if (read_event)
+        CloseHandle(read_event);
+
+done:
     SDL_Event event = { 0 };
     event.type = SDL_EVENT_USER;
     event.user.code = EVENT_PTY_CLOSED;
@@ -975,6 +1045,14 @@ static void sdl3_pause_pty(PorttyBackend *self)
         return;
     SDL_SetAtomicInt(&d->pty_paused, 1);
     vlog("PTY paused (backpressure)\n");
+#ifdef _WIN32
+    /* Cancel any pending overlapped read so the reader thread can
+     * re-evaluate the pause flag immediately. Without this, the
+     * thread is stuck in WaitForMultipleObjects on the read event
+     * and won't notice the pause until new data arrives. */
+    if (d->pty)
+        pty_cancel_read(d->pty);
+#endif
     sdl3_wakeup_reader(d);
 }
 

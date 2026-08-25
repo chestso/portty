@@ -170,6 +170,13 @@ struct TerminalBackend
      * scrollback ring's capacity, so a before/after diff under-counts
      * once the ring is full. */
     int (*consume_pushed_rows)(TerminalBackend *term);
+    /* Read-and-reset count of rows popped back from scrollback since
+     * last call. Used to adjust selection coordinates upward. */
+    int (*consume_popped_rows)(TerminalBackend *term);
+    /* Read-and-reset the selection_damaged flag. Set by the damage
+     * callback when a damage rect overlaps the active selection. The
+     * caller clears the selection if this returns true. */
+    bool (*consume_selection_damaged)(TerminalBackend *term);
     int (*get_scrollback_cell)(TerminalBackend *term, int scrollback_row, int col,
                                TerminalCell *cell);
     /* Read the full codepoint sequence for a multi-codepoint cluster.
@@ -255,6 +262,8 @@ bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
 int terminal_get_scrollback_capacity(TerminalBackend *term);
 int terminal_consume_pushed_rows(TerminalBackend *term);
+int terminal_consume_popped_rows(TerminalBackend *term);
+bool terminal_consume_selection_damaged(TerminalBackend *term);
 int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
                                  TerminalCell *cell);
 /* Fill `out` with the full codepoint sequence at unified row `unified_row`
@@ -371,6 +380,16 @@ void terminal_selection_update(TerminalBackend *term, int row, int col);
 void terminal_selection_extend(TerminalBackend *term, int row, int col);
 void terminal_selection_clear(TerminalBackend *term);
 bool terminal_selection_active(TerminalBackend *term);
+/* Shift selection coordinates by -pushed_rows to follow content that
+ * scrolled off the top. Called after terminal_process_input when rows
+ * were pushed to scrollback. No-op if no selection is active or
+ * pushed_rows is 0. */
+void terminal_selection_adjust_scroll(TerminalBackend *term, int pushed_rows);
+/* Check whether a damage rect (in screen-space row/col) overlaps the
+ * active selection. Returns false if no selection is active. */
+bool terminal_selection_overlaps_damage(TerminalBackend *term,
+                                        int start_row, int start_col,
+                                        int end_row, int end_col);
 bool terminal_cell_in_selection(TerminalBackend *term, int row, int col);
 char *terminal_selection_get_text(TerminalBackend *term);
 void terminal_selection_set_word_chars(TerminalBackend *term, const char *chars);

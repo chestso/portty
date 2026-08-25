@@ -405,10 +405,13 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
         result.handled = true;
         return result;
     }
-    // Any key with active selection → cancel selection
+    // Any key with active selection → resume PTY so the app can
+    // respond. The selection itself is NOT cleared — the damage
+    // overlap check handles clearing if output overwrites selected
+    // content, and scroll adjustment keeps selection coordinates
+    // valid as content shifts.
     if (terminal_selection_active(app->term)) {
-        terminal_selection_clear(app->term);
-        result.force_redraw = true;
+        app->backend->resume_pty(app->backend);
     }
 
     // Ctrl+Shift+V → paste
@@ -495,10 +498,8 @@ KeyboardResult portty_app_handle_text(PorttyApp *app, const char *text)
         return result;
     }
 
-    if (terminal_selection_active(app->term)) {
-        terminal_selection_clear(app->term);
-        result.force_redraw = true;
-    }
+    if (terminal_selection_active(app->term))
+        app->backend->resume_pty(app->backend);
 
     size_t text_len = strlen(text);
     if (text_len > 0 && text_len < sizeof(result.data)) {

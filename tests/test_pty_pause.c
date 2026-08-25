@@ -6,8 +6,10 @@
  */
 
 #include "term.h"
+#include "term_cfr.h"
 #include "portty_pty.h"
 #include "test_helpers.h"
+#include <coffer/coffer.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -19,81 +21,19 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
     return (ssize_t)len;
 }
 
-// ---- Mock terminal backend ----
-
-static int mock_term_rows = 24;
-static int mock_term_cols = 80;
-
-static bool mock_is_altscreen(TerminalBackend *term)
+static TerminalBackend *create_test_term(void)
 {
-    (void)term;
-    return false;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.rows = 24;
+    cfg.cols = 80;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 6;
+    return term_cfr_new(&cfg);
 }
 
-static int mock_get_dimensions(TerminalBackend *term, int *rows, int *cols)
+static void destroy_test_term(TerminalBackend *term)
 {
-    (void)term;
-    *rows = mock_term_rows;
-    *cols = mock_term_cols;
-    return 0;
-}
-
-static int mock_get_cell(TerminalBackend *term, int row, int col,
-                         TerminalCell *cell)
-{
-    (void)term;
-    (void)row;
-    (void)col;
-    memset(cell, 0, sizeof(*cell));
-    cell->cp = ' ';
-    return 0;
-}
-
-static int mock_get_scrollback_cell(TerminalBackend *term, int sb_row,
-                                    int col, TerminalCell *cell)
-{
-    (void)term;
-    (void)sb_row;
-    (void)col;
-    memset(cell, 0, sizeof(*cell));
-    cell->cp = ' ';
-    return 0;
-}
-
-static int mock_get_scrollback_lines(TerminalBackend *term)
-{
-    (void)term;
-    return 0;
-}
-
-static int mock_process_input(TerminalBackend *term, const char *input,
-                              size_t len)
-{
-    (void)term;
-    (void)input;
-    return (int)len;
-}
-
-static TerminalBackend mock_term_backend = {
-    .name = "mock_term",
-    .is_altscreen = mock_is_altscreen,
-    .get_dimensions = mock_get_dimensions,
-    .get_cell = mock_get_cell,
-    .get_scrollback_cell = mock_get_scrollback_cell,
-    .get_scrollback_lines = mock_get_scrollback_lines,
-    .process_input = mock_process_input,
-};
-
-static TerminalBackend *create_mock_term(void)
-{
-    TerminalBackend *term = calloc(1, sizeof(TerminalBackend));
-    *term = mock_term_backend;
-    return term;
-}
-
-static void destroy_mock_term(TerminalBackend *term)
-{
-    free(term->selection.word_chars);
+    terminal_destroy(term);
     free(term);
 }
 
@@ -134,17 +74,19 @@ static void reset_cb_counts(void)
 
 // ---- Tests: process_input selection behavior ----
 
-static void test_process_input_clears_selection(void)
+static void test_process_input_preserves_selection(void)
 {
-    TerminalBackend *term = create_mock_term();
+    TerminalBackend *term = create_test_term();
 
+    // Start selection at row 5 — cursor is at row 0 initially
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
     ASSERT_TRUE(terminal_selection_active(term));
 
+    // Write "hello" at cursor position (row 0) — doesn't intersect row 5
     terminal_process_input(term, "hello", 5);
-    ASSERT_TRUE(!terminal_selection_active(term));
+    ASSERT_TRUE(terminal_selection_active(term));
 
-    destroy_mock_term(term);
+    destroy_test_term(term);
 }
 
 // ---- Tests: selection change callback ----
@@ -152,20 +94,20 @@ static void test_process_input_clears_selection(void)
 static void test_callback_fires_on_selection_start(void)
 {
     reset_cb_counts();
-    TerminalBackend *term = create_mock_term();
+    TerminalBackend *term = create_test_term();
     terminal_set_selection_callback(term, tracking_selection_cb, NULL);
 
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
     ASSERT_EQ(cb_active_count, 1);
     ASSERT_EQ(cb_last_active, true);
 
-    destroy_mock_term(term);
+    destroy_test_term(term);
 }
 
 static void test_callback_fires_on_selection_clear(void)
 {
     reset_cb_counts();
-    TerminalBackend *term = create_mock_term();
+    TerminalBackend *term = create_test_term();
     terminal_set_selection_callback(term, tracking_selection_cb, NULL);
 
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
@@ -173,20 +115,20 @@ static void test_callback_fires_on_selection_clear(void)
     ASSERT_EQ(cb_inactive_count, 1);
     ASSERT_EQ(cb_last_active, false);
 
-    destroy_mock_term(term);
+    destroy_test_term(term);
 }
 
 static void test_callback_not_fired_on_redundant_clear(void)
 {
     reset_cb_counts();
-    TerminalBackend *term = create_mock_term();
+    TerminalBackend *term = create_test_term();
     terminal_set_selection_callback(term, tracking_selection_cb, NULL);
 
     // No selection active — clear should be a no-op
     terminal_selection_clear(term);
     ASSERT_EQ(cb_inactive_count, 0);
 
-    destroy_mock_term(term);
+    destroy_test_term(term);
 }
 
 // ---- Tests: callback-based pause/resume integration ----
@@ -195,18 +137,18 @@ static void test_callback_pause_resume_integration(void)
 {
     mock_pause_count = 0;
     mock_resume_count = 0;
-    TerminalBackend *term = create_mock_term();
+    TerminalBackend *term = create_test_term();
     terminal_set_selection_callback(term, mock_selection_cb, NULL);
 
-    // Start selection → callback pauses PTY
+    // Start selection → callback fires active=true → pause
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
     ASSERT_EQ(mock_pause_count, 1);
 
-    // Clear selection → callback resumes PTY
+    // Clear selection → callback fires active=false → resume
     terminal_selection_clear(term);
     ASSERT_EQ(mock_resume_count, 1);
 
-    destroy_mock_term(term);
+    destroy_test_term(term);
 }
 
 int main(int argc, char *argv[])
@@ -215,15 +157,10 @@ int main(int argc, char *argv[])
 
     printf("test_pty_pause\n");
 
-    // process_input selection behavior
-    RUN_TEST(test_process_input_clears_selection);
-
-    // Selection change callback
+    RUN_TEST(test_process_input_preserves_selection);
     RUN_TEST(test_callback_fires_on_selection_start);
     RUN_TEST(test_callback_fires_on_selection_clear);
     RUN_TEST(test_callback_not_fired_on_redundant_clear);
-
-    // Callback-based pause/resume integration
     RUN_TEST(test_callback_pause_resume_integration);
 
     TEST_SUMMARY();

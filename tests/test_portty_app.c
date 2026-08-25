@@ -10,6 +10,12 @@
 #include "../src/portty_backend.h"
 #include "../src/portty_panel.h"
 #include "../src/common.h"
+#include "../src/term.h"
+#include "../src/term_cfr.h"
+#include "../src/portty_pty.h"
+#include <coffer/coffer.h>
+#include <stdlib.h>
+#include <string.h>
 
 float portty_text_gamma = 1.0f;
 float portty_text_contrast = 0.0f;
@@ -194,6 +200,120 @@ static void test_clear_then_revalidate_no_link(void)
     ASSERT_FALSE(g_state.set_cursor_called);
 }
 
+// ---- Real coffer terminal for keypress-during-selection tests ----
+
+static int mock_send_key_call_count = 0;
+static int mock_last_key_sent = 0;
+static int mock_last_mod_sent = 0;
+
+static void mock_send_key(TerminalBackend *term, int key, int mod)
+{
+    (void)term;
+    mock_send_key_call_count++;
+    mock_last_key_sent = key;
+    mock_last_mod_sent = mod;
+}
+
+static TerminalBackend *create_key_mock_term(void)
+{
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.rows = 24;
+    cfg.cols = 80;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 6;
+    TerminalBackend *term = term_cfr_new(&cfg);
+    if (term)
+        term->send_key = mock_send_key;
+    return term;
+}
+
+static void destroy_key_mock_term(TerminalBackend *term)
+{
+    terminal_destroy(term);
+    free(term);
+}
+
+static void test_keypress_does_not_clear_selection(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    // Start a selection
+    terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
+    ASSERT_TRUE(terminal_selection_active(term));
+
+    // Press arrow down — should NOT clear selection
+    KeyboardResult r = portty_app_handle_key(&app, TERM_KEY_DOWN,
+                                             TERM_MOD_NONE, 0);
+    ASSERT_TRUE(terminal_selection_active(term));
+    ASSERT_TRUE(r.handled);
+    ASSERT_EQ(mock_send_key_call_count, 1);
+    ASSERT_EQ(mock_last_key_sent, TERM_KEY_DOWN);
+
+    destroy_key_mock_term(term);
+}
+
+static void test_keypress_resumes_pty_during_selection(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    // Start selection → callback would pause PTY
+    terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
+    // Simulate the pause
+    g_stub_backend.pause_pty(&g_stub_backend);
+    ASSERT_TRUE(g_state.pause_called);
+    ASSERT_FALSE(g_state.resume_called);
+
+    // Reset resume flag to detect the resume from keypress
+    g_state.resume_called = false;
+    g_state.pause_called = false;
+
+    // Press a key — should resume PTY so the app can respond
+    portty_app_handle_key(&app, TERM_KEY_DOWN, TERM_MOD_NONE, 0);
+    ASSERT_TRUE(g_state.resume_called);
+
+    destroy_key_mock_term(term);
+}
+
+static void test_ctrl_c_still_copies_and_clears(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    // Use word selection so there's actual text to copy
+    terminal_selection_start(term, 5, 10, TERM_SELECT_WORD);
+    ASSERT_TRUE(terminal_selection_active(term));
+
+    // Ctrl+C should copy and clear
+    KeyboardResult r = portty_app_handle_key(&app, TERM_KEY_NONE,
+                                             TERM_MOD_CTRL, 'c');
+    ASSERT_FALSE(terminal_selection_active(term));
+    ASSERT_TRUE(r.handled);
+
+    destroy_key_mock_term(term);
+}
+
+static void test_text_input_does_not_clear_selection(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
+    ASSERT_TRUE(terminal_selection_active(term));
+
+    // Text input should NOT clear selection
+    KeyboardResult r = portty_app_handle_text(&app, "a");
+    ASSERT_TRUE(terminal_selection_active(term));
+    ASSERT_EQ(r.len, 1);
+
+    destroy_key_mock_term(term);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -206,6 +326,12 @@ int main(int argc, char *argv[])
     RUN_TEST(test_clear_hover_noop_when_no_hover);
     RUN_TEST(test_clear_hover_null_safety);
     RUN_TEST(test_clear_then_revalidate_no_link);
+
+    // Keypress-during-selection behavior
+    RUN_TEST(test_keypress_does_not_clear_selection);
+    RUN_TEST(test_keypress_resumes_pty_during_selection);
+    RUN_TEST(test_ctrl_c_still_copies_and_clears);
+    RUN_TEST(test_text_input_does_not_clear_selection);
 
     TEST_SUMMARY();
 }

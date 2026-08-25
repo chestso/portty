@@ -154,6 +154,39 @@ void *pty_get_process_handle(PtyContext *ctx);
 void pty_close_console(PtyContext *ctx);
 
 /**
+ * Initiate an overlapped (async) read on the PTY output pipe.
+ *
+ * If data is immediately available, returns the byte count (> 0).
+ * If the I/O is pending, returns 0 — the caller should wait on
+ * ovl->hEvent and then call pty_get_overlapped_result().
+ * Returns -1 on error.
+ *
+ * The caller must initialize ovl->hEvent as a manual-reset event
+ * before calling.
+ */
+ssize_t pty_read_overlapped(PtyContext *ctx, char *buf, size_t bufsize,
+                            OVERLAPPED *ovl);
+
+/**
+ * Check the result of a completed overlapped read.
+ *
+ * Returns true if the I/O completed (bytes available in *out_bytes).
+ * Returns false if still pending (ERROR_IO_INCOMPLETE) or on error
+ * (out_bytes may still be non-zero if some bytes were read before error).
+ */
+bool pty_get_overlapped_result(PtyContext *ctx, OVERLAPPED *ovl,
+                               ssize_t *out_bytes);
+
+/**
+ * Cancel any pending overlapped I/O on the PTY output pipe.
+ *
+ * Called from the main thread (e.g. when pausing the PTY reader)
+ * to unblock a pending read so the reader thread can re-evaluate
+ * the pause flag.
+ */
+void pty_cancel_read(PtyContext *ctx);
+
+/**
  * Probe whether the OS-level ConPTY passes DCS sequences through.
  *
  * Creates a temporary ConPTY, sends a DCS sequence, and checks whether

@@ -10,6 +10,8 @@
 
 #include "term.h"
 
+#include <coffer/coffer.h>
+
 /* coffer terminal backend — selected via env var PORTTY_VT=coffer. */
 extern TerminalBackend terminal_backend_cfr;
 
@@ -19,5 +21,9 @@ extern TerminalBackend terminal_backend_cfr;
  * PTY-less terminal (e.g. the pager overlay). Returns NULL on failure.
  * Free with terminal_destroy() followed by free(). */
 TerminalBackend *term_cfr_new(const CfrConfig *cfg);
+
+/* Get the underlying CfrTerm from a coffer-backed TerminalBackend.
+ * Returns NULL if the backend is not coffer-backed. */
+CfrTerm *term_cfr_get_cfr_term(TerminalBackend *term);
 
 #endif /* TERM_CFR_H */

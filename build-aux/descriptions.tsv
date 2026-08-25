@@ -107,3 +107,4 @@ src/term_cfr.h	Coffer-backed VT terminal bridge interface
 src/term_colors.c	Portty-specific terminal color defaults sourced from coffer
 src/term_colors.h	Portty-specific terminal color defaults sourced from coffer
 src/timer.h	Poll-based event timer manager interface
+tests/test_selection_scroll.c	Selection scroll adjustment and damage-aware clearing tests

@@ -559,6 +559,53 @@ ssize_t pty_read(PtyContext *ctx, char *buf, size_t bufsize)
     return (ssize_t)bytes_read;
 }
 
+ssize_t pty_read_overlapped(PtyContext *ctx, char *buf, size_t bufsize,
+                            OVERLAPPED *ovl)
+{
+    if (!ctx || ctx->output_read == INVALID_HANDLE_VALUE || !buf ||
+        bufsize == 0 || !ovl)
+        return -1;
+
+    DWORD bytes_read = 0;
+    BOOL ok = ReadFile(ctx->output_read, buf, (DWORD)bufsize,
+                       &bytes_read, ovl);
+    if (ok)
+        return (ssize_t)bytes_read;
+
+    DWORD err = GetLastError();
+    if (err == ERROR_IO_PENDING)
+        return 0; /* pending — caller should wait on ovl->hEvent */
+
+    return bytes_read > 0 ? (ssize_t)bytes_read : -1;
+}
+
+bool pty_get_overlapped_result(PtyContext *ctx, OVERLAPPED *ovl,
+                               ssize_t *out_bytes)
+{
+    if (!ctx || !ovl || !out_bytes)
+        return false;
+
+    DWORD bytes_read = 0;
+    if (GetOverlappedResult(ctx->output_read, ovl, &bytes_read, FALSE)) {
+        *out_bytes = (ssize_t)bytes_read;
+        return true;
+    }
+    /* ERROR_IO_INCOMPLETE means the I/O is still pending. */
+    DWORD err = GetLastError();
+    if (err == ERROR_IO_INCOMPLETE)
+        return false;
+    /* Cancelled or error — check if any bytes were read. */
+    *out_bytes = (ssize_t)bytes_read;
+    return bytes_read > 0;
+}
+
+void pty_cancel_read(PtyContext *ctx)
+{
+    if (!ctx || ctx->output_read == INVALID_HANDLE_VALUE)
+        return;
+    CancelIoEx(ctx->output_read, NULL);
+}
+
 int pty_resize(PtyContext *ctx, int rows, int cols)
 {
     if (!ctx || ctx->hpc == INVALID_HANDLE_VALUE)

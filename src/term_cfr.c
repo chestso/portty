@@ -60,6 +60,21 @@ typedef struct
      * sb_lines saturates at sb_capacity so it can't be inferred from a
      * before/after diff once the ring is full. */
     int pushed_rows;
+
+    /* Rows popped back from scrollback during scroll-down. Used to
+     * adjust selection coordinates upward (positive delta). */
+    int popped_rows;
+
+    /* Set by cb_damage when a damage rect overlaps the active selection.
+     * The caller (rend_sdl3_process_pty_data) checks this after processing
+     * and clears the selection if set. Scroll damage (from cfr_scroll_up/
+     * cfr_scroll_down via cfr_damage_all) does NOT set this — the pushed_rows
+     * counter and cb_moverect handle selection coordinate tracking for scrolls. */
+    bool selection_damaged;
+
+    /* Current terminal dimensions (rows), tracked for full-screen
+     * damage detection in cb_damage. */
+    int term_rows;
 } CfrBackendData;
 
 /* Fire the CWD callback with the given path. On Windows, convert
@@ -142,6 +157,19 @@ static void cb_damage(CfrRect rect, void *user)
 {
     CfrBackendData *d = user;
     damage_union(d, rect.start_row, rect.start_col, rect.end_row, rect.end_col);
+    /* Skip the overlap check for full-screen damage. cfr_scroll_up/
+     * cfr_scroll_down call cfr_damage_all, and apps like less -X
+     * redraw the entire screen after scrolling. Both produce a
+     * full-screen rect that would always overlap an active selection.
+     * Real content overwrites (writes, erases) produce smaller rects. */
+    bool full_screen = (rect.start_row == 0 &&
+                        rect.start_col == 0 &&
+                        rect.end_row >= d->term_rows - 1);
+    if (full_screen)
+        return;
+    if (d->term && terminal_selection_overlaps_damage(d->term,
+                                                      rect.start_row, rect.start_col, rect.end_row, rect.end_col))
+        d->selection_damaged = true;
 }
 
 static void cb_moverect(CfrRect dst, CfrRect src, void *user)
@@ -149,6 +177,31 @@ static void cb_moverect(CfrRect dst, CfrRect src, void *user)
     CfrBackendData *d = user;
     damage_union(d, dst.start_row, dst.start_col, dst.end_row, dst.end_col);
     damage_union(d, src.start_row, src.start_col, src.end_row, src.end_col);
+
+    /* In-screen content moves (scroll regions, SU/SD sequences) that
+     * don't go through scrollback. Adjust selection coordinates to
+     * follow the moved content. If the selection spans the scroll
+     * region boundary, flag for clearing. */
+    if (!d->term || !terminal_selection_active(d->term))
+        return;
+
+    int delta = dst.start_row - src.start_row;
+    if (delta == 0)
+        return;
+
+    TerminalSelection *sel = &d->term->selection;
+    bool start_in = (sel->start.row >= src.start_row &&
+                     sel->start.row <= src.end_row);
+    bool end_in = (sel->end.row >= src.start_row &&
+                   sel->end.row <= src.end_row);
+
+    if (start_in && end_in) {
+        sel->start.row += delta;
+        sel->end.row += delta;
+        sel->anchor.row += delta;
+    } else if (start_in || end_in) {
+        d->selection_damaged = true;
+    }
 }
 
 static void cb_movecursor(CfrCursor cur, void *user)
@@ -242,7 +295,14 @@ static void cb_sb_pop(CfrCell *o, int n, void *u)
 {
     (void)o;
     (void)n;
-    (void)u;
+    CfrBackendData *d = u;
+    d->popped_rows++;
+}
+static void cb_selection_changed(bool active, void *user)
+{
+    CfrBackendData *d = user;
+    if (d && d->term && d->term->selection_change_cb)
+        d->term->selection_change_cb(active, d->term->selection_change_data);
 }
 
 /* OSC 52 (set clipboard). Body format: <selection-chars> ';' <base64 | '?'>.
@@ -410,6 +470,10 @@ static bool cfr_back_init(TerminalBackend *term, const CfrConfig *cfg)
     d->cursor_visible = true;
     d->cursor_blink = true;
 
+    int rows, cols;
+    cfr_get_dimensions(d->vt, &rows, &cols);
+    d->term_rows = rows;
+
     CfrCallbacks cb = {
         .damage = cb_damage,
         .moverect = cb_moverect,
@@ -422,6 +486,7 @@ static bool cfr_back_init(TerminalBackend *term, const CfrConfig *cfg)
         .sb_popline = cb_sb_pop,
         .osc = cb_osc,
         .log = cb_log,
+        .selection_changed = cb_selection_changed,
     };
     cfr_set_callbacks(d->vt, &cb, d);
 
@@ -450,6 +515,7 @@ static void cfr_back_resize(TerminalBackend *term, int width, int height)
     d->needs_redraw = true;
     int rows, cols;
     cfr_get_dimensions(d->vt, &rows, &cols);
+    d->term_rows = rows;
     if (rows && cols)
         damage_union(d, 0, 0, rows - 1, cols - 1);
 }
@@ -680,6 +746,24 @@ static int cfr_back_consume_pushed_rows(TerminalBackend *term)
     int n = d->pushed_rows;
     d->pushed_rows = 0;
     return n;
+}
+static int cfr_back_consume_popped_rows(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d)
+        return 0;
+    int n = d->popped_rows;
+    d->popped_rows = 0;
+    return n;
+}
+static bool cfr_back_consume_selection_damaged(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d)
+        return false;
+    bool v = d->selection_damaged;
+    d->selection_damaged = false;
+    return v;
 }
 static int cfr_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
                                         int col, TerminalCell *cell)
@@ -969,6 +1053,8 @@ TerminalBackend terminal_backend_cfr = {
     .get_scrollback_lines = cfr_back_get_scrollback_lines,
     .get_scrollback_capacity = cfr_back_get_scrollback_capacity,
     .consume_pushed_rows = cfr_back_consume_pushed_rows,
+    .consume_popped_rows = cfr_back_consume_popped_rows,
+    .consume_selection_damaged = cfr_back_consume_selection_damaged,
     .get_scrollback_cell = cfr_back_get_scrollback_cell,
     .get_grapheme = cfr_back_get_grapheme,
     .get_hyperlink = cfr_back_get_hyperlink,
@@ -1014,4 +1100,12 @@ TerminalBackend *term_cfr_new(const CfrConfig *cfg)
         return NULL;
     }
     return t;
+}
+
+CfrTerm *term_cfr_get_cfr_term(TerminalBackend *term)
+{
+    if (!term || !term->backend_data)
+        return NULL;
+    CfrBackendData *d = term->backend_data;
+    return d->vt;
 }
