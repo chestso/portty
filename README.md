@@ -363,9 +363,11 @@ portty's renderer deliberately breaks the Unicode rule that VS15 (text presentat
 
 ## Terminfo
 
-portty ships a single terminfo entry (based on `xterm-256color`) under three aliases — `portty-vty-256color`, `portty-256color`, and `portty`. The default `TERM` is `portty-vty-256color`; the alternate names exist for users who prefer to set them.
+portty ships a single terminfo entry under three aliases — `portty-vty-256color`, `portty-256color`, and `portty`. The default `TERM` is `portty-vty-256color`; the alternate names exist for users who prefer to set them.
 
-`setaf`/`setab` are inherited unchanged from `xterm-256color`, so the entry's capability strings stay within the restricted operator subset that Haskell `vty-unix`'s terminfo parser accepts. Truecolor is signalled via the `Tc` flag (which emacs, tmux, vte, alacritty, kitty, ghostty, and most modern TUIs honor) and via `COLORTERM=truecolor` for apps that read the env var directly. Extension caps added on top of `xterm-256color`: `Tc` (truecolor), `hs`/`tsl`/`fsl`/`dsl` (status line / window title), `Smulx` (extended underline styles), `Setulc` (underline color), `Sync` (synchronized output, DEC mode 2026).
+The capability definitions live in coffer (`data/coffer.ti`, installed as `coffer-vty-256color`). portty's `data/portty.ti` is a two-line shim that `use=`s `coffer-vty-256color` and only contributes the portty aliases. coffer is the VT engine that emits and parses these sequences, so capabilities are defined once there and inherited by portty — no duplicate entry to drift out of sync. The monorepo build installs coffer into the same `$(datadir)/terminfo` before portty, so `tic` resolves the `use=` at install time. (A standalone portty build already has coffer installed as its pkg-config dependency, so resolution works there too.)
+
+`setaf`/`setab` are inherited unchanged from `xterm-256color` (via `coffer.ti`'s own `use=xterm-256color`), so the entry's capability strings stay within the restricted operator subset that Haskell `vty-unix`'s terminfo parser accepts. Truecolor is signalled via the `Tc` flag (which emacs, tmux, vte, alacritty, kitty, ghostty, and most modern TUIs honor) and via `COLORTERM=truecolor` for apps that read the env var directly. Extension caps added on top of `xterm-256color`: `Tc` (truecolor), `hs`/`tsl`/`fsl`/`dsl` (status line / window title), `Smulx` (extended underline styles), `Setulc` (underline color), `Sync` (synchronized output, DEC mode 2026).
 
 The `RGB` flag is deliberately **not** advertised: its ncurses contract is "feed packed 24-bit ints to `setaf` and it'll DTRT," which would require a custom `setaf` outside the vty-unix parser subset. Truecolor consumers are expected to use `Tc` or `COLORTERM`.
 
