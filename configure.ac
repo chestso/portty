@@ -134,7 +134,7 @@ fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
-PKG_CHECK_MODULES([COFFER], [coffer >= 0.2.3])
+PKG_CHECK_MODULES([COFFER], [coffer >= 0.3.0])
 
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
