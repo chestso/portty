@@ -55,7 +55,6 @@ jobs:
           mkdir build && cd build
           ../configure --prefix=/usr/local
           make -j"$(nproc)"
-          make check || true
           sudo make install
 
       - name: Fetch QOI header

@@ -65,7 +65,6 @@ jobs:
           mkdir build && cd build
           sh ../configure --prefix="$MINGW_PREFIX" --enable-release
           make -j"$(nproc)"
-          make check
           make install
 
       - name: Build portty

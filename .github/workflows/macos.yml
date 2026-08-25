@@ -44,7 +44,6 @@ jobs:
           mkdir build && cd build
           ../configure --prefix="$(brew --prefix)" --enable-release
           make -j"$(sysctl -n hw.ncpu)"
-          make check || true
           make install
 
       - name: Build portty
