@@ -57,6 +57,26 @@ jobs:
       - name: Run tests
         run: make -C build check
 
+      - name: GUI smoke test (software renderer)
+        run: |
+          cat > /tmp/gui-smoke.script <<'EOF'
+          wait 1.5
+          screendump /tmp/portty-gui-smoke.png
+          wait 0.5
+          quit
+          EOF
+          ./build/src/portty -v -g 80x24 -d "Hello macOS" -S /tmp/gui-smoke.script
+          test -s /tmp/portty-gui-smoke.png
+          file /tmp/portty-gui-smoke.png
+
+      - name: Upload GUI screenshot
+        uses: actions/upload-artifact@v7
+        with:
+          name: portty-macos-gui-screenshot
+          path: /tmp/portty-gui-smoke.png
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Build portable ZIP
         run: make -C build dist-portable
 

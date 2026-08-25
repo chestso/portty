@@ -760,7 +760,8 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     }
 #endif
 
-    // Create GPU renderer
+    // Create GPU renderer, falling back to the software renderer when no GPU
+    // is available (e.g. headless CI runners without Metal/Vulkan/D3D12).
     vlog("Creating GPU renderer\n");
     SDL_ClearError();
 
@@ -770,6 +771,13 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
         SDL_SetStringProperty(rprops, SDL_PROP_RENDERER_CREATE_NAME_STRING, "gpu");
         d->sdl_renderer = SDL_CreateRendererWithProperties(rprops);
         SDL_DestroyProperties(rprops);
+    }
+    if (!d->sdl_renderer) {
+        const char *gpu_error = SDL_GetError();
+        vlog("GPU renderer unavailable (%s); falling back to software renderer\n",
+             (gpu_error && gpu_error[0]) ? gpu_error : "no specific error message");
+        SDL_ClearError();
+        d->sdl_renderer = SDL_CreateRenderer(d->window, "software");
     }
     if (!d->sdl_renderer) {
         const char *error = SDL_GetError();
