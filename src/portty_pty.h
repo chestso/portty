@@ -14,6 +14,7 @@
 #ifdef _WIN32
 #include <basetsd.h>
 typedef SSIZE_T ssize_t;
+typedef struct _OVERLAPPED OVERLAPPED;
 #else
 #include <sys/types.h>
 #endif
