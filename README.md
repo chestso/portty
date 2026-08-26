@@ -56,7 +56,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
 - Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. The capabilities line lists all three inline image protocols (sixel, iTerm2, kitty graphics) alongside OSC 8, grapheme clusters, and reflow. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
-- Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs
+- Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs, including automatic `xterm-mouse-mode` so the mouse works in `emacs -nw`
 - Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
 
 ## Known Issues
@@ -394,6 +394,19 @@ So `portty.el` loads automatically. No user configuration or `init.el` changes a
 
 1. Loads Emacs's built-in `term/xterm.el` — reuses the entire xterm terminal initialization (keymaps, 256-color support, bracketed paste, focus tracking)
 2. Explicitly enables `modifyOtherKeys` and `setSelection` via `xterm-extra-capabilities` — this avoids xterm version detection (which would not trigger for portty's `TERM`) and directly activates both features
+3. Enables `xterm-mouse-mode` so the mouse works in `emacs -nw`
+
+### Mouse support in `emacs -nw`
+
+`portty.el` turns on `xterm-mouse-mode` during terminal initialization, so Emacs sends `DECSET 1000` (`?1000h`), `DECSET 1003` (`?1003h`), and the SGR mouse extension `DECSET 1006` (`?1006h`) on startup. portty parses those modes via coffer and forwards mouse events (including motion) to Emacs. No user configuration is required.
+
+This is needed because Emacs does not enable xterm mouse tracking just because `TERM` is xterm-compatible. Emacs 31+ auto-enables `xterm-mouse-mode` only for a hardcoded allowlist of terminal names after querying XTVERSION (`Konsole`, `VTE`, `WezTerm`, `iTerm2`, `kitty`, `foot`), and portty isn't in that list. Emacs 30 has no XTVERSION-based auto-enable path at all. The terminal init file is the supported hook that works across both, and it runs for any Emacs version that loads `term/portty.el`.
+
+On Emacs 31+, `portty.el` honors an explicit opt-out: if `xterm-mouse-mode` has already been called (for example `(xterm-mouse-mode -1)` in your init file), the auto-enable is skipped. On Emacs 30 that variable does not exist, so the mode is enabled unconditionally. Emacs 30 users who want mouse events to stay with the terminal instead of Emacs can opt out with:
+
+```elisp
+(add-hook 'tty-setup-hook (lambda () (xterm-mouse-mode -1)))
+```
 
 ### Verifying it loaded
 
