@@ -154,7 +154,10 @@ static void test_mouse_mode_without_altscreen(void)
     terminal_destroy(&t);
 }
 
-/* Switching from one mouse mode to another replaces the previous mode. */
+/* Mouse modes are independent DEC private modes. Enabling a higher
+ * mode does not implicitly disable lower ones, and disabling one mode
+ * does not clear others that are still active. The reported mouse_mode
+ * reflects the highest active tracking level. */
 static void test_mouse_mode_switch_replaces(void)
 {
     TerminalBackend t;
@@ -165,7 +168,14 @@ static void test_mouse_mode_switch_replaces(void)
     ASSERT_EQ(terminal_get_mouse_mode(&t), 2);
     feed(&t, "\x1b[?1003h");
     ASSERT_EQ(terminal_get_mouse_mode(&t), 3);
+    /* Disabling 1002 must NOT clear 1003 — they are independent modes. */
     feed(&t, "\x1b[?1002l");
+    ASSERT_EQ(terminal_get_mouse_mode(&t), 3);
+    /* Disabling 1003 drops to 1000 which is still on. */
+    feed(&t, "\x1b[?1003l");
+    ASSERT_EQ(terminal_get_mouse_mode(&t), 1);
+    /* Disabling 1000 clears all remaining mouse tracking. */
+    feed(&t, "\x1b[?1000l");
     ASSERT_EQ(terminal_get_mouse_mode(&t), 0);
     terminal_destroy(&t);
 }

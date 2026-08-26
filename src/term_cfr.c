@@ -258,17 +258,29 @@ static void cb_set_mode(CfrMode mode, bool on, void *user)
         d->altscreen = on;
         break;
     case CFR_MODE_MOUSE_X10:
-        d->mouse_mode = on ? 1 : 0;
-        break;
     case CFR_MODE_MOUSE_BTN_EVENT:
-        d->mouse_mode = on ? 1 : 0;
-        break;
     case CFR_MODE_MOUSE_DRAG:
-        d->mouse_mode = on ? 2 : 0;
-        break;
     case CFR_MODE_MOUSE_ANY_EVENT:
-        d->mouse_mode = on ? 3 : 0;
+    {
+        /* Recompute the combined mouse tracking level from coffer's
+         * actual mode flags. This avoids a stale-zero bug where turning
+         * off one mode (e.g. 1000) would clear mouse_mode even if a
+         * higher mode (e.g. 1003) is still active. Priority:
+         * any-event (3) > drag (2) > btn/x10 (1) > off (0). */
+        CfrTerm *vt = d->vt;
+        if (vt) {
+            if (cfr_get_mode(vt, CFR_MODE_MOUSE_ANY_EVENT))
+                d->mouse_mode = 3;
+            else if (cfr_get_mode(vt, CFR_MODE_MOUSE_DRAG))
+                d->mouse_mode = 2;
+            else if (cfr_get_mode(vt, CFR_MODE_MOUSE_BTN_EVENT) ||
+                     cfr_get_mode(vt, CFR_MODE_MOUSE_X10))
+                d->mouse_mode = 1;
+            else
+                d->mouse_mode = 0;
+        }
         break;
+    }
     default:
         break;
     }

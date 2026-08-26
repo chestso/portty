@@ -364,6 +364,7 @@ static TerminalBackend *create_terminal(PorttyArgs *args)
     cfg.cell_h_px = 20;
     cfg.reflow = true;
     cfg.ambiguous_wide = (args->ambiguous_wide > 0);
+    cfg.terminal_name = "portty";
     TerminalBackend *term = terminal_init(vt_backend, &cfg);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
