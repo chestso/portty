@@ -381,7 +381,7 @@ infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 
 ## GNU Emacs
 
-portty ships `data/portty.el`, installed by `make install` to `$(datadir)/emacs/site-lisp/term/portty.el` (typically `~/.local/share/emacs/site-lisp/term/portty.el`). This directory is in Emacs's default `load-path`.
+portty ships `data/portty.el`, installed by `make install` to `$(datadir)/emacs/site-lisp/term/portty.el` (typically `~/.local/share/emacs/site-lisp/term/portty.el`). This directory is in Emacs's default `load-path`. Between the gamma-correct rendering, working mouse, and the fixes below, `emacs -nw` in portty can look better than GUI Emacs 😜
 
 ### Automatic loading
 
