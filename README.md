@@ -395,6 +395,7 @@ So `portty.el` loads automatically. No user configuration or `init.el` changes a
 1. Loads Emacs's built-in `term/xterm.el` — reuses the entire xterm terminal initialization (keymaps, 256-color support, bracketed paste, focus tracking)
 2. Explicitly enables `modifyOtherKeys` and `setSelection` via `xterm-extra-capabilities` — this avoids xterm version detection (which would not trigger for portty's `TERM`) and directly activates both features
 3. Enables `xterm-mouse-mode` so the mouse works in `emacs -nw`
+4. Applies the emoji / VS16 width fix (Emacs ≤ 31 only; see below)
 
 ### Mouse support in `emacs -nw`
 
