@@ -408,7 +408,7 @@ On Emacs 31+, `portty.el` honors an explicit opt-out: if `xterm-mouse-mode` has 
 (add-hook 'tty-setup-hook (lambda () (xterm-mouse-mode -1)))
 ```
 
-### Verifying it loaded
+#### Verifying it loaded
 
 To confirm the terminal init ran, check that `xterm-extra-capabilities` is bound (it's defined by `term/xterm.el`, which `portty.el` loads):
 
@@ -416,9 +416,23 @@ To confirm the terminal init ran, check that `xterm-extra-capabilities` is bound
 (boundp 'xterm-extra-capabilities)  ; => t
 ```
 
-### Doom Emacs
+### Emoji / VS16 width fix in `emacs -nw`
 
-Doom's `early-init.el` defers `tty-run-terminal-initialization` to `window-setup-hook` (a performance optimization to avoid blocking startup). This means `portty.el` and its CSI-u keymap entries are not installed until after Emacs finishes starting. Key presses during startup will not be decoded. Once `window-setup-hook` fires, everything works the same as vanilla Emacs.
+In `emacs -nw`, Emacs's `char-width-table` follows the baseline Unicode East-Asian-Width tables, which treat U+FE0F (Variation Selector-16, the emoji-presentation selector) as width 0 and most dual text/emoji base characters (e.g. U+2328 ⌨) as width 1. A compliant terminal such as portty renders base+VS16 as a 2-column wide glyph, so Emacs's idea of the cursor position drifts away from the terminal's, garbling the display on movement/redisplay.
+
+- **Emacs ≤ 31**: no built-in fix. Compensate by telling Emacs that U+FE0F occupies a column (base 1 + VS16 1 = 2 = portty). Also disable `auto-composition-mode` so ZWJ emoji sequences don't composite into a single cell the terminal may render wider:
+
+```elisp
+(unless (display-graphic-p)
+  (if (>= emacs-major-version 32)
+      nil
+    (set-char-table-range char-width-table #xFE0F 1)
+    (setq-default auto-composition-mode nil)))
+```
+
+- **Emacs ≥ 32**: `tty-display-emoji-force-wide` (default `t`) makes `produce_composite_glyph` emit a padding glyph for recognized emoji sequences (base + VS16/modifier/ZWJ), so Emacs and the terminal agree on 2 columns. This needs `auto-composition-mode` ON, so the ≤31 workaround must **not** be applied. No configuration is needed.
+
+Reference: `etc/NEWS` under "Improved Emoji support on text-only terminals" (Emacs 32.1); `src/term.c` `composite_glyph_is_emoji_sequence` and `produce_composite_glyph`.
 
 ### Ctrl + non-letter keys (e.g. `Ctrl+Shift+Alt+%`)
 
