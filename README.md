@@ -420,17 +420,14 @@ To confirm the terminal init ran, check that `xterm-extra-capabilities` is bound
 
 In `emacs -nw`, Emacs's `char-width-table` follows the baseline Unicode East-Asian-Width tables, which treat U+FE0F (Variation Selector-16, the emoji-presentation selector) as width 0 and most dual text/emoji base characters (e.g. U+2328 ⌨) as width 1. A compliant terminal such as portty renders base+VS16 as a 2-column wide glyph, so Emacs's idea of the cursor position drifts away from the terminal's, garbling the display on movement/redisplay.
 
-- **Emacs ≤ 31**: no built-in fix. Compensate by telling Emacs that U+FE0F occupies a column (base 1 + VS16 1 = 2 = portty). Also disable `auto-composition-mode` so ZWJ emoji sequences don't composite into a single cell the terminal may render wider:
+- **Emacs ≤ 31**: no built-in fix. `portty.el` compensates automatically by telling Emacs that U+FE0F occupies a column (base 1 + VS16 1 = 2 = portty) and disabling `auto-composition-mode` so ZWJ emoji sequences don't composite into a single cell the terminal may render wider. No user configuration is needed. The equivalent manual form is:
 
 ```elisp
-(unless (display-graphic-p)
-  (if (>= emacs-major-version 32)
-      nil
-    (set-char-table-range char-width-table #xFE0F 1)
-    (setq-default auto-composition-mode nil)))
+(set-char-table-range char-width-table #xFE0F 1)
+(setq-default auto-composition-mode nil)
 ```
 
-- **Emacs ≥ 32**: `tty-display-emoji-force-wide` (default `t`) makes `produce_composite_glyph` emit a padding glyph for recognized emoji sequences (base + VS16/modifier/ZWJ), so Emacs and the terminal agree on 2 columns. This needs `auto-composition-mode` ON, so the ≤31 workaround must **not** be applied. No configuration is needed.
+- **Emacs ≥ 32**: `tty-display-emoji-force-wide` (default `t`) makes `produce_composite_glyph` emit a padding glyph for recognized emoji sequences (base + VS16/modifier/ZWJ), so Emacs and the terminal agree on 2 columns. This needs `auto-composition-mode` ON, so `portty.el` does **not** apply the ≤31 workaround on Emacs 32+.
 
 Reference: `etc/NEWS` under "Improved Emoji support on text-only terminals" (Emacs 32.1); `src/term.c` `composite_glyph_is_emoji_sequence` and `produce_composite_glyph`.
 

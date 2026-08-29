@@ -26,7 +26,29 @@
   ;; `(add-hook 'tty-setup-hook (lambda () (xterm-mouse-mode -1)))'.
   (unless (and (boundp 'xterm-mouse-mode-called)
                xterm-mouse-mode-called)
-    (xterm-mouse-mode 1)))
+    (xterm-mouse-mode 1))
+  ;; Fix emoji / VS16 (U+FE0F) width mismatch. Emacs's char-width-table
+  ;; treats U+FE0F as width 0 and most dual text/emoji base characters
+  ;; (e.g. U+2328) as width 1, but portty renders base+VS16 as a 2-column
+  ;; wide glyph. Without this fix, Emacs's cursor position drifts from
+  ;; the terminal's and the display garbles on movement/redisplay.
+  ;;
+  ;; Emacs <= 31: no built-in fix. Tell Emacs U+FE0F occupies a column
+  ;; (base 1 + VS16 1 = 2 = portty) and disable `auto-composition-mode'
+  ;; so ZWJ emoji sequences don't composite into a single cell the
+  ;; terminal may render wider.
+  ;;
+  ;; Emacs >= 32: `tty-display-emoji-force-wide' (default t) handles this
+  ;; natively via `produce_composite_glyph', so no action is needed — and
+  ;; `auto-composition-mode' must stay ON for that to work.
+  ;;
+  ;; This file only loads via `tty-run-terminal-initialization', so we're
+  ;; already in a terminal frame; the `display-graphic-p' guard is
+  ;; self-documenting belt-and-suspenders.
+  (when (and (not (display-graphic-p))
+             (< emacs-major-version 32))
+    (set-char-table-range char-width-table #xFE0F 1)
+    (setq-default auto-composition-mode nil)))
 
 (provide 'term/portty)
 
