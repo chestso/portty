@@ -39,14 +39,15 @@ endif
 # Shared sources
 PORTTY_COMMON_SRC = \
     portty_app.c \
-    portty_panel.c \
+    portty_panel.c portty_panel.h \
     term.c term_cfr.c \
     $(PTY_SOURCE) \
     $(FONT_RESOLVE_SOURCE) \
     font_resolve.c font.c font_ft.c \
     colr.c base64.c \
     png_writer.c png_reader.c qoi_writer.c \
-    portty_conf.c diag.c pager.c timer.c path_compat.c os_compat.c display_info.c term_colors.c \
+    portty_conf.c diag.c pager.c timer.c path_compat.c os_compat.c display_info.c \
+    term_colors.c term_colors.h \
     portty_bug.c heap_harden.c \
     rend_common.c rend_boxdraw.c \
     portty_script.c portty_frame_rec.c
@@ -93,7 +94,8 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
-    term_cfr.h term.h timer.h
+    term_cfr.h term.h term_colors.h timer.h \
+    portty_panel.h
 
 if HAVE_GLSLANGVALIDATOR
 regen-shaders:

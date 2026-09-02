@@ -16,6 +16,14 @@ AS_IF([test -z "$PORTTY_VERSION"],
 AC_SUBST([PORTTY_VERSION])
 AC_MSG_NOTICE([portty version: $PORTTY_VERSION])
 
+dnl Derive the automake VERSION (and thus the dist tarball name and the
+dnl PACKAGE_VERSION/VERSION macros in config.h) from the version recomputed
+dnl above, not the one baked into configure by autoreconf.  Without this,
+dnl `make dist` after a tag still names the tarball with the autoreconf-time
+dnl version, so shipping a new release requires re-running autogen.sh.
+PACKAGE_VERSION="$PORTTY_VERSION"
+VERSION="$PORTTY_VERSION"
+
 # Check for programs
 user_cflags="$CFLAGS"
 AC_PROG_CC

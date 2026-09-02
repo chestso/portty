@@ -7,11 +7,22 @@ dist_doc_DATA = README.md
 EXTRA_DIST = \
     autogen.sh \
     build-aux/git-version.sh \
+    build-aux/add-header.sh \
+    build-aux/bin2c.sh \
+    build-aux/descriptions.tsv \
     version \
     COPYING \
+    README.md \
+    BUGS.md \
+    CONTRIBUTING.md \
+    TODO.md \
     .clang-format \
     scripts \
-    examples
+    examples \
+    portty-scripts \
+    docs \
+    contrib/plotty \
+    contrib/demo-lottie.json
 
 # Format target — runs clang-format on C/C++, shfmt on shell, black on Python, prettier on Markdown.
 .PHONY: format

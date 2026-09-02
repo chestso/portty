@@ -13,7 +13,9 @@ emacs_DATA = portty.el
 EXTRA_DIST = portty.ti portty.el \
     icons/hicolor/scalable/apps/portty.svg \
     icons/hicolor/symbolic/apps/portty-symbolic.svg \
-    applications/portty.desktop
+    icons/portty.ico \
+    applications/portty.desktop \
+    conpty/OpenConsole.exe conpty/conpty.dll
 
 if HOST_WINDOWS
 conptydir = $(bindir)
