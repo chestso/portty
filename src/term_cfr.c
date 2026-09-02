@@ -1008,20 +1008,8 @@ static bool cfr_back_get_line_continuation(TerminalBackend *term, int row)
     CfrBackendData *d = term->backend_data;
     if (!d)
         return false;
-    /* Unified coordinate space: visible rows are >= 0, scrollback rows are
-     * negative (-1 = most recent). The selection layer (`term.c`) wants
-     * libvterm semantics: "row N is a continuation of N-1" — true when
-     * the previous logical row ended in a soft wrap.
-     *
-     * bvt's WRAPLINE flag sits on the row that *wrapped into* the next,
-     * the inverse direction. So is_continuation(row) = wrapline(row - 1).
-     * We have to walk across the visible/scrollback boundary too. */
-    int prev = row - 1;
-    if (prev >= 0) {
-        return cfr_get_line_continuation(d->vt, prev);
-    }
-    int sb_row = -(prev + 1);
-    return cfr_get_scrollback_wrapline(d->vt, sb_row);
+    /* Unified coordinate space, "row N continues N-1" semantics. */
+    return cfr_row_is_continuation(d->vt, row);
 }
 
 static void cfr_back_set_scrollback_size(TerminalBackend *term, int lines)
