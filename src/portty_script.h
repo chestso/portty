@@ -18,6 +18,7 @@ extern "C" {
 typedef enum
 {
     SCRIPT_CMD_WAIT,
+    SCRIPT_CMD_WAIT_FOR,
     SCRIPT_CMD_SEND,
     SCRIPT_CMD_SENDLN,
     SCRIPT_CMD_RAW,
@@ -28,6 +29,7 @@ typedef enum
     SCRIPT_CMD_SCREENDUMP,
     SCRIPT_CMD_DUMPROW,
     SCRIPT_CMD_DUMPCELLS,
+    SCRIPT_CMD_DUMPGRID,
     SCRIPT_CMD_MOUSEMOVE,
     SCRIPT_CMD_RESIZE,
     SCRIPT_CMD_WINSIZE,
@@ -44,9 +46,11 @@ typedef enum
 typedef struct
 {
     ScriptCmdType type;
-    /* WAIT */
+    /* WAIT — sleep duration; WAIT_FOR — timeout before giving up */
     double wait_seconds;
-    /* SEND / RAW / ASSERT_* */
+    /* WAIT_FOR — anchor the match to rows ending with the needle */
+    bool wait_line_end;
+    /* SEND / RAW / ASSERT_* / WAIT_FOR */
     char *text; /* heap-allocated, freed by script_free */
     /* DUMPROW / DUMPCELLS */
     int row;
@@ -110,6 +114,16 @@ double portty_now_seconds(void); /* clock_gettime(CLOCK_MONOTONIC) */
 bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
                                 const char *needle);
 
+/* Same scan, but reports the row that matched via *row_out (if non-NULL).
+ * Used by wait-for to report where the wait completed. line_end anchors
+ * the match to rows ending with the needle (after trailing-space trim). */
+bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
+                            const char *needle, int *row_out, bool line_end);
+
+/* Print the visible grid as text (one line per row, trailing blanks
+ * trimmed) — capture-pane-style dump for script diagnostics. */
+void portty_debug_grid_dump_text(TerminalBackend *term, int rows, int cols);
+
 /* Context for the shared step function. Each backend fills this with
  * its own state pointers. NULL pointers mean the backend doesn't support
  * that deferred action (e.g. screendump is only usable during the
@@ -171,7 +185,8 @@ void portty_script_step(PorttyScript *script,
 
 /* Milliseconds until the current command can advance, for the event loop's
  * deadline scheduler. Returns UINT32_MAX when `script`/`cmd_index` are
- * invalid or the command at `cmd_index` is not an active SCRIPT_CMD_WAIT.
+ * invalid or the command at `cmd_index` is not an active SCRIPT_CMD_WAIT or
+ * SCRIPT_CMD_WAIT_FOR (the latter reports its timeout deadline).
  * Does not mutate any state. The backend folds this into its blocking wait
  * (e.g. SDL_AddTimer) so a lone "wait N" script still wakes the loop. */
 uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
