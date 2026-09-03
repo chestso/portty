@@ -48,6 +48,8 @@ typedef struct
     ScriptCmdType type;
     /* WAIT — sleep duration; WAIT_FOR — timeout before giving up */
     double wait_seconds;
+    /* WAIT_FOR — anchor the match to rows ending with the needle */
+    bool wait_line_end;
     /* SEND / RAW / ASSERT_* / WAIT_FOR */
     char *text; /* heap-allocated, freed by script_free */
     /* DUMPROW / DUMPCELLS */
@@ -113,9 +115,10 @@ bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
                                 const char *needle);
 
 /* Same scan, but reports the row that matched via *row_out (if non-NULL).
- * Used by wait-for to report where the wait completed. */
+ * Used by wait-for to report where the wait completed. line_end anchors
+ * the match to rows ending with the needle (after trailing-space trim). */
 bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
-                            const char *needle, int *row_out);
+                            const char *needle, int *row_out, bool line_end);
 
 /* Print the visible grid as text (one line per row, trailing blanks
  * trimmed) — capture-pane-style dump for script diagnostics. */

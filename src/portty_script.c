@@ -283,11 +283,42 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         if (!cmd)
             return false;
         cmd->type = SCRIPT_CMD_WAIT_FOR;
-        /* wait-for <text> [timeout-seconds] — the text may be quoted and may
-         * be followed by a timeout. If the args start with a double quote,
-         * the needle is everything up to the matching closing quote, and an
-         * optional timeout may follow. */
+        /* wait-for <text> [timeout-seconds] [line-end]
+         * Trailing whitespace-separated tokens after the needle are
+         * options: a number sets the timeout, the keyword "line-end"
+         * anchors the match to rows that end with the needle (after
+         * trailing-space trim). Options may come in any order; the
+         * first unrecognized token ends option parsing. For unquoted
+         * needles the options must not be glued to the text — at least
+         * one space separates them, which the split below guarantees
+         * for all but a bare single-word needle with no options. */
+        bool line_end = false;
+        bool got_num = false;
+        /* Trim trailing option tokens off args, right to left */
+        for (;;) {
+            char *last_ws = NULL;
+            for (char *p = args; *p; p++) {
+                if (isspace((unsigned char)*p))
+                    last_ws = p;
+            }
+            if (!last_ws || *(last_ws + 1) == '\0')
+                break; /* no trailing token to consider */
+            const char *tok = last_ws + 1;
+            if (!got_num && isdigit((unsigned char)*tok)) {
+                cmd->wait_seconds = atof(tok);
+                got_num = true;
+                *last_ws = '\0';
+                continue;
+            }
+            if (strcmp(tok, "line-end") == 0) {
+                line_end = true;
+                *last_ws = '\0';
+                continue;
+            }
+            break; /* not an option token — leave it in the needle */
+        }
         if (args[0] == '"') {
+            /* Quoted needle: strip the surrounding quotes */
             char *end = strchr(args + 1, '"');
             if (!end) {
                 script_set_error(s, line_num,
@@ -305,52 +336,13 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
             memcpy(cmd->text, args + 1, text_len);
             cmd->text[text_len] = '\0';
             expand_escapes(cmd->text, (int)text_len);
-            /* Optional timeout token after the quote */
-            const char *rest = end + 1;
-            cmd->wait_seconds = atof(rest); /* 0 if absent/invalid */
         } else {
-            /* Unquoted: the needle runs to end of line, or up to a trailing
-             * "<space><number>" timeout token. Check only the last
-             * whitespace-separated token for numeric-ness. */
-            const char *last_ws = NULL;
-            for (const char *p = args; *p; p++) {
-                if (isspace((unsigned char)*p))
-                    last_ws = p;
-            }
-            const char *tail = NULL;
-            if (last_ws && *(last_ws + 1) != '\0') {
-                bool is_num = true;
-                for (const char *q = last_ws + 1; *q; q++) {
-                    if (!isdigit((unsigned char)*q) && *q != '.') {
-                        is_num = false;
-                        break;
-                    }
-                }
-                if (is_num)
-                    tail = last_ws;
-            }
-            if (tail) {
-                cmd->wait_seconds = atof(tail + 1);
-                /* text is everything before the timeout token */
-                size_t text_len = (size_t)(tail - args);
-                if (text_len == 0) {
-                    script_set_error(s, line_num, "wait-for: empty text");
-                    return false;
-                }
-                cmd->text = malloc(text_len + 1);
-                if (!cmd->text)
-                    return false;
-                memcpy(cmd->text, args, text_len);
-                cmd->text[text_len] = '\0';
-                expand_escapes(cmd->text, (int)text_len);
-            } else {
-                cmd->wait_seconds = 0; /* default applied below */
-                cmd->text = strdup(args);
-                if (!cmd->text)
-                    return false;
-                expand_escapes(cmd->text, (int)strlen(cmd->text));
-            }
+            cmd->text = strdup(args);
+            if (!cmd->text)
+                return false;
+            expand_escapes(cmd->text, (int)strlen(cmd->text));
         }
+        cmd->wait_line_end = line_end;
         if (cmd->wait_seconds <= 0)
             cmd->wait_seconds = 600; /* default timeout */
         return true;
@@ -771,7 +763,7 @@ double portty_now_seconds(void)
 bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
                                 const char *needle)
 {
-    return portty_debug_grid_find(term, rows, cols, needle, NULL);
+    return portty_debug_grid_find(term, rows, cols, needle, NULL, false);
 }
 
 /* Render one terminal row to a freshly malloc'd NUL-terminated UTF-8
@@ -817,9 +809,13 @@ static char *grid_build_row_text(TerminalBackend *term, int cols, int row)
 
 /* Grid scan shared by assert-contains / assert-not-contains / wait-for.
  * Searches all visible rows for the needle string. Returns true if
- * found; *row_out (if non-NULL) receives the row that matched. */
+ * found; *row_out (if non-NULL) receives the row that matched.
+ * line_end=false: substring match anywhere in the row.
+ * line_end=true:  the row must END with the needle, after trimming
+ *                 trailing spaces from the row. */
 bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
-                            const char *needle, int *row_out)
+                            const char *needle, int *row_out,
+                            bool line_end)
 {
     if (!term || !needle || needle[0] == '\0')
         return false;
@@ -831,7 +827,17 @@ bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
         if (!row_text)
             return false;
         int pos = (int)strlen(row_text);
-        bool found = pos >= needle_len && strstr(row_text, needle) != NULL;
+        bool found;
+        if (line_end) {
+            while (pos > 0 && row_text[pos - 1] == ' ')
+                pos--;
+            row_text[pos] = '\0';
+            found = pos >= needle_len &&
+                    strncmp(row_text + pos - needle_len, needle,
+                            (size_t)needle_len) == 0;
+        } else {
+            found = pos >= needle_len && strstr(row_text, needle) != NULL;
+        }
         free(row_text);
         if (found) {
             if (row_out)
@@ -981,10 +987,12 @@ void portty_script_step(PorttyScript *script,
         int match_row = -1;
         bool found = ctx->term && portty_debug_grid_find(
                                       ctx->term, rows, cols,
-                                      cmd->text ? cmd->text : "", &match_row);
+                                      cmd->text ? cmd->text : "", &match_row,
+                                      cmd->wait_line_end);
         if (found) {
-            printf("wait-for \"%s\": found at row %d after %.1fs\n",
-                   cmd->text ? cmd->text : "", match_row,
+            printf("wait-for \"%s\"%s: found at row %d after %.1fs\n",
+                   cmd->text ? cmd->text : "",
+                   cmd->wait_line_end ? " line-end" : "", match_row,
                    cmd->wait_seconds - (deadline - portty_now_seconds()));
             script_wait_deadline_reset();
             (*cmd_index)++;
