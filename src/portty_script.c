@@ -265,6 +265,88 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "wait-for") == 0) {
+        if (*args == '\0') {
+            script_set_error(s, line_num,
+                             "wait-for: requires text and optional timeout-seconds");
+            return false;
+        }
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_WAIT_FOR;
+        /* wait-for <text> [timeout-seconds] — the text may be quoted and may
+         * be followed by a timeout. Try the quoted form first: if the args
+         * start with a double quote, the needle is everything up to the
+         * matching closing quote, and an optional timeout may follow. */
+        if (args[0] == '"') {
+            char *end = strchr(args + 1, '"');
+            if (!end) {
+                script_set_error(s, line_num,
+                                 "wait-for: unterminated quoted text");
+                return false;
+            }
+            size_t text_len = (size_t)(end - (args + 1));
+            if (text_len == 0) {
+                script_set_error(s, line_num, "wait-for: empty text");
+                return false;
+            }
+            cmd->text = malloc(text_len + 1);
+            if (!cmd->text)
+                return false;
+            memcpy(cmd->text, args + 1, text_len);
+            cmd->text[text_len] = '\0';
+            expand_escapes(cmd->text, (int)text_len);
+            const char *rest = end + 1;
+            cmd->wait_seconds = atof(rest); /* 0 if absent/invalid */
+        } else {
+            /* Unquoted: the needle runs to end of line, or up to a trailing
+             * "<space><number>" timeout token. Check only the last
+             * whitespace-separated token for numeric-ness. */
+            const char *last_ws = NULL;
+            for (const char *p = args; *p; p++) {
+                if (isspace((unsigned char)*p))
+                    last_ws = p;
+            }
+            const char *tail = NULL;
+            if (last_ws && *last_ws + 1 != '\0') {
+                bool is_num = true;
+                for (const char *q = last_ws + 1; *q; q++) {
+                    if (!isdigit((unsigned char)*q) && *q != '.') {
+                        is_num = false;
+                        break;
+                    }
+                }
+                if (is_num)
+                    tail = last_ws;
+            }
+            if (tail) {
+                cmd->wait_seconds = atof(tail + 1);
+                /* text is everything before the timeout token */
+                size_t text_len = (size_t)(tail - args);
+                if (text_len == 0) {
+                    script_set_error(s, line_num, "wait-for: empty text");
+                    return false;
+                }
+                cmd->text = malloc(text_len + 1);
+                if (!cmd->text)
+                    return false;
+                memcpy(cmd->text, args, text_len);
+                cmd->text[text_len] = '\0';
+                expand_escapes(cmd->text, (int)text_len);
+            } else {
+                cmd->wait_seconds = 0; /* default applied below */
+                cmd->text = strdup(args);
+                if (!cmd->text)
+                    return false;
+                expand_escapes(cmd->text, (int)strlen(cmd->text));
+            }
+        }
+        if (cmd->wait_seconds <= 0)
+            cmd->wait_seconds = 600; /* default timeout */
+        return true;
+    }
+
     if (strcmp(line, "send") == 0 || strcmp(line, "sendln") == 0 ||
         strcmp(line, "emit") == 0) {
         ScriptCmd *cmd = script_new_cmd(s);
@@ -574,8 +656,16 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
 
 /* ── Public API ── */
 
+static void script_wait_deadline_reset(void);
+
 PorttyScript *portty_script_load(const char *path)
 {
+    /* A newly loaded script starts with a clean wait deadline. The static
+     * deadline is executor state shared across loads; without this reset a
+     * later script would inherit a stale (possibly already-expired) deadline
+     * from the previous one. */
+    script_wait_deadline_reset();
+
     FILE *fp = fopen(path, "r");
     if (!fp) {
         // Create a struct to hold the file open error
@@ -765,7 +855,8 @@ static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
 
 /* ── Script step execution ── */
 
-/* Static-local wait deadline (safe because only one script runs at a time) */
+/* Static-local wait deadline (safe because only one script runs at a time).
+ * Shared by WAIT (fixed sleep) and WAIT_FOR (grid-watch timeout). */
 static double s_wait_deadline = 0;
 static bool s_wait_deadline_valid = false;
 
@@ -778,6 +869,11 @@ static double script_wait_deadline_for(const ScriptCmd *cmd)
     return s_wait_deadline;
 }
 
+static void script_wait_deadline_reset(void)
+{
+    s_wait_deadline_valid = false;
+}
+
 uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
                                          int cmd_index)
 {
@@ -785,7 +881,7 @@ uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
         return UINT32_MAX;
 
     const ScriptCmd *cmd = &script->cmds[cmd_index];
-    if (cmd->type != SCRIPT_CMD_WAIT)
+    if (cmd->type != SCRIPT_CMD_WAIT && cmd->type != SCRIPT_CMD_WAIT_FOR)
         return UINT32_MAX;
 
     double deadline = script_wait_deadline_for(cmd);
@@ -820,7 +916,31 @@ void portty_script_step(PorttyScript *script,
     {
         double deadline = script_wait_deadline_for(cmd);
         if (portty_now_seconds() >= deadline) {
-            s_wait_deadline_valid = false;
+            script_wait_deadline_reset();
+            (*cmd_index)++;
+        }
+        break;
+    }
+
+    case SCRIPT_CMD_WAIT_FOR:
+    {
+        double deadline = script_wait_deadline_for(cmd);
+        int rows = 0, cols = 0;
+        if (ctx->term)
+            terminal_get_dimensions(ctx->term, &rows, &cols);
+        bool found = ctx->term && portty_debug_grid_contains(
+                                      ctx->term, rows, cols,
+                                      cmd->text ? cmd->text : "");
+        if (found) {
+            printf("wait-for \"%s\": found after %.1fs\n",
+                   cmd->text ? cmd->text : "",
+                   cmd->wait_seconds - (deadline - portty_now_seconds()));
+            script_wait_deadline_reset();
+            (*cmd_index)++;
+        } else if (portty_now_seconds() >= deadline) {
+            printf("wait-for \"%s\": TIMEOUT after %.0fs\n",
+                   cmd->text ? cmd->text : "", cmd->wait_seconds);
+            script_wait_deadline_reset();
             (*cmd_index)++;
         }
         break;

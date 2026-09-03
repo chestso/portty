@@ -18,6 +18,7 @@ extern "C" {
 typedef enum
 {
     SCRIPT_CMD_WAIT,
+    SCRIPT_CMD_WAIT_FOR,
     SCRIPT_CMD_SEND,
     SCRIPT_CMD_SENDLN,
     SCRIPT_CMD_RAW,
@@ -44,9 +45,9 @@ typedef enum
 typedef struct
 {
     ScriptCmdType type;
-    /* WAIT */
+    /* WAIT — sleep duration; WAIT_FOR — timeout before giving up */
     double wait_seconds;
-    /* SEND / RAW / ASSERT_* */
+    /* SEND / RAW / ASSERT_* / WAIT_FOR */
     char *text; /* heap-allocated, freed by script_free */
     /* DUMPROW / DUMPCELLS */
     int row;
@@ -171,7 +172,8 @@ void portty_script_step(PorttyScript *script,
 
 /* Milliseconds until the current command can advance, for the event loop's
  * deadline scheduler. Returns UINT32_MAX when `script`/`cmd_index` are
- * invalid or the command at `cmd_index` is not an active SCRIPT_CMD_WAIT.
+ * invalid or the command at `cmd_index` is not an active SCRIPT_CMD_WAIT or
+ * SCRIPT_CMD_WAIT_FOR (the latter reports its timeout deadline).
  * Does not mutate any state. The backend folds this into its blocking wait
  * (e.g. SDL_AddTimer) so a lone "wait N" script still wakes the loop. */
 uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
