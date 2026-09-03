@@ -724,6 +724,8 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     SDL_ClearError();
 
     Uint32 window_flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIDDEN | SDL_WINDOW_HIGH_PIXEL_DENSITY;
+    if (app->borderless)
+        window_flags |= SDL_WINDOW_BORDERLESS;
     d->window = SDL_CreateWindow(title, 800, 600, window_flags);
     if (!d->window) {
         const char *error = SDL_GetError();
@@ -736,7 +738,7 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     set_window_icon(d->window);
 
 #ifdef _WIN32
-    {
+    if (!app->borderless) {
         HWND hwnd = (HWND)SDL_GetPointerProperty(
             SDL_GetWindowProperties(d->window),
             SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);

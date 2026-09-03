@@ -55,6 +55,7 @@ typedef struct PorttyApp
     const char *font_name;   // -f FONT or config file font
     const char *script_path; // -S FILE, NULL if none
     float dpi_scale;         // --dpi-scale multiplier (default 1.0f)
+    bool borderless;         // --borderless or borderless=true in config
 } PorttyApp;
 
 // Terminal output callbacks (registered with coffer).
