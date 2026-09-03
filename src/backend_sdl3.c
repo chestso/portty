@@ -1785,6 +1785,16 @@ static void sdl3_run(PorttyBackend *self)
                 SDL_SetAtomicInt(&d->quit_requested, 1);
                 break;
 
+            case SDL_EVENT_WINDOW_EXPOSED:
+                // libdecor decoration subsurfaces are synchronized: their
+                // commits (hover highlights, focus title-bar redraws) are
+                // cached by the compositor until the parent content surface
+                // commits. SDL sends EXPOSED when libdecor redraws the
+                // decorations, so present a frame to flush them now instead
+                // of waiting for the next cursor blink timer tick.
+                terminal_mark_dirty(term);
+                break;
+
             case SDL_EVENT_WINDOW_FOCUS_GAINED:
                 d->has_focus = true;
                 terminal_mark_dirty(term);
