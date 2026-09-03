@@ -884,6 +884,22 @@ int rend_display_row_to_unified(int scroll_offset, int display_row)
     }
 }
 
+// Inverse of the scrollback half of rend_display_row_to_unified: map a
+// live-screen row to the display row it occupies when the viewport is
+// scrolled `scroll_offset` lines back. Scrolling back pushes live content
+// down by `scroll_offset` rows, so this is a plain offset add. Returns -1
+// for negative `live_row` (defensive; cursor rows are always non-negative).
+// Rows scrolled off the bottom of a short display window still map to a
+// valid display row here — bound-check the result against the display
+// height in the caller.
+int rend_live_row_to_display_row(int scroll_offset, int live_row)
+{
+    int display_row = live_row + scroll_offset;
+    if (display_row < scroll_offset)
+        return -1;
+    return display_row;
+}
+
 void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport_h)
 {
     if (*px < 0)

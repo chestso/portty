@@ -1015,12 +1015,18 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  bool cursor_visible, bool populate_only, int scroll_offset)
 {
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
-    // Hide cursor when scrolled back, when terminal says it's not visible, when cursor_visible is false,
-    // or when cursor is outside visible bounds (can happen during resize before shell repositions cursor)
-    bool cursor_in_bounds = cursor_pos.row >= 0 && cursor_pos.row < display_rows &&
-                            cursor_pos.col >= 0 && cursor_pos.col < display_cols;
-    bool show_cursor = cursor_visible && cursor_in_bounds &&
-                       (scroll_offset == 0) && terminal_get_cursor_visible(term);
+    // Hide the cursor when the terminal says it's not visible, when
+    // cursor_visible (blink phase) is false, or when its row is outside the
+    // visible window — either off the live screen or scrolled out of the
+    // viewport (can also happen during resize before the shell repositions
+    // the cursor). Unlike the old blanket scroll_offset == 0 check, the
+    // cursor stays visible while scrolling as long as its row is on screen,
+    // matching xterm behaviour after e.g. `clear` with scrollback preserved.
+    int cursor_row = rend_live_row_to_display_row(scroll_offset, cursor_pos.row);
+    bool cursor_row_visible = cursor_row >= 0 && cursor_row < display_rows;
+    bool cursor_col_in_bounds = cursor_pos.col >= 0 && cursor_pos.col < display_cols;
+    bool show_cursor = cursor_visible && cursor_row_visible && cursor_col_in_bounds &&
+                       terminal_get_cursor_visible(term);
 
     for (int row = 0; row < display_rows; row++) {
         int unified_row = row - scroll_offset;
@@ -1034,7 +1040,7 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
             }
         }
         // Pass 1.5: draw cursor (under glyphs)
-        if (!populate_only && show_cursor && cursor_pos.row == row) {
+        if (!populate_only && show_cursor && cursor_row == row) {
             terminal_row_iter_init(&it, term, unified_row, display_cols);
             while (terminal_row_iter_next(&it)) {
                 if (it.vt_col == cursor_pos.col) {

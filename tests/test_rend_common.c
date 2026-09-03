@@ -100,6 +100,32 @@ static void test_display_row_to_unified_with_scrollback(void)
     ASSERT_EQ(rend_display_row_to_unified(3, 4), 1);
 }
 
+static void test_live_row_to_display_row_no_scroll(void)
+{
+    // Without scrolling, live rows map 1:1 to display rows.
+    ASSERT_EQ(rend_live_row_to_display_row(0, 0), 0);
+    ASSERT_EQ(rend_live_row_to_display_row(0, 5), 5);
+    ASSERT_EQ(rend_live_row_to_display_row(0, 23), 23);
+}
+
+static void test_live_row_to_display_row_partial_scroll(void)
+{
+    // Scrolled back 1 line: a live row still on screen shifts down by 1.
+    // This is the regression case for `clear` leaving the prompt on row 0
+    // with scrollback preserved — the cursor must stay visible.
+    ASSERT_EQ(rend_live_row_to_display_row(1, 0), 1);
+    ASSERT_EQ(rend_live_row_to_display_row(1, 4), 5);
+}
+
+static void test_live_row_to_display_row_scrolled_out(void)
+{
+    // A live row pushed above the viewport by scrolling is not visible.
+    ASSERT_EQ(rend_live_row_to_display_row(1, -1), -1);
+    ASSERT_EQ(rend_live_row_to_display_row(3, -2), -1);
+    // Row -1 of the live screen can never be scrolled into view.
+    ASSERT_EQ(rend_live_row_to_display_row(0, -1), -1);
+}
+
 static void test_clamp_pixel_to_viewport(void)
 {
     int x = -5, y = -10;
@@ -262,6 +288,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_srgb_linear_monotonic);
     RUN_TEST(test_display_row_to_unified_no_scroll);
     RUN_TEST(test_display_row_to_unified_with_scrollback);
+    RUN_TEST(test_live_row_to_display_row_no_scroll);
+    RUN_TEST(test_live_row_to_display_row_partial_scroll);
+    RUN_TEST(test_live_row_to_display_row_scrolled_out);
     RUN_TEST(test_clamp_pixel_to_viewport);
     RUN_TEST(test_downscale_output_fits_cell_box);
     RUN_TEST(test_apply_glyph_layout_passthrough);

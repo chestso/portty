@@ -54,6 +54,13 @@ uint32_t rend_nf_translate_codepoint(uint32_t cp);
 // current scroll position (0 = no scrollback visible).
 int rend_display_row_to_unified(int scroll_offset, int display_row);
 
+// Inverse mapping for live-screen rows: given a row on the live screen,
+// return the display row it currently occupies when the viewport is
+// scrolled `scroll_offset` lines back (live content is pushed down by
+// `scroll_offset` rows), or -1 for negative `live_row`. Bound-check the
+// result against the display height in the caller.
+int rend_live_row_to_display_row(int scroll_offset, int live_row);
+
 // Clamp a pixel coordinate into the viewport. Helper for selection drag.
 void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport_h);
 
