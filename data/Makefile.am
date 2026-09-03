@@ -23,8 +23,15 @@ conpty_DATA = conpty/OpenConsole.exe conpty/conpty.dll
 endif
 
 if !HOST_WINDOWS
+# tic's use= lookup searches $TERMINFO, $TERMINFO_DIRS, ~/.terminfo and the
+# system dirs — but NOT $datadir/terminfo for a custom prefix. portty.ti
+# references coffer's entries via use=, so point TERMINFO at the install
+# destination, where coffer's terminfo already lives (the monorepo installs
+# coffer first; a standalone portty install requires a prior coffer install
+# anyway).
 install-data-local:
-	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti
+	TERMINFO="$(DESTDIR)$(datadir)/terminfo" \
+	    tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti
 
 uninstall-local:
 	rm -f $(DESTDIR)$(datadir)/terminfo/p/portty-256color
@@ -34,7 +41,8 @@ endif
 
 if HOST_WINDOWS
 install-data-local:
-	tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti \
+	TERMINFO="$(DESTDIR)$(datadir)/terminfo" \
+	    tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti \
 	    || echo "  WARNING: Failed to install terminfo (is ncurses installed?)" >&2
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/install-shortcut.ps1" \
