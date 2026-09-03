@@ -20,3 +20,17 @@ The event-loop mitigations introduced in portty v0.5.5 remain in place, since th
 - Event-driven loop with `SDL_WaitEvent` (no `SDL_WaitEventTimeout`, which can block indefinitely on Wayland per [SDL issue #15380](https://github.com/libsdl-org/SDL/issues/15380))
 - No `SDL_RenderPresent` in the resize event handler — the bottom-of-loop render handles it
 - `SDL_SetRenderVSync(0)` so presents never block on the compositor's frame callback
+
+## Kitty (and likely iTerm2/sixel) graphics don't use the full available screen space
+
+Running:
+
+```
+chafa --clear --align mid,mid -d 5 -- *.jpg
+```
+
+leaves 2 lines of blank to the bottom of the screen.
+
+## Panels seem to render fonts without linear light
+
+When hovering a link, the rendered font seems thin.
