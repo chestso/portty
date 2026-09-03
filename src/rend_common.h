@@ -58,7 +58,7 @@ int rend_display_row_to_unified(int scroll_offset, int display_row);
 void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport_h);
 
 // =============================================================================
-// Coordinate space conversion — HiDPI scaling
+// Coordinate spaces and scale factors — HiDPI scaling
 // =============================================================================
 //
 // portty uses two coordinate spaces:
@@ -72,11 +72,36 @@ void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport
 // PHYSICAL (backend-internal):
 //   - Window/framebuffer dimensions
 //   - cell_w, cell_h: scaled by content_scale during font load
-//   - Mouse coordinates: from SDL in physical pixels
+//   - Mouse coordinates: converted from SDL logical points to physical px
 //   - All rendering coordinates
 //
-// content_scale multiplies logical → physical.
-// Use these helpers consistently throughout both backends.
+// There are THREE distinct scale factors. Mixing them is the classic HiDPI
+// bug; each one has a single legal purpose:
+//
+//   window_scale  — the compositor's scale for this window
+//                   (SDL_GetWindowDisplayScale). SDL reports window sizes
+//                   and ALL input coordinates (mouse, wheel) in logical
+//                   points; converting those to/from physical pixels MUST
+//                   use window_scale and nothing else.
+//
+//   user_scale    — the --dpi-scale CLI flag. Never used directly; it is
+//                   only an input to content_scale.
+//
+//   content_scale — window_scale × user_scale. Used ONLY for font
+//                   rasterization DPI and cell metrics (cell_w, cell_h).
+//                   It is NOT a coordinate conversion factor: cells happen
+//                   to be sized by it, but SDL coordinate math must never
+//                   touch it.
+//
+// The invariant that keeps mouse hit-testing correct:
+//
+//   cell hit = logical_mouse × window_scale / (base_cell × content_scale)
+//
+// Using content_scale in place of window_scale in the numerator cancels
+// the user_scale in the denominator only when user_scale == 1; any other
+// value shifts every mouse hit by that factor. See tests/test_mouse_scale.c.
+//
+// Use the conversion helpers consistently throughout all backends.
 
 static inline int logical_to_physical(int logical, float scale)
 {
@@ -91,6 +116,15 @@ static inline int physical_to_logical(int physical, float scale)
 static inline float logical_to_physical_f(float logical, float scale)
 {
     return logical * scale;
+}
+
+// Convert an SDL input coordinate (mouse/wheel, in window logical points)
+// to a physical pixel coordinate for the renderer's coordinate space.
+// `window_scale` is the compositor scale (SDL_GetWindowDisplayScale), NOT
+// content_scale — see the scale contract above.
+static inline float mouse_logical_to_px(float logical, float window_scale)
+{
+    return logical * (window_scale > 0.0f ? window_scale : 1.0f);
 }
 
 // =============================================================================
