@@ -275,10 +275,11 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         if (!cmd)
             return false;
         cmd->type = SCRIPT_CMD_WAIT_FOR;
-        /* wait-for <text> [timeout-seconds] — the text may be quoted and may
-         * be followed by a timeout. Try the quoted form first: if the args
-         * start with a double quote, the needle is everything up to the
-         * matching closing quote, and an optional timeout may follow. */
+        /* wait-for <text> [timeout-seconds] [dump] — the text may be quoted
+         * and may be followed by a timeout and/or the literal keyword
+         * "dump". If the args start with a double quote, the needle is
+         * everything up to the matching closing quote, and the optional
+         * timeout/dump tokens follow. */
         if (args[0] == '"') {
             char *end = strchr(args + 1, '"');
             if (!end) {
@@ -297,19 +298,54 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
             memcpy(cmd->text, args + 1, text_len);
             cmd->text[text_len] = '\0';
             expand_escapes(cmd->text, (int)text_len);
-            const char *rest = end + 1;
-            cmd->wait_seconds = atof(rest); /* 0 if absent/invalid */
+            /* Optional "dump" keyword and/or timeout token after the quote,
+             * in any order: `"text" 900 dump` or `"text" dump 900`.
+             * Scan whitespace-separated tokens; "dump" sets the flag,
+             * a numeric token is the timeout, anything else ends it. */
+            char *rest = end + 1;
+            bool got_num = false;
+            for (;;) {
+                while (*rest == ' ' || *rest == '\t')
+                    rest++;
+                if (*rest == '\0')
+                    break;
+                if (strncmp(rest, "dump", 4) == 0 &&
+                    (rest[4] == '\0' || rest[4] == ' ' || rest[4] == '\t')) {
+                    cmd->wait_dump = true;
+                    rest += 4;
+                    continue;
+                }
+                if (!got_num && isdigit((unsigned char)*rest)) {
+                    cmd->wait_seconds = atof(rest);
+                    got_num = true;
+                    while (*rest && *rest != ' ' && *rest != '\t')
+                        rest++;
+                    continue;
+                }
+                break; /* unrecognized trailing token — stop scanning */
+            }
         } else {
-            /* Unquoted: the needle runs to end of line, or up to a trailing
-             * "<space><number>" timeout token. Check only the last
-             * whitespace-separated token for numeric-ness. */
+            /* Unquoted: an optional trailing "dump" keyword, then the needle
+             * runs to end of line, or up to a trailing "<space><number>"
+             * timeout token. Check only the last whitespace-separated
+             * token for numeric-ness. */
+            char *dump_pos = NULL;
+            size_t args_len = strlen(args);
+            if (args_len >= 5 &&
+                strcmp(args + args_len - 4, "dump") == 0 &&
+                isspace((unsigned char)args[args_len - 5])) {
+                dump_pos = args + args_len - 4;
+                cmd->wait_dump = true;
+                dump_pos[-1] = '\0'; /* cut the separating whitespace */
+                strip_trailing(args);
+            }
             const char *last_ws = NULL;
             for (const char *p = args; *p; p++) {
                 if (isspace((unsigned char)*p))
                     last_ws = p;
             }
             const char *tail = NULL;
-            if (last_ws && *last_ws + 1 != '\0') {
+            if (last_ws && *(last_ws + 1) != '\0') {
                 bool is_num = true;
                 for (const char *q = last_ws + 1; *q; q++) {
                     if (!isdigit((unsigned char)*q) && *q != '.') {
@@ -762,56 +798,97 @@ double portty_now_seconds(void)
 bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
                                 const char *needle)
 {
+    return portty_debug_grid_find(term, rows, cols, needle, NULL);
+}
+
+/* Render one terminal row to a freshly malloc'd NUL-terminated UTF-8
+ * string (spaces for blank cells, continuation cells skipped).
+ * Returns NULL on allocation failure. */
+static char *grid_build_row_text(TerminalBackend *term, int cols, int row)
+{
+    char *row_text = malloc((size_t)cols * 4 + 1);
+    if (!row_text)
+        return NULL;
+    int pos = 0;
+    for (int col = 0; col < cols; col++) {
+        TerminalCell cell;
+        if (terminal_get_cell(term, row, col, &cell) != 0)
+            break;
+        if (cell.cp == 0 || cell.cp == 0x20) {
+            row_text[pos++] = ' ';
+        } else if (cell.width == 0) {
+            /* continuation cell, skip */
+        } else {
+            /* Encode codepoint as UTF-8 */
+            uint32_t cp = cell.cp;
+            if (cp < 0x80) {
+                row_text[pos++] = (char)cp;
+            } else if (cp < 0x800) {
+                row_text[pos++] = (char)(0xC0 | (cp >> 6));
+                row_text[pos++] = (char)(0x80 | (cp & 0x3F));
+            } else if (cp < 0x10000) {
+                row_text[pos++] = (char)(0xE0 | (cp >> 12));
+                row_text[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                row_text[pos++] = (char)(0x80 | (cp & 0x3F));
+            } else {
+                row_text[pos++] = (char)(0xF0 | (cp >> 18));
+                row_text[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+                row_text[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                row_text[pos++] = (char)(0x80 | (cp & 0x3F));
+            }
+        }
+    }
+    row_text[pos] = '\0';
+    return row_text;
+}
+
+/* Grid scan shared by assert-contains / assert-not-contains / wait-for.
+ * Searches all visible rows for the needle string. Returns true if
+ * found; *row_out (if non-NULL) receives the row that matched. */
+bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
+                            const char *needle, int *row_out)
+{
     if (!term || !needle || needle[0] == '\0')
         return false;
 
     int needle_len = (int)strlen(needle);
 
     for (int row = 0; row < rows; row++) {
-        /* Build the row text by reading each cell's codepoint */
-        char *row_text = malloc((size_t)cols * 4 + 1);
+        char *row_text = grid_build_row_text(term, cols, row);
         if (!row_text)
             return false;
-        int pos = 0;
-        for (int col = 0; col < cols; col++) {
-            TerminalCell cell;
-            if (terminal_get_cell(term, row, col, &cell) != 0)
-                break;
-            if (cell.cp == 0 || cell.cp == 0x20) {
-                row_text[pos++] = ' ';
-            } else if (cell.width == 0) {
-                /* continuation cell, skip */
-            } else {
-                /* Encode codepoint as UTF-8 */
-                uint32_t cp = cell.cp;
-                if (cp < 0x80) {
-                    row_text[pos++] = (char)cp;
-                } else if (cp < 0x800) {
-                    row_text[pos++] = (char)(0xC0 | (cp >> 6));
-                    row_text[pos++] = (char)(0x80 | (cp & 0x3F));
-                } else if (cp < 0x10000) {
-                    row_text[pos++] = (char)(0xE0 | (cp >> 12));
-                    row_text[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                    row_text[pos++] = (char)(0x80 | (cp & 0x3F));
-                } else {
-                    row_text[pos++] = (char)(0xF0 | (cp >> 18));
-                    row_text[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-                    row_text[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                    row_text[pos++] = (char)(0x80 | (cp & 0x3F));
-                }
-            }
-        }
-        row_text[pos] = '\0';
-
-        /* Search for needle in row_text */
-        if (pos >= needle_len && strstr(row_text, needle) != NULL) {
-            free(row_text);
+        int pos = (int)strlen(row_text);
+        bool found = pos >= needle_len && strstr(row_text, needle) != NULL;
+        free(row_text);
+        if (found) {
+            if (row_out)
+                *row_out = row;
             return true;
         }
-        free(row_text);
     }
 
     return false;
+}
+
+/* Print the visible grid as text, one line per row (trailing blanks
+ * trimmed) — a capture-pane-style dump for script diagnostics. */
+void portty_debug_grid_dump_text(TerminalBackend *term, int rows, int cols)
+{
+    if (!term)
+        return;
+
+    printf("=== grid dump %dx%d ===\n", cols, rows);
+    for (int row = 0; row < rows; row++) {
+        char *row_text = grid_build_row_text(term, cols, row);
+        if (!row_text)
+            break;
+        int len = (int)strlen(row_text);
+        while (len > 0 && row_text[len - 1] == ' ')
+            row_text[--len] = '\0';
+        printf("%3d|%s\n", row, row_text);
+        free(row_text);
+    }
+    printf("=== end grid dump ===\n");
 }
 
 /* Execute dumpcells/dumprow — shared between backends */
@@ -928,18 +1005,23 @@ void portty_script_step(PorttyScript *script,
         int rows = 0, cols = 0;
         if (ctx->term)
             terminal_get_dimensions(ctx->term, &rows, &cols);
-        bool found = ctx->term && portty_debug_grid_contains(
+        int match_row = -1;
+        bool found = ctx->term && portty_debug_grid_find(
                                       ctx->term, rows, cols,
-                                      cmd->text ? cmd->text : "");
+                                      cmd->text ? cmd->text : "", &match_row);
         if (found) {
-            printf("wait-for \"%s\": found after %.1fs\n",
-                   cmd->text ? cmd->text : "",
+            printf("wait-for \"%s\": found at row %d after %.1fs\n",
+                   cmd->text ? cmd->text : "", match_row,
                    cmd->wait_seconds - (deadline - portty_now_seconds()));
+            if (cmd->wait_dump && ctx->term)
+                portty_debug_grid_dump_text(ctx->term, rows, cols);
             script_wait_deadline_reset();
             (*cmd_index)++;
         } else if (portty_now_seconds() >= deadline) {
             printf("wait-for \"%s\": TIMEOUT after %.0fs\n",
                    cmd->text ? cmd->text : "", cmd->wait_seconds);
+            if (cmd->wait_dump && ctx->term)
+                portty_debug_grid_dump_text(ctx->term, rows, cols);
             script_wait_deadline_reset();
             (*cmd_index)++;
         }

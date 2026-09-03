@@ -47,6 +47,8 @@ typedef struct
     ScriptCmdType type;
     /* WAIT — sleep duration; WAIT_FOR — timeout before giving up */
     double wait_seconds;
+    /* WAIT_FOR — dump the grid as text on completion (found or timeout) */
+    bool wait_dump;
     /* SEND / RAW / ASSERT_* / WAIT_FOR */
     char *text; /* heap-allocated, freed by script_free */
     /* DUMPROW / DUMPCELLS */
@@ -110,6 +112,15 @@ double portty_now_seconds(void); /* clock_gettime(CLOCK_MONOTONIC) */
  * for the needle string. Returns true if found. */
 bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
                                 const char *needle);
+
+/* Same scan, but reports the row that matched via *row_out (if non-NULL).
+ * Used by wait-for to report where the wait completed. */
+bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
+                            const char *needle, int *row_out);
+
+/* Print the visible grid as text (one line per row, trailing blanks
+ * trimmed) — capture-pane-style dump for script diagnostics. */
+void portty_debug_grid_dump_text(TerminalBackend *term, int rows, int cols);
 
 /* Context for the shared step function. Each backend fills this with
  * its own state pointers. NULL pointers mean the backend doesn't support

@@ -190,8 +190,90 @@ static void test_parse_wait_for_unquoted_no_timeout(void)
     cleanup_tmp(path);
 }
 
-static void test_parse_wait_for_missing_text(void)
+static void test_parse_wait_for_quoted_dump(void)
 {
+    char *path = write_tmp_script("wait-for \"END OF DEMO\" 900 dump\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
+    ASSERT_STR_EQ(cmd->text, "END OF DEMO");
+    ASSERT_TRUE(cmd->wait_seconds > 899.9 && cmd->wait_seconds < 900.1);
+    ASSERT_TRUE(cmd->wait_dump);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_wait_for_quoted_dump_no_timeout(void)
+{
+    char *path = write_tmp_script("wait-for \"marker\" dump\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
+    ASSERT_STR_EQ(cmd->text, "marker");
+    ASSERT_FLOAT_NEAR(cmd->wait_seconds, 600, 0.001); /* default */
+    ASSERT_TRUE(cmd->wait_dump);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_wait_for_unquoted_dump(void)
+{
+    char *path = write_tmp_script("wait-for marker 30 dump\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
+    ASSERT_STR_EQ(cmd->text, "marker");
+    ASSERT_TRUE(cmd->wait_seconds > 29.9 && cmd->wait_seconds < 30.1);
+    ASSERT_TRUE(cmd->wait_dump);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_wait_for_dump_in_text_not_keyword(void)
+{
+    /* "dump" as part of the text must not be stripped */
+    char *path = write_tmp_script("wait-for \"core dump report\"\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
+    ASSERT_STR_EQ(cmd->text, "core dump report");
+    ASSERT_FALSE(cmd->wait_dump);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_wait_for_missing_text(void)
+
+{
+
     char *path = write_tmp_script("wait-for\n");
     ASSERT_NOT_NULL(path);
 
@@ -829,6 +911,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_wait_for_default_timeout);
     RUN_TEST(test_parse_wait_for_unquoted_timeout);
     RUN_TEST(test_parse_wait_for_unquoted_no_timeout);
+    RUN_TEST(test_parse_wait_for_quoted_dump);
+    RUN_TEST(test_parse_wait_for_quoted_dump_no_timeout);
+    RUN_TEST(test_parse_wait_for_unquoted_dump);
+    RUN_TEST(test_parse_wait_for_dump_in_text_not_keyword);
     RUN_TEST(test_parse_wait_for_missing_text);
     RUN_TEST(test_parse_wait_for_empty_quoted_text);
     RUN_TEST(test_parse_send);
