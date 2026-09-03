@@ -265,6 +265,14 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "dumpgrid") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_DUMPGRID;
+        return true;
+    }
+
     if (strcmp(line, "wait-for") == 0) {
         if (*args == '\0') {
             script_set_error(s, line_num,
@@ -275,11 +283,10 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         if (!cmd)
             return false;
         cmd->type = SCRIPT_CMD_WAIT_FOR;
-        /* wait-for <text> [timeout-seconds] [dump] — the text may be quoted
-         * and may be followed by a timeout and/or the literal keyword
-         * "dump". If the args start with a double quote, the needle is
-         * everything up to the matching closing quote, and the optional
-         * timeout/dump tokens follow. */
+        /* wait-for <text> [timeout-seconds] — the text may be quoted and may
+         * be followed by a timeout. If the args start with a double quote,
+         * the needle is everything up to the matching closing quote, and an
+         * optional timeout may follow. */
         if (args[0] == '"') {
             char *end = strchr(args + 1, '"');
             if (!end) {
@@ -298,47 +305,13 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
             memcpy(cmd->text, args + 1, text_len);
             cmd->text[text_len] = '\0';
             expand_escapes(cmd->text, (int)text_len);
-            /* Optional "dump" keyword and/or timeout token after the quote,
-             * in any order: `"text" 900 dump` or `"text" dump 900`.
-             * Scan whitespace-separated tokens; "dump" sets the flag,
-             * a numeric token is the timeout, anything else ends it. */
-            char *rest = end + 1;
-            bool got_num = false;
-            for (;;) {
-                while (*rest == ' ' || *rest == '\t')
-                    rest++;
-                if (*rest == '\0')
-                    break;
-                if (strncmp(rest, "dump", 4) == 0 &&
-                    (rest[4] == '\0' || rest[4] == ' ' || rest[4] == '\t')) {
-                    cmd->wait_dump = true;
-                    rest += 4;
-                    continue;
-                }
-                if (!got_num && isdigit((unsigned char)*rest)) {
-                    cmd->wait_seconds = atof(rest);
-                    got_num = true;
-                    while (*rest && *rest != ' ' && *rest != '\t')
-                        rest++;
-                    continue;
-                }
-                break; /* unrecognized trailing token — stop scanning */
-            }
+            /* Optional timeout token after the quote */
+            const char *rest = end + 1;
+            cmd->wait_seconds = atof(rest); /* 0 if absent/invalid */
         } else {
-            /* Unquoted: an optional trailing "dump" keyword, then the needle
-             * runs to end of line, or up to a trailing "<space><number>"
-             * timeout token. Check only the last whitespace-separated
-             * token for numeric-ness. */
-            char *dump_pos = NULL;
-            size_t args_len = strlen(args);
-            if (args_len >= 5 &&
-                strcmp(args + args_len - 4, "dump") == 0 &&
-                isspace((unsigned char)args[args_len - 5])) {
-                dump_pos = args + args_len - 4;
-                cmd->wait_dump = true;
-                dump_pos[-1] = '\0'; /* cut the separating whitespace */
-                strip_trailing(args);
-            }
+            /* Unquoted: the needle runs to end of line, or up to a trailing
+             * "<space><number>" timeout token. Check only the last
+             * whitespace-separated token for numeric-ness. */
             const char *last_ws = NULL;
             for (const char *p = args; *p; p++) {
                 if (isspace((unsigned char)*p))
@@ -1013,15 +986,11 @@ void portty_script_step(PorttyScript *script,
             printf("wait-for \"%s\": found at row %d after %.1fs\n",
                    cmd->text ? cmd->text : "", match_row,
                    cmd->wait_seconds - (deadline - portty_now_seconds()));
-            if (cmd->wait_dump && ctx->term)
-                portty_debug_grid_dump_text(ctx->term, rows, cols);
             script_wait_deadline_reset();
             (*cmd_index)++;
         } else if (portty_now_seconds() >= deadline) {
             printf("wait-for \"%s\": TIMEOUT after %.0fs\n",
                    cmd->text ? cmd->text : "", cmd->wait_seconds);
-            if (cmd->wait_dump && ctx->term)
-                portty_debug_grid_dump_text(ctx->term, rows, cols);
             script_wait_deadline_reset();
             (*cmd_index)++;
         }
@@ -1139,6 +1108,19 @@ void portty_script_step(PorttyScript *script,
     {
         execute_dumpcells(ctx->term, ctx->scroll_offset,
                           cmd->row, cmd->col_start, cmd->col_end);
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_DUMPGRID:
+    {
+        int rows = 0, cols = 0;
+        if (ctx->term)
+            terminal_get_dimensions(ctx->term, &rows, &cols);
+        if (ctx->term)
+            portty_debug_grid_dump_text(ctx->term, rows, cols);
+        else
+            fprintf(stderr, "dumpgrid: no terminal\n");
         (*cmd_index)++;
         break;
     }

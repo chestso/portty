@@ -147,31 +147,32 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 
 ### Commands
 
-| Command                                                               | Description                                                                                                                                                               |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wait <seconds>`                                                      | Pause script execution for N seconds (monotonic clock)                                                                                                                    |
-| `wait-for <text> [timeout-seconds] [dump]`                            | Suspend execution until `<text>` appears in the visible terminal grid (default timeout 600s; prints TIMEOUT on expiry; `dump` prints the full grid as text on completion) |
-| `send <text>`                                                         | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes.                                                                                     |
-| `sendln <text>`                                                       | Same as `send`, but appends `\r\n` (as if the user pressed Return)                                                                                                        |
-| `emit <text>`                                                         | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.                                                                                        |
-| `raw <hex bytes>`                                                     | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)                                                                                                 |
-| `emit-raw <hex bytes>`                                                | Write raw binary bytes directly to the terminal emulator                                                                                                                  |
-| `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)                                                                                                  |
-| `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                                                                                                             |
-| `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)                                                                                                |
-| `dumprow <row>`                                                       | Print all cells in a terminal row                                                                                                                                         |
-| `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors                                                                                        |
-| `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                                                                                                            |
-| `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                                                                                                       |
-| `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows                                                                                                                                |
-| `winsize <width> <height>`                                            | Set window pixel size                                                                                                                                                     |
-| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                                                                                                         |
-| `panel_hide <id>`                                                     | Hide panel by ID                                                                                                                                                          |
-| `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |
-| `assert-no-hover`                                                     | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |
-| `record-start <dir> [fps]`                                            | Start frame recording to directory at target FPS (default 30), QOI format                                                                                                 |
-| `record-stop`                                                         | Stop frame recording and close manifest                                                                                                                                   |
-| `quit`                                                                | Request application quit                                                                                                                                                  |
+| Command                                                               | Description                                                                                                            |
+| --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `wait <seconds>`                                                      | Pause script execution for N seconds (monotonic clock)                                                                 |
+| `wait-for <text> [timeout-seconds]`                                   | Suspend execution until `<text>` appears in the visible terminal grid (default timeout 600s; prints TIMEOUT on expiry) |
+| `dumpgrid`                                                            | Print the visible grid as text, one line per row (trailing blanks trimmed)                                             |
+| `send <text>`                                                         | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes.                                  |
+| `sendln <text>`                                                       | Same as `send`, but appends `\r\n` (as if the user pressed Return)                                                     |
+| `emit <text>`                                                         | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.                                     |
+| `raw <hex bytes>`                                                     | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)                                              |
+| `emit-raw <hex bytes>`                                                | Write raw binary bytes directly to the terminal emulator                                                               |
+| `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)                                               |
+| `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                                                          |
+| `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)                                             |
+| `dumprow <row>`                                                       | Print all cells in a terminal row                                                                                      |
+| `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors                                     |
+| `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                                                         |
+| `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                                                    |
+| `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows                                                                             |
+| `winsize <width> <height>`                                            | Set window pixel size                                                                                                  |
+| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                                                      |
+| `panel_hide <id>`                                                     | Hide panel by ID                                                                                                       |
+| `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                      |
+| `assert-no-hover`                                                     | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                      |
+| `record-start <dir> [fps]`                                            | Start frame recording to directory at target FPS (default 30), QOI format                                              |
+| `record-stop`                                                         | Stop frame recording and close manifest                                                                                |
+| `quit`                                                                | Request application quit                                                                                               |
 
 ### `send` vs `emit`
 
@@ -265,13 +266,12 @@ record-stop
 quit
 ```
 
-Use quotes around text containing spaces: `wait-for "END OF DEMO" 900`. Append the `dump` keyword to print the whole visible grid as text the moment the wait completes (found or timed out) — handy for diagnosing false-positive matches or seeing what the application actually printed:
+Use quotes around text containing spaces: `wait-for "END OF DEMO" 900`. The success message reports the row where the text matched (`found at row 12 after 87.3s`). Follow a `wait-for` with `dumpgrid` to see exactly what the application printed when the wait completed:
 
 ```
-wait-for "END OF DEMO" 900 dump
+wait-for "Build finished" 300
+dumpgrid
 ```
-
-The success message reports the row where the text matched (`found at row 12 after 87.3s`).
 
 ### Mouse and hover commands
 

@@ -29,6 +29,7 @@ typedef enum
     SCRIPT_CMD_SCREENDUMP,
     SCRIPT_CMD_DUMPROW,
     SCRIPT_CMD_DUMPCELLS,
+    SCRIPT_CMD_DUMPGRID,
     SCRIPT_CMD_MOUSEMOVE,
     SCRIPT_CMD_RESIZE,
     SCRIPT_CMD_WINSIZE,
@@ -47,8 +48,6 @@ typedef struct
     ScriptCmdType type;
     /* WAIT — sleep duration; WAIT_FOR — timeout before giving up */
     double wait_seconds;
-    /* WAIT_FOR — dump the grid as text on completion (found or timeout) */
-    bool wait_dump;
     /* SEND / RAW / ASSERT_* / WAIT_FOR */
     char *text; /* heap-allocated, freed by script_free */
     /* DUMPROW / DUMPCELLS */
