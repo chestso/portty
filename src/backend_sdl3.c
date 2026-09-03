@@ -143,6 +143,7 @@ typedef struct
 
     SDL_Window *window;
     SDL_Renderer *sdl_renderer;
+    float window_scale; // compositor scale (SDL_GetWindowDisplayScale)
     SDL_Thread *pty_reader_thread;
     SDL_AtomicInt running;
     SDL_AtomicInt quit_requested;
@@ -206,14 +207,33 @@ static int sdl_mod_to_term(int mod)
     return m;
 }
 
+// Current compositor scale for this window, cached from
+// SDL_GetWindowDisplayScale and refreshed on
+// SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED. All SDL logical↔physical
+// coordinate conversion (mouse input, window sizing) must go through this
+// value — never content_scale, which also includes the user's --dpi-scale.
+static float sdl3_refresh_window_scale(Sdl3BackendData *d)
+{
+    if (d && d->window) {
+        float scale = SDL_GetWindowDisplayScale(d->window);
+        if (scale > 0.0f)
+            d->window_scale = scale;
+    }
+    if (d && d->window_scale <= 0.0f)
+        d->window_scale = 1.0f;
+    return d ? d->window_scale : 1.0f;
+}
+
 static void sdl3_scale_mouse_coords(Sdl3BackendData *d, float logical_x,
                                     float logical_y, int *out_px, int *out_py)
 {
-    float scale = d->rend.content_scale;
-    if (scale <= 0.0f)
-        scale = 1.0f;
-    *out_px = (int)logical_to_physical_f(logical_x, scale);
-    *out_py = (int)logical_to_physical_f(logical_y, scale);
+    // SDL reports mouse coordinates in window logical points; convert with
+    // the compositor scale. content_scale (which includes --dpi-scale) must
+    // stay out of input coordinate math — see the scale contract in
+    // rend_common.h.
+    float scale = sdl3_refresh_window_scale(d);
+    *out_px = (int)(mouse_logical_to_px(logical_x, scale));
+    *out_py = (int)(mouse_logical_to_px(logical_y, scale));
 }
 
 static void sdl3_flush_buffered_button_up(Sdl3BackendData *d,
@@ -735,6 +755,12 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
 
     set_window_icon(d->window);
 
+    // Cache the compositor scale; input/window-size conversions use this,
+    // never content_scale (see the scale contract in rend_common.h).
+    d->window_scale = 1.0f;
+    sdl3_refresh_window_scale(d);
+    vlog("Window display scale: %.2fx\n", (double)d->window_scale);
+
 #ifdef _WIN32
     {
         HWND hwnd = (HWND)SDL_GetPointerProperty(
@@ -919,12 +945,11 @@ static void sdl3_set_window_size(PorttyBackend *self, int width, int height)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (d && d->window) {
-        // Use system scale for logical conversion, not content_scale
-        // (which includes user's --dpi-scale). SDL's coordinate system
-        // uses the system DPI scale, not the app's content scale.
-        float scale = SDL_GetWindowDisplayScale(d->window);
-        if (scale <= 0.0f)
-            scale = 1.0f;
+        // Use the compositor's window scale for logical conversion, not
+        // content_scale (which includes the user's --dpi-scale). SDL's
+        // coordinate system uses the system DPI scale only — see the scale
+        // contract in rend_common.h.
+        float scale = sdl3_refresh_window_scale(d);
         int logical_w = physical_to_logical(width, scale);
         int logical_h = physical_to_logical(height, scale);
         SDL_SetWindowSize(d->window, logical_w, logical_h);
@@ -982,12 +1007,7 @@ static bool sdl3_get_display_size(PorttyBackend *self, int *w, int *h)
     /* SDL_GetDisplayUsableBounds returns logical coordinates. Convert to
      * physical pixels using the window's display scale so comparisons
      * against physical pixel dimensions in main.c are correct. */
-    float scale = 1.0f;
-    if (d->window) {
-        scale = SDL_GetWindowDisplayScale(d->window);
-        if (scale <= 0.0f)
-            scale = 1.0f;
-    }
+    float scale = sdl3_refresh_window_scale(d);
     if (w)
         *w = logical_to_physical(bounds.w, scale);
     if (h)
@@ -1491,10 +1511,10 @@ static void sdl3_script_winsize(void *user_data, int w, int h)
         return;
     /* Use SDL_SetWindowSize to trigger the real compositor resize path.
      * This goes through Wayland's xdg_surface configure/ack flow, matching
-     * what happens when the user drags the window border. */
-    float scale = d->rend.content_scale;
-    if (scale <= 0.0f)
-        scale = 1.0f;
+     * what happens when the user drags the window border. Window sizing
+     * converts with the compositor's window_scale, not content_scale —
+     * see the scale contract in rend_common.h. */
+    float scale = sdl3_refresh_window_scale(d);
     int logical_w = physical_to_logical(w, scale);
     int logical_h = physical_to_logical(h, scale);
     SDL_SetWindowSize(d->window, logical_w, logical_h);
@@ -1779,6 +1799,18 @@ static void sdl3_run(PorttyBackend *self)
                 terminal_mark_dirty(term);
                 break;
             }
+
+            case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
+                // Refresh the cached compositor scale. Mouse coordinate
+                // conversion (via sdl3_scale_mouse_coords) picks it up on
+                // the next event. Re-rasterizing fonts for the new DPI is
+                // a known follow-up (see TODO.md).
+                vlog("Window display scale changed: %.2fx -> %.2fx\n",
+                     (double)d->window_scale,
+                     (double)SDL_GetWindowDisplayScale(d->window));
+                sdl3_refresh_window_scale(d);
+                terminal_mark_dirty(term);
+                break;
 
             case SDL_EVENT_WINDOW_CLOSE_REQUESTED:
                 vlog("Window close requested\n");

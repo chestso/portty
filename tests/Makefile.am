@@ -7,7 +7,7 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
 EXTRA_DIST = test_helpers.h font_stubs.c
 
-check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_kitty test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_selection_scroll test_vs15_routing test_dpi_scale test_content_scale test_panel test_link_hint
+check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_kitty test_lottie test_lottie_cache test_diag test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_selection_scroll test_vs15_routing test_dpi_scale test_content_scale test_mouse_scale test_panel test_link_hint
 
 # test_atlas — SDL3 GPU atlas packing. Requires SDL3 backend.
 check_PROGRAMS += test_atlas
@@ -115,6 +115,11 @@ test_dpi_scale_CFLAGS = $(TEST_CFLAGS)
 
 test_content_scale_SOURCES = test_content_scale.c $(TEST_COMMON)
 test_content_scale_CFLAGS = $(TEST_CFLAGS)
+
+# Mouse coordinate scaling: SDL input converts with the compositor's
+# window_scale; cells are sized by content_scale. Pure inline math.
+test_mouse_scale_SOURCES = test_mouse_scale.c $(TEST_COMMON)
+test_mouse_scale_CFLAGS = $(TEST_CFLAGS)
 
 # Panel state management. Pure C, no SDL/coffer dependency.
 test_panel_SOURCES = test_panel.c $(TEST_COMMON) ../src/portty_panel.c

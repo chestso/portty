@@ -2,6 +2,18 @@
 
 ---
 
+## 0. HiDPI / Display-Migration Follow-ups
+
+**Out of scope (flagged, not doing now):** re-rasterizing fonts when the window
+moves between displays of different DPI. Currently the content scale is
+computed once at startup (`--dpi-scale` × compositor scale) and on resize; if
+the window migrates to a display with a different scale factor, cell metrics
+and glyph rasterization remain sized for the original display until a font
+reload is triggered. A full fix needs a font-reload pass on
+`SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED`.
+
+---
+
 ## 1. Variable Font Axes
 
 The variation axis infrastructure is fully implemented: `cache_mm_var()` caches axis
