@@ -43,6 +43,7 @@ typedef struct PorttyApp
     bool pointer_outside;
     bool drag_in_progress;
     bool cursor_visible;
+    int hovered_panel_id; // panel whose close button is hovered (0 = none)
 
     PorttyBackend *backend;           // selected backend (filled by entry point)
     FontResolveBackend *font_resolve; // platform-specific via #ifdef

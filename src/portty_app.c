@@ -347,13 +347,37 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
     return true;
 }
 
+// Resolve which panel's close button (if any) is under a pixel position and
+// update close-button hover highlighting. Returns true if the hover state
+// changed (caller should trigger a redraw).
+static bool resolve_panel_hover(PorttyApp *app, int px, int py)
+{
+    if (!app->backend || !app->backend->panel_hit_test || !app->backend->panel_set_hover)
+        return false;
+    bool close_btn = false;
+    int id = (px < 0) ? 0 : app->backend->panel_hit_test(app->backend, px, py, &close_btn);
+    if (!close_btn)
+        id = 0;
+    if (id == app->hovered_panel_id)
+        return false;
+    if (app->hovered_panel_id != 0)
+        app->backend->panel_set_hover(app->backend, app->hovered_panel_id, false);
+    if (id != 0)
+        app->backend->panel_set_hover(app->backend, id, true);
+    app->hovered_panel_id = id;
+    return true;
+}
+
 bool portty_app_revalidate_hover(PorttyApp *app, int px, int py)
 {
+    bool changed = resolve_panel_hover(app, px, py);
     if (pager_active(app->pager))
-        return false;
+        return changed;
     if (terminal_get_mouse_mode(app->term) != 0)
-        return false;
-    return resolve_link_hover(app, px, py);
+        return changed;
+    if (resolve_link_hover(app, px, py))
+        changed = true;
+    return changed;
 }
 
 void portty_app_clear_hover(PorttyApp *app)
@@ -365,6 +389,11 @@ void portty_app_clear_hover(PorttyApp *app)
     app->backend->panel_hide(app->backend, PANEL_ID_LINK_HINT);
     if (was_hovering)
         app->backend->set_cursor(app->backend, PORTTY_CURSOR_TEXT);
+    if (app->hovered_panel_id != 0) {
+        if (app->backend->panel_set_hover)
+            app->backend->panel_set_hover(app->backend, app->hovered_panel_id, false);
+        app->hovered_panel_id = 0;
+    }
 }
 
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
@@ -570,6 +599,7 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
         if (panel_id > 0) {
             if (close_btn) {
                 app->backend->panel_hide(app->backend, panel_id);
+                app->hovered_panel_id = 0;
                 return true;
             }
             // Clicked on panel but not close button - consume event
@@ -580,9 +610,10 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
     int mouse_mode = terminal_get_mouse_mode(app->term);
     bool shift_held = (mod & TERM_MOD_SHIFT) != 0;
 
-    bool hover_changed = false;
+    bool hover_changed = resolve_panel_hover(app, pixel_x, pixel_y);
     if (mouse_mode == 0 || shift_held) {
-        hover_changed = resolve_link_hover(app, pixel_x, pixel_y);
+        if (resolve_link_hover(app, pixel_x, pixel_y))
+            hover_changed = true;
 
         if (button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
             int link_row, link_col;
