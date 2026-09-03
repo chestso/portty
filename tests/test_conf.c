@@ -66,6 +66,7 @@ static void test_init_defaults(void)
     ASSERT_EQ(conf.verbose, -1);
     ASSERT_NULL(conf.word_chars);
     ASSERT_EQ(conf.scrollback, -1);
+    ASSERT_EQ(conf.borderless, -1);
 
     portty_conf_free(&conf);
 }
@@ -122,6 +123,43 @@ static void test_parse_booleans(void)
     portty_conf_init(&conf);
     ASSERT_TRUE(portty_conf_load_path(&conf, path));
     ASSERT_EQ(conf.verbose, 1);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+static void test_parse_borderless(void)
+{
+    /* borderless = true */
+    char *path = write_tmp_conf("borderless = true\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.borderless, 1);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    /* borderless = false */
+    path = write_tmp_conf("borderless = false\n");
+    ASSERT_NOT_NULL(path);
+
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.borderless, 0);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    /* invalid value: stays unset, load still succeeds */
+    path = write_tmp_conf("borderless = maybe\n");
+    ASSERT_NOT_NULL(path);
+
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.borderless, -1);
 
     portty_conf_free(&conf);
     cleanup_tmp(path);
@@ -287,6 +325,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_geometry);
     RUN_TEST(test_parse_hinting);
     RUN_TEST(test_parse_booleans);
+    RUN_TEST(test_parse_borderless);
     RUN_TEST(test_parse_word_chars);
     RUN_TEST(test_parse_scrollback);
     RUN_TEST(test_parse_scrollback_zero);

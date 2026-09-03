@@ -327,6 +327,7 @@ scrollback = 1000
 shell = /bin/bash
 text_composition_strategy = kitty
 ambiguous_wide = false
+borderless = false
 ```
 
 ### Available Keys
@@ -344,6 +345,7 @@ All keys are optional. Keys appear directly at the top level.
 | `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC` | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`          | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
 | `ambiguous_wide`            | `true`/`false`                                        | `false`            | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
+| `borderless`                | `true`/`false`                                        | `false`            | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 

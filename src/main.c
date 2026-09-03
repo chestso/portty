@@ -143,6 +143,7 @@ static void print_usage(const char *progname)
     printf("  -S, --script FILE     Run debug script FILE (see docs/debug-infrastructure-design.md)\n");
     printf("  --dpi-scale SCALE     Multiply detected DPI scale (default: 1.0)\n");
     printf("  -W, --ambiguous-wide   Render ambiguous-width chars as 2 cells\n");
+    printf("  -B, --borderless       Disable window decorations (title bar and borders)\n");
 }
 
 static void print_version(void)
@@ -168,6 +169,7 @@ typedef struct
     const char *script_path;
     float dpi_scale;
     int ambiguous_wide;
+    int borderless;
 } PorttyArgs;
 
 static void portty_args_init(PorttyArgs *args)
@@ -180,6 +182,7 @@ static void portty_args_init(PorttyArgs *args)
     args->init_scrollback = -1;
     args->dpi_scale = 1.0f;
     args->ambiguous_wide = -1;
+    args->borderless = -1;
 }
 
 /* Helper for --dpi-scale parsing (shared with tests) */
@@ -207,10 +210,11 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
         { "script", required_argument, NULL, 'S' },
         { "dpi-scale", required_argument, NULL, 'D' },
         { "ambiguous-wide", no_argument, NULL, 'W' },
+        { "borderless", no_argument, NULL, 'B' },
         { NULL, 0, NULL, 0 }
     };
 
-    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:W", long_options, NULL)) != -1) {
+    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:WB", long_options, NULL)) != -1) {
         switch (args->opt) {
         case 'h':
             print_usage(argv[0]);
@@ -223,6 +227,9 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
             break;
         case 'W':
             args->ambiguous_wide = 1;
+            break;
+        case 'B':
+            args->borderless = 1;
             break;
         case 'd':
             args->demo_text = optarg;
@@ -352,6 +359,10 @@ static void apply_conf_to_args(PorttyArgs *args, PorttyConf *conf)
         args->ambiguous_wide = conf->ambiguous_wide;
     if (args->ambiguous_wide == -1)
         args->ambiguous_wide = 0;
+    if (args->borderless == -1 && conf->borderless >= 0)
+        args->borderless = conf->borderless;
+    if (args->borderless == -1)
+        args->borderless = 0;
 }
 
 static TerminalBackend *create_terminal(PorttyArgs *args)
@@ -397,6 +408,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         .font_name = args->font_name,
         .script_path = args->script_path,
         .dpi_scale = args->dpi_scale,
+        .borderless = args->borderless > 0,
     };
     backend.data = &app;
 
