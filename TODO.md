@@ -281,14 +281,6 @@ and version for feature detection. The `RV` cap in xterm-256color sends
 `ESC[>c` but coffer does not respond to `CSI > q` (XTVERSION query). DA2
 (`CSI > c`) IS implemented and responds with `ESC[>1;0;0c`.
 
-### E3 (clear scrollback)
-
-Inherited from xterm-256color as `\E[3J`. coffer handles `CSI 3 J` but routes
-it to the same code path as `CSI 2 J` (clear visible grid only). The
-scrollback buffer is NOT purged. `cfr_scrollback_clear()` exists but is never
-called from the ED path. Fix: call `cfr_scrollback_clear(vt)` in the `case 3:`
-branch of `cfr_erase_in_display()`.
-
 ### DECSCA (Select Character Protection, CSI " q)
 
 Not in terminfo, not implemented. Used for protected characters that survive

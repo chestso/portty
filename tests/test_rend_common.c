@@ -126,6 +126,20 @@ static void test_live_row_to_display_row_scrolled_out(void)
     ASSERT_EQ(rend_live_row_to_display_row(0, -1), -1);
 }
 
+static void test_scroll_clamp_after_scrollback_purge(void)
+{
+    // RIS (`reset`) / ED 3 purge scrollback; the stored offset must clamp
+    // down to the new count instead of pointing past the end (blank rows).
+    RendScrollState st = { 0 };
+    st.scroll_offset = 5;
+    rend_scroll_clamp(&st, NULL); // stub: scrollback lines = 0
+    ASSERT_EQ(st.scroll_offset, 0);
+    // No-op when the offset is already within bounds.
+    st.scroll_offset = 0;
+    rend_scroll_clamp(&st, NULL);
+    ASSERT_EQ(st.scroll_offset, 0);
+}
+
 static void test_clamp_pixel_to_viewport(void)
 {
     int x = -5, y = -10;
@@ -291,6 +305,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_live_row_to_display_row_no_scroll);
     RUN_TEST(test_live_row_to_display_row_partial_scroll);
     RUN_TEST(test_live_row_to_display_row_scrolled_out);
+    RUN_TEST(test_scroll_clamp_after_scrollback_purge);
     RUN_TEST(test_clamp_pixel_to_viewport);
     RUN_TEST(test_downscale_output_fits_cell_box);
     RUN_TEST(test_apply_glyph_layout_passthrough);

@@ -1429,8 +1429,24 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
 // Scroll offset management — GPU-agnostic
 // =============================================================================
 
+// Clamp scroll_offset against the terminal's current scrollback count. The
+// offset is only clamped on explicit scroll input (rend_scroll), so any path
+// that purges scrollback out from under the renderer (RIS from `reset`, ED 3,
+// future engine-side purges) can leave it pointing past the end — showing
+// blank rows. The draw path calls this every frame before using scroll_offset.
+void rend_scroll_clamp(RendScrollState *st, TerminalBackend *term)
+{
+    int scrollback_lines = terminal_get_scrollback_lines(term);
+    if (st->scroll_offset > scrollback_lines) {
+        st->scroll_offset = scrollback_lines;
+        vlog("Scroll offset clamped to %d (scrollback shrank)\n",
+             st->scroll_offset);
+    }
+}
+
 void rend_scroll(RendScrollState *st, TerminalBackend *term, int delta)
 {
+    rend_scroll_clamp(st, term);
     int scrollback_lines = terminal_get_scrollback_lines(term);
     int new_offset = st->scroll_offset + delta;
     if (new_offset < 0)

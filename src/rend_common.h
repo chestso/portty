@@ -439,6 +439,10 @@ typedef struct
 } RendScrollState;
 
 void rend_scroll(RendScrollState *st, TerminalBackend *term, int delta);
+// Clamp scroll_offset down to the terminal's current scrollback count. Safe to
+// call every frame; a no-op unless scrollback shrank below the offset (e.g.
+// RIS from `reset`, or ED 3 purging scrollback while scrolled back).
+void rend_scroll_clamp(RendScrollState *st, TerminalBackend *term);
 void rend_reset_scroll(RendScrollState *st);
 int rend_get_scroll_offset(RendScrollState *st);
 void rend_set_overlay(RendScrollState *st, TerminalBackend *overlay);

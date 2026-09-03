@@ -1951,6 +1951,10 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
 
     rend_sdl3_atlas_begin_frame(&data->atlas);
 
+    // A scrollback purge (RIS from `reset`, ED 3) can leave the offset
+    // pointing past the end; clamp before drawing.
+    rend_scroll_clamp(&data->scroll, term);
+
     int term_rows, term_cols;
     terminal_get_dimensions(term, &term_rows, &term_cols);
     int display_rows = data->height / data->cell_height;
