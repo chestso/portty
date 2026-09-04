@@ -1784,6 +1784,11 @@ static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
             used.h = dh;
         }
         SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
+        // Texture destination: restore the caller's target binding so the
+        // next render pass draws where the caller expects (a stale texture
+        // binding here silently swallows every subsequent frame).
+        if (dst)
+            SDL_SetRenderTarget(data->renderer, prev);
     } else if (dst) {
         // Legacy sRGB fallback for a texture destination: restore the
         // caller's target binding (content was drawn directly into dst).
