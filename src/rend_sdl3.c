@@ -1996,14 +1996,38 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
     embedded_term_feed(&pr->et, ansi);
     free(ansi);
 
-    // Ensure the content texture exists at exactly the terminal's pixel size
+    // Ensure the content texture exists at exactly the terminal's pixel size.
+    // On the linear-light path the texture is a RGBA64_FLOAT / SRGB_LINEAR
+    // target like the shared linear target itself: render_scene's blit-out
+    // writes linear values into it (no encode — the destination is
+    // linear-tagged), and the panel layer blit into the frame's linear target
+    // is then linear->linear, exact. An sRGB-tagged texture here would be
+    // sampled without decode on the linear path and double-encoded at the
+    // frame blit-out. The legacy sRGB fallback keeps a plain RGBA32 texture:
+    // content is drawn directly into it and blitted within sRGB space.
     if (pr->tex && (pr->w != term_w || pr->h != term_h)) {
         SDL_DestroyTexture(pr->tex);
         pr->tex = NULL;
     }
     if (!pr->tex) {
-        pr->tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                    SDL_TEXTUREACCESS_TARGET, term_w, term_h);
+        if (data->linear_ok) {
+            SDL_PropertiesID props = SDL_CreateProperties();
+            if (!props)
+                return;
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_FORMAT_NUMBER,
+                                  SDL_PIXELFORMAT_RGBA64_FLOAT);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_COLORSPACE_NUMBER,
+                                  SDL_COLORSPACE_SRGB_LINEAR);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_ACCESS_NUMBER,
+                                  SDL_TEXTUREACCESS_TARGET);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_WIDTH_NUMBER, term_w);
+            SDL_SetNumberProperty(props, SDL_PROP_TEXTURE_CREATE_HEIGHT_NUMBER, term_h);
+            pr->tex = SDL_CreateTextureWithProperties(data->renderer, props);
+            SDL_DestroyProperties(props);
+        } else {
+            pr->tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                        SDL_TEXTUREACCESS_TARGET, term_w, term_h);
+        }
         pr->w = term_w;
         pr->h = term_h;
     }
