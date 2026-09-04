@@ -258,20 +258,19 @@ static uint8_t *linearize_for_upload(RendererSdl3Data *data, const uint8_t *src,
 // Forward declaration for panel terminal building
 static void build_panel_terminal(RendererSdl3Data *data, int slot);
 
-// Free panel terminal and texture for a specific slot
+// Free a slot's embedded terminal and content texture
 static void panel_free_slot(RendererSdl3Data *data, int slot)
 {
     if (slot < 0 || slot >= PORTTY_PANEL_MAX)
         return;
-    if (data->panel_textures[slot]) {
-        SDL_DestroyTexture(data->panel_textures[slot]);
-        data->panel_textures[slot] = NULL;
+    PanelRender *pr = &data->panel_renders[slot];
+    if (pr->tex) {
+        SDL_DestroyTexture(pr->tex);
+        pr->tex = NULL;
     }
-    if (data->panel_terms[slot]) {
-        terminal_destroy(data->panel_terms[slot]);
-        free(data->panel_terms[slot]);
-        data->panel_terms[slot] = NULL;
-    }
+    pr->w = 0;
+    pr->h = 0;
+    embedded_term_destroy(&pr->et);
 }
 
 // Free all panel terminals and textures
@@ -341,8 +340,7 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Rende
     data->content_scale = 1.0f;
     data->font_path = NULL;
     memset(&data->panels, 0, sizeof(data->panels));
-    memset(data->panel_terms, 0, sizeof(data->panel_terms));
-    memset(data->panel_textures, 0, sizeof(data->panel_textures));
+    memset(data->panel_renders, 0, sizeof(data->panel_renders));
     data->linear_target = NULL;
     data->linear_w = 0;
     data->linear_h = 0;
@@ -1495,6 +1493,13 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
 // Linear-light compositing
 // ---------------------------------------------------------------------------
 //
+// Forward declarations: the panel chrome layer and the atlas populate pass
+// are used by render_scene / the draw path below.
+static void render_panels_into_linear(RendererSdl3Data *data);
+static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
+                           int rows, int cols, bool cursor_visible, int scroll_offset);
+
+//
 // portty blends antialiased glyph coverage in *linear* light (like kitty),
 // rather than gamma-incorrectly in sRGB space. We do this by drawing the whole
 // frame into an RGBA64_FLOAT render target tagged SDL_COLORSPACE_SRGB_LINEAR:
@@ -1519,7 +1524,7 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
 // toggle) churns GPU allocations and forces SDL's GPU backend to rebuild
 // pipelines tied to the target format; that path has crashed on NVK (a
 // zeroed/freed VkPipeline bound during the command-queue flush). A stable
-// grow-only target removes that per-resize churn. draw_scene_linear
+// grow-only target removes that per-resize churn. render_scene
 // additionally calls SDL_FlushRenderer before each SDL_SetRenderTarget
 // switch to invalidate any cached pipeline state that a swapchain rebuild
 // may have freed. Returns false (and disables the linear path permanently)
@@ -1682,16 +1687,51 @@ static void linear_blend_selfcheck(RendererSdl3Data *data)
     SDL_DestroyTexture(srgb);
 }
 
-// Draw the already-populated scene into the linear-light target and encode it
-// onto whatever render target is currently bound (SDL window or PNG export target). Falls back to drawing straight into the bound
-// target (legacy sRGB) when the float target is unavailable.
-static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
-                              int display_rows, int display_cols,
-                              bool cursor_visible, bool with_sixel)
+// Draw the already-populated scene into the linear-light target, plus the
+// panel chrome layer, and encode the result onto the sRGB destination: `dst`
+// (a texture target) or, when dst == NULL, whatever render target is
+// currently bound (SDL window or PNG export target). Falls back to drawing
+// straight into the destination (legacy sRGB) when the float target is
+// unavailable — the fallback lives here and nowhere else, so no caller can
+// end up compositing gamma-incorrectly by choice.
+//
+// THE RENDER PATH: this is the only sanctioned way to draw a TerminalBackend's
+// visible grid to any destination — main frame, pager overlay and panel
+// content all go through it, which is what makes linear-light compositing
+// ubiquitous rather than a per-caller convention. render_visible_cells() with
+// populate_only == false is reachable only from here; the no-draw atlas pass
+// (populate_atlas) is the only other caller of render_visible_cells.
+//
+// Panels composite INTO the linear frame, not on top of the encoded output:
+// after the terminal scene, the panel layer (background rects, accent stripes,
+// pre-rendered content textures, close buttons) is drawn into the same linear
+// target while it is bound — SDL linearizes the draw colors on this path, and
+// the content textures were themselves sRGB-encoded by render_scene, so the
+// single blit-out re-encode covers text, chrome and antialiased edges in one
+// gamma-correct pass.
+//
+// With a texture destination, the scene is composited into the top-left
+// region of the shared grow-only linear target matching the destination's
+// pixel size, then copied 1:1 (NEAREST, same size) so the linear->sRGB
+// re-encode is byte-identical.
+static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
+                         int display_rows, int display_cols,
+                         bool cursor_visible, bool with_sixel, int scroll_offset,
+                         bool with_panels, SDL_Texture *dst)
 {
-    SDL_Texture *dst = SDL_GetRenderTarget(data->renderer);
+    SDL_Texture *prev = SDL_GetRenderTarget(data->renderer);
+    SDL_Texture *out = dst ? dst : prev; // sRGB destination being encoded onto
     int out_w = 0, out_h = 0;
     bool linear = ensure_linear_target(data, &out_w, &out_h);
+
+    // Texture destinations must fit inside the window-sized linear target.
+    // (Panels and PNG canvases always do; guard anyway.)
+    if (linear && dst) {
+        float dw, dh;
+        SDL_GetTextureSize(dst, &dw, &dh);
+        if (dw > out_w || dh > out_h)
+            linear = false;
+    }
 
     if (linear) {
         // Flush any pending commands from the previous frame and invalidate
@@ -1706,12 +1746,15 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
         // bind.
         SDL_FlushRenderer(data->renderer);
         SDL_SetRenderTarget(data->renderer, data->linear_target);
+    } else if (dst) {
+        SDL_FlushRenderer(data->renderer);
+        SDL_SetRenderTarget(data->renderer, dst);
     }
 
     SDL_SetRenderDrawColor(data->renderer, data->colors.bg_r, data->colors.bg_g,
                            data->colors.bg_b, data->colors.bg_a);
     SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, data->scroll.scroll_offset);
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, scroll_offset);
     render_lottie_layer(data, term, 1); /* background lottie */
     render_lottie_layer(data, term, 0); /* foreground lottie */
     if (with_sixel) {
@@ -1719,16 +1762,33 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
         render_images(data, term, false); /* sixel/iTerm2 + kitty z>=0 on top */
     }
 
+    // Panel chrome layer — composited in the same light space as the scene.
+    if (with_panels)
+        render_panels_into_linear(data);
+
     if (linear) {
         SDL_FlushRenderer(data->renderer);
-        SDL_SetRenderTarget(data->renderer, dst);
+        SDL_SetRenderTarget(data->renderer, out);
         SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
-        // The target is grow-only and may be larger than the output: copy only
-        // the used top-left out_w x out_h region 1:1 (same size + NEAREST scale
-        // = exact copy, so the linear->sRGB re-encode is byte-identical). A
-        // NULL/NULL blit would scale the whole oversized target into dst.
+        // The linear target is grow-only and may be larger than the
+        // destination: copy only the used region 1:1 (same size + NEAREST
+        // scale = exact copy, so the linear->sRGB re-encode is
+        // byte-identical). A NULL/NULL blit would scale the whole oversized
+        // target into the destination.
         SDL_FRect used = { 0.0f, 0.0f, (float)out_w, (float)out_h };
+        if (dst) {
+            // Texture destination: the region is the destination's own size.
+            float dw, dh;
+            SDL_GetTextureSize(dst, &dw, &dh);
+            used.w = dw;
+            used.h = dh;
+        }
         SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
+    } else if (dst) {
+        // Legacy sRGB fallback for a texture destination: restore the
+        // caller's target binding (content was drawn directly into dst).
+        SDL_FlushRenderer(data->renderer);
+        SDL_SetRenderTarget(data->renderer, prev);
     }
 }
 
@@ -1738,44 +1798,53 @@ static void draw_scene_linear(RendererSdl3Data *data, TerminalBackend *term,
 // panel draw is a no-op when inactive.
 
 // Build ANSI content for panel terminal with background color, title (bold),
-// and body text.
+// and body text. Returns a heap buffer the caller frees; NULL on failure.
 static char *rend_sdl3_panel_build_ansi(const char *title, const char *body)
 {
-    // Simple string builder using static buffer (panels are small)
-    static char buf[2048];
-    int len = 0;
-
     const char *panel_bg = "\x1b[48;2;38;38;44m";
+    const char *clear = "\x1b[2J\x1b[H";
+    const char *title_fmt = "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m";
+    const char *body_sep = "\r\n%s";
+    const char *body_fmt = "\x1b[38;2;190;190;198m%s\x1b[39m";
 
-    // Clear screen first in case terminal is being reused
-    len += snprintf(buf + len, sizeof(buf) - len, "\x1b[2J\x1b[H");
-    if (len < 0 || len >= (int)sizeof(buf))
+    // Escape sequences + separators + NUL; generous headroom over the sum of
+    // literal lengths so no per-snprintf truncation bookkeeping is needed.
+    size_t overhead = strlen(panel_bg) * 4 + strlen(clear) + strlen(title_fmt) +
+                      strlen(body_sep) + strlen(body_fmt) + 64;
+    size_t cap = overhead + (title ? strlen(title) : 0) + (body ? strlen(body) : 0) + 1;
+
+    char *buf = malloc(cap);
+    if (!buf)
         return NULL;
-
+    int len = snprintf(buf, cap, "%s", clear);
+    if (len < 0 || (size_t)len >= cap) {
+        free(buf);
+        return NULL;
+    }
     if (title) {
-        len += snprintf(buf + len, sizeof(buf) - len,
-                        "%s\x1b[1m\x1b[38;2;236;236;241m%s\x1b[22m\x1b[39m",
-                        panel_bg, title);
-        if (len < 0 || len >= (int)sizeof(buf))
+        int n = snprintf(buf + len, cap - (size_t)len, title_fmt, panel_bg, title);
+        if (n < 0 || (size_t)n >= cap - (size_t)len) {
+            free(buf);
             return NULL;
+        }
+        len += n;
     }
     if (body) {
-        if (title) {
-            len += snprintf(buf + len, sizeof(buf) - len, "\r\n%s", panel_bg);
-            if (len < 0 || len >= (int)sizeof(buf))
-                return NULL;
-        } else {
-            len += snprintf(buf + len, sizeof(buf) - len, "%s", panel_bg);
-            if (len < 0 || len >= (int)sizeof(buf))
-                return NULL;
-        }
-        len += snprintf(buf + len, sizeof(buf) - len,
-                        "\x1b[38;2;190;190;198m%s\x1b[39m", body);
-        if (len < 0 || len >= (int)sizeof(buf))
+        int n = snprintf(buf + len, cap - (size_t)len, title ? body_sep : "%s", panel_bg);
+        if (n < 0 || (size_t)n >= cap - (size_t)len) {
+            free(buf);
             return NULL;
+        }
+        len += n;
+        n = snprintf(buf + len, cap - (size_t)len, body_fmt, body);
+        if (n < 0 || (size_t)n >= cap - (size_t)len) {
+            free(buf);
+            return NULL;
+        }
+        len += n;
     }
 
-    return len > 0 ? strdup(buf) : NULL;
+    return strdup(buf);
 }
 
 // Build terminal for a panel slot by rendering to texture
@@ -1806,17 +1875,94 @@ static SDL_Texture *make_close_x_texture(SDL_Renderer *r, int size)
     return tex;
 }
 
-// Forward declaration
-static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
-                           int rows, int cols, bool cursor_visible, int scroll_offset);
+// Draw the active panel layer — background rects, accent stripes, pre-rendered
+// content textures and close buttons — onto whatever target is currently
+// bound. Called from inside render_scene's linear pass (and its legacy sRGB
+// fallback branch uses the same helper through the bound target), so panel
+// chrome composites in the same light space as the terminal scene instead of
+// being blitted over the encoded frame. Draw colors are linearized by SDL on
+// the linear target; the content textures are sRGB-encoded already, so the
+// frame's single blit-out re-encode covers them exactly.
+static void render_panels_into_linear(RendererSdl3Data *data)
+{
+    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
+        PanelState *ps = &data->panels.panels[i];
+        PanelRender *pr = &data->panel_renders[i];
+        if (!ps->active || !pr->tex)
+            continue;
 
-// Build terminal and texture for a panel slot based on PanelState
+        // Panel background rect
+        SDL_FRect bg_rect = { (float)ps->px, (float)ps->py, (float)ps->pw, (float)ps->ph };
+        SDL_SetRenderDrawColor(data->renderer, 38, 38, 44, 255);
+        SDL_RenderFillRect(data->renderer, &bg_rect);
+
+        // Accent stripe (if enabled)
+        if (panel_show_accent(ps->flags)) {
+            uint8_t ar, ag, ab;
+            switch (ps->level) {
+            case PORTTY_NOTIFY_ERROR:
+                ar = 235; /* Sriracha */
+                ag = 66;
+                ab = 104;
+                break;
+            case PORTTY_NOTIFY_WARNING:
+                ar = 245; /* Mustard */
+                ag = 239;
+                ab = 52;
+                break;
+            default:
+                ar = 71; /* Thunder */
+                ag = 118;
+                ab = 255;
+                break;
+            }
+            int accent_px = panel_accent_px(ps->px, data->cell_width);
+            int accent_w = panel_accent_w(data->cell_width);
+            SDL_FRect accent_rect = { (float)accent_px, (float)ps->py,
+                                      (float)accent_w, (float)ps->ph };
+            SDL_SetRenderDrawColor(data->renderer, ar, ag, ab, 255);
+            SDL_RenderFillRect(data->renderer, &accent_rect);
+        }
+
+        // Panel content texture at the offset position
+        int text_x = panel_term_px(ps->px, data->cell_width, panel_show_accent(ps->flags));
+        int text_y = panel_term_py(ps->py, data->cell_height);
+        SDL_FRect tex_dst = { (float)text_x, (float)text_y, (float)pr->w, (float)pr->h };
+        SDL_RenderTexture(data->renderer, pr->tex, NULL, &tex_dst);
+
+        // Close button (if enabled)
+        if (panel_show_close(ps->flags) && ps->close_size > 0) {
+            SDL_Texture *close_tex = make_close_x_texture(data->renderer, ps->close_size);
+            if (close_tex) {
+                uint8_t lum = ps->close_hover ? 245 : 170;
+                SDL_SetTextureColorMod(close_tex, lum, lum, lum);
+                SDL_FRect close_dst = { (float)ps->close_px,
+                                        (float)ps->close_py,
+                                        (float)ps->close_size, (float)ps->close_size };
+                SDL_RenderTexture(data->renderer, close_tex, NULL, &close_dst);
+                SDL_DestroyTexture(close_tex);
+            }
+        }
+    }
+}
+
+// Build terminal and content texture for a panel slot based on PanelState.
+// The embedded terminal is sized via embedded_term_ensure (recreated when the
+// panel's grid size changes — one correct size check owning the terminal), and
+// the content texture is recreated alongside it when its pixel size changes —
+// the second half of the same size check that used to be an always-false
+// condition, so a reused slot (e.g. the link-hint pill across different-length
+// URLs) now gets a texture matching the new panel size.
+// The content itself is rendered through render_scene — the one sanctioned,
+// gamma-correct path — so panel text composites in linear light exactly like
+// the main terminal instead of blending coverage in sRGB (the "thin font" bug).
 static void build_panel_terminal(RendererSdl3Data *data, int slot)
 {
     if (slot < 0 || slot >= PORTTY_PANEL_MAX)
         return;
 
     PanelState *ps = &data->panels.panels[slot];
+    PanelRender *pr = &data->panel_renders[slot];
 
     if (!ps->active || !data->font || data->cell_width <= 0 || data->cell_height <= 0 ||
         !font_has_style(data->font, FONT_STYLE_NORMAL))
@@ -1832,71 +1978,42 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
     int term_w = term_cols * data->cell_width;
     int term_h = term_rows * data->cell_height;
 
-    // Check if terminal needs recreation (wrong size or doesn't exist)
-    int existing_cols = 0, existing_rows = 0;
-    if (data->panel_terms[slot]) {
-        terminal_get_dimensions(data->panel_terms[slot], &existing_rows, &existing_cols);
-    }
-
-    if (!data->panel_terms[slot] || existing_cols != term_cols || existing_rows != term_rows) {
-        // Destroy old terminal if it exists
-        if (data->panel_terms[slot]) {
-            terminal_destroy(data->panel_terms[slot]);
-            free(data->panel_terms[slot]);
-            data->panel_terms[slot] = NULL;
-        }
-        // Create new terminal with correct dimensions
-        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
-        cfg.cols = term_cols;
-        cfg.rows = term_rows;
-        cfg.cell_w_px = data->cell_width;
-        cfg.cell_h_px = data->cell_height;
-        data->panel_terms[slot] = term_cfr_new(&cfg);
-    }
-    if (!data->panel_terms[slot])
+    // Ensure the embedded terminal exists at exactly the requested grid size
+    // (recreated on mismatch; content is re-fed below either way).
+    if (!embedded_term_ensure(&pr->et, term_cols, term_rows,
+                              data->cell_width, data->cell_height))
         return;
 
-    // Build ANSI content and feed to terminal
+    // Feed ANSI content (bg color, bold title, body)
     char *ansi = rend_sdl3_panel_build_ansi(ps->title, ps->body);
-    if (ansi) {
-        terminal_process_input(data->panel_terms[slot], ansi, strlen(ansi));
-        terminal_flush_damage(data->panel_terms[slot]);
-        free(ansi);
-    }
-
-    // Create or reuse texture
-    if (!data->panel_textures[slot] ||
-        (data->panel_textures[slot] &&
-         (SDL_GetTextureSize(data->panel_textures[slot], NULL, NULL), false))) {
-        if (data->panel_textures[slot])
-            SDL_DestroyTexture(data->panel_textures[slot]);
-        data->panel_textures[slot] = SDL_CreateTexture(
-            data->renderer, SDL_PIXELFORMAT_RGBA32,
-            SDL_TEXTUREACCESS_TARGET, term_w, term_h);
-    }
-    if (!data->panel_textures[slot])
+    if (!ansi)
         return;
+    embedded_term_feed(&pr->et, ansi);
+    free(ansi);
 
-    SDL_SetTextureBlendMode(data->panel_textures[slot], SDL_BLENDMODE_BLEND);
+    // Ensure the content texture exists at exactly the terminal's pixel size
+    if (pr->tex && (pr->w != term_w || pr->h != term_h)) {
+        SDL_DestroyTexture(pr->tex);
+        pr->tex = NULL;
+    }
+    if (!pr->tex) {
+        pr->tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                    SDL_TEXTUREACCESS_TARGET, term_w, term_h);
+        pr->w = term_w;
+        pr->h = term_h;
+    }
+    if (!pr->tex)
+        return;
+    SDL_SetTextureBlendMode(pr->tex, SDL_BLENDMODE_NONE);
 
-    // First, populate atlas with panel glyphs (may be different from main terminal)
-    int term_r, term_c;
-    terminal_get_dimensions(data->panel_terms[slot], &term_r, &term_c);
-    populate_atlas(data, data->panel_terms[slot], term_r, term_c, false, 0);
+    // First, populate the atlas with panel glyphs (may differ from the main
+    // terminal's; panel build runs after the main atlas work is complete).
+    populate_atlas(data, pr->et.term, term_rows, term_cols, false, 0);
 
-    // Save current render target
-    SDL_Texture *prev_target = SDL_GetRenderTarget(data->renderer);
-
-    // Render panel terminal to texture
-    SDL_SetRenderTarget(data->renderer, data->panel_textures[slot]);
-    SDL_SetRenderDrawColor(data->renderer, 38, 38, 44, 255);
-    SDL_RenderClear(data->renderer);
-
-    // Render terminal cells to the texture
-    render_visible_cells(data, data->panel_terms[slot], term_r, term_c, false, false, 0);
-
-    // Restore render target
-    SDL_SetRenderTarget(data->renderer, prev_target);
+    // Render the panel content through the one sanctioned gamma-correct path.
+    // No panel chrome layer inside the content texture — the chrome is drawn
+    // by render_panels_into_linear as part of the frame.
+    render_scene(data, pr->et.term, term_rows, term_cols, false, false, 0, false, pr->tex);
 }
 
 // Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
@@ -1966,11 +2083,11 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
 
     bool evicted = populate_atlas(data, term, display_rows, display_cols, cursor_visible, data->scroll.scroll_offset);
 
-    // Draw the scene gamma-correct (linear-light) and draw sixel images.
-    draw_scene_linear(data, term, display_rows, display_cols, cursor_visible, true);
-
-    // Build textures for dirty panels (after main terminal atlas work is complete)
-    // Also rebuild if atlas eviction occurred - panel glyphs may have been evicted.
+    // Build textures for dirty panels BEFORE the scene pass: panel content
+    // builds composite into the shared grow-only linear target, which the scene
+    // pass below overwrites for its own frame. Panel glyphs also share the
+    // atlas with the main terminal (build after its atlas work; also rebuild
+    // when atlas eviction occurred — panel glyphs may have been evicted).
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
         PanelState *ps = &data->panels.panels[i];
         if (ps->active && (ps->dirty || evicted)) {
@@ -1979,67 +2096,10 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
         }
     }
 
-    // Draw active panels (sRGB UI chrome over terminal frame)
-    for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
-        PanelState *ps = &data->panels.panels[i];
-        if (!ps->active || !data->panel_textures[i])
-            continue;
-
-        // Draw panel background rect
-        SDL_FRect bg_rect = { (float)ps->px, (float)ps->py, (float)ps->pw, (float)ps->ph };
-        SDL_SetRenderDrawColor(data->renderer, 38, 38, 44, 255);
-        SDL_RenderFillRect(data->renderer, &bg_rect);
-
-        // Draw accent stripe (if enabled)
-        if (panel_show_accent(ps->flags)) {
-            uint8_t ar, ag, ab;
-            switch (ps->level) {
-            case PORTTY_NOTIFY_ERROR:
-                ar = 235; /* Sriracha */
-                ag = 66;
-                ab = 104;
-                break;
-            case PORTTY_NOTIFY_WARNING:
-                ar = 245; /* Mustard */
-                ag = 239;
-                ab = 52;
-                break;
-            default:
-                ar = 71; /* Thunder */
-                ag = 118;
-                ab = 255;
-                break;
-            }
-            int accent_px = panel_accent_px(ps->px, data->cell_width);
-            int accent_w = panel_accent_w(data->cell_width);
-            SDL_FRect accent_rect = { (float)accent_px, (float)ps->py,
-                                      (float)accent_w, (float)ps->ph };
-            SDL_SetRenderDrawColor(data->renderer, ar, ag, ab, 255);
-            SDL_RenderFillRect(data->renderer, &accent_rect);
-        }
-
-        // Draw panel text texture at offset position
-        int text_x = panel_term_px(ps->px, data->cell_width, panel_show_accent(ps->flags));
-        int text_y = panel_term_py(ps->py, data->cell_height);
-        float term_w, term_h;
-        SDL_GetTextureSize(data->panel_textures[i], &term_w, &term_h);
-        SDL_FRect tex_dst = { (float)text_x, (float)text_y, term_w, term_h };
-        SDL_RenderTexture(data->renderer, data->panel_textures[i], NULL, &tex_dst);
-
-        // Close button (if enabled)
-        if (panel_show_close(ps->flags) && ps->close_size > 0) {
-            SDL_Texture *close_tex = make_close_x_texture(data->renderer, ps->close_size);
-            if (close_tex) {
-                uint8_t lum = ps->close_hover ? 245 : 170;
-                SDL_SetTextureColorMod(close_tex, lum, lum, lum);
-                SDL_FRect close_dst = { (float)ps->close_px,
-                                        (float)ps->close_py,
-                                        (float)ps->close_size, (float)ps->close_size };
-                SDL_RenderTexture(data->renderer, close_tex, NULL, &close_dst);
-                SDL_DestroyTexture(close_tex);
-            }
-        }
-    }
+    // Draw the scene gamma-correct (linear-light), with the panel chrome layer
+    // composited into the same linear frame, and draw sixel images.
+    render_scene(data, term, display_rows, display_cols, cursor_visible, true,
+                 data->scroll.scroll_offset, true, NULL);
 }
 
 void rend_sdl3_present(RendererSdl3Data *data)
@@ -2315,8 +2375,9 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     populate_atlas(data, term, render_rows, render_cols, false, data->scroll.scroll_offset);
 
     // Draw the scene gamma-correct (linear-light) into `target`
-    // so the PNG matches on-screen output, including sixel images.
-    draw_scene_linear(data, term, render_rows, render_cols, false, true);
+    // so the PNG matches on-screen output, including sixel images. Panels
+    // are window chrome and are not part of a PNG export.
+    render_scene(data, term, render_rows, render_cols, false, true, 0, false, NULL);
 
     data->width = saved_w;
     data->height = saved_h;

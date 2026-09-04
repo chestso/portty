@@ -160,7 +160,7 @@ test_rend_common_LDADD = -lm
 # coffer for the full handler implementations.
 test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
     ../src/portty_app.c ../src/term.c ../src/term_cfr.c ../src/base64.c \
-    ../src/path_compat.c ../src/pager.c ../src/rend_common.c \
+    ../src/path_compat.c ../src/pager.c ../src/embedded_term.c ../src/rend_common.c \
     ../src/portty_conf.c ../src/diag.c ../src/font.c font_stubs.c
 if HOST_WINDOWS
 test_portty_app_SOURCES += ../src/pty_w32.c

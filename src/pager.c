@@ -13,9 +13,9 @@
 // lookups as the main view, but target the overlay terminal.
 
 #include "pager.h"
+#include "embedded_term.h"
 #include "portty_app.h"
 #include "portty_panel.h"
-#include "term_cfr.h"
 
 #include <coffer/coffer.h>
 #include <stdio.h>
@@ -29,7 +29,7 @@ struct Pager
 {
     PorttyBackend *backend; // unified backend; transitional split fields inside
     PorttyApp *app;         // transitional access to rend/plat
-    TerminalBackend *term;  // overlay terminal; NULL when closed
+    EmbeddedTerm et;        // overlay terminal; torn down when closed
     char *text;             // retained source document (for rebuild on resize)
     int cols, rows;
     uint16_t hovered; // last hovered hyperlink id (debounces cursor changes)
@@ -63,25 +63,7 @@ void pager_destroy(Pager *p)
 
 bool pager_active(const Pager *p)
 {
-    return p && p->term != NULL;
-}
-
-// Feed the document into the VT, translating bare LF to CRLF so lines start at
-// column 0 (a VT treats LF as line-feed only).
-static void feed_text(TerminalBackend *term, const char *s)
-{
-    const char *run = s;
-    for (const char *c = s; *c; c++) {
-        if (*c == '\n' && (c == s || c[-1] != '\r')) {
-            if (c > run)
-                terminal_process_input(term, run, (size_t)(c - run));
-            terminal_process_input(term, "\r\n", 2);
-            run = c + 1;
-        }
-    }
-    size_t tail = strlen(run);
-    if (tail)
-        terminal_process_input(term, run, tail);
+    return p && embedded_term_active(&p->et);
 }
 
 // Build the overlay terminal from `text` at the given size and hand it to the
@@ -90,40 +72,32 @@ static bool overlay_build(Pager *p, const char *text, int cols, int rows)
 {
     int cell_w = 10, cell_h = 20;
     p->backend->get_cell_size(p->backend, &cell_w, &cell_h);
-    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
-    cfg.cols = cols;
-    cfg.rows = rows;
-    cfg.cell_w_px = cell_w;
-    cfg.cell_h_px = cell_h;
-    TerminalBackend *t = term_cfr_new(&cfg);
-    if (!t)
+    if (!embedded_term_init(&p->et, cols, rows, cell_w, cell_h))
         return false;
 
-    // Scrollback must retain the whole document above the fold.
+    // Scrollback must retain the whole document above the fold — pager
+    // policy, not EmbeddedTerm policy.
     int lines = 1;
     for (const char *c = text; *c; c++)
         if (*c == '\n')
             lines++;
-    terminal_set_scrollback_size(t, lines + rows + 16);
+    terminal_set_scrollback_size(p->et.term, lines + rows + 16);
 
-    feed_text(t, text);
+    embedded_term_feed(&p->et, text);
 
-    p->term = t;
     p->cols = cols;
     p->rows = rows;
     p->hovered = 0;
-    p->backend->set_overlay(p->backend, t); // positions the shared view at the top
+    p->backend->set_overlay(p->backend, p->et.term); // positions the shared view at the top
     return true;
 }
 
 static void overlay_teardown(Pager *p)
 {
-    if (!p->term)
+    if (!p->et.term)
         return;
     p->backend->clear_overlay(p->backend); // restore host scroll view, stop drawing overlay
-    terminal_destroy(p->term);
-    free(p->term); // heap instance from term_cfr_new
-    p->term = NULL;
+    embedded_term_destroy(&p->et);
 }
 
 bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
@@ -131,7 +105,7 @@ bool pager_open(Pager *p, const char *ansi_text, int cols, int rows)
     if (!p || !ansi_text || cols <= 0 || rows <= 0)
         return false;
 
-    bool was_open = (p->term != NULL);
+    bool was_open = (p->et.term != NULL);
 
     char *copy = strdup(ansi_text);
     if (!copy)
@@ -260,7 +234,7 @@ bool pager_key(Pager *p, int key, int mod, uint32_t codepoint)
         break;
     }
     if (delta != 0)
-        p->backend->scroll(p->backend, p->term, delta);
+        p->backend->scroll(p->backend, p->et.term, delta);
 
     // Modal: consume every key so nothing leaks to the shell.
     return true;
@@ -273,13 +247,13 @@ bool pager_scroll(Pager *p, int delta)
 
     // Hide link hint panel on scroll — the hovered link may have moved.
     if (p->hovered != 0) {
-        terminal_set_hovered_hyperlink(p->term, 0);
+        terminal_set_hovered_hyperlink(p->et.term, 0);
         p->backend->panel_hide(p->backend, PANEL_ID_LINK_HINT);
         p->backend->set_cursor(p->backend, PORTTY_CURSOR_TEXT);
         p->hovered = 0;
     }
 
-    p->backend->scroll(p->backend, p->term, delta);
+    p->backend->scroll(p->backend, p->et.term, delta);
     return true;
 }
 
@@ -295,7 +269,7 @@ static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
     int display_row = py / ch;
 
     int rows, cols;
-    terminal_get_dimensions(p->term, &rows, &cols);
+    terminal_get_dimensions(p->et.term, &rows, &cols);
     if (display_row < 0 || display_row >= rows || display_col < 0 || display_col >= cols)
         return false;
 
@@ -304,7 +278,7 @@ static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
     int unified_row =
         (scrollback_row >= 0) ? -(scrollback_row + 1) : (display_row - scroll_offset);
 
-    int vt_col = terminal_vis_col_to_vt_col(p->term, unified_row, display_col);
+    int vt_col = terminal_vis_col_to_vt_col(p->et.term, unified_row, display_col);
     if (vt_col < 0)
         vt_col = 0;
     if (vt_col >= cols)
@@ -320,8 +294,8 @@ static uint16_t link_at(Pager *p, int unified_row, int vt_col)
 {
     TerminalCell cell;
     int rc = (unified_row >= 0)
-                 ? terminal_get_cell(p->term, unified_row, vt_col, &cell)
-                 : terminal_get_scrollback_cell(p->term, -(unified_row + 1), vt_col, &cell);
+                 ? terminal_get_cell(p->et.term, unified_row, vt_col, &cell)
+                 : terminal_get_scrollback_cell(p->et.term, -(unified_row + 1), vt_col, &cell);
     if (rc < 0)
         return 0;
     return cell.hyperlink_id;
@@ -329,15 +303,15 @@ static uint16_t link_at(Pager *p, int unified_row, int vt_col)
 
 static void copy_selection(Pager *p)
 {
-    if (!terminal_selection_active(p->term))
+    if (!terminal_selection_active(p->et.term))
         return;
-    char *text = terminal_selection_get_text(p->term);
+    char *text = terminal_selection_get_text(p->et.term);
     if (text) {
         p->backend->clipboard_set(p->backend, text);
         free(text);
     }
     // Clear the highlight after copying, matching the main view.
-    terminal_selection_clear(p->term);
+    terminal_selection_clear(p->et.term);
 }
 
 bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, int clicks,
@@ -357,12 +331,12 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     // Hover feedback (link pointer vs text cursor) + the real-URI hint pill,
     // positioned via the pixel-Y anchor like the main terminal.
     if (hid != p->hovered) {
-        terminal_set_hovered_hyperlink(p->term, hid);
+        terminal_set_hovered_hyperlink(p->et.term, hid);
         p->backend->set_cursor(p->backend,
                                hid != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
         if (hid != 0) {
             char url[4096];
-            size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
+            size_t n = terminal_cell_get_hyperlink(p->et.term, row, col, url, sizeof(url));
             if (n > 0 && n < sizeof(url)) {
                 int url_cells = cfr_utf8_display_width(url, n);
                 int panel_cols = url_cells + PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
@@ -408,7 +382,7 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     // Ctrl + left-click on a link opens the URL (takes precedence over selection).
     if (hid != 0 && button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
         char url[4096];
-        size_t n = terminal_cell_get_hyperlink(p->term, row, col, url, sizeof(url));
+        size_t n = terminal_cell_get_hyperlink(p->et.term, row, col, url, sizeof(url));
         if (n > 0 && terminal_hyperlink_is_safe(url)) {
             char err[256];
             if (!p->backend->open_url(p->backend, url, err, sizeof(err)))
@@ -425,13 +399,13 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     if (button == 1 && pressed && in_grid) {
         if (clicks >= 3) {
             p->drag_pending = false;
-            terminal_selection_start(p->term, row, col, TERM_SELECT_LINE);
+            terminal_selection_start(p->et.term, row, col, TERM_SELECT_LINE);
         } else if (clicks == 2) {
             p->drag_pending = false;
-            terminal_selection_start(p->term, row, col, TERM_SELECT_WORD);
-        } else if (terminal_selection_active(p->term)) {
+            terminal_selection_start(p->et.term, row, col, TERM_SELECT_WORD);
+        } else if (terminal_selection_active(p->et.term)) {
             p->drag_pending = false;
-            terminal_selection_clear(p->term);
+            terminal_selection_clear(p->et.term);
         } else {
             p->drag_pending = true;
             p->drag_row = row;
@@ -452,10 +426,10 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     if (button == 0 && pressed && in_grid) {
         if (p->drag_pending) {
             p->drag_pending = false;
-            terminal_selection_start(p->term, p->drag_row, p->drag_col, TERM_SELECT_CHAR);
-            terminal_selection_update(p->term, row, col);
-        } else if (terminal_selection_active(p->term)) {
-            terminal_selection_update(p->term, row, col);
+            terminal_selection_start(p->et.term, p->drag_row, p->drag_col, TERM_SELECT_CHAR);
+            terminal_selection_update(p->et.term, row, col);
+        } else if (terminal_selection_active(p->et.term)) {
+            terminal_selection_update(p->et.term, row, col);
         }
         return true;
     }
