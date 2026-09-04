@@ -151,29 +151,22 @@ static int expand_escapes(char *str, int len)
  * Sets *out_len to the number of bytes. */
 static char *parse_hex_bytes(const char *args, int *out_len)
 {
-    /* Count tokens to estimate buffer size */
-    int count = 0;
-    const char *p = args;
-    while (*p) {
-        while (*p && isspace((unsigned char)*p))
-            p++;
-        if (*p)
-            count++;
-        while (*p && !isspace((unsigned char)*p))
-            p++;
+    /* Size the buffer from the number of hex digit pairs, not the
+     * whitespace-separated token count: a single long token like
+     * "1b5d31..." holds many pairs and must get a byte each. */
+    size_t cap = 0;
+    for (const char *p = args; *p; p++) {
+        if (isxdigit((unsigned char)*p))
+            cap++;
     }
+    cap = cap / 2 + 1; /* +1 for the NUL terminator */
 
-    if (count == 0) {
-        *out_len = 0;
-        return calloc(1, 1); /* empty string */
-    }
-
-    char *buf = malloc((size_t)count + 1);
+    char *buf = malloc(cap);
     if (!buf)
         return NULL;
 
     int idx = 0;
-    p = args;
+    const char *p = args;
     while (*p) {
         while (*p && isspace((unsigned char)*p))
             p++;
@@ -1300,6 +1293,18 @@ void portty_script_step(PorttyScript *script,
                      i, (unsigned long long)imgs[i].id,
                      imgs[i].row, imgs[i].col,
                      imgs[i].width_px, imgs[i].height_px);
+            }
+            int pl_count = 0;
+            const CfrImagePlacement *pls =
+                terminal_get_image_placements(ctx->term, &pl_count);
+            vlog("dump-sixel: %d placement(s)\n", pl_count);
+            for (int i = 0; i < pl_count; i++) {
+                vlog("  [%d] id=%llu image=%llu row=%d col=%d %dx%d cells "
+                     "src=%d,%d %dx%d z=%d\n",
+                     i, (unsigned long long)pls[i].id,
+                     (unsigned long long)pls[i].image_id, pls[i].row,
+                     pls[i].col, pls[i].rows, pls[i].cols, pls[i].src_x,
+                     pls[i].src_y, pls[i].src_w, pls[i].src_h, pls[i].z_index);
             }
         } else {
             vlog("dump-sixel: no terminal\n");

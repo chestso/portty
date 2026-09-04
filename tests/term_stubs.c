@@ -75,3 +75,11 @@ const CfrImage *terminal_get_images(TerminalBackend *term, int *count)
         *count = 0;
     return NULL;
 }
+
+const CfrImagePlacement *terminal_get_image_placements(TerminalBackend *term, int *count)
+{
+    (void)term;
+    if (count)
+        *count = 0;
+    return NULL;
+}
