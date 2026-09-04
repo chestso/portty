@@ -553,6 +553,10 @@ Thomas Christensen
 
 The default 16-color ANSI palette is [Dracula](https://draculatheme.com) (per the [official spec](https://draculatheme.com/spec)), provided by coffer. The default terminal background is pitch-black (`#000000`), separate from the palette's AnsiBlack.
 
+Single-header third-party libraries, fetched automatically at configure time:
+
+- [QOI](https://github.com/phoboslab/qoi) — "Quite OK Image" format by Dominic Szablewski (MIT). Used by the frame recorder's QOI writer; the header is downloaded to `third_party/qoi/` by `scripts/fetch-qoi.sh`, pinned to a specific commit since upstream has no version tags.
+
 ## License
 
 MIT — see [COPYING](COPYING) for details.
