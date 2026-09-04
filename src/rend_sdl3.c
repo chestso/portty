@@ -1717,7 +1717,7 @@ static void linear_blend_selfcheck(RendererSdl3Data *data)
 static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
                          int display_rows, int display_cols,
                          bool cursor_visible, bool with_sixel, int scroll_offset,
-                         bool with_panels, SDL_Texture *dst)
+                         bool with_panels, SDL_Color clear_color, SDL_Texture *dst)
 {
     SDL_Texture *prev = SDL_GetRenderTarget(data->renderer);
     SDL_Texture *out = dst ? dst : prev; // sRGB destination being encoded onto
@@ -1751,8 +1751,8 @@ static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
         SDL_SetRenderTarget(data->renderer, dst);
     }
 
-    SDL_SetRenderDrawColor(data->renderer, data->colors.bg_r, data->colors.bg_g,
-                           data->colors.bg_b, data->colors.bg_a);
+    SDL_SetRenderDrawColor(data->renderer, clear_color.r, clear_color.g,
+                           clear_color.b, clear_color.a);
     SDL_RenderClear(data->renderer);
     render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, scroll_offset);
     render_lottie_layer(data, term, 1); /* background lottie */
@@ -2042,7 +2042,9 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
     // Render the panel content through the one sanctioned gamma-correct path.
     // No panel chrome layer inside the content texture — the chrome is drawn
     // by render_panels_into_linear as part of the frame.
-    render_scene(data, pr->et.term, term_rows, term_cols, false, false, 0, false, pr->tex);
+    SDL_Color panel_bg = { 38, 38, 44, 255 };
+    render_scene(data, pr->et.term, term_rows, term_cols, false, false, 0, false,
+                 panel_bg, pr->tex);
 }
 
 // Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
@@ -2127,8 +2129,9 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
 
     // Draw the scene gamma-correct (linear-light), with the panel chrome layer
     // composited into the same linear frame, and draw sixel images.
+    SDL_Color bg = { data->colors.bg_r, data->colors.bg_g, data->colors.bg_b, data->colors.bg_a };
     render_scene(data, term, display_rows, display_cols, cursor_visible, true,
-                 data->scroll.scroll_offset, true, NULL);
+                 data->scroll.scroll_offset, true, bg, NULL);
 }
 
 void rend_sdl3_present(RendererSdl3Data *data)
@@ -2406,7 +2409,8 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     // Draw the scene gamma-correct (linear-light) into `target`
     // so the PNG matches on-screen output, including sixel images. Panels
     // are window chrome and are not part of a PNG export.
-    render_scene(data, term, render_rows, render_cols, false, true, 0, false, NULL);
+    SDL_Color bg = { data->colors.bg_r, data->colors.bg_g, data->colors.bg_b, data->colors.bg_a };
+    render_scene(data, term, render_rows, render_cols, false, true, 0, false, bg, NULL);
 
     data->width = saved_w;
     data->height = saved_h;
