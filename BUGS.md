@@ -21,7 +21,7 @@ The event-loop mitigations introduced in portty v0.5.5 remain in place, since th
 - No `SDL_RenderPresent` in the resize event handler — the bottom-of-loop render handles it
 - `SDL_SetRenderVSync(0)` so presents never block on the compositor's frame callback
 
-## Kitty (and likely iTerm2/sixel) graphics don't use the full available screen space
+## Resolved: Kitty (and likely iTerm2/sixel) graphics don't use the full available screen space
 
 Running:
 
@@ -29,4 +29,8 @@ Running:
 chafa --clear --align mid,mid -d 5 -- *.jpg
 ```
 
-leaves 2 lines of blank to the bottom of the screen.
+left 2 lines of blank at the bottom of the screen, while kitty left only 1.
+
+The engine moved the cursor down by the image's full row count after placement, instead of kitty's `rows - 1` (plus a column wrap at the right edge). chafa's epilogue newline then hit the bottom margin and scrolled the grid, shifting the image up: the top row clipped off-screen and an extra blank row appeared at the bottom. Fixed in coffer (kitty cursor-advance rule, `c=`/`r=` parsed as display size, `C=1` honored); `chafa --clear --align mid,mid` now renders pixel-identical to kitty.
+
+The single remaining blank row is chafa policy, not a terminal gap: `--margin-bottom` defaults to 1 ("safety margin… prevent images from scrolling out", per `chafa --help`). Use `--margin-bottom=0` to have chafa request the full grid; the image height is still aspect-limited unless `--stretch` is also given.
