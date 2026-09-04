@@ -115,6 +115,7 @@ int rend_sdl3_get_scroll_offset(RendererSdl3Data *data);
 void rend_sdl3_set_overlay(RendererSdl3Data *data, TerminalBackend *overlay);
 void rend_sdl3_clear_overlay(RendererSdl3Data *data);
 bool rend_sdl3_has_overlay(RendererSdl3Data *data);
+TerminalBackend *rend_sdl3_get_overlay(RendererSdl3Data *data);
 void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int cols, int rows,
                           const char *title, const char *body, PorttyNotifyLevel level,
                           unsigned int flags);

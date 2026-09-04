@@ -426,6 +426,16 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "renderdump") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_RENDERDUMP;
+        strip_quotes(args);
+        snprintf(cmd->path, sizeof(cmd->path), "%s", args);
+        return true;
+    }
+
     if (strcmp(line, "dumprow") == 0) {
         ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -1096,6 +1106,18 @@ void portty_script_step(PorttyScript *script,
             snprintf(ctx->screendump_path_buf, 512, "%s", cmd->path);
         } else {
             fprintf(stderr, "screendump: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_RENDERDUMP:
+    {
+        if (ctx->pending_renderdump && ctx->renderdump_path_buf) {
+            *ctx->pending_renderdump = true;
+            snprintf(ctx->renderdump_path_buf, 512, "%s", cmd->path);
+        } else {
+            fprintf(stderr, "renderdump: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

@@ -41,6 +41,7 @@ typedef enum
     SCRIPT_CMD_ASSERT_HOVER,
     SCRIPT_CMD_ASSERT_NO_HOVER,
     SCRIPT_CMD_DUMP_SIXEL,
+    SCRIPT_CMD_RENDERDUMP,
 } ScriptCmdType;
 
 typedef struct
@@ -142,6 +143,11 @@ typedef struct
     /* Deferred action flags — backend points these at its own fields: */
     bool *pending_screendump;
     char *screendump_path_buf; /* backend's destination buffer */
+    /* Same pattern for renderdump: offscene render of the terminal scene
+     * (content-trimmed, no chrome), executed in the backend's deferred
+     * command phase where GL access is safe. */
+    bool *pending_renderdump;
+    char *renderdump_path_buf; /* backend's destination buffer */
     /* Mouse move callback (NULL if unsupported) */
     void (*mousemove_fn)(void *app, int x, int y);
     void *mousemove_user_data;

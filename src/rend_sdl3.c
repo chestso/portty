@@ -2242,6 +2242,13 @@ bool rend_sdl3_has_overlay(RendererSdl3Data *data)
     return rend_has_overlay(&data->scroll);
 }
 
+TerminalBackend *rend_sdl3_get_overlay(RendererSdl3Data *data)
+{
+    if (!data)
+        return NULL;
+    return data->scroll.overlay;
+}
+
 void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int cols, int rows,
                           const char *title, const char *body, PorttyNotifyLevel level,
                           unsigned int flags)
