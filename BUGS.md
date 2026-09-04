@@ -30,7 +30,3 @@ chafa --clear --align mid,mid -d 5 -- *.jpg
 ```
 
 leaves 2 lines of blank to the bottom of the screen.
-
-## Panels seem to render fonts without linear light
-
-When hovering a link, the rendered font seems thin.

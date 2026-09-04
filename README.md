@@ -27,7 +27,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 **Rendering: portty** (SDL3 GPU backend)
 
 - Damage-driven rendering — frame repainted only when terminal content, cursor, selection, or scrollback view changes; idle terminal does no rendering work
-- Gamma-correct text rendering — antialiased glyph coverage composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), giving physically-correct weight like kitty. Tunable with `text_composition_strategy` config key (luminance-aware fragment shader on GPU renderer)
+- Gamma-correct text rendering — antialiased glyph coverage composited in **linear light** via SDL's GPU renderer (Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS), giving physically-correct weight like kitty. All terminal surfaces go through one render path: the main view, the pager overlay, and notification panels (text and chrome) composite in the same linear pass with a single sRGB encode. Tunable with `text_composition_strategy` config key (luminance-aware fragment shader on GPU renderer)
 - Text shaping with HarfBuzz
 - Font rasterization with FreeType
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
@@ -100,6 +100,7 @@ build/src/portty --demo "Hello, world!"
 | `-s N` / `--scrollback N`   | Scrollback history lines (default: 1000, 0 to disable)          |
 | `-S FILE` / `--script FILE` | Run script FILE (see [Scripting](#scripting))                   |
 | `-W` / `--ambiguous-wide`   | Render ambiguous-width chars as 2 cells                         |
+| `-B` / `--borderless`       | Disable window decorations (title bar and borders)              |
 
 ### Keyboard Shortcuts
 
@@ -160,6 +161,7 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)                                                                                                  |
 | `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                                                                                                             |
 | `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)                                                                                                |
+| `renderdump <path>`                                                   | Render the terminal scene offscreen to a PNG file: fresh render pass, trimmed to content bounds, no panels/cursor; while the pager is open, dumps the pager's content     |
 | `dumprow <row>`                                                       | Print all cells in a terminal row                                                                                                                                         |
 | `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors                                                                                        |
 | `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                                                                                                            |
@@ -284,6 +286,8 @@ dumpgrid
 ### Mouse and hover commands
 
 `mousemove` simulates a mouse move to the given **physical** pixel coordinates. This is useful for testing hover states (such as OSC-8 hyperlink previews) without a real mouse or window server. Coordinates are in the same physical pixel space the app uses for cell math, so scale them by the content scale if testing on HiDPI displays.
+
+The synthetic mouse starts at (0,0). If the link occupies the top-left of the grid, a single move onto it may be a no-op state transition — move off the target first, then onto it.
 
 Hover an OSC-8 hyperlink to capture the hover preview:
 

@@ -108,3 +108,5 @@ src/term_colors.c	Portty-specific terminal color defaults sourced from coffer
 src/term_colors.h	Portty-specific terminal color defaults sourced from coffer
 src/timer.h	Poll-based event timer manager interface
 tests/test_selection_scroll.c	Selection scroll adjustment and damage-aware clearing tests
+src/embedded_term.c	Embedded terminal substrate for PTY-less coffer terminals
+src/embedded_term.h	Embedded terminal substrate interface

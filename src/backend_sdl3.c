@@ -185,6 +185,8 @@ typedef struct
     bool script_done;
     bool pending_screendump;
     char screendump_path[512];
+    bool pending_renderdump;
+    char renderdump_path[512];
     FrameRecorder *frame_recorder;
     TimerId record_timer;
     bool pending_record_frame;
@@ -1621,6 +1623,8 @@ static void sdl3_run(PorttyBackend *self)
                 .emit_user_data = d->app,
                 .pending_screendump = &d->pending_screendump,
                 .screendump_path_buf = d->screendump_path,
+                .pending_renderdump = &d->pending_renderdump,
+                .renderdump_path_buf = d->renderdump_path,
                 .mousemove_fn = sdl3_script_mousemove,
                 .mousemove_user_data = d,
                 .panel_fn = sdl3_script_panel,
@@ -2044,6 +2048,21 @@ static void sdl3_run(PorttyBackend *self)
         if (d->pending_screendump) {
             d->pending_screendump = false;
             sdl3_debug_screendump(d, d->screendump_path);
+        }
+
+        // === Debug script: post-render renderdump ===
+        // Offscene render of the terminal scene: content-trimmed,
+        // chrome-free, independent of whether a frame was presented
+        // (unlike screendump, which captures the presented backbuffer).
+        // While the pager overlay is active, dump the overlay's content —
+        // that is the terminal the script is interacting with.
+        if (d->pending_renderdump) {
+            d->pending_renderdump = false;
+            TerminalBackend *dump_term = term;
+            if (rend_sdl3_has_overlay(rend))
+                dump_term = rend_sdl3_get_overlay(rend);
+            if (sdl3_render_to_png(self, dump_term, d->renderdump_path) != 0)
+                fprintf(stderr, "ERROR: renderdump failed: %s\n", d->renderdump_path);
         }
 
         // === Debug script: post-render frame capture ===

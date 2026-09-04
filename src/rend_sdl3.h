@@ -9,6 +9,7 @@
 #define REND_SDL3_H
 
 #include "diag.h"
+#include "embedded_term.h"
 #include "font.h"
 #include "portty_backend.h"
 #include "portty_panel.h"
@@ -24,6 +25,16 @@
 
 #define IMAGE_CACHE_MAX  256
 #define LOTTIE_CACHE_MAX 64
+
+// Per-slot render state for an active notification panel: the embedded
+// terminal holding its content plus the linear float texture the content
+// was composited into. One size check owns both (panel_render_ensure).
+typedef struct PanelRender
+{
+    EmbeddedTerm et;  // embedded terminal: the panel's content
+    SDL_Texture *tex; // linear float target; NULL when unset
+    int w, h;         // pixel size of tex (single source of truth)
+} PanelRender;
 
 typedef struct RendererSdl3Data
 {
@@ -66,8 +77,7 @@ typedef struct RendererSdl3Data
     RendShaderState *glyph_shader;
 
     PanelManager panels;
-    TerminalBackend *panel_terms[PORTTY_PANEL_MAX];
-    SDL_Texture *panel_textures[PORTTY_PANEL_MAX];
+    PanelRender panel_renders[PORTTY_PANEL_MAX];
 
     struct
     {
@@ -105,6 +115,7 @@ int rend_sdl3_get_scroll_offset(RendererSdl3Data *data);
 void rend_sdl3_set_overlay(RendererSdl3Data *data, TerminalBackend *overlay);
 void rend_sdl3_clear_overlay(RendererSdl3Data *data);
 bool rend_sdl3_has_overlay(RendererSdl3Data *data);
+TerminalBackend *rend_sdl3_get_overlay(RendererSdl3Data *data);
 void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int cols, int rows,
                           const char *title, const char *body, PorttyNotifyLevel level,
                           unsigned int flags);

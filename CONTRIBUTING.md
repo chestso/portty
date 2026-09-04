@@ -53,6 +53,8 @@ portty uses a modular backend abstraction design:
 
 - **Terminal Backend**: Handles terminal emulation and screen state
   - Current implementation: coffer (`terminal_backend_cfr`) — external VT engine consumed via `pkg-config coffer`, bridged through `term_cfr.c` (parser, page-based grid, scrollback ring, reflow, charsets). DEC ANSI parser (Williams state machine), UAX #11 + #29 cluster widths, page-arena style/grapheme interning, scrollback page ring
+  - `EmbeddedTerm` (`embedded_term.c`) — shared owner of a second, PTY-less coffer terminal (create/resize/destroy/feed-ANSI): the substrate for the pager overlay and notification panels, which are separate components built on it
+  - `render_scene()` (`rend_sdl3.c`) — the single render path for every terminal surface (main view, pager overlay, PNG export, panel content); the legacy sRGB fallback lives inside it, so gamma correctness is structural rather than a per-caller convention. Panels and their chrome composite into the linear frame before the single sRGB encode at present
 
 - **Font Backend**: Handles font loading, shaping, and glyph rasterization
   - Current implementation: FreeType/HarfBuzz (`font_backend_ft`)
