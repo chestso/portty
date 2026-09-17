@@ -19,6 +19,7 @@
 
 float portty_text_gamma = 1.0f;
 float portty_text_contrast = 0.0f;
+float portty_dim_opacity = 0.6f;
 bool portty_notification_transparent = false;
 
 // Stub implementations for the backend functions called by the extracted

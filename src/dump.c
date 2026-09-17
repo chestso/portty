@@ -442,6 +442,8 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
             jk_float(out, &first, "text_gamma", (double)c->text_gamma);
         if (c->text_contrast >= 0.0f)
             jk_float(out, &first, "text_contrast", (double)c->text_contrast);
+        if (c->dim_opacity >= 0.0f)
+            jk_float(out, &first, "dim_opacity", (double)c->dim_opacity);
         if (c->dump_dir)
             jk_str(out, &first, "dump_dir", c->dump_dir);
         jclose(out, first, true);

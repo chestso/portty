@@ -643,17 +643,24 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     TerminalCell cell = *cell_in;
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
 
-    // Dim/faint (SGR 2): blend foreground toward background at 40% opacity,
-    // matching kitty's dim_opacity default. Works for both color-baked
-    // (emoji) and non-color-baked (text) glyph paths since the blended
-    // color flows into both the atlas color_key and SDL_SetTextureColorMod.
+    // Dim/faint (SGR 2): blend foreground toward background. The opacity is
+    // the `dim_opacity` config knob (default 0.6), so dim text stays legible
+    // instead of the more aggressive kitty 0.4 default. Works for both
+    // color-baked (emoji) and non-color-baked (text) glyph paths since the
+    // blended color flows into both the atlas color_key and
+    // SDL_SetTextureColorMod.
     if (cell.attrs.dim) {
         uint8_t bg_r = cell.bg.is_default ? 0 : cell.bg.r;
         uint8_t bg_g = cell.bg.is_default ? 0 : cell.bg.g;
         uint8_t bg_b = cell.bg.is_default ? 0 : cell.bg.b;
-        r = (Uint8)(r * 0.4f + bg_r * 0.6f);
-        g = (Uint8)(g * 0.4f + bg_g * 0.6f);
-        b = (Uint8)(b * 0.4f + bg_b * 0.6f);
+        float op = portty_dim_opacity;
+        if (op < 0.0f)
+            op = 0.0f;
+        if (op > 1.0f)
+            op = 1.0f;
+        r = (Uint8)(r * op + bg_r * (1.0f - op));
+        g = (Uint8)(g * op + bg_g * (1.0f - op));
+        b = (Uint8)(b * op + bg_b * (1.0f - op));
     }
 
     // Background perceptual luma (0..1) for the glyph-coverage shader's fg/bg

@@ -67,6 +67,7 @@ static void test_init_defaults(void)
     ASSERT_NULL(conf.word_chars);
     ASSERT_EQ(conf.scrollback, -1);
     ASSERT_EQ(conf.borderless, -1);
+    ASSERT_TRUE(conf.dim_opacity < 0.0f);
 
     portty_conf_free(&conf);
 }
@@ -161,6 +162,47 @@ static void test_parse_borderless(void)
     ASSERT_TRUE(portty_conf_load_path(&conf, path));
     ASSERT_EQ(conf.borderless, -1);
 
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+static void test_parse_dim_opacity(void)
+{
+    /* A fractional value in range is stored. */
+    char *path = write_tmp_conf("dim_opacity = 0.75\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.dim_opacity > 0.74f && conf.dim_opacity < 0.76f);
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    /* 0 is a valid value (fully dimmed). */
+    path = write_tmp_conf("dim_opacity = 0\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.dim_opacity == 0.0f);
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    /* Out of range stays unset, load still succeeds. */
+    path = write_tmp_conf("dim_opacity = 1.5\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.dim_opacity < 0.0f);
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    /* Non-numeric stays unset. */
+    path = write_tmp_conf("dim_opacity = banana\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.dim_opacity < 0.0f);
     portty_conf_free(&conf);
     cleanup_tmp(path);
 }
@@ -326,6 +368,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_parse_hinting);
     RUN_TEST(test_parse_booleans);
     RUN_TEST(test_parse_borderless);
+    RUN_TEST(test_parse_dim_opacity);
     RUN_TEST(test_parse_word_chars);
     RUN_TEST(test_parse_scrollback);
     RUN_TEST(test_parse_scrollback_zero);

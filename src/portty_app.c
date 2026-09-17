@@ -874,6 +874,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .scrollback = terminal_get_scrollback_capacity(app->term),
         .text_gamma = portty_text_gamma,
         .text_contrast = portty_text_contrast,
+        .dim_opacity = portty_dim_opacity,
         .word_chars = c ? c->word_chars : NULL,
         .term_env = "portty-vty-256color",
         .colorterm_env = "truecolor",

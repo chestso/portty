@@ -362,6 +362,7 @@ word_chars = abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-.:/
 scrollback = 1000
 shell = /bin/bash
 text_composition_strategy = kitty
+dim_opacity = 0.6
 ambiguous_wide = false
 borderless = false
 ```
@@ -380,6 +381,7 @@ All keys are optional. Keys appear directly at the top level.
 | `scrollback`                | Non-negative integer                                  | `1000`                         | Scrollback history lines (0 disables)                                                                                                                |
 | `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC`             | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`                      | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
+| `dim_opacity`               | Number `0.0`–`1.0`                                    | `0.6`                          | Opacity of SGR 2 (dim/faint) foreground text: `0` blends fully into the cell background, `1` leaves dim text at full intensity                       |
 | `ambiguous_wide`            | `true`/`false`                                        | `false`                        | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
 | `borderless`                | `true`/`false`                                        | `false`                        | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
 | `dump_dir`                  | Directory path                                        | `$XDG_STATE_HOME/portty/dumps` | Directory for `Ctrl+Shift+F7` terminal-state dumps (also `$PORTTY_DUMP_DIR`)                                                                         |

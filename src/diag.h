@@ -51,6 +51,7 @@ typedef struct
     int scrollback;
     float text_gamma;
     float text_contrast;
+    float dim_opacity; // SGR 2 dim foreground opacity (0..1)
     const char *word_chars;
     const char *platform_name; // "sdl3"
 

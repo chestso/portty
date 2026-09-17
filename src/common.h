@@ -21,6 +21,11 @@ extern int verbose;
 extern float portty_text_gamma;
 extern float portty_text_contrast;
 
+/* Opacity of SGR 2 (dim/faint) foreground text, 0..1 (defined in main.c, set
+ * from config). 1 renders dim text at full intensity (no dimming); lower
+ * values blend the foreground toward the cell background. */
+extern float portty_dim_opacity;
+
 /* Verbose logging implementation - use vlog() macro instead */
 void vlog_impl(const char *file, const char *func, int line, const char *format, ...);
 
