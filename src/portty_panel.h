@@ -59,8 +59,16 @@ typedef struct
 } PanelManager;
 
 void panel_mgr_init(PanelManager *mgr, int cell_w, int cell_h);
+
+// Update the cell metrics used for pixel layout. A call with unchanged
+// metrics is a no-op (it does not mark active panels for rebuild).
 void panel_mgr_set_cell_size(PanelManager *mgr, int cell_w, int cell_h);
 
+// Show or update the panel with the given id. If a panel with that id is
+// already active and every field matches, this is a no-op: the panel keeps
+// its dirty flag and close-button hover, and no strings are reallocated.
+// Otherwise the panel's fields are updated (only strings that changed are
+// reallocated) and it is marked for rebuild.
 PanelState *panel_mgr_show(PanelManager *mgr, int id,
                            int col, int row, int cols, int rows,
                            const char *title, const char *body,

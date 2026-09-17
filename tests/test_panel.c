@@ -302,6 +302,97 @@ static void test_panel_center_in_grid(void)
     panel_center_in_grid(80, 24, 17, 4, NULL, NULL);
 }
 
+static void test_panel_show_identical_is_noop(void)
+{
+    PanelManager mgr;
+    panel_mgr_init(&mgr, 10, 20);
+
+    PanelState *p = panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    ASSERT_NOT_NULL(p);
+    ASSERT_TRUE(p->dirty);
+
+    // Simulate the renderer having consumed the rebuild.
+    p->dirty = false;
+
+    // A repeat show with identical content must not re-flag the slot.
+    PanelState *again = panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    ASSERT_EQ(again, p);
+    ASSERT_FALSE(p->dirty);
+    ASSERT_EQ(panel_mgr_active_count(&mgr), 1);
+
+    panel_mgr_hide_all(&mgr);
+}
+
+static void test_panel_show_change_marks_dirty(void)
+{
+    PanelManager mgr;
+    panel_mgr_init(&mgr, 10, 20);
+
+    PanelState *p = panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    p->dirty = false;
+
+    // Any changed field re-flags the slot for rebuild.
+    panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B2", PORTTY_NOTIFY_INFO, 0);
+    ASSERT_TRUE(p->dirty);
+    ASSERT_STR_EQ(p->body, "B2");
+
+    p->dirty = false;
+    panel_mgr_show(&mgr, 1, 6, 3, 20, 4, "T", "B2", PORTTY_NOTIFY_INFO, 0);
+    ASSERT_TRUE(p->dirty);
+    ASSERT_EQ(p->col, 6);
+
+    p->dirty = false;
+    panel_mgr_show(&mgr, 1, 6, 3, 20, 4, "T", "B2", PORTTY_NOTIFY_ERROR, 0);
+    ASSERT_TRUE(p->dirty);
+    ASSERT_EQ(p->level, PORTTY_NOTIFY_ERROR);
+
+    p->dirty = false;
+    panel_mgr_show(&mgr, 1, 6, 3, 20, 4, "T", "B2", PORTTY_NOTIFY_ERROR, PANEL_FLAG_NO_ACCENT);
+    ASSERT_TRUE(p->dirty);
+    ASSERT_EQ(p->flags, PANEL_FLAG_NO_ACCENT);
+
+    panel_mgr_hide_all(&mgr);
+}
+
+static void test_panel_show_identical_keeps_hover(void)
+{
+    PanelManager mgr;
+    panel_mgr_init(&mgr, 10, 20);
+
+    PanelState *p = panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    panel_mgr_set_hover(&mgr, 1, true);
+    ASSERT_TRUE(p->close_hover);
+
+    // A no-op show must not clobber the hover highlight.
+    panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    ASSERT_TRUE(p->close_hover);
+
+    // A content change drops it (the close button may have moved).
+    panel_mgr_show(&mgr, 1, 2, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    ASSERT_FALSE(p->close_hover);
+
+    panel_mgr_hide_all(&mgr);
+}
+
+static void test_panel_set_cell_size_same_is_noop(void)
+{
+    PanelManager mgr;
+    panel_mgr_init(&mgr, 10, 20);
+
+    PanelState *p = panel_mgr_show(&mgr, 1, 5, 3, 20, 4, "T", "B", PORTTY_NOTIFY_INFO, 0);
+    p->dirty = false;
+
+    panel_mgr_set_cell_size(&mgr, 10, 20);
+    ASSERT_FALSE(p->dirty);
+    ASSERT_EQ(p->px, 50);
+
+    panel_mgr_set_cell_size(&mgr, 15, 25);
+    ASSERT_TRUE(p->dirty);
+    ASSERT_EQ(p->px, 75);
+
+    panel_mgr_hide_all(&mgr);
+}
+
 int main(void)
 {
     RUN_TEST(test_panel_init);
@@ -321,6 +412,10 @@ int main(void)
     RUN_TEST(test_panel_pixel_to_grid);
     RUN_TEST(test_panel_null_strings);
     RUN_TEST(test_panel_center_in_grid);
+    RUN_TEST(test_panel_show_identical_is_noop);
+    RUN_TEST(test_panel_show_change_marks_dirty);
+    RUN_TEST(test_panel_show_identical_keeps_hover);
+    RUN_TEST(test_panel_set_cell_size_same_is_noop);
 
     TEST_SUMMARY();
 }

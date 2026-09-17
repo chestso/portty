@@ -2263,7 +2263,11 @@ void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int 
     if (!data)
         return;
 
-    // Find slot
+    // Locate the slot the show will land in (same search order as
+    // panel_mgr_show), then let panel_mgr_show apply the state change. The
+    // index pairing matters across hide/show: panels.panels[i] is rendered
+    // through panel_renders[i], and reserved ids keep that render slot's
+    // texture and embedded terminal alive while hidden.
     int slot = -1;
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
         if (data->panels.panels[i].active && data->panels.panels[i].id == id) {
@@ -2288,7 +2292,7 @@ void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int 
         return;
 
     // Panel texture will be built during draw pass when dirty flag is checked
-    (void)slot; // Slot index available if needed
+    (void)slot;
 }
 
 void rend_sdl3_panel_hide(RendererSdl3Data *data, int id)
@@ -2298,7 +2302,16 @@ void rend_sdl3_panel_hide(RendererSdl3Data *data, int id)
 
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
         if (data->panels.panels[i].active && data->panels.panels[i].id == id) {
-            panel_free_slot(data, i);
+            // Reserved (negative) ids — the link-hint pill and the resize
+            // overlay — are hidden and re-shown constantly (pointer motion
+            // between links, every resize frame). Their slot keeps its
+            // embedded terminal and content texture, so a re-show only
+            // re-feeds the ANSI instead of rebuilding the terminal and
+            // reallocating the GPU texture. build_panel_terminal recreates
+            // either one when a re-show needs a different size, and
+            // panels_free_all releases them at renderer teardown.
+            if (id >= 0)
+                panel_free_slot(data, i);
             panel_mgr_hide(&data->panels, id);
             break;
         }

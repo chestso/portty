@@ -20,6 +20,25 @@ static char *safe_strdup(const char *s)
     return strdup(s);
 }
 
+static bool str_equal(const char *a, const char *b)
+{
+    if (!a || !b)
+        return a == b;
+    return strcmp(a, b) == 0;
+}
+
+// Replace *dst with a copy of src, but only when the text actually differs.
+// Panels are re-shown on every resize event and on link-hint changes; keeping
+// the existing allocation when the text is unchanged avoids a free/strdup
+// per redundant show.
+static void panel_set_string(char **dst, const char *src)
+{
+    if (str_equal(*dst, src))
+        return;
+    free(*dst);
+    *dst = safe_strdup(src);
+}
+
 static void panel_free_strings(PanelState *p)
 {
     free(p->title);
@@ -49,6 +68,12 @@ void panel_mgr_init(PanelManager *mgr, int cell_w, int cell_h)
 
 void panel_mgr_set_cell_size(PanelManager *mgr, int cell_w, int cell_h)
 {
+    // Cell metrics change with font size/DPI, not per frame; the renderer
+    // calls this on every show. Skipping the no-op case keeps a repeated
+    // show from marking every active panel dirty (and rebuilding its
+    // texture) when nothing about the metrics moved.
+    if (mgr->cell_w == cell_w && mgr->cell_h == cell_h)
+        return;
     mgr->cell_w = cell_w;
     mgr->cell_h = cell_h;
     panel_mgr_recompute_layout(mgr);
@@ -60,6 +85,7 @@ PanelState *panel_mgr_show(PanelManager *mgr, int id,
                            PorttyNotifyLevel level, unsigned int flags)
 {
     PanelState *slot = panel_mgr_find(mgr, id);
+    bool reused = slot != NULL;
     if (!slot) {
         for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
             if (!mgr->panels[i].active) {
@@ -71,7 +97,17 @@ PanelState *panel_mgr_show(PanelManager *mgr, int id,
     if (!slot)
         return NULL;
 
-    panel_free_strings(slot);
+    // A repeat show with identical content is a no-op: leave the dirty flag
+    // (and close-button hover) untouched so a redundant configure event or
+    // link re-resolve does not rebuild the panel texture. Any changed field
+    // still marks the slot for rebuild below.
+    if (reused &&
+        slot->col == col && slot->row == row &&
+        slot->cols == cols && slot->rows == rows &&
+        slot->level == level && slot->flags == flags &&
+        str_equal(slot->title, title) && str_equal(slot->body, body))
+        return slot;
+
     slot->active = true;
     slot->id = id;
     slot->col = col;
@@ -80,8 +116,8 @@ PanelState *panel_mgr_show(PanelManager *mgr, int id,
     slot->rows = rows;
     slot->level = level;
     slot->flags = flags;
-    slot->title = safe_strdup(title);
-    slot->body = safe_strdup(body);
+    panel_set_string(&slot->title, title);
+    panel_set_string(&slot->body, body);
     slot->close_hover = false;
     slot->dirty = true;
 
