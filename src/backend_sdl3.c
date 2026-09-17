@@ -1535,6 +1535,14 @@ static void sdl3_script_mousemove(void *user_data, int x, int y)
         terminal_mark_dirty(d->term);
 }
 
+static bool sdl3_script_dumpstate(void *user_data, const char *path)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return false;
+    return portty_app_dump_state(d->app, path);
+}
+
 static void sdl3_record_start(void *user_data, int fps)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
@@ -1640,6 +1648,8 @@ static void sdl3_run(PorttyBackend *self)
                 .record_start_fn = sdl3_record_start,
                 .record_stop_fn = sdl3_record_stop,
                 .record_user_data = d,
+                .dump_fn = sdl3_script_dumpstate,
+                .dump_user_data = d,
             };
             portty_script_step(d->script, &d->cmd_index, &ctx);
             if (d->cmd_index >= portty_script_count(d->script))

@@ -115,6 +115,7 @@ build/src/portty --demo "Hello, world!"
 | Right-click              | Copy selection if active, otherwise paste (works in altscreen too)           |
 | `Ctrl+click` on link     | Open OSC-8 URL via the system handler                                        |
 | `Ctrl+Shift+F6`          | Open the diagnostics report (built-in pager)                                 |
+| `Ctrl+Shift+F7`          | Dump the full terminal state to a JSON file                                  |
 | `Ctrl+Shift+N`           | Spawn a new terminal window in the shell's CWD                               |
 
 ### Diagnostics Report
@@ -164,6 +165,7 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `renderdump <path>`                                                   | Render the terminal scene offscreen to a PNG file: fresh render pass, trimmed to content bounds, no panels/cursor; while the pager is open, dumps the pager's content     |
 | `dumprow <row>`                                                       | Print all cells in a terminal row                                                                                                                                         |
 | `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors                                                                                        |
+| `dumpstate [path]`                                                    | Write the full terminal state as JSON (default location, or `path`; `-` = stdout)                                                                                         |
 | `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                                                                                                            |
 | `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                                                                                                       |
 | `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows                                                                                                                                |
@@ -368,18 +370,19 @@ borderless = false
 
 All keys are optional. Keys appear directly at the top level.
 
-| Key                         | Values                                                | Default            | Description                                                                                                                                          |
-| --------------------------- | ----------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `font`                      | Fontconfig pattern                                    | `monospace`        | Font family and size (e.g. `monospace-16`)                                                                                                           |
-| `geometry`                  | `COLSxROWS`                                           | `80x24`            | Initial terminal dimensions                                                                                                                          |
-| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`            | FreeType hinting mode                                                                                                                                |
-| `verbose`                   | `true`/`false`                                        | `false`            | Debug output                                                                                                                                         |
-| `word_chars`                | Character string                                      | `A-Za-z0-9_-./~`   | Characters treated as word for double-click                                                                                                          |
-| `scrollback`                | Non-negative integer                                  | `1000`             | Scrollback history lines (0 disables)                                                                                                                |
-| `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC` | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
-| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`          | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
-| `ambiguous_wide`            | `true`/`false`                                        | `false`            | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
-| `borderless`                | `true`/`false`                                        | `false`            | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
+| Key                         | Values                                                | Default                        | Description                                                                                                                                          |
+| --------------------------- | ----------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `font`                      | Fontconfig pattern                                    | `monospace`                    | Font family and size (e.g. `monospace-16`)                                                                                                           |
+| `geometry`                  | `COLSxROWS`                                           | `80x24`                        | Initial terminal dimensions                                                                                                                          |
+| `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`                        | FreeType hinting mode                                                                                                                                |
+| `verbose`                   | `true`/`false`                                        | `false`                        | Debug output                                                                                                                                         |
+| `word_chars`                | Character string                                      | `A-Za-z0-9_-./~`               | Characters treated as word for double-click                                                                                                          |
+| `scrollback`                | Non-negative integer                                  | `1000`                         | Scrollback history lines (0 disables)                                                                                                                |
+| `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC`             | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
+| `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`                      | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
+| `ambiguous_wide`            | `true`/`false`                                        | `false`                        | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
+| `borderless`                | `true`/`false`                                        | `false`                        | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
+| `dump_dir`                  | Directory path                                        | `$XDG_STATE_HOME/portty/dumps` | Directory for `Ctrl+Shift+F7` terminal-state dumps (also `$PORTTY_DUMP_DIR`)                                                                         |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 

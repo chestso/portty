@@ -9,6 +9,7 @@ src/base64.c	Base64 encoder and decoder
 src/colr.c	COLR v1 paint-tree traversal and compositing for color fonts
 src/diag.c	Diagnostics report builder for bug reporting
 src/display_info.c	Physical display and DPI information collection
+src/dump.c	Terminal state dump to structured JSON for debugging
 src/font.c	Font backend abstraction and lifecycle wrappers
 src/font_ft.c	FreeType and HarfBuzz font rasterization and text shaping
 src/font_resolve.c	Font resolver backend dispatch and shared resolution helpers
@@ -54,6 +55,7 @@ tests/test_cursor_render.c	Cursor blink handler render regression tests
 tests/test_debug_script.c	Debug script parser tests
 tests/test_diag.c	Diagnostics report generation tests
 tests/test_dpi_scale.c	DPI scale argument parsing tests
+tests/test_dump.c	Terminal state dump (JSON) tests
 tests/test_link_hint.c	OSC-8 link hint panel positioning tests
 tests/test_lottie.c	Lottie animation end-to-end tests through the host bridge
 tests/test_lottie_cache.c	Lottie cache logic tests
@@ -76,6 +78,7 @@ src/base64.h	Base64 encoder and decoder interface
 src/common.h	Shared macros, logging, and common utilities
 src/diag.h	Diagnostics report builder interface
 src/display_info.h	Physical display and DPI information interface
+src/dump.h	Terminal state dump interface
 src/font.h	Font backend abstraction interface
 src/font_ft.h	FreeType font backend interface
 src/font_ft_internal.h	FreeType font backend internal structs shared with the renderer

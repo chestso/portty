@@ -108,6 +108,7 @@ void portty_conf_init(PorttyConf *conf)
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
     conf->shell = NULL;
+    conf->dump_dir = NULL;
     conf->source_path = NULL;
 }
 
@@ -202,6 +203,9 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
         } else if (strcmp(key, "shell") == 0) {
             free(conf->shell);
             conf->shell = strdup(val);
+        } else if (strcmp(key, "dump_dir") == 0) {
+            free(conf->dump_dir);
+            conf->dump_dir = strdup(val);
         } else if (strcmp(key, "ambiguous_wide") == 0) {
             int b = parse_bool(val);
             if (b < 0)
@@ -289,6 +293,8 @@ void portty_conf_free(PorttyConf *conf)
     conf->word_chars = NULL;
     free(conf->shell);
     conf->shell = NULL;
+    free(conf->dump_dir);
+    conf->dump_dir = NULL;
     free(conf->source_path);
     conf->source_path = NULL;
 }

@@ -236,6 +236,10 @@ struct TerminalBackend
     // Query a coffer mode (CfrMode). Returns false if the backend or mode
     // is unavailable.
     bool (*get_mode)(TerminalBackend *term, CfrMode mode);
+
+    // Query the active selection rectangle. Fills *out and returns true when
+    // a selection is active; returns false (leaving *out untouched) otherwise.
+    bool (*get_selection)(TerminalBackend *term, TerminalSelection *out);
 };
 
 TerminalBackend *terminal_init(TerminalBackend *term, const CfrConfig *cfg);
@@ -380,6 +384,8 @@ void terminal_selection_update(TerminalBackend *term, int row, int col);
 void terminal_selection_extend(TerminalBackend *term, int row, int col);
 void terminal_selection_clear(TerminalBackend *term);
 bool terminal_selection_active(TerminalBackend *term);
+/* Fill *out with the active selection and return true; false if none. */
+bool terminal_get_selection(TerminalBackend *term, TerminalSelection *out);
 /* Shift selection coordinates by -pushed_rows to follow content that
  * scrolled off the top. Called after terminal_process_input when rows
  * were pushed to scrollback. No-op if no selection is active or

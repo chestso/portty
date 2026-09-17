@@ -33,6 +33,7 @@ typedef struct
     float text_gamma;       /* < 0 = unset (neutral); kitty text_composition_strategy gamma */
     float text_contrast;    /* < 0 = unset (neutral); kitty contrast, 0..100 */
     char *shell;            /* NULL = not set; overrides $SHELL/COMSPEC when no -- args */
+    char *dump_dir;         /* NULL = default; directory for Ctrl+Shift+F7 state dumps */
     char *source_path;      /* path the config was loaded from, or NULL (defaults) */
 } PorttyConf;
 

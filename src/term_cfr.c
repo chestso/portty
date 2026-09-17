@@ -1028,6 +1028,24 @@ static bool cfr_back_get_mode(TerminalBackend *term, CfrMode mode)
     return cfr_get_mode(d->vt, mode);
 }
 
+static bool cfr_back_get_selection(TerminalBackend *term, TerminalSelection *out)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d || !out)
+        return false;
+    const CfrSelection *sel = cfr_selection_get(d->vt);
+    if (!sel || !sel->active)
+        return false;
+    out->active = true;
+    out->mode = (sel->mode == CFR_SEL_WORD)   ? TERM_SELECT_WORD
+                : (sel->mode == CFR_SEL_LINE) ? TERM_SELECT_LINE
+                                              : TERM_SELECT_CHAR;
+    out->anchor = (TerminalPos){ .row = sel->anchor.row, .col = sel->anchor.col };
+    out->start = (TerminalPos){ .row = sel->start.row, .col = sel->start.col };
+    out->end = (TerminalPos){ .row = sel->end.row, .col = sel->end.col };
+    return true;
+}
+
 /* ------------------------------------------------------------------ */
 /* vtable                                                              */
 /* ------------------------------------------------------------------ */
@@ -1077,6 +1095,7 @@ TerminalBackend terminal_backend_cfr = {
     .lottie_tick = cfr_back_lottie_tick,
     .lottie_count = cfr_back_lottie_count,
     .get_mode = cfr_back_get_mode,
+    .get_selection = cfr_back_get_selection,
 };
 
 TerminalBackend *term_cfr_new(const CfrConfig *cfg)

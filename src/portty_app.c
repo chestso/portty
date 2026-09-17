@@ -12,6 +12,7 @@
 #include "portty_app.h"
 #include "common.h"
 #include "diag.h"
+#include "dump.h"
 #include "pager.h"
 #include "portty_backend.h"
 #include "portty_panel.h"
@@ -493,6 +494,13 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
         return result;
     }
 
+    // Ctrl+Shift+F7 → dump the full terminal state to a JSON file
+    if (term_key == TERM_KEY_F7 && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
+        portty_app_dump_state(app, NULL);
+        result.handled = true;
+        return result;
+    }
+
     // Ctrl+Shift+N → spawn a new terminal window in the shell's CWD
     if (term_key == TERM_KEY_NONE && codepoint == 'N' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
         app->backend->spawn_new_terminal(app->backend);
@@ -898,4 +906,32 @@ void portty_app_show_diagnostics(PorttyApp *app)
     if (cols > 0 && rows > 0 && app->pager)
         pager_open(app->pager, report, cols, rows);
     free(report);
+}
+
+bool portty_app_dump_state(PorttyApp *app, const char *path)
+{
+    if (!app || !app->term)
+        return false;
+
+    PorttyDiag pd = { 0 };
+    if (app->backend && app->backend->get_diag)
+        app->backend->get_diag(app->backend, &pd);
+
+    TerminalDumpMeta meta = {
+        .diag = &pd,
+        .conf = app->conf,
+        .scroll_offset = (app->backend && app->backend->get_scroll_offset)
+                             ? app->backend->get_scroll_offset(app->backend)
+                             : 0,
+    };
+
+    char resolved[4096];
+    if (!portty_dump_write(app->term, &meta, path, resolved, sizeof(resolved))) {
+        fprintf(stderr, "ERROR: failed to write terminal state dump\n");
+        return false;
+    }
+
+    vlog("terminal state dump written to %s\n", resolved);
+    fprintf(stderr, "Terminal state dump written to %s\n", resolved);
+    return true;
 }

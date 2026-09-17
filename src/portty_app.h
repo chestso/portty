@@ -91,6 +91,10 @@ int portty_app_display_row_to_unified(PorttyApp *app, int display_row);
 // Diagnostics report
 void portty_app_show_diagnostics(PorttyApp *app);
 
+// Dump the entire terminal state to a JSON file for debugging. `path` NULL
+// selects the default location; "-" writes to stdout. Returns true on success.
+bool portty_app_dump_state(PorttyApp *app, const char *path);
+
 // Lifecycle helpers.
 void portty_app_set_autoscroll(PorttyApp *app, bool enabled);
 

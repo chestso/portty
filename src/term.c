@@ -388,6 +388,13 @@ bool terminal_selection_active(TerminalBackend *term)
     return vt ? cfr_selection_active(vt) : false;
 }
 
+bool terminal_get_selection(TerminalBackend *term, TerminalSelection *out)
+{
+    if (!term || !term->get_selection)
+        return false;
+    return term->get_selection(term, out);
+}
+
 void terminal_selection_adjust_scroll(TerminalBackend *term, int pushed_rows)
 {
     /* No-op: coffer handles scroll adjustment inline during VT processing. */

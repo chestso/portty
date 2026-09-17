@@ -429,6 +429,17 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "dumpstate") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = SCRIPT_CMD_DUMPSTATE;
+        /* Optional PATH argument; empty = default location, "-" = stdout. */
+        strip_quotes(args);
+        snprintf(cmd->path, sizeof(cmd->path), "%s", args);
+        return true;
+    }
+
     if (strcmp(line, "dumprow") == 0) {
         ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -1308,6 +1319,19 @@ void portty_script_step(PorttyScript *script,
             }
         } else {
             vlog("dump-sixel: no terminal\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_DUMPSTATE:
+    {
+        if (ctx->dump_fn) {
+            const char *path = cmd->path[0] ? cmd->path : NULL;
+            if (!ctx->dump_fn(ctx->dump_user_data, path))
+                fprintf(stderr, "dumpstate: failed to write terminal state\n");
+        } else {
+            fprintf(stderr, "dumpstate: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

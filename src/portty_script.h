@@ -42,6 +42,7 @@ typedef enum
     SCRIPT_CMD_ASSERT_NO_HOVER,
     SCRIPT_CMD_DUMP_SIXEL,
     SCRIPT_CMD_RENDERDUMP,
+    SCRIPT_CMD_DUMPSTATE,
 } ScriptCmdType;
 
 typedef struct
@@ -175,6 +176,10 @@ typedef struct
     void (*record_start_fn)(void *user_data, int fps);
     void (*record_stop_fn)(void *user_data);
     void *record_user_data;
+    /* Terminal-state dump callback (dumpstate PATH). path NULL = default
+     * location, "-" = stdout. NULL if unsupported by this backend. */
+    bool (*dump_fn)(void *user_data, const char *path);
+    void *dump_user_data;
 } ScriptExecCtx;
 
 /* Execute one script step. Called each frame by the backend's main loop.
