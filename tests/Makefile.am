@@ -168,6 +168,7 @@ test_rend_common_LDADD = -lm
 test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
     ../src/portty_app.c ../src/term.c ../src/term_cfr.c ../src/base64.c \
     ../src/path_compat.c ../src/pager.c ../src/embedded_term.c ../src/rend_common.c \
+    ../src/portty_panel.c \
     ../src/portty_conf.c ../src/diag.c ../src/dump.c ../src/font.c font_stubs.c
 if HOST_WINDOWS
 test_portty_app_SOURCES += ../src/pty_w32.c
@@ -193,9 +194,8 @@ test_vs15_routing_SOURCES = test_vs15_routing.c $(TEST_COMMON) $(TERM_STUBS) \
 test_vs15_routing_CFLAGS = $(TEST_CFLAGS)
 test_vs15_routing_LDADD = -lm
 
-# Link hint panel positioning tests. Pure logic, no SDL/coffer dependency.
-test_link_hint_SOURCES = test_link_hint.c $(TEST_COMMON)
-test_link_hint_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
-test_link_hint_LDADD = $(COFFER_LIBS)
+# Link hint panel geometry tests. Pulls in portty_panel.c; no SDL/coffer link dependency.
+test_link_hint_SOURCES = test_link_hint.c $(TEST_COMMON) ../src/portty_panel.c
+test_link_hint_CFLAGS = $(TEST_CFLAGS)
 
 TESTS = $(check_PROGRAMS)

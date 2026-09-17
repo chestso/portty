@@ -295,48 +295,10 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
                 terminal_get_dimensions(app->term, &term_rows, &term_cols);
 
                 int display_row = py / cell_h;
-                if (display_row < 0)
-                    display_row = 0;
-                if (display_row >= term_rows)
-                    display_row = term_rows - 1;
-
-                int display_col = link_col;
-                if (display_col < 0)
-                    display_col = 0;
-                if (display_col >= term_cols)
-                    display_col = term_cols - 1;
-
-                int url_cells = cfr_utf8_display_width(url, n);
-                int panel_cols = url_cells + PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
-                if (panel_cols > term_cols)
-                    panel_cols = term_cols;
-                if (panel_cols < PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1)
-                    panel_cols = PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1;
-
-                int panel_rows = 1 + PANEL_DECORATION_ROWS;
-
-                int panel_row;
-                if (display_row - panel_rows >= 0) {
-                    panel_row = display_row - panel_rows;
-                } else if (display_row + 1 + panel_rows <= term_rows) {
-                    panel_row = display_row + 1;
-                } else {
-                    panel_row = 0;
-                    if (panel_rows > term_rows)
-                        panel_rows = term_rows;
-                }
-
-                int panel_col;
-                if (display_col + panel_cols / 2 <= term_cols / 2) {
-                    panel_col = 0;
-                } else {
-                    panel_col = term_cols - panel_cols;
-                    if (panel_col < 0)
-                        panel_col = 0;
-                }
+                PanelRect hint = panel_link_hint_rect(term_cols, term_rows, display_row);
 
                 app->backend->panel_show(app->backend, PANEL_ID_LINK_HINT,
-                                         panel_col, panel_row, panel_cols, panel_rows,
+                                         hint.col, hint.row, hint.cols, hint.rows,
                                          NULL, url,
                                          PORTTY_NOTIFY_INFO,
                                          PANEL_FLAG_NO_ACCENT | PANEL_FLAG_NO_CLOSE);

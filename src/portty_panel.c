@@ -236,3 +236,27 @@ void panel_center_in_grid(int term_cols, int term_rows,
     if (out_row)
         *out_row = row;
 }
+
+PanelRect panel_link_hint_rect(int term_cols, int term_rows, int link_row)
+{
+    PanelRect r = { 0, 0, term_cols, 1 + PANEL_DECORATION_ROWS };
+
+    if (r.cols < 0)
+        r.cols = 0;
+    if (term_rows < 1)
+        term_rows = 1;
+    if (link_row < 0)
+        link_row = 0;
+    if (link_row >= term_rows)
+        link_row = term_rows - 1;
+    if (r.rows > term_rows)
+        r.rows = term_rows;
+
+    if (link_row - r.rows >= 0)
+        r.row = link_row - r.rows; // the row just above the link
+    else if (link_row + 1 + r.rows <= term_rows)
+        r.row = link_row + 1; // the row just below it
+    else
+        r.row = term_rows - r.rows; // neither fits: bottom-align
+    return r;
+}

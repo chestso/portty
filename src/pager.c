@@ -338,37 +338,10 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
             char url[4096];
             size_t n = terminal_cell_get_hyperlink(p->et.term, row, col, url, sizeof(url));
             if (n > 0 && n < sizeof(url)) {
-                int url_cells = cfr_utf8_display_width(url, n);
-                int panel_cols = url_cells + PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
-                if (panel_cols > p->cols)
-                    panel_cols = p->cols;
-                if (panel_cols < PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1)
-                    panel_cols = PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT + 1;
-
-                int panel_rows = 1 + PANEL_DECORATION_ROWS;
-
-                int panel_row = (row > 0) ? row - panel_rows : row + 1;
-                if (panel_row < 0)
-                    panel_row = 0;
-                if (panel_row + panel_rows > p->rows) {
-                    panel_row = p->rows - panel_rows;
-                    if (panel_row < 0) {
-                        panel_row = 0;
-                        panel_rows = p->rows;
-                    }
-                }
-
-                int panel_col;
-                if (col + panel_cols / 2 <= p->cols / 2) {
-                    panel_col = 0;
-                } else {
-                    panel_col = p->cols - panel_cols;
-                    if (panel_col < 0)
-                        panel_col = 0;
-                }
+                PanelRect hint = panel_link_hint_rect(p->cols, p->rows, row);
 
                 p->backend->panel_show(p->backend, PANEL_ID_LINK_HINT,
-                                       panel_col, panel_row, panel_cols, panel_rows,
+                                       hint.col, hint.row, hint.cols, hint.rows,
                                        NULL, url,
                                        PORTTY_NOTIFY_INFO,
                                        PANEL_FLAG_NO_ACCENT | PANEL_FLAG_NO_CLOSE);

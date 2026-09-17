@@ -58,6 +58,13 @@ typedef struct
     int cell_w, cell_h;
 } PanelManager;
 
+// A panel's cell rectangle.
+typedef struct
+{
+    int col, row;
+    int cols, rows;
+} PanelRect;
+
 void panel_mgr_init(PanelManager *mgr, int cell_w, int cell_h);
 
 // Update the cell metrics used for pixel layout. A call with unchanged
@@ -96,6 +103,13 @@ void panel_grid_to_pixel(int cell_w, int cell_h,
 void panel_center_in_grid(int term_cols, int term_rows,
                           int panel_cols, int panel_rows,
                           int *out_col, int *out_row);
+
+// Cell rectangle of the OSC-8 link hint for a link on `link_row`. The strip
+// spans the grid's full width and is one content row tall plus the decoration
+// padding, so only its row tracks the link: the row above it when that fits,
+// otherwise the row below, otherwise bottom-aligned. A link_row outside the
+// grid clamps into it.
+PanelRect panel_link_hint_rect(int term_cols, int term_rows, int link_row);
 
 void panel_pixel_to_grid(int cell_w, int cell_h,
                          int px, int py, int *col, int *row);

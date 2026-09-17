@@ -43,7 +43,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
-- OSC-8 hyperlinks — pointer cursor changes on hover; hover hint shows full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
+- OSC-8 hyperlinks — pointer cursor changes on hover; a full-width hint strip shows the full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals

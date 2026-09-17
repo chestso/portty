@@ -1,168 +1,111 @@
 /*
- * portty — OSC-8 link hint panel positioning tests
+ * portty — OSC-8 link hint panel geometry tests
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen
  */
 
 /*
- * test_link_hint.c — unit tests for OSC-8 link hint panel positioning
+ * test_link_hint.c — unit tests for OSC-8 link hint panel geometry
  *
- * Tests:
- *   - cfr_utf8_display_width() for URLs
- *   - Panel position/size calculation logic
+ * The hint is a full-width strip, so the only thing that varies with the
+ * link is the row it lands on (above the link when that fits, below it
+ * otherwise).
  */
 
 #include "test_helpers.h"
 #include "portty_panel.h"
-#include <coffer/coffer.h>
 
-/* Test cfr_utf8_display_width with various inputs */
-static void test_utf8_display_width_ascii(void)
+static const int HINT_ROWS = 1 + PANEL_DECORATION_ROWS; /* 3 */
+
+/* The strip spans the whole grid, in every placement. */
+static void test_hint_spans_full_width(void)
 {
-    ASSERT_EQ(cfr_utf8_display_width("hello", 5), 5);
-    ASSERT_EQ(cfr_utf8_display_width("https://example.com", 18), 18);
-    ASSERT_EQ(cfr_utf8_display_width("", 0), 0);
-    ASSERT_EQ(cfr_utf8_display_width(NULL, 0), 0);
+    PanelRect r = panel_link_hint_rect(80, 24, 5);
+    ASSERT_EQ(r.col, 0);
+    ASSERT_EQ(r.cols, 80);
+
+    /* Same width for a link in the right half — there is no right-aligned
+     * short form anymore. */
+    r = panel_link_hint_rect(80, 24, 70);
+    ASSERT_EQ(r.col, 0);
+    ASSERT_EQ(r.cols, 80);
+
+    /* And on a narrow grid. */
+    r = panel_link_hint_rect(20, 6, 3);
+    ASSERT_EQ(r.col, 0);
+    ASSERT_EQ(r.cols, 20);
 }
 
-static void test_utf8_display_width_wide_chars(void)
+static void test_hint_rows_are_one_content_row(void)
 {
-    /* CJK characters are width 2 */
-    ASSERT_EQ(cfr_utf8_display_width("\xE3\x81\x82", 3), 2); /* U+3042 hiragana A */
-    ASSERT_EQ(cfr_utf8_display_width("\xE4\xB8\xAD", 3), 2); /* U+4E2D CJK 'middle' */
-
-    /* Emoji are width 2 */
-    ASSERT_EQ(cfr_utf8_display_width("\xF0\x9F\x8E\x89", 4), 2); /* U+1F389 party popper */
-
-    /* Mixed ASCII and wide */
-    ASSERT_EQ(cfr_utf8_display_width("a\xE3\x81\x82", 4), 3); /* "a" + hiragana */
+    PanelRect r = panel_link_hint_rect(80, 24, 5);
+    ASSERT_EQ(r.rows, 3);
+    ASSERT_EQ(r.rows, HINT_ROWS);
 }
 
-static void test_utf8_display_width_zero_width(void)
+/* Link at row 5: the strip sits on rows 2..4, one row above the link. */
+static void test_hint_above_link(void)
 {
-    /* Combining acute accent U+0301 is zero-width */
-    ASSERT_EQ(cfr_utf8_display_width("\xCC\x81", 2), 0);
-
-    /* e + combining acute = 1 cell (e is 1, combining mark is 0) */
-    ASSERT_EQ(cfr_utf8_display_width("e\xCC\x81", 3), 1);
-
-    /* VS16 U+FE0F is zero-width (doesn't add to width, but forces 2-cell emoji) */
-    ASSERT_EQ(cfr_utf8_display_width("\xEF\xB8\x8F", 3), 0);
+    PanelRect r = panel_link_hint_rect(80, 24, 5);
+    ASSERT_EQ(r.row, 2);
+    ASSERT_EQ(r.row + r.rows, 5);
 }
 
-/* Test panel size calculation constants */
-static void test_panel_size_constants(void)
+/* Link at the top row has no room above, so the strip goes below it. */
+static void test_hint_below_link_at_top_row(void)
 {
-    /* Panel rows = text_rows + decoration rows (top + bottom padding) */
-    ASSERT_EQ(PANEL_CELL_PAD_TOP, 1);
-    ASSERT_EQ(PANEL_CELL_PAD_BOTTOM, 1);
-    ASSERT_EQ(PANEL_DECORATION_ROWS, 2);
-
-    /* For 1 text row: panel_rows = 1 + 2 = 3 */
-    ASSERT_EQ(1 + PANEL_DECORATION_ROWS, 3);
-
-    /* Panel cols = url_cells + horizontal decoration */
-    /* Horizontal decoration for naked panel: GAP + PAD_RIGHT = 2 */
-    ASSERT_EQ(PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT, 2);
+    PanelRect r = panel_link_hint_rect(80, 24, 0);
+    ASSERT_EQ(r.row, 1);
 }
 
-/* Test panel positioning logic (extracted from design) */
-static void test_panel_position_above_link(void)
+static void test_hint_below_link_at_row_one(void)
 {
-    /* Link at row 5 should show panel above at row 5 - 3 = 2 */
-    int display_row = 5;
-    int panel_rows = 3;
-
-    int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
-    ASSERT_EQ(panel_row, 2);
-
-    /* Panel occupies rows 2, 3, 4; link at row 5 has 1-row gap */
+    PanelRect r = panel_link_hint_rect(80, 24, 1);
+    ASSERT_EQ(r.row, 2);
 }
 
-static void test_panel_position_at_top_row(void)
+/* A grid too short for either placement bottom-aligns the strip. */
+static void test_hint_bottom_aligned_on_short_grid(void)
 {
-    /* Link at row 0 should show panel below at row 1 */
-    int display_row = 0;
-    int panel_rows = 3;
-
-    int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
-    ASSERT_EQ(panel_row, 1);
+    PanelRect r = panel_link_hint_rect(80, 6, 2);
+    ASSERT_EQ(r.row, 3);
+    ASSERT_EQ(r.row + r.rows, 6);
 }
 
-static void test_panel_position_at_row_1(void)
+static void test_hint_rows_clamp_to_grid_height(void)
 {
-    /* Link at row 1: can show above at row -2? No, clamp to 0.
-     * Design says: above if display_row > 0, so row 1 - 3 = -2.
-     * Implementation should clamp to 0. */
-    int display_row = 1;
-    int panel_rows = 3;
-
-    int panel_row = (display_row > 0) ? display_row - panel_rows : display_row + 1;
-    /* Raw calculation gives -2, implementation must clamp */
-    if (panel_row < 0)
-        panel_row = 0;
-    ASSERT_EQ(panel_row, 0);
+    PanelRect r = panel_link_hint_rect(80, 2, 1);
+    ASSERT_EQ(r.rows, 2);
+    ASSERT_EQ(r.row, 0);
 }
 
-static void test_panel_horizontal_position_left_link(void)
+/* Link rows outside the grid clamp, so the strip still lands on a visible
+ * row. */
+static void test_hint_link_row_clamped_into_grid(void)
 {
-    /* Link in left half of terminal: left-align panel */
-    int link_col = 5;
-    int panel_cols = 30;
-    int term_cols = 80;
+    PanelRect low = panel_link_hint_rect(80, 24, -5);
+    PanelRect high = panel_link_hint_rect(80, 24, 999);
+    ASSERT_EQ(low.row, 1);   /* clamped to row 0, so it goes below */
+    ASSERT_EQ(high.row, 20); /* clamped to row 23, so it goes above */
 
-    int panel_col;
-    if (link_col + panel_cols / 2 <= term_cols / 2) {
-        panel_col = 0;
-    } else {
-        panel_col = term_cols - panel_cols;
-    }
-    ASSERT_EQ(panel_col, 0);
+    PanelRect one = panel_link_hint_rect(80, 1, 0);
+    ASSERT_EQ(one.rows, 1);
+    ASSERT_EQ(one.row, 0);
 }
 
-static void test_panel_horizontal_position_right_link(void)
+int main(int argc, char *argv[])
 {
-    /* Link in right half of terminal: right-align panel */
-    int link_col = 60;
-    int panel_cols = 30;
-    int term_cols = 80;
+    test_parse_args(argc, argv);
 
-    int panel_col;
-    if (link_col + panel_cols / 2 <= term_cols / 2) {
-        panel_col = 0;
-    } else {
-        panel_col = term_cols - panel_cols;
-    }
-    ASSERT_EQ(panel_col, 50);
-}
+    RUN_TEST(test_hint_spans_full_width);
+    RUN_TEST(test_hint_rows_are_one_content_row);
+    RUN_TEST(test_hint_above_link);
+    RUN_TEST(test_hint_below_link_at_top_row);
+    RUN_TEST(test_hint_below_link_at_row_one);
+    RUN_TEST(test_hint_bottom_aligned_on_short_grid);
+    RUN_TEST(test_hint_rows_clamp_to_grid_height);
+    RUN_TEST(test_hint_link_row_clamped_into_grid);
 
-static void test_panel_width_capped_to_terminal(void)
-{
-    int url_cells = 100;
-    int term_cols = 80;
-    int decor = PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
-
-    int panel_cols = url_cells + decor;
-    if (panel_cols > term_cols)
-        panel_cols = term_cols;
-
-    ASSERT_EQ(panel_cols, 80);
-}
-
-int main(void)
-{
-    test_utf8_display_width_ascii();
-    test_utf8_display_width_wide_chars();
-    test_utf8_display_width_zero_width();
-    test_panel_size_constants();
-    test_panel_position_above_link();
-    test_panel_position_at_top_row();
-    test_panel_position_at_row_1();
-    test_panel_horizontal_position_left_link();
-    test_panel_horizontal_position_right_link();
-    test_panel_width_capped_to_terminal();
-
-    printf("PASS: all link_hint tests passed\n");
-    return 0;
+    TEST_SUMMARY();
 }
