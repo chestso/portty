@@ -159,6 +159,8 @@ typedef struct
     TimerId cursor_blink_timer;
     TimerId autoscroll_timer;
     TimerId lottie_timer;
+    Uint64 resize_overlay_hide_at; // SDL ticks deadline for hiding the resize overlay (0 = hidden)
+    Uint64 run_start_ticks;        // SDL ticks when the event loop started (primes the resize overlay)
     SDL_TimerID wake_timer;
     bool cursor_blink_visible;
     bool has_focus;
@@ -633,8 +635,8 @@ static uint32_t sdl3_timer_wake_cb(void *userdata, SDL_TimerID id,
 
 /* Arm a single SDL timer for the earliest pending deadline so the blocking
  * SDL_WaitEvent wakes just in time to service it. Must be called on the
- * main thread. It factors in both the TimerManager and a pending script
- * wait. */
+ * main thread. It factors in the TimerManager, a pending script wait, and
+ * the resize-overlay hide deadline. */
 static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
 {
     if (d->wake_timer) {
@@ -648,6 +650,15 @@ static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
         uint32_t wait_ms = portty_script_wait_remaining_ms(d->script, d->cmd_index);
         if (wait_ms < delay)
             delay = wait_ms;
+    }
+
+    if (d->resize_overlay_hide_at != 0) {
+        Uint64 now = SDL_GetTicks();
+        uint32_t overlay_ms = (d->resize_overlay_hide_at > now)
+                                  ? (uint32_t)(d->resize_overlay_hide_at - now)
+                                  : 0;
+        if (overlay_ms < delay)
+            delay = overlay_ms;
     }
 
     if (delay == UINT32_MAX)
@@ -1492,6 +1503,78 @@ static void sdl3_record_frame(Sdl3BackendData *d, const char *path)
     SDL_DestroySurface(surface);
 }
 
+// ── Resize geometry overlay ──────────────────────────────────────────────
+// While the user drags the window border, a small panel reports the current
+// grid geometry (cols x rows) and the cell size, centered over the terminal.
+// Each resize event pushes the hide deadline out, so the steady stream of
+// configure events a drag produces keeps the panel up and it disappears once
+// resizing stops. The deadline is absolute rather than a timer-manager
+// interval: the loop's elapsed-time accounting is frame-relative, so a
+// freshly armed 600 ms timer would fire immediately when a frame happened to
+// carry more elapsed time than that.
+#define RESIZE_OVERLAY_HIDE_MS 600
+// Startup applies the window size before the event loop runs; those queued
+// resize events must not flash the overlay. Ignore overlay updates for this
+// long after the loop starts, which covers the initial sizing burst while
+// still showing the panel for any resize the user performs.
+#define RESIZE_OVERLAY_PRIME_MS 500
+
+static void sdl3_resize_overlay_hide(Sdl3BackendData *d)
+{
+    if (!d)
+        return;
+    d->resize_overlay_hide_at = 0;
+    if (d->app && d->app->backend)
+        d->app->backend->panel_hide(d->app->backend, PANEL_ID_RESIZE_OVERLAY);
+}
+
+static void sdl3_resize_overlay_update(Sdl3BackendData *d)
+{
+    if (!d || !d->app || !d->app->backend || !d->term)
+        return;
+    if (SDL_GetTicks() - d->run_start_ticks < RESIZE_OVERLAY_PRIME_MS)
+        return;
+
+    int rows, cols;
+    terminal_get_dimensions(d->term, &rows, &cols);
+    if (rows <= 0 || cols <= 0)
+        return;
+
+    int cell_w, cell_h;
+    if (!d->app->backend->get_cell_size(d->app->backend, &cell_w, &cell_h) ||
+        cell_w <= 0 || cell_h <= 0)
+        return;
+
+    char title[48];
+    char body[48];
+    snprintf(title, sizeof(title), "%d x %d", cols, rows);
+    snprintf(body, sizeof(body), "cell %d x %d px", cell_w, cell_h);
+
+    int content_cols = (int)strlen(title);
+    int body_cols = (int)strlen(body);
+    if (body_cols > content_cols)
+        content_cols = body_cols;
+
+    // No accent, no close button: content + gap + right pad, with one content
+    // row for the geometry and one for the cell size, plus the row padding.
+    int panel_cols = content_cols + PANEL_CELL_GAP + PANEL_CELL_PAD_RIGHT;
+    int panel_rows = 2 + PANEL_DECORATION_ROWS;
+    if (panel_cols > cols)
+        panel_cols = cols;
+    if (panel_rows > rows)
+        panel_rows = rows;
+
+    int panel_col, panel_row;
+    panel_center_in_grid(cols, rows, panel_cols, panel_rows, &panel_col, &panel_row);
+
+    d->app->backend->panel_show(d->app->backend, PANEL_ID_RESIZE_OVERLAY,
+                                panel_col, panel_row, panel_cols, panel_rows,
+                                title, body, PORTTY_NOTIFY_INFO,
+                                PANEL_FLAG_NO_ACCENT | PANEL_FLAG_NO_CLOSE);
+
+    d->resize_overlay_hide_at = SDL_GetTicks() + RESIZE_OVERLAY_HIDE_MS;
+}
+
 // ── Event loop ───────────────────────────────────────────────────────────
 
 static void sdl3_script_resize(void *user_data, int cols, int rows)
@@ -1505,6 +1588,7 @@ static void sdl3_script_resize(void *user_data, int cols, int rows)
     int pixel_w = cols * cell_w;
     int pixel_h = rows * cell_h;
     portty_app_handle_resize(d->app, pixel_w, pixel_h);
+    sdl3_resize_overlay_update(d);
     vlog("resize: %d cols x %d rows\n", cols, rows);
 }
 
@@ -1617,6 +1701,7 @@ static void sdl3_run(PorttyBackend *self)
 
     SDL_Event event;
     Uint64 last_tick = SDL_GetTicks();
+    d->run_start_ticks = last_tick;
     while (!SDL_GetAtomicInt(&d->quit_requested)) {
         // === Debug script: pre-render commands ===
         // Run before we block so a script that does not emit events (e.g. a
@@ -1812,6 +1897,7 @@ static void sdl3_run(PorttyBackend *self)
                 int pix_w, pix_h;
                 SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
                 portty_app_handle_resize(d->app, pix_w, pix_h);
+                sdl3_resize_overlay_update(d);
                 terminal_mark_dirty(term);
                 break;
             }
@@ -2018,6 +2104,13 @@ static void sdl3_run(PorttyBackend *self)
                     break;
                 }
             }
+        }
+
+        // Hide the resize geometry overlay once resize activity has settled.
+        if (d->resize_overlay_hide_at != 0 &&
+            SDL_GetTicks() >= d->resize_overlay_hide_at) {
+            sdl3_resize_overlay_hide(d);
+            terminal_mark_dirty(term);
         }
 
         // Flush buffered button-up if no more events pending

@@ -184,3 +184,19 @@ void panel_pixel_to_grid(int cell_w, int cell_h,
     if (row)
         *row = (cell_h > 0) ? (py / cell_h) : 0;
 }
+
+void panel_center_in_grid(int term_cols, int term_rows,
+                          int panel_cols, int panel_rows,
+                          int *out_col, int *out_row)
+{
+    int col = (term_cols - panel_cols) / 2;
+    int row = (term_rows - panel_rows) / 2;
+    if (col < 0)
+        col = 0;
+    if (row < 0)
+        row = 0;
+    if (out_col)
+        *out_col = col;
+    if (out_row)
+        *out_row = row;
+}

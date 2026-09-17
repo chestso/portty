@@ -274,6 +274,34 @@ static void test_panel_null_strings(void)
     panel_mgr_hide_all(&mgr);
 }
 
+static void test_panel_center_in_grid(void)
+{
+    int col, row;
+
+    // Odd remainder rounds down: (80-17)/2 = 31, (24-4)/2 = 10.
+    panel_center_in_grid(80, 24, 17, 4, &col, &row);
+    ASSERT_EQ(col, 31);
+    ASSERT_EQ(row, 10);
+
+    // Even fit is exact: (100-20)/2 = 40, (50-10)/2 = 20.
+    panel_center_in_grid(100, 50, 20, 10, &col, &row);
+    ASSERT_EQ(col, 40);
+    ASSERT_EQ(row, 20);
+
+    // Larger than the grid clamps to the top-left corner.
+    panel_center_in_grid(10, 5, 40, 20, &col, &row);
+    ASSERT_EQ(col, 0);
+    ASSERT_EQ(row, 0);
+
+    // Equal size centers at the origin.
+    panel_center_in_grid(20, 10, 20, 10, &col, &row);
+    ASSERT_EQ(col, 0);
+    ASSERT_EQ(row, 0);
+
+    // NULL outputs are tolerated.
+    panel_center_in_grid(80, 24, 17, 4, NULL, NULL);
+}
+
 int main(void)
 {
     RUN_TEST(test_panel_init);
@@ -292,6 +320,7 @@ int main(void)
     RUN_TEST(test_panel_grid_to_pixel);
     RUN_TEST(test_panel_pixel_to_grid);
     RUN_TEST(test_panel_null_strings);
+    RUN_TEST(test_panel_center_in_grid);
 
     TEST_SUMMARY();
 }

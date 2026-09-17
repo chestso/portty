@@ -14,7 +14,8 @@
 #define PORTTY_PANEL_MAX 8
 
 // Reserved panel IDs (negative to avoid collision with user/script panels)
-#define PANEL_ID_LINK_HINT -1 // OSC-8 URL hover hint pill
+#define PANEL_ID_LINK_HINT      -1 // OSC-8 URL hover hint pill
+#define PANEL_ID_RESIZE_OVERLAY -2 // transient cols x rows readout during a window resize
 
 // Panel decoration flags (bitwise OR)
 #define PANEL_FLAG_NO_ACCENT 0x01
@@ -80,6 +81,13 @@ void panel_mgr_recompute_layout(PanelManager *mgr);
 
 void panel_grid_to_pixel(int cell_w, int cell_h,
                          int col, int row, int *px, int *py);
+
+// Center a panel_cols x panel_rows panel within a term_cols x term_rows grid,
+// returning the top-left cell. A panel larger than the grid clamps to cell 0
+// so its top-left corner stays on screen.
+void panel_center_in_grid(int term_cols, int term_rows,
+                          int panel_cols, int panel_rows,
+                          int *out_col, int *out_row);
 
 void panel_pixel_to_grid(int cell_w, int cell_h,
                          int px, int py, int *col, int *row);
