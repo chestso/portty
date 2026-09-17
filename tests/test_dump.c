@@ -32,16 +32,18 @@ static void feed(TerminalBackend *t, const char *s)
     terminal_process_input(t, s, strlen(s));
 }
 
-static TerminalBackend make_term(int cols, int rows)
+/* Fills a caller-owned backend: the coffer bridge stores the backend address
+ * (backend_data->term) for its callbacks, so the struct must outlive the call
+ * that creates it. */
+static void make_term(TerminalBackend *t, int cols, int rows)
 {
-    TerminalBackend t = terminal_backend_cfr;
     CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    *t = terminal_backend_cfr;
     cfg.cols = cols;
     cfg.rows = rows;
     cfg.cell_w_px = 10;
     cfg.cell_h_px = 20;
-    terminal_init(&t, &cfg);
-    return t;
+    terminal_init(t, &cfg);
 }
 
 static char *dump_to_string(TerminalBackend *t, const TerminalDumpMeta *meta)
@@ -81,7 +83,8 @@ static int count_substr(const char *hay, const char *needle)
 
 static void test_header_and_geometry(void)
 {
-    TerminalBackend t = make_term(5, 2);
+    TerminalBackend t;
+    make_term(&t, 5, 2);
     feed(&t, "hi");
     char *j = dump_to_string(&t, NULL);
     ASSERT_NOT_NULL(j);
@@ -98,7 +101,8 @@ static void test_header_and_geometry(void)
 
 static void test_cell_codepoint_width_attrs_colors(void)
 {
-    TerminalBackend t = make_term(4, 1);
+    TerminalBackend t;
+    make_term(&t, 4, 1);
     /* "X" in bold red on the default background. */
     feed(&t, "\x1b[1;31mX\x1b[0m");
     char *j = dump_to_string(&t, NULL);
@@ -111,7 +115,8 @@ static void test_cell_codepoint_width_attrs_colors(void)
 
 static void test_wide_cell(void)
 {
-    TerminalBackend t = make_term(4, 1);
+    TerminalBackend t;
+    make_term(&t, 4, 1);
     feed(&t, "\xe6\xbc\xa2"); /* U+6F22, East-Asian wide → 2 cells */
     char *j = dump_to_string(&t, NULL);
     ASSERT_NOT_NULL(j);
@@ -122,7 +127,8 @@ static void test_wide_cell(void)
 
 static void test_mode_flags(void)
 {
-    TerminalBackend t = make_term(4, 1);
+    TerminalBackend t;
+    make_term(&t, 4, 1);
     feed(&t, "\x1b[?2004h"); /* bracketed paste on */
     char *j = dump_to_string(&t, NULL);
     ASSERT_NOT_NULL(j);
@@ -134,7 +140,8 @@ static void test_mode_flags(void)
 
 static void test_hyperlink_interned_once(void)
 {
-    TerminalBackend t = make_term(8, 1);
+    TerminalBackend t;
+    make_term(&t, 8, 1);
     feed(&t, "\x1b]8;;https://example.com\x1b\\L\x1b]8;;\x1b\\L");
     char *j = dump_to_string(&t, NULL);
     ASSERT_NOT_NULL(j);
@@ -147,7 +154,8 @@ static void test_hyperlink_interned_once(void)
 
 static void test_scrollback_captured(void)
 {
-    TerminalBackend t = make_term(4, 3);
+    TerminalBackend t;
+    make_term(&t, 4, 3);
     feed(&t, "1\r\n2\r\n3\r\n4\r\n5\r\n6\r\n");
     char *j = dump_to_string(&t, NULL);
     ASSERT_NOT_NULL(j);
@@ -160,7 +168,8 @@ static void test_scrollback_captured(void)
 
 static void test_selection_serialized(void)
 {
-    TerminalBackend t = make_term(8, 1);
+    TerminalBackend t;
+    make_term(&t, 8, 1);
     feed(&t, "hello");
     terminal_selection_start(&t, 0, 0, TERM_SELECT_CHAR);
     terminal_selection_update(&t, 0, 4);
