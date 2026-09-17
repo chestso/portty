@@ -295,11 +295,11 @@ static void cb_output(const uint8_t *bytes, size_t len, void *user)
 
 static void cb_bell(void *user) { (void)user; /* TODO: visual bell hook */ }
 
-static void cb_sb_push(const CfrCell *c, int n, bool w, void *u)
+static void cb_sb_push(const CfrCell *c, int n, uint32_t lineage, void *u)
 {
     (void)c;
     (void)n;
-    (void)w;
+    (void)lineage;
     CfrBackendData *d = u;
     d->pushed_rows++;
 }
