@@ -582,6 +582,27 @@ static bool parse_command(PorttyScript *s, char *line, int line_num)
         return true;
     }
 
+    if (strcmp(line, "mousedown") == 0 || strcmp(line, "mouseup") == 0) {
+        ScriptCmd *cmd = script_new_cmd(s);
+        if (!cmd)
+            return false;
+        cmd->type = (strcmp(line, "mousedown") == 0) ? SCRIPT_CMD_MOUSEDOWN
+                                                     : SCRIPT_CMD_MOUSEUP;
+        cmd->mouse_button = 1;
+        cmd->mouse_clicks = 1;
+        int n = sscanf(args, "%d %d %d %d", &cmd->mouse_x, &cmd->mouse_y,
+                       &cmd->mouse_button, &cmd->mouse_clicks);
+        if (n < 2) {
+            script_set_error(s, line_num, "mousedown/mouseup: requires x y [button] [clicks]");
+            return false;
+        }
+        if (cmd->mouse_button <= 0)
+            cmd->mouse_button = 1;
+        if (cmd->mouse_clicks <= 0)
+            cmd->mouse_clicks = 1;
+        return true;
+    }
+
     if (strcmp(line, "resize") == 0) {
         ScriptCmd *cmd = script_new_cmd(s);
         if (!cmd)
@@ -1197,6 +1218,21 @@ void portty_script_step(PorttyScript *script,
                               cmd->mouse_x, cmd->mouse_y);
         } else {
             fprintf(stderr, "mousemove: not supported by this backend\n");
+        }
+        (*cmd_index)++;
+        break;
+    }
+
+    case SCRIPT_CMD_MOUSEDOWN:
+    case SCRIPT_CMD_MOUSEUP:
+    {
+        if (ctx->mouse_button_fn) {
+            ctx->mouse_button_fn(ctx->mouse_button_user_data,
+                                 cmd->mouse_x, cmd->mouse_y, cmd->mouse_button,
+                                 cmd->type == SCRIPT_CMD_MOUSEDOWN,
+                                 cmd->mouse_clicks);
+        } else {
+            fprintf(stderr, "mousedown/mouseup: not supported by this backend\n");
         }
         (*cmd_index)++;
         break;

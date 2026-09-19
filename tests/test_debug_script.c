@@ -868,6 +868,69 @@ static void test_parse_panel_with_level(void)
     cleanup_tmp(path);
 }
 
+static void test_parse_mousemove(void)
+{
+    char *path = write_tmp_script("mousemove 12 34\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 1);
+
+    const ScriptCmd *cmd = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(cmd);
+    ASSERT_EQ(cmd->type, SCRIPT_CMD_MOUSEMOVE);
+    ASSERT_EQ(cmd->mouse_x, 12);
+    ASSERT_EQ(cmd->mouse_y, 34);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_mouse_button(void)
+{
+    char *path = write_tmp_script("mousedown 12 34\n"
+                                  "mouseup 56 78 1 2\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(portty_script_count(s), 2);
+
+    const ScriptCmd *down = portty_script_get(s, 0);
+    ASSERT_NOT_NULL(down);
+    ASSERT_EQ(down->type, SCRIPT_CMD_MOUSEDOWN);
+    ASSERT_EQ(down->mouse_x, 12);
+    ASSERT_EQ(down->mouse_y, 34);
+    /* Defaults: left button, single click. */
+    ASSERT_EQ(down->mouse_button, 1);
+    ASSERT_EQ(down->mouse_clicks, 1);
+
+    const ScriptCmd *up = portty_script_get(s, 1);
+    ASSERT_NOT_NULL(up);
+    ASSERT_EQ(up->type, SCRIPT_CMD_MOUSEUP);
+    ASSERT_EQ(up->mouse_x, 56);
+    ASSERT_EQ(up->mouse_y, 78);
+    ASSERT_EQ(up->mouse_button, 1);
+    ASSERT_EQ(up->mouse_clicks, 2);
+
+    portty_script_free(s);
+    cleanup_tmp(path);
+}
+
+static void test_parse_mouse_button_missing_args(void)
+{
+    char *path = write_tmp_script("mousedown 12\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyScript *s = portty_script_load(path);
+    ASSERT_NOT_NULL(s);
+    ASSERT_NOT_NULL(portty_script_error(s));
+    portty_script_free(s);
+
+    cleanup_tmp(path);
+}
+
 static void test_wait_remaining_ms_reports(void)
 {
     char *path = write_tmp_script("wait 0.05\n");
@@ -963,6 +1026,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_error_message);
     RUN_TEST(test_parse_panel);
     RUN_TEST(test_parse_panel_with_level);
+    RUN_TEST(test_parse_mousemove);
+    RUN_TEST(test_parse_mouse_button);
+    RUN_TEST(test_parse_mouse_button_missing_args);
     RUN_TEST(test_wait_remaining_ms_reports);
     RUN_TEST(test_wait_remaining_ms_non_wait_returns_max);
     RUN_TEST(test_wait_remaining_ms_wait_for_reports_timeout);

@@ -192,6 +192,8 @@ typedef struct
     FrameRecorder *frame_recorder;
     TimerId record_timer;
     bool pending_record_frame;
+    // Synthetic left button held by a debug script (mousedown without mouseup)
+    bool script_button_down;
 } Sdl3BackendData;
 
 static Sdl3BackendData *sdl3_data(PorttyBackend *self)
@@ -406,8 +408,13 @@ static int pty_reader_thread_func(void *data)
                 /* I/O pending — wait for completion or wakeup. */
                 read_pending = true;
             } else {
-                /* Error. */
+                /* Error. A read cancelled by pty_cancel_read() (issued when
+                 * a selection pauses the PTY) reports ERROR_OPERATION_ABORTED;
+                 * that is an expected pause, not end-of-stream, so loop back
+                 * and re-evaluate the pause flag. */
                 DWORD err = GetLastError();
+                if (err == ERROR_OPERATION_ABORTED)
+                    continue;
                 if (err == ERROR_BROKEN_PIPE)
                     vlog("PTY reader thread: pipe closed\n");
                 else
@@ -1614,8 +1621,20 @@ static void sdl3_script_mousemove(void *user_data, int x, int y)
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
     if (!d || !d->app)
         return;
-    portty_app_handle_mouse(d->app, x, y, 0, false, 0, 0);
+    portty_app_handle_mouse(d->app, x, y, 0, d->script_button_down, 0, 0);
     if (portty_app_revalidate_hover(d->app, x, y))
+        terminal_mark_dirty(d->term);
+}
+
+static void sdl3_script_mouse_button(void *user_data, int x, int y, int button,
+                                     bool pressed, int clicks)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return;
+    if (button == 1)
+        d->script_button_down = pressed;
+    if (portty_app_handle_mouse(d->app, x, y, button, pressed, clicks, 0))
         terminal_mark_dirty(d->term);
 }
 
@@ -1720,6 +1739,8 @@ static void sdl3_run(PorttyBackend *self)
                 .renderdump_path_buf = d->renderdump_path,
                 .mousemove_fn = sdl3_script_mousemove,
                 .mousemove_user_data = d,
+                .mouse_button_fn = sdl3_script_mouse_button,
+                .mouse_button_user_data = d,
                 .panel_fn = sdl3_script_panel,
                 .panel_user_data = self,
                 .panel_hide_fn = sdl3_script_panel_hide,

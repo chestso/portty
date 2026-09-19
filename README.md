@@ -169,6 +169,8 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `dumpstate [path]`                                                    | Write the full terminal state as JSON (default location, or `path`; `-` = stdout)                                                                                         |
 | `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                                                                                                            |
 | `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                                                                                                       |
+| `mousedown <x> <y> [button] [clicks]`                                 | Simulate a mouse button press (default left button, 1 click). Pair with `mousemove` to drag                                                                               |
+| `mouseup <x> <y> [button] [clicks]`                                   | Simulate a mouse button release                                                                                                                                           |
 | `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows (pops the same geometry overlay as an interactive resize)                                                                      |
 | `winsize <width> <height>`                                            | Set window pixel size                                                                                                                                                     |
 | `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                                                                                                         |
@@ -291,6 +293,21 @@ dumpgrid
 `mousemove` simulates a mouse move to the given **physical** pixel coordinates. This is useful for testing hover states (such as OSC-8 hyperlink previews) without a real mouse or window server. Coordinates are in the same physical pixel space the app uses for cell math, so scale them by the content scale if testing on HiDPI displays.
 
 The synthetic mouse starts at (0,0). If the link occupies the top-left of the grid, a single move onto it may be a no-op state transition — move off the target first, then onto it.
+
+`mousedown` and `mouseup` simulate button presses at the same physical pixel coordinates. Holding the left button while moving (`mousedown` → `mousemove` → `mouseup`) drives the text-selection drag, which is otherwise hard to exercise headlessly:
+
+```
+# Run with: portty -S select_demo.script
+wait 1.0
+sendln echo select this text please
+wait 0.5
+mousedown 20 40
+mousemove 200 40
+mousemove 200 60
+mouseup 200 60
+dumpstate /tmp/portty-selection.json
+quit
+```
 
 Hover an OSC-8 hyperlink to capture the hover preview:
 

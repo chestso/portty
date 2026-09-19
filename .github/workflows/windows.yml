@@ -77,6 +77,30 @@ jobs:
       - name: Run tests
         run: make -C build check
 
+      - name: GUI smoke test (selection drag)
+        run: |
+          mkdir -p build/smoke
+          rm -f build/smoke/child_ran.txt build/smoke/selection.json
+          cat > build/smoke/select.script <<'EOF'
+          wait 2.0
+          sendln echo SMOKE_MARKER_OK > build/smoke/child_ran.txt
+          wait 2.5
+          mousemove 20 40
+          mousedown 20 40
+          mousemove 200 40
+          mousemove 200 60
+          mouseup 200 60
+          wait 0.3
+          dumpstate build/smoke/selection.json
+          quit
+          EOF
+          ./build/src/portty -S build/smoke/select.script
+          # The child must have run, and the drag must have reached the dump:
+          # pausing the PTY for a selection must not end the session.
+          grep -q SMOKE_MARKER_OK build/smoke/child_ran.txt
+          test -s build/smoke/selection.json
+          grep -q '"selection": {' build/smoke/selection.json
+
       - name: Build portable ZIP
         run: make -C build dist-portable
 

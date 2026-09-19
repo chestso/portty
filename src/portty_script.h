@@ -31,6 +31,8 @@ typedef enum
     SCRIPT_CMD_DUMPCELLS,
     SCRIPT_CMD_DUMPGRID,
     SCRIPT_CMD_MOUSEMOVE,
+    SCRIPT_CMD_MOUSEDOWN,
+    SCRIPT_CMD_MOUSEUP,
     SCRIPT_CMD_RESIZE,
     SCRIPT_CMD_WINSIZE,
     SCRIPT_CMD_RECORD_START,
@@ -60,9 +62,12 @@ typedef struct
     int col_end;
     /* SCREENDUMP */
     char path[512];
-    /* MOUSEMOVE */
+    /* MOUSEMOVE / MOUSEDOWN / MOUSEUP */
     int mouse_x;
     int mouse_y;
+    /* MOUSEDOWN / MOUSEUP */
+    int mouse_button;
+    int mouse_clicks;
     /* PANEL */
     int panel_id;
     int panel_col, panel_row;
@@ -152,6 +157,11 @@ typedef struct
     /* Mouse move callback (NULL if unsupported) */
     void (*mousemove_fn)(void *app, int x, int y);
     void *mousemove_user_data;
+    /* Mouse button callback (NULL if unsupported). The backend owns the
+     * pressed-state memory so a mousedown/mousemove/mouseup sequence drags. */
+    void (*mouse_button_fn)(void *app, int x, int y, int button, bool pressed,
+                            int clicks);
+    void *mouse_button_user_data;
     /* Panel callback (NULL if unsupported) */
     void (*panel_fn)(void *backend, int id, int col, int row, int cols, int rows,
                      const char *title, const char *body, int level, unsigned int flags);
