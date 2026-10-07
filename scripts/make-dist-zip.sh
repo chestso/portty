@@ -37,6 +37,10 @@ VERSION="$("$SRC_DIR/build-aux/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0
 terminfo_search_path() {
 	local prefix dir dirs="${TERMINFO_DIRS:-}"
 	if prefix="$(pkg-config --variable=prefix coffer 2>/dev/null)" && [ -n "$prefix" ]; then
+		# MSYS2's pkg-config reports a native path; tic needs the MSYS2 view.
+		if command -v cygpath >/dev/null 2>&1; then
+			prefix="$(cygpath -u "$prefix" 2>/dev/null || printf '%s' "$prefix")"
+		fi
 		dirs="${prefix}/share/terminfo${dirs:+:$dirs}"
 	fi
 	if command -v brew >/dev/null 2>&1; then
