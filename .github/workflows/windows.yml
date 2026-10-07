@@ -53,6 +53,7 @@ jobs:
             mingw-w64-ucrt-x86_64-thorvg
             ncurses
             zip
+            unzip
             p7zip
 
       - name: Fetch QOI header
@@ -77,7 +78,49 @@ jobs:
       - name: Run tests
         run: make -C build check
 
-      - name: GUI smoke test (selection drag)
+      - name: Build portable ZIP
+        run: make -C build dist-portable
+
+      - name: Verify extracted portable ZIP
+        run: |
+          package_dir=$(mktemp -d)
+          archives=(portty-*-windows-*-sdl3.zip)
+          test "${#archives[@]}" -eq 1
+          unzip -q "${archives[0]}" -d "$package_dir"
+          stages=("$package_dir"/*/)
+          test "${#stages[@]}" -eq 1
+          stage="${stages[0]}"
+          exe="${stage}portty.exe"
+          for file in "$exe" "${stage}portty.cmd" "${stage}README-PORTABLE.txt"; do
+            test -f "$file"
+          done
+          test -n "$(find "$stage" -maxdepth 1 -iname 'SDL3.dll' -print -quit)"
+
+          # The launcher advertises the bundled terminfo through TERMINFO_DIRS,
+          # so a bundle that lost it is incomplete even though it still launches.
+          # tic names the leaf directory after the ncurses build (a wide build
+          # hex-encodes it), so locate the entry rather than assume a path.
+          terminfo_dir="${stage}share/terminfo"
+          entry=$(find "$terminfo_dir" -type f -name portty-256color -print -quit)
+          if [ -z "$entry" ]; then
+            echo "ERROR: the bundle carries no portty-256color entry; it contains:" >&2
+            find "$terminfo_dir" -print >&2
+            exit 1
+          fi
+          TERMINFO_DIRS="$terminfo_dir" infocmp portty-256color >/dev/null
+
+          # Windows resolves an executable's imports from its own directory
+          # first, so a PATH holding nothing but System32 proves the bundle is
+          # self-contained: whatever it does not provide has to come from Windows.
+          system32="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")/System32"
+          if ! (cd "$stage" && PATH="$system32" timeout 60 "$exe" --version); then
+            echo "ERROR: the packaged portty.exe did not start with only $system32 on PATH" >&2
+            exit 1
+          fi
+
+          echo "PORTTY_PACKAGED_EXE=$exe" >> "$(cygpath -u "$GITHUB_ENV")"
+
+      - name: Packaged GUI smoke test (selection drag)
         run: |
           mkdir -p build/smoke
           rm -f build/smoke/child_ran.txt build/smoke/selection.json
@@ -94,15 +137,12 @@ jobs:
           dumpstate build/smoke/selection.json
           quit
           EOF
-          ./build/src/portty -S build/smoke/select.script
+          "$PORTTY_PACKAGED_EXE" -S build/smoke/select.script
           # The child must have run, and the drag must have reached the dump:
           # pausing the PTY for a selection must not end the session.
           grep -q SMOKE_MARKER_OK build/smoke/child_ran.txt
           test -s build/smoke/selection.json
           grep -q '"selection": {' build/smoke/selection.json
-
-      - name: Build portable ZIP
-        run: make -C build dist-portable
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
