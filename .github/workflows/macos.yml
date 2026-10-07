@@ -74,10 +74,15 @@ jobs:
           done
           # The launcher advertises the bundled terminfo through TERMINFO_DIRS, so
           # a bundle that lost it is incomplete even though it still launches.
+          # tic names the leaf directory after the ncurses build (a wide build
+          # hex-encodes it), so locate the entry rather than assume a path.
           terminfo_dir="$app/Contents/Resources/share/terminfo"
-          find "$terminfo_dir" -print
           entry=$(find "$terminfo_dir" -type f -name portty-256color -print -quit)
-          test -n "$entry"
+          if [ -z "$entry" ]; then
+            echo "ERROR: the bundle carries no portty-256color entry; it contains:" >&2
+            find "$terminfo_dir" -print >&2
+            exit 1
+          fi
           TERMINFO_DIRS="$terminfo_dir" infocmp portty-256color >/dev/null
           "$app/Contents/MacOS/portty" --version
           echo "PORTTY_PACKAGED_EXE=$app/Contents/MacOS/portty" >> "$GITHUB_ENV"

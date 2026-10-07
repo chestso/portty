@@ -204,12 +204,13 @@ EOF
 	# The launcher advertises this directory through TERMINFO_DIRS, so a bundle
 	# without terminfo is not a bundle — fail rather than ship one.
 	echo "==> Compiling terminfo"
-	if ! TERMINFO_DIRS="$(terminfo_search_path)" \
+	terminfo_dirs="$(terminfo_search_path)"
+	if ! TERMINFO_DIRS="$terminfo_dirs" \
 		tic -x -o "$APP_DIR/Contents/Resources/share/terminfo" "$SRC_DIR/data/portty.ti"; then
-		echo "ERROR: tic failed — cannot resolve use= entries; the bundle would ship without terminfo" >&2
+		echo "ERROR: tic failed — cannot resolve use= entries (searched: $terminfo_dirs)" >&2
 		exit 1
 	fi
-	find "$APP_DIR/Contents/Resources/share/terminfo" -type f
+	(cd "$APP_DIR/Contents/Resources/share/terminfo" && find . -type f)
 
 	# --- Info.plist ---
 	echo "==> Writing Info.plist"
@@ -373,9 +374,11 @@ else
 	# --- Terminfo --------------------------------------------------------------
 	echo "==> Compiling terminfo"
 	mkdir -p "$STAGE_DIR/share/terminfo"
-	TERMINFO_DIRS="$(terminfo_search_path)" \
+	terminfo_dirs="$(terminfo_search_path)"
+	TERMINFO_DIRS="$terminfo_dirs" \
 		tic -x -o "$STAGE_DIR/share/terminfo" "$SRC_DIR/data/portty.ti" ||
-		echo "  WARNING: tic failed — terminfo not included" >&2
+		echo "  WARNING: tic failed — terminfo not included (searched: $terminfo_dirs)" >&2
+	(cd "$STAGE_DIR/share/terminfo" && find . -type f)
 
 	# --- Runtime DLLs ----------------------------------------------------------
 	echo "==> Bundling runtime DLLs"
