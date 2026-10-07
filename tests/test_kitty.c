@@ -219,6 +219,63 @@ static void test_bridge_chunked_transmit_no_action(void)
     terminal_destroy(&t);
 }
 
+/* Clients that stream successive images under one fixed id (a=T,i=N
+ * each time) rely on the spec's re-transmit rule: the old placement is
+ * deleted and the new placement shows the NEW pixels. The renderer's
+ * texture cache keys on (id, version), so the version must differ
+ * across the re-transmit or the previous image's pixels stay cached. */
+static void test_bridge_retransmit_same_id(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    terminal_set_cell_px(&t, 10, 6);
+
+    char seq[256];
+    char b64[64];
+
+    uint8_t red[4] = { 255, 0, 0, 255 };
+    b64_encode(red, sizeof(red), b64);
+    snprintf(seq, sizeof(seq),
+             "\x1b_Ga=T,f=32,s=1,v=1,i=1,q=2,C=1;%s\x1b\\", b64);
+    feed(&t, seq);
+
+    int n = 0;
+    const CfrImage *s = terminal_get_images(&t, &n);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(n, 1);
+    uint32_t v0 = s[0].version;
+
+    /* Same id, same dimensions, new pixels. */
+    uint8_t green[4] = { 0, 255, 0, 255 };
+    b64_encode(green, sizeof(green), b64);
+    snprintf(seq, sizeof(seq),
+             "\x1b_Ga=T,f=32,s=1,v=1,i=1,q=2,C=1;%s\x1b\\", b64);
+    feed(&t, seq);
+
+    s = terminal_get_images(&t, &n);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(n, 1);
+    ASSERT_TRUE(s[0].version != v0); /* texture cache must re-upload */
+    ASSERT_EQ(s[0].rgba[0], 0);
+    ASSERT_EQ(s[0].rgba[1], 255);
+
+    int pn = 0;
+    const CfrImagePlacement *pls =
+        terminal_get_image_placements(&t, &pn);
+    ASSERT_NOT_NULL(pls);
+    ASSERT_EQ(pn, 1); /* one live placement, not two */
+    ASSERT_EQ((long long)pls[0].image_id, 1);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -228,6 +285,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_bridge_place);
     RUN_TEST(test_bridge_mixed_sources);
     RUN_TEST(test_bridge_chunked_transmit_no_action);
+    RUN_TEST(test_bridge_retransmit_same_id);
 
     TEST_SUMMARY();
 }
