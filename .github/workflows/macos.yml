@@ -57,7 +57,25 @@ jobs:
       - name: Run tests
         run: make -C build check
 
-      - name: GUI smoke test (software renderer)
+      - name: Build portable ZIP
+        run: make -C build dist-portable
+
+      - name: Verify extracted portable ZIP
+        run: |
+          package_dir=$(mktemp -d "$RUNNER_TEMP/portty-package.XXXXXX")
+          archives=(portty-*-macos-*-sdl3.zip)
+          test "${#archives[@]}" -eq 1
+          ditto -x -k "${archives[0]}" "$package_dir"
+          apps=("$package_dir"/*/Portty.app)
+          test "${#apps[@]}" -eq 1
+          app="${apps[0]}"
+          for binary in "$app/Contents/MacOS/portty.real" "$app/Contents/Frameworks/"*; do
+            codesign --verify --strict "$binary"
+          done
+          "$app/Contents/MacOS/portty" --version
+          echo "PORTTY_PACKAGED_EXE=$app/Contents/MacOS/portty" >> "$GITHUB_ENV"
+
+      - name: Packaged GUI smoke test (software renderer)
         run: |
           cat > /tmp/gui-smoke.script <<'EOF'
           wait 1.5
@@ -65,7 +83,7 @@ jobs:
           wait 0.5
           quit
           EOF
-          ./build/src/portty -v -g 80x24 -d "Hello macOS" -S /tmp/gui-smoke.script
+          "$PORTTY_PACKAGED_EXE" -v -g 80x24 -d "Hello macOS" -S /tmp/gui-smoke.script
           test -s /tmp/portty-gui-smoke.png
           file /tmp/portty-gui-smoke.png
 
@@ -76,9 +94,6 @@ jobs:
           path: /tmp/portty-gui-smoke.png
           if-no-files-found: error
           retention-days: 14
-
-      - name: Build portable ZIP
-        run: make -C build dist-portable
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
