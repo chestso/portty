@@ -69,20 +69,46 @@ if [ "$IS_MACOS" -eq 1 ]; then
 	DYLIB_DIR="$APP_DIR/Contents/Frameworks"
 	mkdir -p "$DYLIB_DIR"
 
-	SYSTEM_LIBS='libSystem\.|libc\.\|libobjc\.\|libiconv\.\|libcharset\.'
+	# Read load commands rather than splitting otool -L output on spaces.
+	# LC_ID_DYLIB is the library's own name, not a dependency to bundle.
+	macho_dependencies() {
+		local commands
+		commands=$(otool -l "$1") || return 1
+		printf '%s\n' "$commands" | awk '
+			$1 == "cmd" {
+				dependency = ($2 ~ /^LC_(LOAD|LOAD_WEAK|REEXPORT|LOAD_UPWARD|LAZY_LOAD)_DYLIB$/)
+			}
+			dependency && $1 == "name" {
+				sub(/^[[:space:]]*name /, "")
+				sub(/ \(offset [0-9]+\)$/, "")
+				print
+				dependency = 0
+			}'
+	}
 
 	bundle_dylib() {
 		local lib_path="$1"
-		local base
+		local base deps dep
+		case "$lib_path" in
+		/usr/lib/* | /System/Library/*) return ;;
+		/*) ;;
+		*)
+			echo "ERROR: Cannot bundle unresolved dependency: $lib_path" >&2
+			exit 1
+			;;
+		esac
+		if [ ! -f "$lib_path" ]; then
+			echo "ERROR: Dependency not found: $lib_path" >&2
+			exit 1
+		fi
 		base="$(basename "$lib_path")"
 
-		# Skip system libraries
-		if echo "$base" | grep -qE "^($SYSTEM_LIBS)"; then
-			return
-		fi
-
-		# Skip if already bundled
+		# Copies remain unmodified until the full dependency graph is collected.
 		if [ -f "$DYLIB_DIR/$base" ]; then
+			if ! cmp -s "$lib_path" "$DYLIB_DIR/$base"; then
+				echo "ERROR: Different dependencies share the name $base: $lib_path" >&2
+				exit 1
+			fi
 			return
 		fi
 
@@ -90,35 +116,62 @@ if [ "$IS_MACOS" -eq 1 ]; then
 		cp "$lib_path" "$DYLIB_DIR/$base"
 		chmod 755 "$DYLIB_DIR/$base"
 
-		# Fix install name in the dylib itself so it finds its siblings
-		install_name_tool -id "@rpath/$base" "$DYLIB_DIR/$base" 2>/dev/null || true
-
 		# Recurse into the dylib's own dependencies
-		local deps
-		deps=$(otool -L "$lib_path" 2>/dev/null | tail -n +2 | awk '{print $1}')
-		for dep in $deps; do
-			[ -f "$dep" ] || continue
+		deps=$(macho_dependencies "$lib_path")
+		while IFS= read -r dep; do
+			[ -n "$dep" ] || continue
 			bundle_dylib "$dep"
-		done
+		done <<EOF
+$deps
+EOF
 	}
 
 	# Process the main binary's dependencies
-	MAIN_DEPS=$(otool -L "$REAL_EXE" 2>/dev/null | tail -n +2 | awk '{print $1}')
-	for dep in $MAIN_DEPS; do
-		[ -f "$dep" ] || continue
+	MAIN_DEPS=$(macho_dependencies "$REAL_EXE")
+	while IFS= read -r dep; do
+		[ -n "$dep" ] || continue
 		bundle_dylib "$dep"
-	done
+	done <<EOF
+$MAIN_DEPS
+EOF
 
-	# Fix install names in the main binary to point to @rpath
-	for dep in $(otool -L "$REAL_EXE" 2>/dev/null | tail -n +2 | awk '{print $1}'); do
-		base="$(basename "$dep")"
-		if [ -f "$DYLIB_DIR/$base" ]; then
-			install_name_tool -change "$dep" "@rpath/$base" "$APP_DIR/Contents/MacOS/portty" 2>/dev/null || true
-		fi
-	done
+	# Bind every non-system edge to this bundle, including transitive edges.
+	# Explicit loader paths cannot accidentally prefer an installed Homebrew lib.
+	relocate_macho() {
+		local binary="$1" relative_dir="$2"
+		local deps dep commands rpaths rpath
+		deps=$(macho_dependencies "$binary")
+		while IFS= read -r dep; do
+			case "$dep" in
+			"" | /usr/lib/* | /System/Library/*) continue ;;
+			esac
+			install_name_tool -change "$dep" "$relative_dir/$(basename "$dep")" "$binary"
+		done <<EOF
+$deps
+EOF
+		commands=$(otool -l "$binary")
+		rpaths=$(printf '%s\n' "$commands" | awk '
+			$1 == "cmd" { rpath = ($2 == "LC_RPATH") }
+			rpath && $1 == "path" {
+				sub(/^[[:space:]]*path /, "")
+				sub(/ \(offset [0-9]+\)$/, "")
+				print
+				rpath = 0
+			}')
+		while IFS= read -r rpath; do
+			[ -n "$rpath" ] || continue
+			install_name_tool -delete_rpath "$rpath" "$binary"
+		done <<EOF
+$rpaths
+EOF
+	}
 
-	# Add LC_RPATH pointing to the Frameworks directory
-	install_name_tool -add_rpath "@executable_path/../Frameworks" "$APP_DIR/Contents/MacOS/portty" 2>/dev/null || true
+	for dylib in "$DYLIB_DIR"/*; do
+		[ -f "$dylib" ] || continue
+		relocate_macho "$dylib" '@loader_path'
+		install_name_tool -id "@rpath/$(basename "$dylib")" "$dylib"
+	done
+	relocate_macho "$APP_DIR/Contents/MacOS/portty" '@loader_path/../Frameworks'
 
 	# --- Data files ---
 	echo "==> Copying data files (icons, emacs)"
@@ -207,8 +260,16 @@ exec "\$(dirname "\$0")/portty.real" "\$@"
 WRAPPER
 	chmod 755 "$REAL_BIN"
 
-	# Fix rpath on the renamed binary too
-	install_name_tool -add_rpath "@executable_path/../Frameworks" "$REAL_BIN.real" 2>/dev/null || true
+	# Mach-O edits invalidate existing signatures. Sign only after all relocation
+	# and renaming is complete, then verify the bytes that will enter the ZIP.
+	echo "==> Signing and verifying bundled Mach-O files"
+	for dylib in "$DYLIB_DIR"/*; do
+		[ -f "$dylib" ] || continue
+		codesign --force --sign - "$dylib"
+		codesign --verify --strict "$dylib"
+	done
+	codesign --force --sign - "$REAL_BIN.real"
+	codesign --verify --strict "$REAL_BIN.real"
 
 	# --- README ---
 	echo "==> Writing README-PORTABLE.txt"
