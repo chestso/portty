@@ -30,6 +30,24 @@ BACKEND="${3:-sdl3}"
 # Get version from the same script configure uses
 VERSION="$("$SRC_DIR/build-aux/git-version.sh" "$SRC_DIR" 2>/dev/null || echo "0.0.0-unknown")"
 
+# tic resolves use= entries through $TERMINFO, $TERMINFO_DIRS, ~/.terminfo and
+# the system dirs — never through the prefix coffer was installed into.
+# portty.ti pulls in coffer's entries via use=, so point the lookup at coffer's
+# terminfo directory (and the usual install locations) when compiling.
+terminfo_search_path() {
+	local prefix dir dirs="${TERMINFO_DIRS:-}"
+	if prefix="$(pkg-config --variable=prefix coffer 2>/dev/null)" && [ -n "$prefix" ]; then
+		dirs="${prefix}/share/terminfo${dirs:+:$dirs}"
+	fi
+	if command -v brew >/dev/null 2>&1; then
+		dirs="$(brew --prefix)/share/terminfo${dirs:+:$dirs}"
+	fi
+	for dir in "$HOME/.local/share/terminfo" /usr/local/share/terminfo /usr/share/terminfo; do
+		dirs="${dirs:+$dirs:}$dir"
+	done
+	printf '%s' "$dirs"
+}
+
 # ── Platform detection ──────────────────────────────────────────────
 
 if [ "$(uname -s)" = "Darwin" ]; then
@@ -183,9 +201,14 @@ EOF
 	fi
 
 	# --- Terminfo ---
+	# The launcher advertises this directory through TERMINFO_DIRS, so a bundle
+	# without terminfo is not a bundle — fail rather than ship one.
 	echo "==> Compiling terminfo"
-	tic -x -o "$APP_DIR/Contents/Resources/share/terminfo" "$SRC_DIR/data/portty.ti" ||
-		echo "  WARNING: tic failed — terminfo not included" >&2
+	if ! TERMINFO_DIRS="$(terminfo_search_path)" \
+		tic -x -o "$APP_DIR/Contents/Resources/share/terminfo" "$SRC_DIR/data/portty.ti"; then
+		echo "ERROR: tic failed — cannot resolve use= entries; the bundle would ship without terminfo" >&2
+		exit 1
+	fi
 
 	# --- Info.plist ---
 	echo "==> Writing Info.plist"
@@ -349,7 +372,8 @@ else
 	# --- Terminfo --------------------------------------------------------------
 	echo "==> Compiling terminfo"
 	mkdir -p "$STAGE_DIR/share/terminfo"
-	tic -x -o "$STAGE_DIR/share/terminfo" "$SRC_DIR/data/portty.ti" ||
+	TERMINFO_DIRS="$(terminfo_search_path)" \
+		tic -x -o "$STAGE_DIR/share/terminfo" "$SRC_DIR/data/portty.ti" ||
 		echo "  WARNING: tic failed — terminfo not included" >&2
 
 	# --- Runtime DLLs ----------------------------------------------------------

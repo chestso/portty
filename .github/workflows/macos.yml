@@ -72,10 +72,15 @@ jobs:
           for binary in "$app/Contents/MacOS/portty.real" "$app/Contents/Frameworks/"*; do
             codesign --verify --strict "$binary"
           done
-          "$app/Contents/MacOS/portty" --version
+          # The launcher advertises the bundled terminfo through TERMINFO_DIRS, so
+          # a bundle that lost it is incomplete even though it still launches.
+          terminfo="$app/Contents/Resources/share/terminfo/p/portty-256color"
+          test -s "$terminfo"
+          TERMINFO_DIRS="$app/Contents/Resources/share/terminfo" infocmp portty-256color >/dev/null
+          "$app/Contents/MacOS/portty" --version | grep -q '^portty '
           echo "PORTTY_PACKAGED_EXE=$app/Contents/MacOS/portty" >> "$GITHUB_ENV"
 
-      - name: Packaged GUI smoke test (software renderer)
+      - name: Packaged GUI smoke test
         run: |
           cat > /tmp/gui-smoke.script <<'EOF'
           wait 1.5
