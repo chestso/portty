@@ -209,6 +209,7 @@ EOF
 		echo "ERROR: tic failed — cannot resolve use= entries; the bundle would ship without terminfo" >&2
 		exit 1
 	fi
+	find "$APP_DIR/Contents/Resources/share/terminfo" -type f
 
 	# --- Info.plist ---
 	echo "==> Writing Info.plist"
