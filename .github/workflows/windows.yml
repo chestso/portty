@@ -112,8 +112,11 @@ jobs:
           # Windows resolves an executable's imports from its own directory
           # first, so a PATH holding nothing but System32 proves the bundle is
           # self-contained: whatever it does not provide has to come from Windows.
+          # System32 has its own timeout.exe, so name the coreutils one outright.
+          timeout_bin=$(command -v timeout)
+          test -n "$timeout_bin"
           system32="$(cygpath -u "${SYSTEMROOT:-C:\\Windows}")/System32"
-          if ! (cd "$stage" && PATH="$system32" timeout 60 "$exe" --version); then
+          if ! (cd "$stage" && PATH="$system32" "$timeout_bin" 60 "$exe" --version); then
             echo "ERROR: the packaged portty.exe did not start with only $system32 on PATH" >&2
             exit 1
           fi
