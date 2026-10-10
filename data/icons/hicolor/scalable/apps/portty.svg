@@ -1,12 +1,208 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+<svg width="256" height="256" viewBox="0 0 256 256" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="text-gradient" gradientUnits="userSpaceOnUse" x1="20" y1="0" x2="108" y2="0">
-      <stop offset="0" stop-color="#FF5FAF"/>
-      <stop offset="1" stop-color="#7571F9"/>
+    <!-- Outer rim / hull drop shadow -->
+    <filter id="hull-shadow" x="0" y="0" width="256" height="256" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="12" stdDeviation="16" flood-color="#020617" flood-opacity="0.8"/>
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#020617" flood-opacity="0.6"/>
+    </filter>
+
+    <!-- Inner glow for terminal prompt symbols -->
+    <filter id="prompt-glow" x="30" y="30" width="196" height="196" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4" result="blur1"/>
+      <feGaussianBlur stdDeviation="10" result="blur2"/>
+      <feMerge>
+        <feMergeNode in="blur2"/>
+        <feMergeNode in="blur1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Deep oceanic backdrop behind glass -->
+    <radialGradient id="deep-ocean-bg" cx="50%" cy="40%" r="60%">
+      <stop offset="0%" stop-color="#0d1f38"/>
+      <stop offset="45%" stop-color="#071326"/>
+      <stop offset="80%" stop-color="#030814"/>
+      <stop offset="100%" stop-color="#010308"/>
+    </radialGradient>
+
+    <!-- Metallic brass / bronze outer bezel -->
+    <linearGradient id="brass-bezel" x1="16%" y1="10%" x2="84%" y2="90%">
+      <stop offset="0%" stop-color="#f5d77f"/>
+      <stop offset="15%" stop-color="#dfaa43"/>
+      <stop offset="35%" stop-color="#8a5a1b"/>
+      <stop offset="50%" stop-color="#e8bf5e"/>
+      <stop offset="68%" stop-color="#5c3809"/>
+      <stop offset="85%" stop-color="#a67324"/>
+      <stop offset="100%" stop-color="#3d2204"/>
     </linearGradient>
+
+    <!-- Metallic bezel highlight overlay -->
+    <linearGradient id="bezel-highlight" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.6"/>
+      <stop offset="25%" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="75%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <!-- Inner flange / dark rubber seal ring -->
+    <linearGradient id="inner-seal" x1="30%" y1="15%" x2="70%" y2="85%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="50%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#020617"/>
+    </linearGradient>
+
+    <!-- Bolt gradient -->
+    <radialGradient id="bolt-head" cx="35%" cy="35%" r="65%">
+      <stop offset="0%" stop-color="#fff4c2"/>
+      <stop offset="40%" stop-color="#dfa83e"/>
+      <stop offset="80%" stop-color="#7a4b11"/>
+      <stop offset="100%" stop-color="#381d03"/>
+    </radialGradient>
+
+    <!-- Lucid glowing prompt gradient: Cyan to Neon Emerald -->
+    <linearGradient id="lucid-cyan-glow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="50%" stop-color="#2dd4bf"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+
+    <!-- Glass reflections -->
+    <linearGradient id="glass-reflection-top" x1="20%" y1="0%" x2="80%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.45"/>
+      <stop offset="30%" stop-color="#38bdf8" stop-opacity="0.15"/>
+      <stop offset="65%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="glass-reflection-bottom" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3"/>
+      <stop offset="30%" stop-color="#38bdf8" stop-opacity="0.08"/>
+      <stop offset="70%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="glass-glare-arc" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffffff" stop-opacity="0.7"/>
+      <stop offset="50%" stop-color="#ffffff" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Clip paths for interior chamber and glass effects -->
+    <clipPath id="porthole-interior-clip">
+      <circle cx="128" cy="128" r="82"/>
+    </clipPath>
+
+    <clipPath id="glass-curved-sheen-clip">
+      <ellipse cx="128" cy="80" rx="76" ry="60"/>
+    </clipPath>
   </defs>
-  <rect x="8" y="8" width="112" height="112" rx="16" ry="16" fill="#000000"/>
-  <path d="M 28 42 L 56 64 L 28 86" fill="none" stroke="url(#text-gradient)" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
-  <line x1="62" y1="86" x2="98" y2="86" stroke="url(#text-gradient)" stroke-width="9" stroke-linecap="round"/>
+
+  <!-- ==================== BASE / OUTER BEZEL ==================== -->
+  <!-- Outer Porthole Metallic Ring (Bezel) -->
+  <g filter="url(#hull-shadow)">
+    <!-- Outer rim -->
+    <circle cx="128" cy="128" r="114" fill="url(#brass-bezel)"/>
+    <circle cx="128" cy="128" r="114" fill="url(#bezel-highlight)"/>
+    <!-- Outer chamfer edge stroke -->
+    <circle cx="128" cy="128" r="113.5" fill="none" stroke="#fff4c2" stroke-opacity="0.5" stroke-width="1"/>
+    <circle cx="128" cy="128" r="89.5" fill="none" stroke="#000000" stroke-opacity="0.7" stroke-width="2"/>
+  </g>
+
+  <!-- Rivets / Heavy Industrial Bolts (8 bolts evenly spaced at radius 101) -->
+  <g id="bolts">
+    <!-- Angle 0 (top): (128, 27) -->
+    <circle cx="128" cy="27" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="128" cy="26" r="5" fill="url(#bolt-head)"/>
+    <circle cx="128" cy="25.5" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 45 (top-right): (199.4, 56.6) -->
+    <circle cx="199.4" cy="57.6" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="199.4" cy="56.6" r="5" fill="url(#bolt-head)"/>
+    <circle cx="199.4" cy="56.1" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 90 (right): (229, 128) -->
+    <circle cx="229" cy="129" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="229" cy="128" r="5" fill="url(#bolt-head)"/>
+    <circle cx="229" cy="127.5" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 135 (bottom-right): (199.4, 199.4) -->
+    <circle cx="199.4" cy="200.4" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="199.4" cy="199.4" r="5" fill="url(#bolt-head)"/>
+    <circle cx="199.4" cy="198.9" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 180 (bottom): (128, 229) -->
+    <circle cx="128" cy="230" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="128" cy="229" r="5" fill="url(#bolt-head)"/>
+    <circle cx="128" cy="228.5" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 225 (bottom-left): (56.6, 199.4) -->
+    <circle cx="56.6" cy="200.4" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="56.6" cy="199.4" r="5" fill="url(#bolt-head)"/>
+    <circle cx="56.6" cy="198.9" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 270 (left): (27, 128) -->
+    <circle cx="27" cy="129" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="27" cy="128" r="5" fill="url(#bolt-head)"/>
+    <circle cx="27" cy="127.5" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+
+    <!-- Angle 315 (top-left): (56.6, 56.6) -->
+    <circle cx="56.6" cy="57.6" r="6" fill="#0c0702" opacity="0.6"/>
+    <circle cx="56.6" cy="56.6" r="5" fill="url(#bolt-head)"/>
+    <circle cx="56.6" cy="56.1" r="4.5" fill="none" stroke="#fff" stroke-opacity="0.6" stroke-width="0.8"/>
+  </g>
+
+  <!-- Inner Seal / Bezel Retainer Ring -->
+  <circle cx="128" cy="128" r="88" fill="url(#inner-seal)"/>
+  <circle cx="128" cy="128" r="88" fill="none" stroke="#000000" stroke-width="1.5"/>
+  <circle cx="128" cy="128" r="83" fill="none" stroke="#082f49" stroke-opacity="0.8" stroke-width="2"/>
+
+  <!-- ==================== PORTHOLE INTERIOR (BEHIND & ON GLASS) ==================== -->
+  <g clip-path="url(#porthole-interior-clip)">
+    <!-- Deep Ocean Chamber Background -->
+    <circle cx="128" cy="128" r="82" fill="url(#deep-ocean-bg)"/>
+
+    <!-- Subtle terminal grid / scanline atmosphere inside the port -->
+    <g opacity="0.12" stroke="#38bdf8" stroke-width="0.5">
+      <line x1="46" y1="78" x2="210" y2="78"/>
+      <line x1="46" y1="98" x2="210" y2="98"/>
+      <line x1="46" y1="118" x2="210" y2="118"/>
+      <line x1="46" y1="138" x2="210" y2="138"/>
+      <line x1="46" y1="158" x2="210" y2="158"/>
+      <line x1="46" y1="178" x2="210" y2="178"/>
+    </g>
+
+    <!-- Deep underwater glow centered behind prompt -->
+    <circle cx="128" cy="128" r="55" fill="#0ea5e9" opacity="0.22"/>
+
+    <!-- ==================== LUCID '>_' EMBEDDED IN GLASS ==================== -->
+    <g filter="url(#prompt-glow)">
+      <!-- Outer cyan halo glow paths -->
+      <path d="M 72 88 L 112 128 L 72 168" fill="none" stroke="#06b6d4" stroke-width="20" stroke-linecap="round" stroke-linejoin="round" opacity="0.3"/>
+      <line x1="124" y1="168" x2="182" y2="168" stroke="#06b6d4" stroke-width="20" stroke-linecap="round" opacity="0.3"/>
+
+      <!-- Core lucid prompt: sharp, vivid terminal glyphs -->
+      <path d="M 72 88 L 112 128 L 72 168" fill="none" stroke="url(#lucid-cyan-glow)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"/>
+      <line x1="124" y1="168" x2="182" y2="168" stroke="url(#lucid-cyan-glow)" stroke-width="14" stroke-linecap="round"/>
+
+      <!-- Inner ultra-bright specular filament -->
+      <path d="M 72 88 L 112 128 L 72 168" fill="none" stroke="#f0fdfa" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.95"/>
+      <line x1="124" y1="168" x2="182" y2="168" stroke="#f0fdfa" stroke-width="5" stroke-linecap="round" opacity="0.95"/>
+    </g>
+
+    <!-- Glass Refraction Overlay (subtle prismatic glass depth over the prompt) -->
+    <circle cx="128" cy="128" r="82" fill="url(#glass-reflection-bottom)"/>
+
+    <!-- Primary Top Diagonal Glass Glare Reflection -->
+    <path d="M 50 68 C 75 48 181 48 206 68 C 170 120 86 120 50 68 Z" fill="url(#glass-reflection-top)" opacity="0.8"/>
+
+    <!-- Curved Upper Spherical Glass Sheen -->
+    <path d="M 54 90 C 65 60 92 48 128 48 C 164 48 191 60 202 90 C 172 74 140 70 128 70 C 116 70 84 74 54 90 Z" fill="url(#glass-glare-arc)"/>
+
+    <!-- Glass edge inner rim specular curve (top-left) -->
+    <path d="M 68 72 A 78 78 0 0 1 188 72" fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.45"/>
+    
+    <!-- Glass edge inner rim reflection (bottom-right) -->
+    <path d="M 88 194 A 78 78 0 0 0 168 194" fill="none" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" opacity="0.35"/>
+  </g>
+
+  <!-- Final High-Gloss Crystal Rim Highlight Overlay -->
+  <circle cx="128" cy="128" r="82" fill="none" stroke="#ffffff" stroke-opacity="0.25" stroke-width="1"/>
 </svg>
