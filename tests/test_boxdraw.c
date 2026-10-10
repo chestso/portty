@@ -26,12 +26,40 @@
 #define CELL_W 18
 #define CELL_H 36
 
+/* Double-line geometry, derived the same way rend_boxdraw.c does for a
+ * CELL_W x CELL_H cell: stroke thickness, sub-line offset from the center,
+ * and the resulting sub-line rect edges.  A double line is a hollow "tube";
+ * the band between its two sub-lines is the tube interior. */
+#define LIGHT    (CELL_W / 5)
+#define OFF      (LIGHT + (LIGHT + 1) / 2)
+#define CELL_CX  (CELL_W / 2)
+#define CELL_CY  (CELL_H / 2)
+#define LV_LEFT  (CELL_CX - OFF - LIGHT / 2) /* left vertical sub-line (V1) */
+#define LV_RIGHT (LV_LEFT + LIGHT)
+#define RV_LEFT  (CELL_CX + OFF - LIGHT / 2) /* right vertical sub-line (V2) */
+#define RV_RIGHT (RV_LEFT + LIGHT)
+#define TH_TOP   (CELL_CY - OFF - LIGHT / 2) /* top horizontal sub-line (H1) */
+#define TH_BOT   (TH_TOP + LIGHT)
+#define BH_TOP   (CELL_CY + OFF - LIGHT / 2) /* bottom horizontal sub-line (H2) */
+#define BH_BOT   (BH_TOP + LIGHT)
+
 /* Check if a pixel in the bitmap is set (non-transparent). */
 static bool px_set(const GlyphBitmap *bmp, int x, int y)
 {
     if (x < 0 || x >= bmp->width || y < 0 || y >= bmp->height)
         return false;
     return bmp->pixels[(y * bmp->width + x) * 4 + 3] > 0;
+}
+
+/* Number of set pixels in the half-open rect [x0, x1) x [y0, y1). */
+static int rect_set_count(const GlyphBitmap *bmp, int x0, int y0, int x1, int y1)
+{
+    int n = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++)
+            if (px_set(bmp, x, y))
+                n++;
+    return n;
 }
 
 static int col_count(const GlyphBitmap *bmp, int x, int y0, int y1)
@@ -296,6 +324,194 @@ static void test_vertical_line_spans_cell(void)
     free_bmp(bmp);
 }
 
+/* Test: double-line junctions are open.
+ *
+ * Where two double tubes cross, the through tube's wall is cut over the
+ * crossing tube's interior, so the two interiors join instead of the wall
+ * sealing the branch off.  A closed junction fills the band asserted empty
+ * below. */
+static void test_double_junction_open(void)
+{
+    GlyphBitmap *bmp;
+
+    /* ╠ U+2560: vertical through, horizontal right — V2 is cut between the
+     * two horizontals. */
+    bmp = draw_cp(0x2560);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, TH_BOT, RV_RIGHT, BH_TOP), 0);
+    free_bmp(bmp);
+
+    /* ╣ U+2563: vertical through, horizontal left — V1 is cut. */
+    bmp = draw_cp(0x2563);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, TH_BOT, LV_RIGHT, BH_TOP), 0);
+    free_bmp(bmp);
+
+    /* ╦ U+2566: horizontal through, vertical down — H2 is cut. */
+    bmp = draw_cp(0x2566);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, BH_TOP, RV_LEFT, BH_BOT), 0);
+    free_bmp(bmp);
+
+    /* ╩ U+2569: horizontal through, vertical up — H1 is cut. */
+    bmp = draw_cp(0x2569);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, TH_TOP, RV_LEFT, TH_BOT), 0);
+    free_bmp(bmp);
+
+    /* ╬ U+256C: both tubes through — all four walls are cut. */
+    bmp = draw_cp(0x256C);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, TH_BOT, LV_RIGHT, BH_TOP), 0);
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, TH_BOT, RV_RIGHT, BH_TOP), 0);
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, TH_TOP, RV_LEFT, TH_BOT), 0);
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, BH_TOP, RV_LEFT, BH_BOT), 0);
+    free_bmp(bmp);
+}
+
+/* Test: a single/heavy stub that joins a double tube reaches its wall with
+ * no gap and without intruding into the tube interior. */
+static void test_single_stub_joins_double_tube(void)
+{
+    GlyphBitmap *bmp;
+    int vc_left = CELL_CX - LIGHT / 2; /* single vertical stub band */
+    int hc_top = CELL_CY - LIGHT / 2;  /* single horizontal stub band */
+
+    /* ╒ U+2552: down single + right double.  The stub spans from H1's top
+     * edge to the cell bottom. */
+    bmp = draw_cp(0x2552);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, vc_left, TH_TOP, vc_left + LIGHT, CELL_H),
+              LIGHT * (CELL_H - TH_TOP));
+    free_bmp(bmp);
+
+    /* ╘ U+2558: up single + right double.  The stub spans from the cell top
+     * down to H2's bottom edge. */
+    bmp = draw_cp(0x2558);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, vc_left, 0, vc_left + LIGHT, BH_BOT),
+              LIGHT * BH_BOT);
+    free_bmp(bmp);
+
+    /* ╓ U+2553: down double + right single.  The single horizontal starts at
+     * V1's outer edge, capping both verticals. */
+    bmp = draw_cp(0x2553);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_TRUE(px_set(bmp, LV_LEFT, CELL_CY));
+    ASSERT_FALSE(px_set(bmp, LV_LEFT - 1, CELL_CY));
+    free_bmp(bmp);
+
+    /* ╙ U+2559: up double + right single — same, mirrored. */
+    bmp = draw_cp(0x2559);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_TRUE(px_set(bmp, LV_LEFT, CELL_CY));
+    ASSERT_FALSE(px_set(bmp, LV_LEFT - 1, CELL_CY));
+    free_bmp(bmp);
+
+    /* ╟ U+255F: vertical through + right single.  The stub branches off the
+     * near wall (V2) and leaves the vertical interior open. */
+    bmp = draw_cp(0x255F);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_TRUE(px_set(bmp, RV_LEFT, CELL_CY));
+    ASSERT_FALSE(px_set(bmp, RV_LEFT - 1, CELL_CY));
+    free_bmp(bmp);
+
+    /* ╢ U+2562: vertical through + left single — mirrored. */
+    bmp = draw_cp(0x2562);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_TRUE(px_set(bmp, LV_RIGHT - 1, CELL_CY));
+    ASSERT_FALSE(px_set(bmp, LV_RIGHT, CELL_CY));
+    free_bmp(bmp);
+
+    /* ╤ U+2564: down single + horizontal double.  The stub hangs below H2
+     * and leaves the horizontal interior open. */
+    bmp = draw_cp(0x2564);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, vc_left, TH_BOT, vc_left + LIGHT, BH_TOP), 0);
+    ASSERT_TRUE(px_set(bmp, CELL_CX, BH_BOT));
+    free_bmp(bmp);
+
+    /* ╧ U+2567: up single + horizontal double — mirrored. */
+    bmp = draw_cp(0x2567);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, vc_left, TH_BOT, vc_left + LIGHT, BH_TOP), 0);
+    ASSERT_TRUE(px_set(bmp, CELL_CX, TH_TOP - 1));
+    free_bmp(bmp);
+
+    /* ╞ U+255E: single vertical + right double.  The double horizontals
+     * start at the single line's outer edge, so the corner is filled. */
+    bmp = draw_cp(0x255E);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_TRUE(px_set(bmp, vc_left, TH_TOP));
+    ASSERT_FALSE(px_set(bmp, vc_left - 1, TH_TOP));
+    ASSERT_EQ(rect_set_count(bmp, hc_top, TH_TOP, vc_left, TH_BOT), 0);
+    free_bmp(bmp);
+}
+
+/* Test: double-line corners keep their nested outer/inner pairing.
+ * The outer sub-lines (V1 + H1 for ╔) meet each other, as do the inner
+ * sub-lines (V2 + H2), and the tube interiors stay hollow. */
+static void test_double_corner_pairing(void)
+{
+    GlyphBitmap *bmp;
+
+    /* ╔ U+2554: outer L = V1 + H1, inner L = V2 + H2. */
+    bmp = draw_cp(0x2554);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, TH_TOP, CELL_W, TH_BOT),
+              (CELL_W - LV_LEFT) * LIGHT); /* H1 from V1's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, TH_TOP, LV_RIGHT, CELL_H),
+              LIGHT * (CELL_H - TH_TOP)); /* V1 from H1's top edge */
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, BH_TOP, CELL_W, BH_BOT),
+              (CELL_W - RV_LEFT) * LIGHT); /* H2 from V2's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, BH_TOP, RV_RIGHT, CELL_H),
+              LIGHT * (CELL_H - BH_TOP)); /* V2 from H2's top edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, TH_BOT, RV_LEFT, BH_TOP), 0);
+    free_bmp(bmp);
+
+    /* ╗ U+2557: outer L = V2 + H1, inner L = V1 + H2. */
+    bmp = draw_cp(0x2557);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, 0, TH_TOP, RV_RIGHT, TH_BOT),
+              RV_RIGHT * LIGHT); /* H1 to V2's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, TH_TOP, RV_RIGHT, CELL_H),
+              LIGHT * (CELL_H - TH_TOP)); /* V2 from H1's top edge */
+    ASSERT_EQ(rect_set_count(bmp, 0, BH_TOP, LV_RIGHT, BH_BOT),
+              LV_RIGHT * LIGHT); /* H2 to V1's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, BH_TOP, LV_RIGHT, CELL_H),
+              LIGHT * (CELL_H - BH_TOP)); /* V1 from H2's top edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, TH_BOT, RV_LEFT, BH_TOP), 0);
+    free_bmp(bmp);
+
+    /* ╚ U+255A: outer L = V1 + H2, inner L = V2 + H1. */
+    bmp = draw_cp(0x255A);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, BH_TOP, CELL_W, BH_BOT),
+              (CELL_W - LV_LEFT) * LIGHT); /* H2 from V1's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, 0, LV_RIGHT, BH_BOT),
+              LIGHT * BH_BOT); /* V1 from the top to H2's bottom edge */
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, TH_TOP, CELL_W, TH_BOT),
+              (CELL_W - RV_LEFT) * LIGHT); /* H1 from V2's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, 0, RV_RIGHT, TH_BOT),
+              LIGHT * TH_BOT); /* V2 from the top to H1's bottom edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, TH_BOT, RV_LEFT, BH_TOP), 0);
+    free_bmp(bmp);
+
+    /* ╝ U+255D: outer L = V2 + H2, inner L = V1 + H1. */
+    bmp = draw_cp(0x255D);
+    ASSERT_NOT_NULL(bmp);
+    ASSERT_EQ(rect_set_count(bmp, 0, BH_TOP, RV_RIGHT, BH_BOT),
+              RV_RIGHT * LIGHT); /* H2 to V2's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, RV_LEFT, 0, RV_RIGHT, BH_BOT),
+              LIGHT * BH_BOT); /* V2 from the top to H2's bottom edge */
+    ASSERT_EQ(rect_set_count(bmp, 0, TH_TOP, LV_RIGHT, TH_BOT),
+              LV_RIGHT * LIGHT); /* H1 to V1's outer edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_LEFT, 0, LV_RIGHT, TH_BOT),
+              LIGHT * TH_BOT); /* V1 from the top to H1's bottom edge */
+    ASSERT_EQ(rect_set_count(bmp, LV_RIGHT, TH_BOT, RV_LEFT, BH_TOP), 0);
+    free_bmp(bmp);
+}
+
 /* Test: at a larger cell size, rounded corners still produce proper
  * vertical stubs and arc pixels. */
 static void test_rounded_corner_large_cell(void)
@@ -542,6 +758,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_rounded_matches_straight_direction);
     RUN_TEST(test_horizontal_line_spans_cell);
     RUN_TEST(test_vertical_line_spans_cell);
+    RUN_TEST(test_double_junction_open);
+    RUN_TEST(test_single_stub_joins_double_tube);
+    RUN_TEST(test_double_corner_pairing);
     RUN_TEST(test_rounded_corner_large_cell);
     RUN_TEST(test_diagonal_proportional_margins);
     RUN_TEST(test_diagonal_lines_reach_bitmap_corners);

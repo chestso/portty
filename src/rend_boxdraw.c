@@ -53,6 +53,21 @@ static void ctx_fill_rect(BoxDrawCtx *ctx, int x, int y, int w, int h)
     }
 }
 
+// Clear a rectangle to fully transparent. Used to open a double tube's wall
+// where a perpendicular tube crosses it.
+static void ctx_clear_rect(BoxDrawCtx *ctx, int x, int y, int w, int h)
+{
+    if (!ctx->pixels || w <= 0 || h <= 0)
+        return;
+    int x0 = x < 0 ? 0 : x;
+    int y0 = y < 0 ? 0 : y;
+    int x1 = x + w > ctx->width ? ctx->width : x + w;
+    int y1 = y + h > ctx->height ? ctx->height : y + h;
+    for (int py = y0; py < y1; py++)
+        memset(ctx->pixels + (size_t)(py * ctx->width + x0) * 4, 0,
+               (size_t)(x1 - x0) * 4);
+}
+
 static void ctx_draw_point(BoxDrawCtx *ctx, float x, float y)
 {
     if (!ctx->pixels)
@@ -254,76 +269,130 @@ bool rend_boxdraw_is_supported(uint32_t cp)
     return (cp >= 0x2500 && cp <= 0x257F) || (cp >= 0x2580 && cp <= 0x259F);
 }
 
-// Draw single/heavy box lines (weights 1 and 2) from center to edges.
-// All coordinates are intentionally integer-truncated for pixel-aligned rendering.
-static void draw_single_heavy_lines(BoxDrawCtx *ctx,
-                                    int up, int down, int left, int right,
-                                    int x, int y, int w, int h,
-                                    int light, int heavy)
+// Resolved pixel geometry for one box-drawing cell.
+//
+// A double line is a hollow "tube": two parallel sub-lines with the space
+// between them left as background.  The sub-lines are V1/V2 (left/right
+// vertical) and H1/H2 (top/bottom horizontal); a tube's interior is the band
+// between its two sub-lines.  All edges are pixel coordinates relative to the
+// cell origin.
+typedef struct
 {
-    int cx = x + w / 2;
-    int cy = y + h / 2;
-    int light_half = light / 2;
-    int heavy_half = heavy / 2;
+    int x, y, w, h; // cell rect
+    int cx, cy;     // cell center
+    int light;      // stroke thickness for weight 1
+    int heavy;      // stroke thickness for weight 2
+    int light_half;
+    int heavy_half;
+    int lv_left, lv_right; // left vertical sub-line (V1)
+    int rv_left, rv_right; // right vertical sub-line (V2)
+    int th_top, th_bot;    // top horizontal sub-line (H1)
+    int bh_top, bh_bot;    // bottom horizontal sub-line (H2)
+} BoxGeom;
+
+static BoxGeom box_geom(int x, int y, int w, int h)
+{
+    BoxGeom g;
+
+    g.x = x;
+    g.y = y;
+    g.w = w;
+    g.h = h;
+    g.cx = x + w / 2;
+    g.cy = y + h / 2;
+
+    // Uniform line thickness based on cell width (narrower dimension)
+    g.light = w / 5;
+    if (g.light < 1)
+        g.light = 1;
+    g.heavy = g.light * 3;
+    if (g.heavy < g.light + 2)
+        g.heavy = g.light + 2;
+    g.light_half = g.light / 2;
+    g.heavy_half = g.heavy / 2;
+
+    // Sub-line rect edges.  Horizontal and vertical sub-lines connect at
+    // these edges (not centers) so corners meet without gaps.
+    int off = g.light + (g.light + 1) / 2; // sub-line offset from center
+    g.lv_left = g.cx - off - g.light_half;
+    g.lv_right = g.lv_left + g.light;
+    g.rv_left = g.cx + off - g.light_half;
+    g.rv_right = g.rv_left + g.light;
+    g.th_top = g.cy - off - g.light_half;
+    g.th_bot = g.th_top + g.light;
+    g.bh_top = g.cy + off - g.light_half;
+    g.bh_bot = g.bh_top + g.light;
+    return g;
+}
+
+// Draw single/heavy box lines (weights 1 and 2).
+//
+// A stub running into a double tube stops at the tube's wall rather than at
+// the cell center: at the near wall when the stub branches off a through
+// tube, or at the outer wall when the stub is the other arm of a corner.
+// Where both halves of an axis are single/heavy the two stubs meet in the
+// middle and span the cell, so no adjustment is needed.
+// All coordinates are intentionally integer-truncated for pixel-aligned rendering.
+static void draw_single_heavy_lines(BoxDrawCtx *ctx, const BoxGeom *g,
+                                    int up, int down, int left, int right)
+{
+    bool v_double = (up == 3 || down == 3);
+    bool v_through = (up == 3 && down == 3);
+    bool h_double = (left == 3 || right == 3);
+    bool h_through = (left == 3 && right == 3);
+
+    int up_end = g->cy + (up == 2 ? g->heavy_half : g->light_half);
+    int down_start = g->cy - (down == 2 ? g->heavy_half : g->light_half);
+    int left_end = g->cx + (left == 2 ? g->heavy_half : g->light_half);
+    int right_start = g->cx - (right == 2 ? g->heavy_half : g->light_half);
+
+    if (h_double && !(up && down)) {
+        up_end = h_through ? g->th_bot : g->bh_bot;
+        down_start = h_through ? g->bh_top : g->th_top;
+    }
+    if (v_double && !(left && right)) {
+        left_end = v_through ? g->lv_right : g->rv_right;
+        right_start = v_through ? g->rv_left : g->lv_left;
+    }
 
 #define FILL(rx, ry, rw, rh) ctx_fill_rect(ctx, (rx), (ry), (rw), (rh))
 
     if (up == 1)
-        FILL(cx - light_half, y, light, cy - y + light_half);
+        FILL(g->cx - g->light_half, g->y, g->light, up_end - g->y);
     else if (up == 2)
-        FILL(cx - heavy_half, y, heavy, cy - y + heavy_half);
+        FILL(g->cx - g->heavy_half, g->y, g->heavy, up_end - g->y);
 
     if (down == 1)
-        FILL(cx - light_half, cy - light_half, light, y + h - cy + light_half);
+        FILL(g->cx - g->light_half, down_start, g->light, g->y + g->h - down_start);
     else if (down == 2)
-        FILL(cx - heavy_half, cy - heavy_half, heavy, y + h - cy + heavy_half);
+        FILL(g->cx - g->heavy_half, down_start, g->heavy, g->y + g->h - down_start);
 
     if (left == 1)
-        FILL(x, cy - light_half, cx - x + light_half, light);
+        FILL(g->x, g->cy - g->light_half, left_end - g->x, g->light);
     else if (left == 2)
-        FILL(x, cy - heavy_half, cx - x + heavy_half, heavy);
+        FILL(g->x, g->cy - g->heavy_half, left_end - g->x, g->heavy);
 
     if (right == 1)
-        FILL(cx - light_half, cy - light_half, x + w - cx + light_half, light);
+        FILL(right_start, g->cy - g->light_half, g->x + g->w - right_start, g->light);
     else if (right == 2)
-        FILL(cx - heavy_half, cy - heavy_half, x + w - cx + heavy_half, heavy);
+        FILL(right_start, g->cy - g->heavy_half, g->x + g->w - right_start, g->heavy);
 
 #undef FILL
 }
 
-// Draw double box lines (weight 3) using 4 sub-lines with proper corner connections.
-// The 4 sub-lines are: left-v (at cx-off), right-v (at cx+off),
-// top-h (at cy-off), bot-h (at cy+off).
-// At corners, outer sub-lines connect to outer, inner to inner, forming L-shapes.
+// Draw double box lines (weight 3) using 4 sub-lines with proper corner
+// connections.  The 4 sub-lines are: left-v (V1), right-v (V2),
+// top-h (H1) and bot-h (H2).
+//
+// At a corner the outer sub-lines connect to each other and the inner
+// sub-lines connect to each other, forming two nested L-shapes.  At a
+// T-junction or a cross, the through tube's wall is opened over the crossing
+// tube's interior so the two tube interiors form one connected region.
 // All coordinates are intentionally integer-truncated for pixel-aligned rendering.
-static void draw_double_lines(BoxDrawCtx *ctx,
-                              int up, int down, int left, int right,
-                              int x, int y, int w, int h,
-                              int light)
+static void draw_double_lines(BoxDrawCtx *ctx, const BoxGeom *g,
+                              int up, int down, int left, int right)
 {
-    int cx = x + w / 2;
-    int cy = y + h / 2;
-    int off = light + (light + 1) / 2; // offset from center
-    int lw = light;                    // sub-line width
-    int lw_half = lw / 2;
-
-    // Sub-line center positions
-    int lv_x = cx - off;
-    int rv_x = cx + off;
-    int th_y = cy - off;
-    int bh_y = cy + off;
-
-    // Pixel edges of each sub-line's drawn rect. Horizontal and vertical
-    // sub-lines must connect at these edges (not centers) to form seamless
-    // corners without gaps.
-    int lv_left = lv_x - lw_half;
-    int lv_right = lv_left + lw;
-    int rv_left = rv_x - lw_half;
-    int rv_right = rv_left + lw;
-    int th_top = th_y - lw_half;
-    int th_bot = th_top + lw;
-    int bh_top = bh_y - lw_half;
-    int bh_bot = bh_top + lw;
+    int lw = g->light;
 
     bool du = (up == 3), dd = (down == 3), dl = (left == 3), dr = (right == 3);
     bool has_dv = du || dd;
@@ -337,56 +406,56 @@ static void draw_double_lines(BoxDrawCtx *ctx,
 
         // Top endpoints
         if (du) {
-            lv_y1 = y;
-            rv_y1 = y;
+            lv_y1 = g->y;
+            rv_y1 = g->y;
         } else if (has_dh) {
             // Only going down. Determine corner pairing:
             // down+right (╔-like): outer = left-v/top-h, inner = right-v/bot-h
             // down+left  (╗-like): outer = right-v/top-h, inner = left-v/bot-h
             // down+both  (╦-like): both verticals start at bot-h
             if (dr && !dl) {
-                lv_y1 = th_top;
-                rv_y1 = bh_top;
+                lv_y1 = g->th_top;
+                rv_y1 = g->bh_top;
             } else if (dl && !dr) {
-                rv_y1 = th_top;
-                lv_y1 = bh_top;
+                rv_y1 = g->th_top;
+                lv_y1 = g->bh_top;
             } else {
-                lv_y1 = bh_top;
-                rv_y1 = bh_top;
+                lv_y1 = g->bh_top;
+                rv_y1 = g->bh_top;
             }
         } else {
-            lv_y1 = cy - lw_half;
-            rv_y1 = cy - lw_half;
+            lv_y1 = g->cy - g->light_half;
+            rv_y1 = g->cy - g->light_half;
         }
 
         // Bottom endpoints
         if (dd) {
-            lv_y2 = y + h;
-            rv_y2 = y + h;
+            lv_y2 = g->y + g->h;
+            rv_y2 = g->y + g->h;
         } else if (has_dh) {
             // Only going up.
             // up+right (╚-like): outer = left-v/bot-h, inner = right-v/top-h
             // up+left  (╝-like): outer = right-v/bot-h, inner = left-v/top-h
             // up+both  (╩-like): both verticals end at top-h
             if (dr && !dl) {
-                lv_y2 = bh_bot;
-                rv_y2 = th_bot;
+                lv_y2 = g->bh_bot;
+                rv_y2 = g->th_bot;
             } else if (dl && !dr) {
-                rv_y2 = bh_bot;
-                lv_y2 = th_bot;
+                rv_y2 = g->bh_bot;
+                lv_y2 = g->th_bot;
             } else {
-                lv_y2 = th_bot;
-                rv_y2 = th_bot;
+                lv_y2 = g->th_bot;
+                rv_y2 = g->th_bot;
             }
         } else {
-            lv_y2 = cy + lw_half;
-            rv_y2 = cy + lw_half;
+            lv_y2 = g->cy + g->light_half;
+            rv_y2 = g->cy + g->light_half;
         }
 
         if (lv_y2 > lv_y1)
-            FILL(lv_left, lv_y1, lw, lv_y2 - lv_y1);
+            FILL(g->lv_left, lv_y1, lw, lv_y2 - lv_y1);
         if (rv_y2 > rv_y1)
-            FILL(rv_left, rv_y1, lw, rv_y2 - rv_y1);
+            FILL(g->rv_left, rv_y1, lw, rv_y2 - rv_y1);
     }
 
     // --- Horizontal sub-lines ---
@@ -395,56 +464,74 @@ static void draw_double_lines(BoxDrawCtx *ctx,
 
         // Left endpoints
         if (dl) {
-            th_x1 = x;
-            bh_x1 = x;
+            th_x1 = g->x;
+            bh_x1 = g->x;
         } else if (has_dv) {
             // Only going right.
             // down+right (╔-like): outer = top-h/left-v, inner = bot-h/right-v
             // up+right   (╚-like): outer = bot-h/left-v, inner = top-h/right-v
             // both+right (╠-like): both horizontals start at right-v
             if (dd && !du) {
-                th_x1 = lv_left;
-                bh_x1 = rv_left;
+                th_x1 = g->lv_left;
+                bh_x1 = g->rv_left;
             } else if (du && !dd) {
-                bh_x1 = lv_left;
-                th_x1 = rv_left;
+                bh_x1 = g->lv_left;
+                th_x1 = g->rv_left;
             } else {
-                th_x1 = rv_left;
-                bh_x1 = rv_left;
+                th_x1 = g->rv_left;
+                bh_x1 = g->rv_left;
             }
         } else {
-            th_x1 = cx - lw_half;
-            bh_x1 = cx - lw_half;
+            th_x1 = g->cx - g->light_half;
+            bh_x1 = g->cx - g->light_half;
         }
 
         // Right endpoints
         if (dr) {
-            th_x2 = x + w;
-            bh_x2 = x + w;
+            th_x2 = g->x + g->w;
+            bh_x2 = g->x + g->w;
         } else if (has_dv) {
             // Only going left.
             // down+left (╗-like): outer = top-h/right-v, inner = bot-h/left-v
             // up+left   (╝-like): outer = bot-h/right-v, inner = top-h/left-v
             // both+left (╣-like): both horizontals end at left-v
             if (dd && !du) {
-                th_x2 = rv_right;
-                bh_x2 = lv_right;
+                th_x2 = g->rv_right;
+                bh_x2 = g->lv_right;
             } else if (du && !dd) {
-                bh_x2 = rv_right;
-                th_x2 = lv_right;
+                bh_x2 = g->rv_right;
+                th_x2 = g->lv_right;
             } else {
-                th_x2 = lv_right;
-                bh_x2 = lv_right;
+                th_x2 = g->lv_right;
+                bh_x2 = g->lv_right;
             }
         } else {
-            th_x2 = cx + lw_half;
-            bh_x2 = cx + lw_half;
+            th_x2 = g->cx + g->light_half;
+            bh_x2 = g->cx + g->light_half;
         }
 
         if (th_x2 > th_x1)
-            FILL(th_x1, th_top, th_x2 - th_x1, lw);
+            FILL(th_x1, g->th_top, th_x2 - th_x1, lw);
         if (bh_x2 > bh_x1)
-            FILL(bh_x1, bh_top, bh_x2 - bh_x1, lw);
+            FILL(bh_x1, g->bh_top, bh_x2 - bh_x1, lw);
+    }
+
+    // --- Open the junctions ---
+    // A through tube's wall is cut where a perpendicular double tube crosses
+    // it, so the two tube interiors join into one open region.
+    if (has_dv && has_dh) {
+        if (du && dd) {
+            if (dr)
+                ctx_clear_rect(ctx, g->rv_left, g->th_bot, lw, g->bh_top - g->th_bot);
+            if (dl)
+                ctx_clear_rect(ctx, g->lv_left, g->th_bot, lw, g->bh_top - g->th_bot);
+        }
+        if (dl && dr) {
+            if (dd)
+                ctx_clear_rect(ctx, g->lv_right, g->bh_top, g->rv_left - g->lv_right, lw);
+            if (du)
+                ctx_clear_rect(ctx, g->lv_right, g->th_top, g->rv_left - g->lv_right, lw);
+        }
     }
 
 #undef FILL
@@ -458,22 +545,14 @@ static void draw_box_lines(BoxDrawCtx *ctx, uint8_t enc,
     int left = (enc >> 2) & 3;
     int right = (enc >> 0) & 3;
 
-    // Uniform line thickness based on cell width (narrower dimension)
-    int light = w / 5;
-    if (light < 1)
-        light = 1;
-    int heavy = light * 3;
-    if (heavy < light + 2)
-        heavy = light + 2;
+    BoxGeom g = box_geom(x, y, w, h);
 
     // Draw single/heavy lines (weights 1 and 2)
-    draw_single_heavy_lines(ctx, up, down, left, right,
-                            x, y, w, h, light, heavy);
+    draw_single_heavy_lines(ctx, &g, up, down, left, right);
 
     // Draw double lines (weight 3)
     if (up == 3 || down == 3 || left == 3 || right == 3)
-        draw_double_lines(ctx, up, down, left, right,
-                          x, y, w, h, light);
+        draw_double_lines(ctx, &g, up, down, left, right);
 }
 
 static void draw_block_element(BoxDrawCtx *ctx, uint32_t cp,
