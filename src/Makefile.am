@@ -115,15 +115,17 @@ endif
 
 # Embedded window icon (256x256 PNG compiled into the binary as a C header
 # via build-aux/bin2c.sh). After changing the source SVG, run `make regen-icon`
-# (needs rsvg-convert) to refresh the committed header, then commit it.
+# (needs rsvg-convert) to refresh the committed header, then commit it. The
+# rasterized PNG is an intermediate and stays in the build tree.
 regen-icon:
 	rsvg-convert -w 256 -h 256 -f png \
 	    $(top_srcdir)/data/icons/hicolor/scalable/apps/portty.svg \
-	    -o $(srcdir)/portty_icon_256.png
+	    -o portty_icon_256.png
 	$(SHELL) $(top_srcdir)/build-aux/bin2c.sh \
-	    $(srcdir)/portty_icon_256.png portty_icon_png \
+	    portty_icon_256.png portty_icon_png \
 	    > $(srcdir)/portty_icon_png.h
 	@echo "  GEN      portty_icon_png.h"
+CLEANFILES += portty_icon_256.png
 
 if HAVE_RC
 # Compile the Windows resource file (portty.rc) with windres to embed the
