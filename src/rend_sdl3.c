@@ -41,6 +41,14 @@
 #define FALLBACK_CACHE_SIZE  64
 #define MAX_LOADED_FALLBACKS 8
 
+// Atlas key tags. The atlas is keyed by (font_data, glyph_id, color), so a
+// glyph rasterized against a different pixel budget needs its own key.
+// Font glyph indices stay in the low thousands even for color fonts, leaving
+// the top bits free.
+#define ATLAS_WIDE_GLYPH_TAG (1u << 29) // single-glyph path: 2-cell raster
+#define ATLAS_RUN_GLYPH_TAG  (1u << 27) // shaped run: laid out in a slot,
+#define ATLAS_RUN_CELL_SHIFT 28         // ...slot_cells cells wide
+
 typedef struct
 {
     uint32_t codepoint;
@@ -852,34 +860,92 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         }
 
         if (shaped) {
-            for (int gi = 0; gi < shaped->num_glyphs; gi++) {
-                uint32_t gid = shaped->glyph_ids[gi];
-                if (gid == 0)
-                    continue;
-                // Tag the gid so 1-cell and 2-cell rasters of the same glyph
-                // get separate atlas entries (matches single-glyph path bit 29).
-                uint32_t atlas_gid = (columns_to_consume >= 2) ? (gid | (1u << 29)) : gid;
-                RendSdl3AtlasEntry *entry =
-                    rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
-                if (!entry) {
-                    GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
-                                                           render_r, render_g, render_b);
-                    if (gb) {
-                        entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
-                                            gb, downscale_glyph,
-                                            cache_w, cache_h, center_horizontally, color_baked);
-                        data->font->free_glyph_bitmap(data->font, gb);
-                    } else {
-                        rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
+            // A run the font has no ligature for arrives as one glyph per
+            // component. When those glyphs are placed by cell-centering
+            // (downscaled color emoji, symbol-class glyphs) HarfBuzz's own x
+            // positions are dropped, so lay the components out across the
+            // cluster's box — otherwise every one of them lands on the same
+            // spot and only the last is visible.
+            RendRunGlyphSlot slots[32];
+            int n_slots = 0;
+            if (shaped->num_glyphs > 1 && (downscale_glyph || center_horizontally))
+                n_slots = rend_layout_shaped_run(shaped, avail_w, data->cell_width,
+                                                 columns_to_consume, slots,
+                                                 (int)(sizeof(slots) / sizeof(slots[0])));
+
+            if (n_slots > 1) {
+                for (int si = 0; si < n_slots; si++) {
+                    uint32_t gid = shaped->glyph_ids[slots[si].index];
+                    // Run slots get their own atlas key namespace with the
+                    // slot's cell budget above it: a component rasterized for
+                    // a 1-cell slot must not alias the single-glyph entry for
+                    // the same font glyph, which used a different budget.
+                    uint32_t atlas_gid = gid | ATLAS_RUN_GLYPH_TAG |
+                                         ((uint32_t)slots[si].slot_cells << ATLAS_RUN_CELL_SHIFT);
+                    int slot_w = slots[si].slot_cells * data->cell_width;
+                    // Keep the single-glyph path's square clamp for color
+                    // emoji so a wide slot doesn't stretch the glyph.
+                    if (downscale_glyph && slot_w > avail_h)
+                        slot_w = avail_h;
+
+                    RendSdl3AtlasEntry *entry =
+                        rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
+                    if (!entry) {
+                        GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
+                                                               render_r, render_g, render_b);
+                        if (gb) {
+                            entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
+                                                gb, downscale_glyph,
+                                                slot_w, cache_h, center_horizontally, color_baked);
+                            data->font->free_glyph_bitmap(data->font, gb);
+                        } else {
+                            rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
+                        }
+                    }
+                    if (!populate_only) {
+                        // Centered entries ignore the offsets and center inside
+                        // slot_w; baseline-anchored ones carry the centering in
+                        // entry->x_offset (computed against slot_w above).
+                        blit_glyph(data->renderer, &data->atlas, entry,
+                                   cell_x + slots[si].x, cell_y,
+                                   entry ? entry->x_offset : 0,
+                                   entry ? entry->y_offset : 0,
+                                   slot_w, avail_h, data->font_ascent,
+                                   color_baked, r, g, b, data->glyph_shader, bg_luma);
                     }
                 }
-                if (!populate_only) {
-                    int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
-                    int y_off = entry ? entry->y_offset : 0;
-                    blit_glyph(data->renderer, &data->atlas, entry,
-                               cell_x, cell_y, x_off,
-                               y_off, avail_w, avail_h, data->font_ascent,
-                               color_baked, r, g, b, data->glyph_shader, bg_luma);
+            } else {
+                for (int gi = 0; gi < shaped->num_glyphs; gi++) {
+                    uint32_t gid = shaped->glyph_ids[gi];
+                    if (gid == 0)
+                        continue;
+                    // Tag the gid so 1-cell and 2-cell rasters of the same glyph
+                    // get separate atlas entries (matches single-glyph path bit 29).
+                    uint32_t atlas_gid = (columns_to_consume >= 2)
+                                             ? (gid | ATLAS_WIDE_GLYPH_TAG)
+                                             : gid;
+                    RendSdl3AtlasEntry *entry =
+                        rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
+                    if (!entry) {
+                        GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
+                                                               render_r, render_g, render_b);
+                        if (gb) {
+                            entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
+                                                gb, downscale_glyph,
+                                                cache_w, cache_h, center_horizontally, color_baked);
+                            data->font->free_glyph_bitmap(data->font, gb);
+                        } else {
+                            rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
+                        }
+                    }
+                    if (!populate_only) {
+                        int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
+                        int y_off = entry ? entry->y_offset : 0;
+                        blit_glyph(data->renderer, &data->atlas, entry,
+                                   cell_x, cell_y, x_off,
+                                   y_off, avail_w, avail_h, data->font_ascent,
+                                   color_baked, r, g, b, data->glyph_shader, bg_luma);
+                    }
                 }
             }
             free(shaped->glyph_ids);
@@ -934,7 +1000,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         // get separate atlas entries (different rasterization sizes).
         uint32_t atlas_glyph_id = glyph_index;
         if (columns_to_consume >= 2 && atlas_glyph_id != 0)
-            atlas_glyph_id |= (1u << 29);
+            atlas_glyph_id |= ATLAS_WIDE_GLYPH_TAG;
 
         if (atlas_glyph_id != 0)
             entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_glyph_id, color_key);

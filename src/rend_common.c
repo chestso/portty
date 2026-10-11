@@ -364,6 +364,49 @@ GlyphBitmap *rend_apply_glyph_layout(GlyphBitmap *bitmap,
     return NULL;
 }
 
+int rend_layout_shaped_run(const ShapedGlyphs *run, int box_w, int cell_w,
+                           int columns_to_consume, RendRunGlyphSlot *slots,
+                           int max_slots)
+{
+    if (!run || !slots || max_slots <= 0 || box_w <= 0 || cell_w <= 0)
+        return 0;
+
+    // Total advance of the glyphs that will actually be drawn — the slots
+    // divide this, not the run's nominal advance, so a skipped placeholder
+    // glyph doesn't leave a gap.
+    int total = 0;
+    for (int i = 0; i < run->num_glyphs; i++) {
+        if (run->glyph_ids[i] == 0 || run->x_advances[i] <= 0)
+            continue;
+        total += run->x_advances[i];
+    }
+    if (total <= 0)
+        return 0;
+
+    int drawn = 0;
+    int cursor = 0;
+    for (int i = 0; i < run->num_glyphs && drawn < max_slots; i++) {
+        int advance = run->x_advances[i];
+        if (run->glyph_ids[i] == 0 || advance <= 0)
+            continue;
+
+        int slot_w = (int)(((long)box_w * advance) / total);
+        int cells = (slot_w + cell_w / 2) / cell_w;
+        if (cells < 1)
+            cells = 1;
+        if (columns_to_consume > 0 && cells > columns_to_consume)
+            cells = columns_to_consume;
+
+        slots[drawn].index = i;
+        slots[drawn].x = (int)(((long)box_w * cursor) / total);
+        slots[drawn].slot_cells = cells;
+        drawn++;
+
+        cursor += advance;
+    }
+    return drawn;
+}
+
 // =============================================================================
 // NERD FONTS V2 -> V3 CODEPOINT TRANSLATION HACK
 // =============================================================================

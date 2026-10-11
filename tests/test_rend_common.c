@@ -291,6 +291,103 @@ static void test_plan_glyph_regional_passes_through(void)
     ASSERT_EQ(p.cache_h, 24);
 }
 
+/* Build a shaped run from parallel arrays. */
+static ShapedGlyphs make_run(const uint32_t *ids, const int *advances, int n)
+{
+    ShapedGlyphs run;
+    memset(&run, 0, sizeof(run));
+    run.num_glyphs = n;
+    run.glyph_ids = (uint32_t *)ids;
+    run.x_advances = (int *)advances;
+    return run;
+}
+
+/* A two-component run the font has no ligature for (🐦‍🟥 in a font that
+ * composes neither) must spread its glyphs across the cluster's two cells
+ * instead of piling them on one spot. Equal advances → one cell each. */
+static void test_layout_shaped_run_two_components(void)
+{
+    uint32_t ids[3] = { 506, 1, 2280 };
+    int advances[3] = { 1275, 0, 1275 };
+    ShapedGlyphs run = make_run(ids, advances, 3);
+
+    RendRunGlyphSlot slots[8];
+    int n = rend_layout_shaped_run(&run, 20, 10, 2, slots, 8);
+
+    ASSERT_EQ(n, 2);
+    /* The zero-advance ZWJ placeholder (gid 1) gets no slot; the two real
+     * components land in the first and second cell. */
+    ASSERT_EQ(slots[0].index, 0);
+    ASSERT_EQ(slots[0].x, 0);
+    ASSERT_EQ(slots[0].slot_cells, 1);
+    ASSERT_EQ(slots[1].index, 2);
+    ASSERT_EQ(slots[1].x, 10);
+    ASSERT_EQ(slots[1].slot_cells, 1);
+}
+
+/* A composed run (one glyph) needs no distribution — the caller keeps its
+ * single-glyph placement. */
+static void test_layout_shaped_run_single_glyph(void)
+{
+    uint32_t ids[1] = { 508 };
+    int advances[1] = { 1275 };
+    ShapedGlyphs run = make_run(ids, advances, 1);
+
+    RendRunGlyphSlot slots[8];
+    ASSERT_EQ(rend_layout_shaped_run(&run, 20, 10, 2, slots, 8), 1);
+    ASSERT_EQ(slots[0].x, 0);
+}
+
+/* Unequal advances get advance-proportional origins and budgets. */
+static void test_layout_shaped_run_proportional(void)
+{
+    uint32_t ids[2] = { 10, 20 };
+    int advances[2] = { 300, 100 };
+    ShapedGlyphs run = make_run(ids, advances, 2);
+
+    RendRunGlyphSlot slots[8];
+    int n = rend_layout_shaped_run(&run, 20, 10, 2, slots, 8);
+
+    ASSERT_EQ(n, 2);
+    ASSERT_EQ(slots[0].x, 0);          /* 20 * 0 / 400 */
+    ASSERT_EQ(slots[1].x, 15);         /* 20 * 300 / 400 */
+    ASSERT_EQ(slots[0].slot_cells, 2); /* 15px slot → 2 cells */
+    ASSERT_EQ(slots[1].slot_cells, 1);
+}
+
+/* A three-glyph run in a two-cell cluster clamps every slot to the cluster's
+ * own budget — the run must not claim a third cell it doesn't occupy. */
+static void test_layout_shaped_run_clamps_to_cluster_cells(void)
+{
+    uint32_t ids[3] = { 1, 2, 3 };
+    int advances[3] = { 100, 100, 100 };
+    ShapedGlyphs run = make_run(ids, advances, 3);
+
+    RendRunGlyphSlot slots[8];
+    int n = rend_layout_shaped_run(&run, 20, 10, 2, slots, 8);
+
+    ASSERT_EQ(n, 3);
+    for (int i = 0; i < n; i++)
+        ASSERT_TRUE(slots[i].slot_cells <= 2);
+}
+
+/* Nothing drawable (all notdef, or no advance at all) → no slots, so the
+ * caller falls back to its own placement instead of drawing nothing. */
+static void test_layout_shaped_run_nothing_drawable(void)
+{
+    uint32_t ids[2] = { 0, 0 };
+    int advances[2] = { 100, 100 };
+    ShapedGlyphs run = make_run(ids, advances, 2);
+
+    RendRunGlyphSlot slots[8];
+    ASSERT_EQ(rend_layout_shaped_run(&run, 20, 10, 2, slots, 8), 0);
+
+    uint32_t ids2[2] = { 5, 6 };
+    int advances2[2] = { 0, 0 };
+    ShapedGlyphs run2 = make_run(ids2, advances2, 2);
+    ASSERT_EQ(rend_layout_shaped_run(&run2, 20, 10, 2, slots, 8), 0);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -311,6 +408,11 @@ int main(int argc, char *argv[])
     RUN_TEST(test_apply_glyph_layout_passthrough);
     RUN_TEST(test_apply_glyph_layout_center_only);
     RUN_TEST(test_apply_glyph_layout_downscale_centered);
+    RUN_TEST(test_layout_shaped_run_two_components);
+    RUN_TEST(test_layout_shaped_run_single_glyph);
+    RUN_TEST(test_layout_shaped_run_proportional);
+    RUN_TEST(test_layout_shaped_run_clamps_to_cluster_cells);
+    RUN_TEST(test_layout_shaped_run_nothing_drawable);
     RUN_TEST(test_resolve_cell_style_normal_default);
     RUN_TEST(test_resolve_cell_style_bold_italic_cascade);
     RUN_TEST(test_resolve_cell_style_bold_loads_when_only_bold_present);

@@ -218,6 +218,39 @@ GlyphBitmap *rend_apply_glyph_layout(GlyphBitmap *bitmap,
                                      bool center_horizontally,
                                      int max_w, int max_h);
 
+// One drawable glyph of a multi-glyph shaped run, placed inside the cell
+// box the cluster occupies.
+typedef struct
+{
+    int index;      // glyph index within the run
+    int x;          // slot origin in px, from the box's left edge
+    int slot_cells; // raster budget and centering box, in whole cells (>= 1)
+} RendRunGlyphSlot;
+
+// Distribute the glyphs of a shaped run across the cell box its cluster
+// occupies, so a run the font has no ligature for lays its components out
+// side by side instead of drawing every one of them on top of the others.
+// Each glyph gets an advance-proportional x origin and a whole-cell raster
+// budget, which the backend uses as both the atlas entry's pixel budget and
+// the box the glyph is centered in.
+//
+// Callers reach for this when the run's glyphs are placed by cell-centering
+// (downscaled color emoji, symbol-class glyphs); the baseline-anchored path
+// already honours HarfBuzz's own x positions and needs no help.
+//
+// Glyphs with nothing to place are skipped: notdef (glyph 0), and
+// zero-advance glyphs, which own no advance (a ZWJ's placeholder glyph, an
+// emoji modifier the font did not compose) and would land on their
+// neighbour. Zero-advance glyphs of *baseline-anchored* runs are still
+// drawn by the caller — a combining mark with ink and no advance belongs on
+// top of its base.
+//
+// Returns the number of glyphs written to `slots`, or 0 when the run
+// carries no drawable advance at all (caller keeps single-glyph placement).
+int rend_layout_shaped_run(const ShapedGlyphs *run, int box_w, int cell_w,
+                           int columns_to_consume, RendRunGlyphSlot *slots,
+                           int max_slots);
+
 // Per-cell glyph rendering decisions: presentation sizes, color-baked
 // flag, atlas color key, render colors, symbol-class flag, and the
 // downscale-or-center policy. Caller already picked a FontStyle via
