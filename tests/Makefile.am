@@ -199,3 +199,12 @@ test_link_hint_SOURCES = test_link_hint.c $(TEST_COMMON) ../src/portty_panel.c
 test_link_hint_CFLAGS = $(TEST_CFLAGS)
 
 TESTS = $(check_PROGRAMS)
+
+# Build the test binaries WITHOUT running them. CI uses this in the
+# parallel Build step (make -j ... check-programs) so the timed Run
+# tests step is pure execution — `make check` in the serial harness
+# would otherwise compile all 30 binaries one-by-one inside it.
+# (There is no built-in `make check_PROGRAMS`: the serial harness
+# only expands that variable inside its own recursive rule.)
+.PHONY: check-programs
+check-programs: $(check_PROGRAMS)

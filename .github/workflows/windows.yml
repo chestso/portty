@@ -17,6 +17,12 @@ jobs:
     defaults:
       run:
         shell: msys2 {0}
+    env:
+      # Pinned coffer ref — single source for both the checkout and the
+      # coffer-install cache key in this file. Bump alongside configure.ac's
+      # pkg-config minimum; the same ref lives in linux.yml / macos.yml
+      # (bump all three together).
+      COFFER_REF: v0.6.4
 
     steps:
       - name: Checkout portty
@@ -28,7 +34,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: chestso/coffer
-          ref: v0.6.4
+          ref: ${{ env.COFFER_REF }}
           path: coffer
           fetch-depth: 0
 
@@ -59,27 +65,66 @@ jobs:
       - name: Fetch QOI header
         run: sh scripts/fetch-qoi.sh
 
+      - name: Resolve the coffer install prefix
+        id: coffer-prefix
+        run: |
+          prefix="$(cygpath -m "$HOME/.local")"
+          echo "coffer install prefix: $prefix"
+          echo "path=$prefix" >> "$(cygpath -u "$GITHUB_OUTPUT")"
+
+      - name: Cache coffer install
+        id: coffer-cache
+        uses: actions/cache@v5
+        with:
+          # The prefix ($HOME/.local inside the MSYS2 shell) in host form —
+          # actions/cache runs on the host, not in the MSYS2 shell. Resolved
+          # in the step above rather than spelled out, because the MSYS2 root
+          # moves with setup-msys2's `release` input: the upstream release
+          # extracts to $RUNNER_TEMP/msys64, the image's copy lives at
+          # C:/msys64. Keyed on the coffer ref + msystem: a pin bump
+          # rebuilds; otherwise the install is restored in seconds instead
+          # of recompiled. A stale key (moved MSYS2 root) degrades to a
+          # miss+rebuild, never a break.
+          path: ${{ steps.coffer-prefix.outputs.path }}
+          key: coffer-install-ucrt64-${{ env.COFFER_REF }}
+
       - name: Build & install coffer
+        if: steps.coffer-cache.outputs.cache-hit != 'true'
         working-directory: coffer
         run: |
           ./autogen.sh
           mkdir build && cd build
-          sh ../configure --prefix="$MINGW_PREFIX" --enable-release
+          sh ../configure --prefix="$HOME/.local" --enable-release
           make -j"$(nproc)"
           make install
 
       - name: Build portty
         run: |
+          # setup-msys2 does not pass PKG_CONFIG_PATH through to the
+          # MSYS2 environment (msys2/setup-msys2#98), and /etc/profile
+          # overwrites it on every login shell; export it here so
+          # pkgconf finds the coffer.pc we just installed (from the cache
+          # or the fresh build above). $HOME/.local is a POSIX path
+          # (no drive letter) — a C:/... path here would split on the
+          # drive-letter colon and pkg-config would see two bogus dirs.
+          export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
           ./autogen.sh
           mkdir build && cd build
           sh ../configure --enable-release
           make -j"$(nproc)"
+          # Pre-build the test binaries in parallel HERE, so `make check`
+          # below does not compile all 30 of them SERIALly inside the timed
+          # test step. (check_PROGRAMS is a tests/ subdir target — the root
+          # `make -j` above does not descend.)
+          make -j"$(nproc)" -C tests check-programs
 
       - name: Run tests
         run: make -C build check
 
       - name: Build portable ZIP
-        run: make -C build dist-portable
+        run: |
+          export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
+          make -C build dist-portable
 
       - name: Verify extracted portable ZIP
         run: |
