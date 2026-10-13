@@ -1,1 +1,50 @@
-1 ICON "portty.ico"
+// portty.rc - Windows resource script
+//
+// Embeds the application icon and version metadata into portty.exe (compiled
+// via windres, see src/Makefile.am). The icon is data/icons/portty.ico, on
+// windres's include path.
+//
+// The version is NOT written here: it comes from the build-generated
+// portty_version.h, the single version source (git-version.sh, recomputed on
+// every make), so the .exe's Properties tab reports the version the tree
+// actually has. VERSIONINFO's quad is four fields; the product version is
+// three-component, so the revision field is 0.
+
+#include <windows.h>
+#include "portty_version.h"
+
+#define VER_FILEVERSION        PORTTY_VERSION_MAJOR,PORTTY_VERSION_MINOR,PORTTY_VERSION_PATCH,0
+#define VER_FILEVERSION_STR    PORTTY_VERSION
+#define VER_PRODUCTVERSION     VER_FILEVERSION
+#define VER_PRODUCTVERSION_STR VER_FILEVERSION_STR
+
+IDI_PORTTY ICON "portty.ico"
+
+VS_VERSION_INFO VERSIONINFO
+ FILEVERSION    VER_FILEVERSION
+ PRODUCTVERSION VER_PRODUCTVERSION
+ FILEFLAGSMASK  0x3fL
+ FILEFLAGS      0x0L
+ FILEOS         VOS_NT_WINDOWS32
+ FILETYPE       VFT_APP
+ FILESUBTYPE    0x0L
+BEGIN
+    BLOCK "StringFileInfo"
+    BEGIN
+        BLOCK "040904b0"
+        BEGIN
+            VALUE "CompanyName",      "chestso"
+            VALUE "FileDescription",  "portty - terminal emulator"
+            VALUE "FileVersion",      VER_FILEVERSION_STR
+            VALUE "InternalName",     "portty"
+            VALUE "LegalCopyright",   "no rights reserved"
+            VALUE "OriginalFilename", "portty.exe"
+            VALUE "ProductName",      "portty"
+            VALUE "ProductVersion",   VER_PRODUCTVERSION_STR
+        END
+    END
+    BLOCK "VarFileInfo"
+    BEGIN
+        VALUE "Translation", 0x409, 1200
+    END
+END

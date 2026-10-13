@@ -1,9 +1,18 @@
 # src/Makefile.am - Build rules for portty source files
 
 # Regenerate portty_version.h on every `make` so the embedded version string
-# tracks the current git HEAD. The recipe always runs, but the file is only
+# tracks the current git HEAD (including a -dirty suffix when the working tree
+# has uncommitted changes). The recipe always runs, but the file is only
 # rewritten when the version actually changes — so dependent .o files stay
 # cached when nothing changed.
+#
+# The three numeric fields exist for the Windows version QUAD
+# (src/portty.rc builds FILEVERSION/PRODUCTVERSION from them), which is why
+# each is reduced to digits: a tag with fewer components than X.Y.Z leaves a
+# field empty, and `FILEVERSION 1,0,,0` is not a resource windres can compile.
+# A component that is not plain digits (a suffix surviving the base split)
+# contributes its digits and nothing else — never an unexpanded macro, never
+# an empty one.
 BUILT_SOURCES = portty_version.h
 CLEANFILES = portty_version.h portty-resources.o
 
@@ -12,7 +21,16 @@ portty_version.h: portty_version_force
 	@v=`"$(top_srcdir)/build-aux/git-version.sh" "$(top_srcdir)" 2>/dev/null`; \
 	test -n "$$v" || v="$(PORTTY_VERSION)"; \
 	test -n "$$v" || v="unknown"; \
-	printf '/*\n * portty — Build-generated version header.\n *\n * SPDX-License-Identifier: MIT\n * Copyright (c) 2026 Thomas Christensen\n */\n#ifndef PORTTY_VERSION_H\n#define PORTTY_VERSION_H\n#define PORTTY_VERSION "%s"\n#endif\n' "$$v" > $@.tmp; \
+	base=`echo "$$v" | sed 's/-.*//'`; \
+	field() { \
+	  f=`echo "$$1" | cut -d. -f"$$2" | tr -cd '0-9'`; \
+	  test -n "$$f" || f=0; \
+	  echo "$$f"; \
+	}; \
+	major=`field "$$base" 1`; \
+	minor=`field "$$base" 2`; \
+	patch=`field "$$base" 3`; \
+	printf '/*\n * portty — Build-generated version header.\n *\n * SPDX-License-Identifier: MIT\n * Copyright (c) 2026 Thomas Christensen\n */\n/* The numeric fields are the Windows version quad src/portty.rc embeds;\n * tests/test_version.c pins them against PORTTY_VERSION. */\n#ifndef PORTTY_VERSION_H\n#define PORTTY_VERSION_H\n#define PORTTY_VERSION "%s"\n#define PORTTY_VERSION_MAJOR %s\n#define PORTTY_VERSION_MINOR %s\n#define PORTTY_VERSION_PATCH %s\n#endif\n' "$$v" "$$major" "$$minor" "$$patch" > $@.tmp; \
 	if cmp -s $@.tmp $@ 2>/dev/null; then \
 	  rm -f $@.tmp; \
 	else \
@@ -129,10 +147,16 @@ CLEANFILES += portty_icon_256.png
 
 if HAVE_RC
 # Compile the Windows resource file (portty.rc) with windres to embed the
-# app icon into the .exe. Automake has no built-in .rc → .o build rule, so we
-# provide an explicit one and link the resulting object into portty.
-portty-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico
-	$(AM_V_GEN)$(RC) $(RCFLAGS) -I$(srcdir) -I$(top_srcdir)/data/icons -i $< -o $@
+# app icon and version metadata into the .exe. Automake has no built-in
+# .rc → .o build rule, so we provide an explicit one and link the resulting
+# object into portty. The .rc takes its version fields from the build-generated
+# portty_version.h, so the header's directory is on windres's include path and
+# the rule waits for the header (BUILT_SOURCES orders `make all`; the explicit
+# prerequisite covers a parallel build and `make -C src portty-resources.o`).
+portty-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico \
+    portty_version.h
+	$(AM_V_GEN)$(RC) $(RCFLAGS) -I$(top_builddir)/src -I$(srcdir) \
+	    -I$(top_srcdir)/data/icons -i $< -o $@
 endif HAVE_RC
 
 if HOST_WINDOWS
