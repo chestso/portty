@@ -30,10 +30,6 @@ typedef enum
 bool is_emoji_presentation(uint32_t cp);
 bool is_regional_indicator(uint32_t cp);
 
-// Returns true if any codepoint in the cell's chars[] is U+FE0E (VS15).
-// VS15 narrows the cell to 1 column but does NOT block color emoji routing.
-bool unicode_cell_has_vs15(const uint32_t *chars, int max);
-
 // sRGB transfer function, single-sourced here for every CPU-side color-space
 // conversion in the renderer (the color-glyph atlas linearize LUT and the
 // notification/link-hint panel glyph blend). The standard sRGB EOTF/OETF.

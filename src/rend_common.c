@@ -57,17 +57,6 @@ bool is_regional_indicator(uint32_t cp)
     return (cp >= 0x1F1E6 && cp <= 0x1F1FF);
 }
 
-bool unicode_cell_has_vs15(const uint32_t *chars, int max)
-{
-    if (!chars)
-        return false;
-    for (int i = 0; i < max && chars[i] != 0; i++) {
-        if (chars[i] == UNICODE_VARIATION_SELECTOR_15)
-            return true;
-    }
-    return false;
-}
-
 float rend_srgb_to_linear(uint8_t v)
 {
     double c = v / 255.0;

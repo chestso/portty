@@ -10,7 +10,6 @@
 #include <stdlib.h>
 
 /* Forward declarations so main() can register tests via RUN_TEST. */
-static void test_unicode_cell_has_vs15(void);
 static void test_vs15_routes_to_emoji_when_glyph_available(void);
 static void test_vs15_routes_to_emoji_for_emoji_default(void);
 static void test_vs15_does_not_force_emoji_via_vs16(void);
@@ -20,34 +19,6 @@ static void test_emoji_default_without_vs15(void);
 static void test_text_default_without_vs15_stays_text(void);
 static void test_no_emoji_font_available(void);
 static void test_empty_or_invalid_input(void);
-
-/* --- VS15 detection --- */
-
-static void test_unicode_cell_has_vs15(void)
-{
-    /* Emoji-default + VS15: ⚡︎ */
-    uint32_t bolt_vs15[] = { 0x26A1, 0xFE0E, 0 };
-    ASSERT_TRUE(unicode_cell_has_vs15(bolt_vs15, 8));
-
-    /* Emoji-default + VS16 (no VS15): ⚡️ */
-    uint32_t bolt_vs16[] = { 0x26A1, 0xFE0F, 0 };
-    ASSERT_FALSE(unicode_cell_has_vs15(bolt_vs16, 8));
-
-    /* Bare codepoint, no selector */
-    uint32_t bare[] = { 0x26A1, 0 };
-    ASSERT_FALSE(unicode_cell_has_vs15(bare, 8));
-
-    /* Both VS15 and VS16 present */
-    uint32_t both[] = { 0x26A1, 0xFE0E, 0xFE0F, 0 };
-    ASSERT_TRUE(unicode_cell_has_vs15(both, 8));
-
-    /* Empty cell */
-    uint32_t empty[] = { 0 };
-    ASSERT_FALSE(unicode_cell_has_vs15(empty, 8));
-
-    /* NULL safety */
-    ASSERT_FALSE(unicode_cell_has_vs15(NULL, 8));
-}
 
 /* --- Emoji routing: VS15 should NOT block color emoji --- */
 
@@ -142,7 +113,6 @@ int main(int argc, char *argv[])
     printf("test_vs15_routing\n");
 
     printf("\nVS15 detection\n");
-    RUN_TEST(test_unicode_cell_has_vs15);
 
     printf("\nEmoji routing with VS15\n");
     RUN_TEST(test_vs15_routes_to_emoji_when_glyph_available);

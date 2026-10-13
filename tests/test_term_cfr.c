@@ -188,6 +188,56 @@ static void test_long_cluster_survives_accessor(void)
     terminal_destroy(&t);
 }
 
+/* A VS15 (U+FE0E) request over a base UTS #51 gives a text glyph — ⚡︎
+ * (U+26A1 is Wide, so the bare codepoint and ⚡️ are two cells) — takes
+ * ONE cell, and the bridge must report it that way: the renderer walks
+ * rows by `cell.width`, and the grid's columns are what the app's own
+ * layout arithmetic agrees with. */
+static void test_vs15_cluster_takes_one_cell(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 8;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    /* ⚡ + VS15, then A: the bolt owns column 0 alone. */
+    feed(&t, "\xe2\x9a\xa1\xef\xb8\x8e"
+             "A");
+
+    TerminalCell bolt, next;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &bolt), 0);
+    ASSERT_EQ(bolt.cp, (uint32_t)0x26A1);
+    ASSERT_EQ(bolt.width, 1);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 1, &next), 0);
+    ASSERT_EQ(next.cp, (uint32_t)'A');
+    ASSERT_EQ(next.width, 1);
+    terminal_destroy(&t);
+
+    /* Control: the same base without the selector stays two cells, so the
+     * next character lands in column 2. */
+    t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 8;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    feed(&t, "\xe2\x9a\xa1"
+             "A");
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &bolt), 0);
+    ASSERT_EQ(bolt.cp, (uint32_t)0x26A1);
+    ASSERT_EQ(bolt.width, 2);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 2, &next), 0);
+    ASSERT_EQ(next.cp, (uint32_t)'A');
+    terminal_destroy(&t);
+}
+
 /* Spaces between words must round-trip through the clipboard. Typed spaces
  * land as cp=0x20, width=1 cells and were always preserved — this guards
  * the simple case while the harder cases (TAB, CUF) sit below. */
@@ -640,6 +690,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_resize_grows_and_reflows);
     RUN_TEST(test_resize_shrinks_and_reflows);
     RUN_TEST(test_long_cluster_survives_accessor);
+    RUN_TEST(test_vs15_cluster_takes_one_cell);
     RUN_TEST(test_selection_preserves_spaces);
     RUN_TEST(test_selection_across_rows);
     RUN_TEST(test_selection_with_tab);
