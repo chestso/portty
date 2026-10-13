@@ -153,7 +153,10 @@ static void test_bridge_mixed_sources(void)
 
     /* Place a sixel image */
     feed(&t, "\x1bPq#1;2;100;0;0#1BB\x1b\\");
-    /* Place an iTerm2 image (moves cursor down first from sixel) */
+    /* Break to a fresh row: a sixel lands the cursor on the image's last
+     * row, and images anchored at the same cell coalesce. */
+    feed(&t, "\r\n");
+    /* Place an iTerm2 image */
     char seq[256];
     snprintf(seq, sizeof(seq),
              "\x1b]1337;File=inline=1:%s\x07",
