@@ -29,7 +29,11 @@ if !HOST_WINDOWS
 # destination, where coffer's terminfo already lives (the monorepo installs
 # coffer first; a standalone portty install requires a prior coffer install
 # anyway).
+#
+# tic creates the per-letter subdirectory (p/) but not the -o directory
+# itself, so a prefix that has no share/terminfo yet needs it made first.
 install-data-local:
+	$(MKDIR_P) "$(DESTDIR)$(datadir)/terminfo"
 	TERMINFO="$(DESTDIR)$(datadir)/terminfo" \
 	    tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti
 
@@ -41,6 +45,7 @@ endif
 
 if HOST_WINDOWS
 install-data-local:
+	$(MKDIR_P) "$(DESTDIR)$(datadir)/terminfo"
 	TERMINFO="$(DESTDIR)$(datadir)/terminfo" \
 	    tic -x -o $(DESTDIR)$(datadir)/terminfo $(srcdir)/portty.ti \
 	    || echo "  WARNING: Failed to install terminfo (is ncurses installed?)" >&2
