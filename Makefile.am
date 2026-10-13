@@ -22,7 +22,8 @@ EXTRA_DIST = \
     portty-scripts \
     docs \
     contrib/plotty \
-    contrib/demo-lottie.json
+    contrib/demo-lottie.json \
+    third_party/qoi/qoi.h
 
 # Format target — runs clang-format on C/C++, shfmt on shell, black on Python, prettier on Markdown.
 .PHONY: format

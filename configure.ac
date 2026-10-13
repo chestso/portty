@@ -129,7 +129,9 @@ AC_SUBST([portty_backend])
 # The QOI single-header library (used by the frame recorder's qoi_writer.c)
 # lives in third_party/qoi/qoi.h. It is fetched by scripts/fetch-qoi.sh and
 # is required by both backends. Auto-fetch it at configure time if missing
-# so a fresh checkout builds without a manual fetch step.
+# so a fresh checkout builds without a manual fetch step; the header is
+# gitignored but listed in EXTRA_DIST, so a release tarball already carries
+# it and configure there never needs the network.
 AS_IF([test ! -f "$srcdir/third_party/qoi/qoi.h"],
   [AC_MSG_NOTICE([QOI header not found, fetching via scripts/fetch-qoi.sh])
    AS_IF([$srcdir/scripts/fetch-qoi.sh "$srcdir/third_party/qoi"],

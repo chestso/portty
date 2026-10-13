@@ -57,9 +57,6 @@ jobs:
           make -j"$(nproc)"
           sudo make install
 
-      - name: Fetch QOI header
-        run: sh scripts/fetch-qoi.sh
-
       - name: Build portty
         run: |
           ./autogen.sh

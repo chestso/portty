@@ -62,9 +62,6 @@ jobs:
             unzip
             p7zip
 
-      - name: Fetch QOI header
-        run: sh scripts/fetch-qoi.sh
-
       - name: Resolve the coffer install prefix
         id: coffer-prefix
         run: |
