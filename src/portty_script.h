@@ -3,215 +3,108 @@
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen
+ *
+ * The script engine (parser, executor, core vocabulary: wait, wait-for,
+ * send/sendln, raw, emit/emit-raw, assert-contains/not-contains,
+ * await-exit/assert-exit, resize, render [cells|styles], cursor,
+ * dump-sixel, quit) lives in coffer — see coffer's
+ * docs/script-engine-design.md. This module wires portty's
+ * UI-specific extension commands into it:
+ *
+ *   screendump, renderdump, dumpstate, record-start, record-stop,
+ *   panel, panel_hide, mousemove, mousedown, mouseup, winsize,
+ *   assert-hover, assert-no-hover
  */
 
 #ifndef PORTTY_SCRIPT_H
 #define PORTTY_SCRIPT_H
 
+#include <coffer/script.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <stdint.h>
+
+#include "portty_frame_rec.h"
+#include "portty_pty.h"
+#include "term.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-typedef enum
-{
-    SCRIPT_CMD_WAIT,
-    SCRIPT_CMD_WAIT_FOR,
-    SCRIPT_CMD_SEND,
-    SCRIPT_CMD_SENDLN,
-    SCRIPT_CMD_RAW,
-    SCRIPT_CMD_EMIT,
-    SCRIPT_CMD_EMIT_RAW,
-    SCRIPT_CMD_ASSERT_CONTAINS,
-    SCRIPT_CMD_ASSERT_NOT_CONTAINS,
-    SCRIPT_CMD_SCREENDUMP,
-    SCRIPT_CMD_DUMPROW,
-    SCRIPT_CMD_DUMPCELLS,
-    SCRIPT_CMD_DUMPGRID,
-    SCRIPT_CMD_MOUSEMOVE,
-    SCRIPT_CMD_MOUSEDOWN,
-    SCRIPT_CMD_MOUSEUP,
-    SCRIPT_CMD_RESIZE,
-    SCRIPT_CMD_WINSIZE,
-    SCRIPT_CMD_RECORD_START,
-    SCRIPT_CMD_RECORD_STOP,
-    SCRIPT_CMD_PANEL,
-    SCRIPT_CMD_PANEL_HIDE,
-    SCRIPT_CMD_QUIT,
-    SCRIPT_CMD_ASSERT_HOVER,
-    SCRIPT_CMD_ASSERT_NO_HOVER,
-    SCRIPT_CMD_DUMP_SIXEL,
-    SCRIPT_CMD_RENDERDUMP,
-    SCRIPT_CMD_DUMPSTATE,
-} ScriptCmdType;
-
+/* UI extension context. The backend fills this once before
+ * portty_script_load() (fields point at backend state); the exec_ext
+ * dispatch reads it when a UI command runs. Must outlive the script. */
 typedef struct
 {
-    ScriptCmdType type;
-    /* WAIT — sleep duration; WAIT_FOR — timeout before giving up */
-    double wait_seconds;
-    /* WAIT_FOR — anchor the match to rows ending with the needle */
-    bool wait_line_end;
-    /* SEND / RAW / ASSERT_* / WAIT_FOR */
-    char *text; /* heap-allocated, freed by script_free */
-    /* DUMPROW / DUMPCELLS */
-    int row;
-    int col_start; /* -1 = all columns (for dumprow) */
-    int col_end;
-    /* SCREENDUMP */
-    char path[512];
-    /* MOUSEMOVE / MOUSEDOWN / MOUSEUP */
-    int mouse_x;
-    int mouse_y;
-    /* MOUSEDOWN / MOUSEUP */
-    int mouse_button;
-    int mouse_clicks;
-    /* PANEL */
-    int panel_id;
-    int panel_col, panel_row;
-    int panel_cols, panel_rows;
-    char panel_title[128];
-    char panel_body[256];
-    int panel_level;
-    unsigned int panel_flags; /* PANEL_FLAG_* bits */
-    /* RESIZE */
-    int resize_cols;
-    int resize_rows;
-    /* WINSIZE — set window pixel size via SDL_SetWindowSize */
-    int winsize_w;
-    int winsize_h;
-    /* RECORD_START */
-    char record_dir[512];
-    int record_fps;
-} ScriptCmd;
+    TerminalBackend *term; /* hover asserts (terminal_hovered_hyperlink) */
+    PtyContext *pty;       /* send/sendln/raw + await-exit */
+    CfrTerm *cfr_term;     /* the engine grid (term_cfr_get_cfr_term) */
+
+    /* Direct terminal input hook for emit/emit-raw. */
+    void (*emit_fn)(void *app, const char *data, size_t len);
+    void *app;
+
+    /* Deferred actions the backend executes in its render phase. */
+    bool *pending_screendump;
+    char *screendump_path_buf; /* 512 bytes */
+    bool *pending_renderdump;
+    char *renderdump_path_buf; /* 512 bytes */
+
+    /* Synthetic mouse input (NULL = unsupported). */
+    void (*mousemove_fn)(void *ud, int x, int y);
+    void *mousemove_ud;
+    void (*mouse_button_fn)(void *ud, int x, int y, int button,
+                            bool pressed, int clicks);
+    void *mouse_button_ud;
+
+    /* Notification panels (NULL = unsupported). */
+    void (*panel_fn)(void *ud, int id, int col, int row, int cols,
+                     int rows, const char *title, const char *body,
+                     int level, unsigned int flags);
+    void *panel_ud;
+    void (*panel_hide_fn)(void *ud, int id);
+    void *panel_hide_ud;
+
+    /* resize (PTY + grid) and winsize (window pixels) hooks. */
+    void (*resize_fn)(void *ud, int cols, int rows);
+    void *resize_ud;
+    void (*winsize_fn)(void *ud, int w, int h);
+    void *winsize_ud;
+
+    /* Frame recorder. */
+    FrameRecorder *recorder;
+    void (*record_start_fn)(void *ud, int fps);
+    void (*record_stop_fn)(void *ud);
+    void *record_ud;
+
+    /* Terminal-state dump (dumpstate PATH; NULL path = default). */
+    bool (*dump_fn)(void *ud, const char *path);
+    void *dump_ud;
+} ScriptUIExt;
 
 typedef struct PorttyScript PorttyScript;
 
-/* Load and parse a script file. Returns NULL on error. */
-PorttyScript *portty_script_load(const char *path);
+/* Load a script and start a run wired to `ext`. portty's extension
+ * command names are registered automatically; unknown commands fail
+ * the load. Returns NULL on error with "line N: ..." in `err`. */
+PorttyScript *portty_script_load(const char *path, ScriptUIExt *ext,
+                                 char *err, size_t errlen);
 
-/* Free a script and all its ScriptCmd text strings. Safe to call on NULL. */
 void portty_script_free(PorttyScript *s);
 
-/* Get the number of parsed commands. */
-int portty_script_count(const PorttyScript *s);
+/* One step per frame. Returns the engine status; when it is not
+ * CFR_SCRIPT_RUNNING the run is over (done or failed). */
+CfrScriptStatus portty_script_step(PorttyScript *s);
 
-/* Get a command by index (0-based). Returns NULL if out of range. */
-const ScriptCmd *portty_script_get(const PorttyScript *s, int index);
+/* Milliseconds until the current wait can advance (UINT32_MAX when
+ * not waiting), for the event loop's deadline fold. */
+uint32_t portty_script_wait_ms(PorttyScript *s);
 
-/* Get a human-readable error message if load() failed.
- * Returns NULL if no error or if s is NULL. */
-const char *portty_script_error(const PorttyScript *s);
-
-/* ── Shared execution helpers ── */
-
-#include "portty_backend.h"
-#include "portty_frame_rec.h"
-#include "portty_pty.h"
-#include "term.h"
-
-/* Monotonic time helper (no existing utility in the codebase) */
-double portty_now_seconds(void); /* clock_gettime(CLOCK_MONOTONIC) */
-
-/* Grid scan for assert-contains / assert-not-contains.
- * Searches all visible rows (and current scrollback view if scroll_offset > 0)
- * for the needle string. Returns true if found. */
-bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
-                                const char *needle);
-
-/* Same scan, but reports the row that matched via *row_out (if non-NULL).
- * Used by wait-for to report where the wait completed. line_end anchors
- * the match to rows ending with the needle (after trailing-space trim). */
-bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
-                            const char *needle, int *row_out, bool line_end);
-
-/* Print the visible grid as text (one line per row, trailing blanks
- * trimmed) — capture-pane-style dump for script diagnostics. */
-void portty_debug_grid_dump_text(TerminalBackend *term, int rows, int cols);
-
-/* Context for the shared step function. Each backend fills this with
- * its own state pointers. NULL pointers mean the backend doesn't support
- * that deferred action (e.g. screendump is only usable during the
- * renderer's deferred command phase). */
-typedef struct
-{
-    PorttyBackend *backend;
-    TerminalBackend *term;
-    PtyContext *pty;
-    int scroll_offset;
-    /* Direct terminal input hook. If set, the emit/emitln/emit-raw commands
-     * feed data straight to the VT engine via terminal_process_input.
-     * NULL means emit is unsupported (warn + skip). */
-    void (*emit_fn)(void *app, const char *data, size_t len);
-    void *emit_user_data;
-    /* Deferred action flags — backend points these at its own fields: */
-    bool *pending_screendump;
-    char *screendump_path_buf; /* backend's destination buffer */
-    /* Same pattern for renderdump: offscene render of the terminal scene
-     * (content-trimmed, no chrome), executed in the backend's deferred
-     * command phase where GL access is safe. */
-    bool *pending_renderdump;
-    char *renderdump_path_buf; /* backend's destination buffer */
-    /* Mouse move callback (NULL if unsupported) */
-    void (*mousemove_fn)(void *app, int x, int y);
-    void *mousemove_user_data;
-    /* Mouse button callback (NULL if unsupported). The backend owns the
-     * pressed-state memory so a mousedown/mousemove/mouseup sequence drags. */
-    void (*mouse_button_fn)(void *app, int x, int y, int button, bool pressed,
-                            int clicks);
-    void *mouse_button_user_data;
-    /* Panel callback (NULL if unsupported) */
-    void (*panel_fn)(void *backend, int id, int col, int row, int cols, int rows,
-                     const char *title, const char *body, int level, unsigned int flags);
-    void *panel_user_data;
-    /* Panel hide callback (NULL if unsupported) */
-    void (*panel_hide_fn)(void *backend, int id);
-    void *panel_hide_user_data;
-    /* Resize callback (NULL if unsupported) */
-    void (*resize_fn)(void *user_data, int cols, int rows);
-    void *resize_user_data;
-    /* Window size callback — sets pixel size via SDL_SetWindowSize,
-     * triggering the real compositor resize path (NULL if unsupported) */
-    void (*winsize_fn)(void *user_data, int w, int h);
-    void *winsize_user_data;
-    /* Frame recorder context */
-    FrameRecorder *recorder;
-    bool *pending_record_frame;
-    /* Timer lifecycle callbacks (backend-specific).
-     * Called by portty_script_step() when RECORD_START/STOP
-     * commands are processed. The backend creates/removes the timer
-     * here, not in frame_recorder_start/stop(). */
-    void (*record_start_fn)(void *user_data, int fps);
-    void (*record_stop_fn)(void *user_data);
-    void *record_user_data;
-    /* Terminal-state dump callback (dumpstate PATH). path NULL = default
-     * location, "-" = stdout. NULL if unsupported by this backend. */
-    bool (*dump_fn)(void *user_data, const char *path);
-    void *dump_user_data;
-} ScriptExecCtx;
-
-/* Execute one script step. Called each frame by the backend's main loop.
- * Handles wait/send/raw/assert/dumpcells/dumprow.
- * Sets *pending_screendump for the deferred command that needs GL
- * access (screendump).
- * When pending pointers are NULL, unsupported commands print a warning
- * and are skipped.
- * Advances *cmd_index; when all commands are done, sets *cmd_index to
- * count (caller can detect completion by comparing). */
-void portty_script_step(PorttyScript *script,
-                        int *cmd_index,
-                        ScriptExecCtx *ctx);
-
-/* Milliseconds until the current command can advance, for the event loop's
- * deadline scheduler. Returns UINT32_MAX when `script`/`cmd_index` are
- * invalid or the command at `cmd_index` is not an active SCRIPT_CMD_WAIT or
- * SCRIPT_CMD_WAIT_FOR (the latter reports its timeout deadline).
- * Does not mutate any state. The backend folds this into its blocking wait
- * (e.g. SDL_AddTimer) so a lone "wait N" script still wakes the loop. */
-uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
-                                         int cmd_index);
+/* True when the run executed `quit` — the backend should request_quit.
+ * (A failed run should also quit: the engine stops at the first
+ * failure, so nothing will advance anymore.) */
+bool portty_script_quit_requested(const PorttyScript *s);
 
 #ifdef __cplusplus
 }

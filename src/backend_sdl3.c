@@ -28,6 +28,7 @@
 #include "rend_common.h"
 #include "rend_sdl3.h"
 #include "term.h"
+#include "term_cfr.h"
 #include "term_colors.h"
 #include "timer.h"
 #include <SDL3/SDL.h>
@@ -183,7 +184,7 @@ typedef struct
 
     // Debug script infrastructure
     PorttyScript *script;
-    int cmd_index;
+    ScriptUIExt script_ext;
     bool script_done;
     bool pending_screendump;
     char screendump_path[512];
@@ -654,7 +655,7 @@ static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
     uint32_t delay = timer_manager_next_delay_ms(d->timers);
 
     if (d->script && !d->script_done) {
-        uint32_t wait_ms = portty_script_wait_remaining_ms(d->script, d->cmd_index);
+        uint32_t wait_ms = portty_script_wait_ms(d->script);
         if (wait_ms < delay)
             delay = wait_ms;
     }
@@ -1696,22 +1697,50 @@ static void sdl3_run(PorttyBackend *self)
 
     // Load debug script if specified
     if (d->app->script_path) {
-        d->script = portty_script_load(d->app->script_path);
-        if (!d->script) {
-            fprintf(stderr, "ERROR: Failed to load debug script: %s: out of memory\n",
-                    d->app->script_path);
+        d->frame_recorder = frame_recorder_new();
+        if (!d->frame_recorder) {
+            fprintf(stderr, "ERROR: Failed to allocate frame recorder\n");
             SDL_SetAtomicInt(&d->quit_requested, 1);
-        } else {
-            const char *err = portty_script_error(d->script);
-            if (err) {
-                fprintf(stderr, "ERROR: %s: %s\n", d->app->script_path, err);
-                SDL_SetAtomicInt(&d->quit_requested, 1);
-            }
-            d->frame_recorder = frame_recorder_new();
-            if (!d->frame_recorder) {
-                fprintf(stderr, "ERROR: Failed to allocate frame recorder\n");
-                SDL_SetAtomicInt(&d->quit_requested, 1);
-            }
+        }
+
+        // The extension context points at backend state; it must stay
+        // valid for the whole run, so it lives in Sdl3BackendData.
+        d->script_ext = (ScriptUIExt){
+            .term = term,
+            .pty = d->pty,
+            .cfr_term = term_cfr_get_cfr_term(term),
+            .emit_fn = (void (*)(void *, const char *, size_t))portty_app_feed_terminal,
+            .app = d->app,
+            .pending_screendump = &d->pending_screendump,
+            .screendump_path_buf = d->screendump_path,
+            .pending_renderdump = &d->pending_renderdump,
+            .renderdump_path_buf = d->renderdump_path,
+            .mousemove_fn = sdl3_script_mousemove,
+            .mousemove_ud = d,
+            .mouse_button_fn = sdl3_script_mouse_button,
+            .mouse_button_ud = d,
+            .panel_fn = sdl3_script_panel,
+            .panel_ud = self,
+            .panel_hide_fn = sdl3_script_panel_hide,
+            .panel_hide_ud = self,
+            .resize_fn = sdl3_script_resize,
+            .resize_ud = d,
+            .winsize_fn = sdl3_script_winsize,
+            .winsize_ud = d,
+            .recorder = d->frame_recorder,
+            .record_start_fn = sdl3_record_start,
+            .record_stop_fn = sdl3_record_stop,
+            .record_ud = d,
+            .dump_fn = sdl3_script_dumpstate,
+            .dump_ud = d,
+        };
+
+        char err[512];
+        d->script = portty_script_load(d->app->script_path,
+                                       &d->script_ext, err, sizeof(err));
+        if (!d->script) {
+            fprintf(stderr, "ERROR: %s: %s\n", d->app->script_path, err);
+            SDL_SetAtomicInt(&d->quit_requested, 1);
         }
     }
 
@@ -1726,40 +1755,15 @@ static void sdl3_run(PorttyBackend *self)
         // Run before we block so a script that does not emit events (e.g. a
         // bare "wait") can still register its own wake deadline below.
         if (d->script && !d->script_done) {
-            ScriptExecCtx ctx = {
-                .backend = self,
-                .term = term,
-                .pty = d->pty,
-                .scroll_offset = rend_sdl3_get_scroll_offset(rend),
-                .emit_fn = (void (*)(void *, const char *, size_t))portty_app_feed_terminal,
-                .emit_user_data = d->app,
-                .pending_screendump = &d->pending_screendump,
-                .screendump_path_buf = d->screendump_path,
-                .pending_renderdump = &d->pending_renderdump,
-                .renderdump_path_buf = d->renderdump_path,
-                .mousemove_fn = sdl3_script_mousemove,
-                .mousemove_user_data = d,
-                .mouse_button_fn = sdl3_script_mouse_button,
-                .mouse_button_user_data = d,
-                .panel_fn = sdl3_script_panel,
-                .panel_user_data = self,
-                .panel_hide_fn = sdl3_script_panel_hide,
-                .panel_hide_user_data = self,
-                .resize_fn = sdl3_script_resize,
-                .resize_user_data = d,
-                .winsize_fn = sdl3_script_winsize,
-                .winsize_user_data = d,
-                .recorder = d->frame_recorder,
-                .pending_record_frame = &d->pending_record_frame,
-                .record_start_fn = sdl3_record_start,
-                .record_stop_fn = sdl3_record_stop,
-                .record_user_data = d,
-                .dump_fn = sdl3_script_dumpstate,
-                .dump_user_data = d,
-            };
-            portty_script_step(d->script, &d->cmd_index, &ctx);
-            if (d->cmd_index >= portty_script_count(d->script))
+            CfrScriptStatus st = portty_script_step(d->script);
+            if (st != CFR_SCRIPT_RUNNING) {
                 d->script_done = true;
+                if (st == CFR_SCRIPT_FAILED)
+                    fprintf(stderr, "script FAILED — quitting\n");
+                if (st == CFR_SCRIPT_FAILED ||
+                    portty_script_quit_requested(d->script))
+                    self->request_quit(self);
+            }
         }
 
         bool pty_processed = false;

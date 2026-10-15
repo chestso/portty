@@ -30,6 +30,8 @@ struct PtyContext
     pid_t child_pid;
     int rows;
     int cols;
+    int exit_status; /* valid once exited is true */
+    bool exited;     /* sticky: child reaped (by anyone) */
 };
 
 // Self-pipe for SIGCHLD notification
@@ -390,12 +392,41 @@ bool pty_is_running(PtyContext *ctx)
     } else if (result == ctx->child_pid) {
         // Child has exited
         vlog("PTY child exited: pid=%d, status=%d\n", ctx->child_pid, status);
+        ctx->exit_status =
+            WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+        ctx->exited = true;
         ctx->child_pid = -1;
         return false;
     } else {
         // Error or no such child
         return false;
     }
+}
+
+int pty_poll_exit(PtyContext *ctx, int *out_status)
+{
+    if (!ctx)
+        return -1;
+    if (ctx->exited)
+        goto out;
+    if (ctx->child_pid <= 0)
+        return -1;
+
+    int status;
+    pid_t result = waitpid(ctx->child_pid, &status, WNOHANG);
+    if (result == 0)
+        return 0;
+    if (result < 0)
+        return -1;
+    ctx->exit_status =
+        WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+    ctx->exited = true;
+    ctx->child_pid = -1;
+
+out:
+    if (out_status)
+        *out_status = ctx->exit_status;
+    return 1;
 }
 
 int pty_get_master_fd(PtyContext *ctx)

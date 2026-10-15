@@ -51,6 +51,16 @@ void pty_destroy(PtyContext *ctx);
 ssize_t pty_write(PtyContext *ctx, const char *data, size_t len);
 
 /**
+ * Non-blocking child exit check (script `await-exit`).
+ *
+ * @param ctx PTY context
+ * @param out_status Receives the exit code (128+signal on POSIX)
+ * @return 1 when the child has exited, 0 while it still runs, -1 on
+ *         error. Reaping is sticky: a reaped child stays "exited".
+ */
+int pty_poll_exit(PtyContext *ctx, int *out_status);
+
+/**
  * Read data from the PTY (receive from shell).
  *
  * @param ctx PTY context

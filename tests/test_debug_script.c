@@ -1,8 +1,14 @@
 /*
- * portty — Debug script parser tests
+ * portty — Debug script tests (coffer engine wiring + UI extensions)
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen
+ *
+ * The core grammar (escapes, wait-for options, hex payloads, unified
+ * buffer search) is covered by coffer's tests/test_script.c; these
+ * tests cover portty's side: extension command registration, ext arg
+ * parsing (panel, mouse, record-start, dump paths), deferred flags,
+ * hover asserts, and the quit/failure status flow.
  */
 
 #include "portty_script.h"
@@ -63,920 +69,523 @@ static void sleep_ms(int ms)
 #endif
 }
 
-/* ── Parser tests ── */
+/* ── Fake extension context ── */
+
+typedef struct
+{
+    ScriptUIExt ext;
+    /* capture state */
+    bool screendump_pending;
+    char screendump_path[512];
+    bool renderdump_pending;
+    char renderdump_path[512];
+    int mouse_x, mouse_y, mouse_moves;
+    int btn_x, btn_y, btn_button, btn_clicks, btn_pressed, btn_calls;
+    int panel_id, panel_col, panel_row, panel_cols, panel_rows;
+    int panel_level, panel_calls;
+    unsigned int panel_flags;
+    char panel_title[128];
+    char panel_body[256];
+    int panel_hide_id, panel_hide_calls;
+    int win_w, win_h, winsize_calls;
+    int resize_cols, resize_rows, resize_calls;
+    char dump_path[512];
+    int dump_calls;
+    bool dump_ret;
+    char emitted[1024];
+    size_t emitted_len;
+} FakeExt;
+
+static void fake_mousemove(void *ud, int x, int y)
+{
+    FakeExt *f = ud;
+    f->mouse_x = x;
+    f->mouse_y = y;
+    f->mouse_moves++;
+}
+
+static void fake_mouse_button(void *ud, int x, int y, int button,
+                              bool pressed, int clicks)
+{
+    FakeExt *f = ud;
+    f->btn_x = x;
+    f->btn_y = y;
+    f->btn_button = button;
+    f->btn_pressed = pressed;
+    f->btn_clicks = clicks;
+    f->btn_calls++;
+}
+
+static void fake_panel(void *ud, int id, int col, int row, int cols,
+                       int rows, const char *title, const char *body,
+                       int level, unsigned int flags)
+{
+    FakeExt *f = ud;
+    f->panel_id = id;
+    f->panel_col = col;
+    f->panel_row = row;
+    f->panel_cols = cols;
+    f->panel_rows = rows;
+    f->panel_level = level;
+    f->panel_flags = flags;
+    snprintf(f->panel_title, sizeof(f->panel_title), "%s", title);
+    snprintf(f->panel_body, sizeof(f->panel_body), "%s", body);
+    f->panel_calls++;
+}
+
+static void fake_panel_hide(void *ud, int id)
+{
+    FakeExt *f = ud;
+    f->panel_hide_id = id;
+    f->panel_hide_calls++;
+}
+
+static void fake_resize(void *ud, int cols, int rows)
+{
+    FakeExt *f = ud;
+    f->resize_cols = cols;
+    f->resize_rows = rows;
+    f->resize_calls++;
+}
+
+static void fake_winsize(void *ud, int w, int h)
+{
+    FakeExt *f = ud;
+    f->win_w = w;
+    f->win_h = h;
+    f->winsize_calls++;
+}
+
+static bool fake_dump(void *ud, const char *path)
+{
+    FakeExt *f = ud;
+    snprintf(f->dump_path, sizeof(f->dump_path), "%s",
+             path ? path : "(null)");
+    f->dump_calls++;
+    return f->dump_ret;
+}
+
+static void fake_emit(void *app, const char *data, size_t len)
+{
+    FakeExt *f = app;
+    if (f->emitted_len + len >= sizeof(f->emitted))
+        len = sizeof(f->emitted) - f->emitted_len - 1;
+    memcpy(f->emitted + f->emitted_len, data, len);
+    f->emitted_len += len;
+    f->emitted[f->emitted_len] = '\0';
+}
+
+static void fake_ext_init(FakeExt *f)
+{
+    memset(f, 0, sizeof(*f));
+    f->dump_ret = true;
+    f->ext = (ScriptUIExt){
+        .pending_screendump = &f->screendump_pending,
+        .screendump_path_buf = f->screendump_path,
+        .pending_renderdump = &f->renderdump_pending,
+        .renderdump_path_buf = f->renderdump_path,
+        .mousemove_fn = fake_mousemove,
+        .mousemove_ud = f,
+        .mouse_button_fn = fake_mouse_button,
+        .mouse_button_ud = f,
+        .panel_fn = fake_panel,
+        .panel_ud = f,
+        .panel_hide_fn = fake_panel_hide,
+        .panel_hide_ud = f,
+        .resize_fn = fake_resize,
+        .resize_ud = f,
+        .winsize_fn = fake_winsize,
+        .winsize_ud = f,
+        .dump_fn = fake_dump,
+        .dump_ud = f,
+        .emit_fn = fake_emit,
+        .app = f,
+    };
+}
+
+/* Load + step a script to completion (immediate commands only). */
+static CfrScriptStatus run_to_end(FakeExt *f, const char *text)
+{
+    char *path = write_tmp_script(text);
+    if (!path)
+        return CFR_SCRIPT_FAILED;
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f->ext, err, sizeof(err));
+    cleanup_tmp(path);
+    if (!s)
+        return CFR_SCRIPT_FAILED;
+    CfrScriptStatus st = CFR_SCRIPT_RUNNING;
+    for (int i = 0; i < 100 && st == CFR_SCRIPT_RUNNING; i++)
+        st = portty_script_step(s);
+    portty_script_free(s);
+    return st;
+}
+
+/* ── Load errors ── */
 
 static void test_load_empty_file(void)
 {
-    char *path = write_tmp_script("");
+    char *path = write_tmp_script("# comment\n\n   # indented\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f.ext, err, sizeof(err));
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 0);
-
+    ASSERT_EQ(portty_script_step(s), CFR_SCRIPT_DONE);
+    ASSERT_FALSE(portty_script_quit_requested(s));
     portty_script_free(s);
     cleanup_tmp(path);
 }
 
-static void test_load_comments_and_blanks(void)
-{
-    char *path = write_tmp_script(
-        "# This is a comment\n"
-        "\n"
-        "   # indented comment\n"
-        "\n"
-        "# another comment\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 0);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait(void)
-{
-    char *path = write_tmp_script("wait 3.5\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT);
-    ASSERT_TRUE(cmd->wait_seconds > 3.4 && cmd->wait_seconds < 3.6);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for(void)
-{
-    char *path = write_tmp_script("wait-for \"hello crush\" 2.5\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "hello crush");
-    ASSERT_TRUE(cmd->wait_seconds > 2.4 && cmd->wait_seconds < 2.6);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_default_timeout(void)
-{
-    char *path = write_tmp_script("wait-for \"END OF DEMO\"\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "END OF DEMO");
-    ASSERT_FLOAT_NEAR(cmd->wait_seconds, 600, 0.001);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_unquoted_timeout(void)
-{
-    char *path = write_tmp_script("wait-for build succeeded 30\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "build succeeded");
-    ASSERT_TRUE(cmd->wait_seconds > 29.9 && cmd->wait_seconds < 30.1);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_unquoted_no_timeout(void)
-{
-    char *path = write_tmp_script("wait-for END OF DEMO\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "END OF DEMO");
-    ASSERT_FLOAT_NEAR(cmd->wait_seconds, 600, 0.001);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_line_end(void)
-{
-    char *path = write_tmp_script("wait-for \"DEMO-COMPLETE-OVER\" 900 line-end\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "DEMO-COMPLETE-OVER");
-    ASSERT_TRUE(cmd->wait_seconds > 899.9 && cmd->wait_seconds < 900.1);
-    ASSERT_TRUE(cmd->wait_line_end);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_line_end_before_timeout(void)
-{
-    char *path = write_tmp_script("wait-for \"marker\" line-end 30\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "marker");
-    ASSERT_TRUE(cmd->wait_seconds > 29.9 && cmd->wait_seconds < 30.1);
-    ASSERT_TRUE(cmd->wait_line_end);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_unquoted_line_end(void)
-{
-    char *path = write_tmp_script("wait-for DONE line-end\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "DONE");
-    ASSERT_FLOAT_NEAR(cmd->wait_seconds, 600, 0.001); /* default */
-    ASSERT_TRUE(cmd->wait_line_end);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_no_line_end_by_default(void)
-{
-    char *path = write_tmp_script("wait-for \"thinking about line-end anchors\" 10\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT_FOR);
-    ASSERT_STR_EQ(cmd->text, "thinking about line-end anchors");
-    ASSERT_TRUE(cmd->wait_seconds > 9.9 && cmd->wait_seconds < 10.1);
-    ASSERT_FALSE(cmd->wait_line_end);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_dumpgrid(void)
-{
-    char *path = write_tmp_script("dumpgrid\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPGRID);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_missing_text(void)
-
-{
-
-    char *path = write_tmp_script("wait-for\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_script_error(s));
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_for_empty_quoted_text(void)
-{
-    char *path = write_tmp_script("wait-for \"\" 10\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_script_error(s));
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_wait_integer(void)
-
-{
-    char *path = write_tmp_script("wait 5\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT);
-    ASSERT_TRUE(cmd->wait_seconds > 4.9 && cmd->wait_seconds < 5.1);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_send(void)
-{
-    char *path = write_tmp_script("send hello world\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
-    ASSERT_STR_EQ(cmd->text, "hello world");
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_send_escapes(void)
-{
-    char *path = write_tmp_script("send line1\\nline2\\t\\e\\\\\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ((int)strlen(cmd->text), 14);
-    ASSERT_EQ(cmd->text[0], 'l');
-    ASSERT_EQ(cmd->text[5], '\n');
-    ASSERT_EQ(cmd->text[11], '\t');
-    ASSERT_EQ(cmd->text[12], '\x1b');
-    ASSERT_EQ(cmd->text[13], '\\');
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_send_quoted(void)
-{
-    char *path = write_tmp_script("send \"hello world\"\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
-    ASSERT_STR_EQ(cmd->text, "hello world");
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_raw(void)
-{
-    char *path = write_tmp_script("raw 1b 5b 6d\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_RAW);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ((int)strlen(cmd->text), 3);
-    ASSERT_EQ((uint8_t)cmd->text[0], 0x1b);
-    ASSERT_EQ((uint8_t)cmd->text[1], 0x5b);
-    ASSERT_EQ((uint8_t)cmd->text[2], 0x6d);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_assert_contains(void)
-{
-    char *path = write_tmp_script("assert-contains hello crush\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_ASSERT_CONTAINS);
-    ASSERT_STR_EQ(cmd->text, "hello crush");
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_assert_not_contains(void)
-{
-    char *path = write_tmp_script("assert-not-contains error\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_ASSERT_NOT_CONTAINS);
-    ASSERT_STR_EQ(cmd->text, "error");
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_screendump(void)
-{
-    char *path = write_tmp_script("screendump /tmp/screenshot.png\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SCREENDUMP);
-    ASSERT_STR_EQ(cmd->path, "/tmp/screenshot.png");
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_dumprow(void)
-{
-    char *path = write_tmp_script("dumprow 5\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPROW);
-    ASSERT_EQ(cmd->row, 5);
-    ASSERT_EQ(cmd->col_start, -1);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_dumpcells(void)
-{
-    char *path = write_tmp_script("dumpcells 5 3 10\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_DUMPCELLS);
-    ASSERT_EQ(cmd->row, 5);
-    ASSERT_EQ(cmd->col_start, 3);
-    ASSERT_EQ(cmd->col_end, 10);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_quit(void)
-{
-    char *path = write_tmp_script("quit\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_QUIT);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_multi_command(void)
-{
-    char *path = write_tmp_script(
-        "wait 2\n"
-        "send hello\\n\n"
-        "assert-contains hello\n"
-        "screendump /tmp/out.png\n"
-        "quit\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 5);
-
-    ASSERT_EQ(portty_script_get(s, 0)->type, SCRIPT_CMD_WAIT);
-    ASSERT_EQ(portty_script_get(s, 1)->type, SCRIPT_CMD_SEND);
-    ASSERT_EQ(portty_script_get(s, 2)->type, SCRIPT_CMD_ASSERT_CONTAINS);
-    ASSERT_EQ(portty_script_get(s, 3)->type, SCRIPT_CMD_SCREENDUMP);
-    ASSERT_EQ(portty_script_get(s, 4)->type, SCRIPT_CMD_QUIT);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_unknown_command(void)
+static void test_load_unknown_command_fails(void)
 {
     char *path = write_tmp_script("frobnicate foo\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    // Now returns a struct with error
-    ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_script_error(s));
-    portty_script_free(s);
-
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f.ext, err, sizeof(err));
+    ASSERT_NULL(s);
+    ASSERT_TRUE(strstr(err, "unknown command") != NULL);
     cleanup_tmp(path);
 }
 
-static void test_parse_missing_file(void)
+static void test_load_missing_file(void)
 {
-    PorttyScript *s = portty_script_load("/nonexistent/path/to/script");
-    // Now returns a struct with error instead of NULL
-    ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_script_error(s));
-    portty_script_free(s);
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load("/nonexistent/path/to/script",
+                                         &f.ext, err, sizeof(err));
+    ASSERT_NULL(s);
+    ASSERT_TRUE(strstr(err, "cannot open") != NULL);
 }
 
-static void test_get_out_of_range(void)
+static void test_load_ext_names_registered(void)
 {
-    char *path = write_tmp_script("quit\n");
+    /* All portty UI commands must load without a parse error. */
+    char *path = write_tmp_script(
+        "screendump /tmp/a.png\n"
+        "renderdump /tmp/b.png\n"
+        "dumpstate /tmp/c.txt\n"
+        "panel 1 0 0 40 3 \"T\" \"B\"\n"
+        "panel_hide 1\n"
+        "mousemove 1 2\n"
+        "mousedown 1 2\n"
+        "mouseup 1 2\n"
+        "winsize 800 600\n"
+        "assert-no-hover\n"
+        "quit\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f.ext, err, sizeof(err));
+    if (!s)
+        fprintf(stderr, "  load error: %s\n", err);
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    ASSERT_NULL(portty_script_get(s, 1));
-    ASSERT_NULL(portty_script_get(s, -1));
-
     portty_script_free(s);
     cleanup_tmp(path);
 }
 
-static void test_parse_raw_no_args(void)
+/* dumpgrid/dumprow/dumpcells were deleted (replaced by core render). */
+static void test_deleted_dump_commands_rejected(void)
 {
-    char *path = write_tmp_script("raw\n");
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    char *path = write_tmp_script("dumpgrid\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_RAW);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ((int)strlen(cmd->text), 0);
-
-    portty_script_free(s);
+    ASSERT_NULL(portty_script_load(path, &f.ext, err, sizeof(err)));
     cleanup_tmp(path);
-}
-
-static void test_parse_send_no_args(void)
-{
-    char *path = write_tmp_script("send\n");
+    path = write_tmp_script("dumprow 1\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ((int)strlen(cmd->text), 0);
-
-    portty_script_free(s);
+    ASSERT_NULL(portty_script_load(path, &f.ext, err, sizeof(err)));
     cleanup_tmp(path);
-}
-
-static void test_parse_sendln(void)
-{
-    char *path = write_tmp_script("sendln hello world\n");
+    path = write_tmp_script("dumpcells 1 0 5\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SENDLN);
-    ASSERT_STR_EQ(cmd->text, "hello world");
-
-    portty_script_free(s);
+    ASSERT_NULL(portty_script_load(path, &f.ext, err, sizeof(err)));
     cleanup_tmp(path);
 }
 
-static void test_parse_dumpcells_missing_args(void)
-{
-    char *path = write_tmp_script("dumpcells 5\n");
-    ASSERT_NOT_NULL(path);
+/* ── Core commands through the wrapper ── */
 
-    PorttyScript *s = portty_script_load(path);
-    // Now returns a struct with error
-    ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_script_error(s));
-    portty_script_free(s);
-
-    cleanup_tmp(path);
-}
-
-static void test_parse_screendump_long_path(void)
-{
-    char longpath[600];
-    memset(longpath, 'A', sizeof(longpath) - 1);
-    longpath[sizeof(longpath) - 1] = '\0';
-
-    char script[700];
-    snprintf(script, sizeof(script), "screendump %s\n", longpath);
-
-    char *path = write_tmp_script(script);
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SCREENDUMP);
-    /* Path should be truncated to fit in cmd->path[512] */
-    ASSERT_TRUE(strlen(cmd->path) < sizeof(cmd->path));
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_error_message(void)
-{
-    PorttyScript *s = portty_script_load("/nonexistent/path");
-    // Now returns a struct with error
-    ASSERT_NOT_NULL(s);
-    const char *err = portty_script_error(s);
-    ASSERT_NOT_NULL(err);
-    ASSERT_TRUE(strstr(err, "cannot open file") != NULL);
-    portty_script_free(s);
-}
-
-static void test_parse_trailing_whitespace(void)
-{
-    char *path = write_tmp_script("wait 3.0   \n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_WAIT);
-    ASSERT_TRUE(cmd->wait_seconds > 2.9 && cmd->wait_seconds < 3.1);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_send_carriage_return(void)
-{
-    char *path = write_tmp_script("send hello\\rworld\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_SEND);
-    ASSERT_EQ(cmd->text[5], '\r');
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_emit(void)
-{
-    char *path = write_tmp_script("emit \"hello world\"\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT);
-    ASSERT_STR_EQ(cmd->text, "hello world");
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_emit_escapes(void)
-{
-    char *path = write_tmp_script("emit \\e[4mSingle\\e[0m\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ((int)strlen(cmd->text), 14);
-    ASSERT_EQ(cmd->text[0], '\x1b');
-    ASSERT_EQ(cmd->text[2], '4');
-    ASSERT_EQ(cmd->text[10], '\x1b');
-    ASSERT_EQ(cmd->text[12], '0');
-    ASSERT_EQ(cmd->text[13], 'm');
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_emit_raw(void)
-{
-    char *path = write_tmp_script("emit-raw 1b 5b 34 6d 1b 5b 30 6d\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT_RAW);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ((int)strlen(cmd->text), 8);
-    ASSERT_EQ((uint8_t)cmd->text[0], 0x1b);
-    ASSERT_EQ((uint8_t)cmd->text[2], 0x34);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_x_escape(void)
-{
-    char *path = write_tmp_script("emit \\x1b[4mSingle\\x1b[0m\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_EMIT);
-    ASSERT_NOT_NULL(cmd->text);
-    ASSERT_EQ(cmd->text[0], '\x1b');
-    ASSERT_EQ(cmd->text[2], '4');
-    ASSERT_EQ(cmd->text[10], '\x1b');
-    ASSERT_EQ(cmd->text[12], '0');
-    ASSERT_EQ(cmd->text[13], 'm');
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_panel(void)
-{
-    char *path = write_tmp_script("panel 1 0 0 40 3 \"Build Complete\" \"All tests passed\"\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_PANEL);
-    ASSERT_EQ(cmd->panel_id, 1);
-    ASSERT_EQ(cmd->panel_col, 0);
-    ASSERT_EQ(cmd->panel_row, 0);
-    ASSERT_EQ(cmd->panel_cols, 40);
-    ASSERT_EQ(cmd->panel_rows, 3);
-    ASSERT_STR_EQ(cmd->panel_title, "Build Complete");
-    ASSERT_STR_EQ(cmd->panel_body, "All tests passed");
-    ASSERT_EQ(cmd->panel_level, 0);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_panel_with_level(void)
-{
-    char *path = write_tmp_script("panel 2 10 5 30 2 \"Warning\" \"Disk space low\" 1\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_PANEL);
-    ASSERT_EQ(cmd->panel_id, 2);
-    ASSERT_EQ(cmd->panel_col, 10);
-    ASSERT_EQ(cmd->panel_row, 5);
-    ASSERT_EQ(cmd->panel_cols, 30);
-    ASSERT_EQ(cmd->panel_rows, 2);
-    ASSERT_STR_EQ(cmd->panel_title, "Warning");
-    ASSERT_STR_EQ(cmd->panel_body, "Disk space low");
-    ASSERT_EQ(cmd->panel_level, 1);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_mousemove(void)
-{
-    char *path = write_tmp_script("mousemove 12 34\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 1);
-
-    const ScriptCmd *cmd = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(cmd);
-    ASSERT_EQ(cmd->type, SCRIPT_CMD_MOUSEMOVE);
-    ASSERT_EQ(cmd->mouse_x, 12);
-    ASSERT_EQ(cmd->mouse_y, 34);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_mouse_button(void)
-{
-    char *path = write_tmp_script("mousedown 12 34\n"
-                                  "mouseup 56 78 1 2\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_count(s), 2);
-
-    const ScriptCmd *down = portty_script_get(s, 0);
-    ASSERT_NOT_NULL(down);
-    ASSERT_EQ(down->type, SCRIPT_CMD_MOUSEDOWN);
-    ASSERT_EQ(down->mouse_x, 12);
-    ASSERT_EQ(down->mouse_y, 34);
-    /* Defaults: left button, single click. */
-    ASSERT_EQ(down->mouse_button, 1);
-    ASSERT_EQ(down->mouse_clicks, 1);
-
-    const ScriptCmd *up = portty_script_get(s, 1);
-    ASSERT_NOT_NULL(up);
-    ASSERT_EQ(up->type, SCRIPT_CMD_MOUSEUP);
-    ASSERT_EQ(up->mouse_x, 56);
-    ASSERT_EQ(up->mouse_y, 78);
-    ASSERT_EQ(up->mouse_button, 1);
-    ASSERT_EQ(up->mouse_clicks, 2);
-
-    portty_script_free(s);
-    cleanup_tmp(path);
-}
-
-static void test_parse_mouse_button_missing_args(void)
-{
-    char *path = write_tmp_script("mousedown 12\n");
-    ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
-    ASSERT_NOT_NULL(s);
-    ASSERT_NOT_NULL(portty_script_error(s));
-    portty_script_free(s);
-
-    cleanup_tmp(path);
-}
-
-static void test_wait_remaining_ms_reports(void)
+static void test_wait_paces_steps(void)
 {
     char *path = write_tmp_script("wait 0.05\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f.ext, err, sizeof(err));
     ASSERT_NOT_NULL(s);
 
-    uint32_t before = portty_script_wait_remaining_ms(s, 0);
+    ASSERT_EQ(portty_script_step(s), CFR_SCRIPT_RUNNING);
+    uint32_t before = portty_script_wait_ms(s);
     ASSERT_TRUE(before > 0 && before <= 60);
-
-    sleep_ms(20);
-    uint32_t after = portty_script_wait_remaining_ms(s, 0);
-    ASSERT_TRUE(after < before);
-    ASSERT_TRUE(after <= 40);
+    sleep_ms(60);
+    ASSERT_EQ(portty_script_step(s), CFR_SCRIPT_DONE);
 
     portty_script_free(s);
     cleanup_tmp(path);
 }
 
-static void test_wait_remaining_ms_non_wait_returns_max(void)
+static void test_wait_ms_non_wait_returns_max(void)
 {
-    char *path = write_tmp_script("send \"hi\"\n");
+    char *path = write_tmp_script("send hi\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
+    FakeExt f;
+    fake_ext_init(&f);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f.ext, err, sizeof(err));
     ASSERT_NOT_NULL(s);
-    ASSERT_EQ(portty_script_wait_remaining_ms(s, 0), UINT32_MAX);
-
+    ASSERT_EQ(portty_script_wait_ms(s), UINT32_MAX);
     portty_script_free(s);
     cleanup_tmp(path);
 }
 
-static void test_wait_remaining_ms_wait_for_reports_timeout(void)
+static void test_emit_reaches_emit_fn(void)
 {
-    char *path = write_tmp_script("wait-for ready 0.05\n");
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "emit hello\n"), CFR_SCRIPT_DONE);
+    ASSERT_STR_EQ(f.emitted, "hello");
+}
+
+static void test_resize_reaches_resize_fn(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "resize 120 40\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.resize_calls, 1);
+    ASSERT_EQ(f.resize_cols, 120);
+    ASSERT_EQ(f.resize_rows, 40);
+}
+
+static void test_quit_sets_flag(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    char *path = write_tmp_script("quit\n");
     ASSERT_NOT_NULL(path);
-
-    PorttyScript *s = portty_script_load(path);
+    char err[256] = { 0 };
+    PorttyScript *s = portty_script_load(path, &f.ext, err, sizeof(err));
     ASSERT_NOT_NULL(s);
-
-    uint32_t before = portty_script_wait_remaining_ms(s, 0);
-    ASSERT_TRUE(before > 0 && before <= 60);
-
+    ASSERT_EQ(portty_script_step(s), CFR_SCRIPT_DONE);
+    ASSERT_TRUE(portty_script_quit_requested(s));
     portty_script_free(s);
     cleanup_tmp(path);
+}
+
+/* ── Extension commands ── */
+
+static void test_screendump_defers(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "screendump /tmp/shot.png\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_TRUE(f.screendump_pending);
+    ASSERT_STR_EQ(f.screendump_path, "/tmp/shot.png");
+}
+
+static void test_screendump_quoted(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "screendump \"/tmp/my shot.png\"\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_STR_EQ(f.screendump_path, "/tmp/my shot.png");
+}
+
+static void test_renderdump_defers(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "renderdump /tmp/r.png\n"), CFR_SCRIPT_DONE);
+    ASSERT_TRUE(f.renderdump_pending);
+    ASSERT_STR_EQ(f.renderdump_path, "/tmp/r.png");
+}
+
+static void test_dumpstate_path(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "dumpstate /tmp/state.txt\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.dump_calls, 1);
+    ASSERT_STR_EQ(f.dump_path, "/tmp/state.txt");
+}
+
+static void test_dumpstate_default_path(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "dumpstate\n"), CFR_SCRIPT_DONE);
+    ASSERT_STR_EQ(f.dump_path, "(null)");
+}
+
+static void test_dumpstate_failure_fails_run(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    f.dump_ret = false;
+    ASSERT_EQ(run_to_end(&f, "dumpstate /tmp/x\n"), CFR_SCRIPT_FAILED);
+}
+
+static void test_mousemove(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "mousemove 12 34\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.mouse_moves, 1);
+    ASSERT_EQ(f.mouse_x, 12);
+    ASSERT_EQ(f.mouse_y, 34);
+}
+
+static void test_mouse_buttons(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "mousedown 12 34\nmouseup 56 78 1 2\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.btn_calls, 2);
+    ASSERT_EQ(f.btn_button, 1);
+    ASSERT_EQ(f.btn_clicks, 2);
+    ASSERT_FALSE(f.btn_pressed); /* last call was mouseup */
+}
+
+static void test_mouse_button_defaults(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "mousedown 12 34\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.btn_button, 1);
+    ASSERT_EQ(f.btn_clicks, 1);
+    ASSERT_TRUE(f.btn_pressed);
+}
+
+static void test_mouse_bad_args_fail(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "mousedown 12\n"), CFR_SCRIPT_FAILED);
+}
+
+static void test_panel(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "panel 1 2 3 40 5 \"Build\" \"All good\"\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.panel_calls, 1);
+    ASSERT_EQ(f.panel_id, 1);
+    ASSERT_EQ(f.panel_col, 2);
+    ASSERT_EQ(f.panel_row, 3);
+    ASSERT_EQ(f.panel_cols, 40);
+    ASSERT_EQ(f.panel_rows, 5);
+    ASSERT_STR_EQ(f.panel_title, "Build");
+    ASSERT_STR_EQ(f.panel_body, "All good");
+    ASSERT_EQ(f.panel_level, 0);
+}
+
+static void test_panel_with_level_and_flags(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "panel 2 10 5 30 2 \"Warn\" \"Low disk\" 1 4\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.panel_level, 1);
+    ASSERT_EQ(f.panel_flags, 4);
+}
+
+static void test_panel_escapes_expanded(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "panel 1 0 0 10 2 \"T\" \"line1\\nline2\"\n"),
+              CFR_SCRIPT_DONE);
+    ASSERT_STR_EQ(f.panel_body, "line1\nline2");
+}
+
+static void test_panel_hide(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "panel_hide 7\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.panel_hide_calls, 1);
+    ASSERT_EQ(f.panel_hide_id, 7);
+}
+
+static void test_winsize(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "winsize 1024 768\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.win_w, 1024);
+    ASSERT_EQ(f.win_h, 768);
+}
+
+static void test_record_start_stop(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    FrameRecorder *rec = frame_recorder_new();
+    ASSERT_NOT_NULL(rec);
+    f.ext.recorder = rec;
+
+#ifdef _WIN32
+    char dir[MAX_PATH];
+    ASSERT_TRUE(GetTempPathA(MAX_PATH, dir) != 0);
+    strncat(dir, "portty-rec-test", MAX_PATH - strlen(dir) - 1);
+#else
+    char dir[] = "/tmp/portty_rec_test_XXXXXX";
+    ASSERT_NOT_NULL(mkdtemp(dir));
+#endif
+
+    char text[1200];
+    snprintf(text, sizeof(text), "record-start %s 12\nrecord-stop\n", dir);
+    ASSERT_EQ(run_to_end(&f, text), CFR_SCRIPT_DONE);
+    ASSERT_FALSE(rec->recording);
+    ASSERT_EQ(rec->target_fps, 12);
+
+    frame_recorder_free(rec);
+#ifdef _WIN32
+    RemoveDirectoryA(dir);
+#else
+    char manifest[1200];
+    snprintf(manifest, sizeof(manifest), "%s/frames.csv", dir);
+    remove(manifest);
+    rmdir(dir);
+#endif
+}
+
+static void test_record_without_recorder_warns_but_passes(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    /* recorder NULL: warn + skip, run still completes */
+    ASSERT_EQ(run_to_end(&f, "record-start /tmp/x 10\nrecord-stop\n"),
+              CFR_SCRIPT_DONE);
+}
+
+static void test_assert_no_hover_passes(void)
+{
+    /* term_stubs' terminal_hovered_hyperlink returns 0 (no hover). */
+    FakeExt f;
+    fake_ext_init(&f);
+    TerminalBackend *term = (TerminalBackend *)&f; /* stub ignores it */
+    f.ext.term = term;
+    ASSERT_EQ(run_to_end(&f, "assert-no-hover\n"), CFR_SCRIPT_DONE);
+}
+
+static void test_assert_hover_fails_run(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    f.ext.term = (TerminalBackend *)&f;
+    ASSERT_EQ(run_to_end(&f, "assert-hover\n"), CFR_SCRIPT_FAILED);
 }
 
 int main(int argc, char *argv[])
@@ -984,54 +593,36 @@ int main(int argc, char *argv[])
     test_parse_args(argc, argv);
 
     RUN_TEST(test_load_empty_file);
-    RUN_TEST(test_load_comments_and_blanks);
-    RUN_TEST(test_parse_wait);
-    RUN_TEST(test_parse_wait_integer);
-    RUN_TEST(test_parse_wait_for);
-    RUN_TEST(test_parse_wait_for_default_timeout);
-    RUN_TEST(test_parse_wait_for_unquoted_timeout);
-    RUN_TEST(test_parse_wait_for_unquoted_no_timeout);
-    RUN_TEST(test_parse_wait_for_line_end);
-    RUN_TEST(test_parse_wait_for_line_end_before_timeout);
-    RUN_TEST(test_parse_wait_for_unquoted_line_end);
-    RUN_TEST(test_parse_wait_for_no_line_end_by_default);
-    RUN_TEST(test_parse_dumpgrid);
-    RUN_TEST(test_parse_wait_for_missing_text);
-    RUN_TEST(test_parse_wait_for_empty_quoted_text);
-    RUN_TEST(test_parse_send);
-    RUN_TEST(test_parse_send_escapes);
-    RUN_TEST(test_parse_send_quoted);
-    RUN_TEST(test_parse_send_carriage_return);
-    RUN_TEST(test_parse_raw);
-    RUN_TEST(test_parse_raw_no_args);
-    RUN_TEST(test_parse_send_no_args);
-    RUN_TEST(test_parse_sendln);
-    RUN_TEST(test_parse_emit);
-    RUN_TEST(test_parse_emit_escapes);
-    RUN_TEST(test_parse_emit_raw);
-    RUN_TEST(test_parse_x_escape);
-    RUN_TEST(test_parse_assert_contains);
-    RUN_TEST(test_parse_assert_not_contains);
-    RUN_TEST(test_parse_screendump);
-    RUN_TEST(test_parse_dumprow);
-    RUN_TEST(test_parse_dumpcells);
-    RUN_TEST(test_parse_quit);
-    RUN_TEST(test_parse_multi_command);
-    RUN_TEST(test_parse_unknown_command);
-    RUN_TEST(test_parse_missing_file);
-    RUN_TEST(test_get_out_of_range);
-    RUN_TEST(test_parse_dumpcells_missing_args);
-    RUN_TEST(test_parse_screendump_long_path);
-    RUN_TEST(test_parse_trailing_whitespace);
-    RUN_TEST(test_error_message);
-    RUN_TEST(test_parse_panel);
-    RUN_TEST(test_parse_panel_with_level);
-    RUN_TEST(test_parse_mousemove);
-    RUN_TEST(test_parse_mouse_button);
-    RUN_TEST(test_parse_mouse_button_missing_args);
-    RUN_TEST(test_wait_remaining_ms_reports);
-    RUN_TEST(test_wait_remaining_ms_non_wait_returns_max);
-    RUN_TEST(test_wait_remaining_ms_wait_for_reports_timeout);
+    RUN_TEST(test_load_unknown_command_fails);
+    RUN_TEST(test_load_missing_file);
+    RUN_TEST(test_load_ext_names_registered);
+    RUN_TEST(test_deleted_dump_commands_rejected);
+
+    RUN_TEST(test_wait_paces_steps);
+    RUN_TEST(test_wait_ms_non_wait_returns_max);
+    RUN_TEST(test_emit_reaches_emit_fn);
+    RUN_TEST(test_resize_reaches_resize_fn);
+    RUN_TEST(test_quit_sets_flag);
+
+    RUN_TEST(test_screendump_defers);
+    RUN_TEST(test_screendump_quoted);
+    RUN_TEST(test_renderdump_defers);
+    RUN_TEST(test_dumpstate_path);
+    RUN_TEST(test_dumpstate_default_path);
+    RUN_TEST(test_dumpstate_failure_fails_run);
+    RUN_TEST(test_mousemove);
+    RUN_TEST(test_mouse_buttons);
+    RUN_TEST(test_mouse_button_defaults);
+    RUN_TEST(test_mouse_bad_args_fail);
+    RUN_TEST(test_panel);
+    RUN_TEST(test_panel_with_level_and_flags);
+    RUN_TEST(test_panel_escapes_expanded);
+    RUN_TEST(test_panel_hide);
+    RUN_TEST(test_winsize);
+    RUN_TEST(test_record_start_stop);
+    RUN_TEST(test_record_without_recorder_warns_but_passes);
+    RUN_TEST(test_assert_no_hover_passes);
+    RUN_TEST(test_assert_hover_fails_run);
 
     TEST_SUMMARY();
 }

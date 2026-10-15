@@ -1,5 +1,5 @@
 /*
- * portty — Debug/automation script parser and execution
+ * portty — Script engine wiring: coffer core + UI extension commands
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen
@@ -10,730 +10,374 @@
 #endif
 
 #include "portty_script.h"
-#include "common.h"
-#include "rend_common.h"
 
 #include <ctype.h>
-#include <errno.h>
-#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#ifdef _WIN32
-#include <windows.h>
-#else
-#include <time.h>
-#endif
-
-/* ── PorttyScript struct ── */
-
 struct PorttyScript
 {
-    ScriptCmd *cmds;
-    int count;
-    int capacity;
-    char error[256];
-    bool has_error;
-    int error_line; // Line number where error occurred (0 if no error)
+    CfrScript *script;
+    CfrScriptRun *run;
 };
 
-/* ── Helpers ── */
+/* UI extension command names, registered with the engine at load time.
+ * Anything not in this list and not a core command is a parse error. */
+static const char *const EXT_NAMES[] = {
+    "screendump", "renderdump", "dumpstate", "record-start",
+    "record-stop", "panel", "panel_hide", "mousemove",
+    "mousedown", "mouseup", "winsize", "assert-hover",
+    "assert-no-hover", NULL
+};
 
-static int hex_val(char c)
+/* ── Engine host hooks (adapt ScriptUIExt to CfrScriptHost) ── */
+
+static void host_pty_write(void *ud, const char *data, size_t len)
 {
-    if (c >= '0' && c <= '9')
-        return c - '0';
-    if (c >= 'a' && c <= 'f')
-        return c - 'a' + 10;
-    if (c >= 'A' && c <= 'F')
-        return c - 'A' + 10;
+    ScriptUIExt *ext = ud;
+    if (ext->pty)
+        pty_write(ext->pty, data, len);
+}
+
+static void host_emit(void *ud, const char *data, size_t len)
+{
+    ScriptUIExt *ext = ud;
+    if (ext->emit_fn)
+        ext->emit_fn(ext->app, data, len);
+}
+
+static int host_poll_exit(void *ud, int *status)
+{
+    ScriptUIExt *ext = ud;
+    if (!ext->pty)
+        return -1;
+    return pty_poll_exit(ext->pty, status);
+}
+
+static int host_resize(void *ud, int cols, int rows)
+{
+    ScriptUIExt *ext = ud;
+    if (!ext->resize_fn)
+        return -1;
+    ext->resize_fn(ext->resize_ud, cols, rows);
     return 0;
 }
 
-static void script_set_error(PorttyScript *s, int line, const char *fmt, ...)
-{
-    va_list args;
-    va_start(args, fmt);
-    vsnprintf(s->error, sizeof(s->error), fmt, args);
-    va_end(args);
-    s->has_error = true;
-    s->error_line = line;
-}
+/* ── Extension command arg parsing helpers ── */
 
-static bool script_ensure_capacity(PorttyScript *s)
+/* Strip one layer of surrounding quotes in place. */
+static void strip_quotes(char *s)
 {
-    if (s->count >= s->capacity) {
-        int new_cap = s->capacity == 0 ? 16 : s->capacity * 2;
-        ScriptCmd *new_cmds = realloc(s->cmds, (size_t)new_cap * sizeof(ScriptCmd));
-        if (!new_cmds)
-            return false;
-        s->cmds = new_cmds;
-        s->capacity = new_cap;
+    size_t len = strlen(s);
+    if (len >= 2 && ((s[0] == '"' && s[len - 1] == '"') ||
+                     (s[0] == '\'' && s[len - 1] == '\''))) {
+        memmove(s, s + 1, len - 2);
+        s[len - 2] = '\0';
     }
-    return true;
 }
 
-/* Strip trailing whitespace from a string in-place */
-static void strip_trailing(char *str)
+/* panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags] */
+static bool exec_panel(ScriptUIExt *ext, char *args, int line)
 {
-    int len = (int)strlen(str);
-    while (len > 0 && isspace((unsigned char)str[len - 1]))
-        str[--len] = '\0';
-}
-
-/* Skip leading whitespace, return pointer to first non-ws char */
-static char *skip_ws(char *str)
-{
-    while (*str && isspace((unsigned char)*str))
-        str++;
-    return str;
-}
-
-/* Expand backslash escapes (\n \r \t \e \\) in place.
- * Returns the new length (may be shorter than input). */
-static int expand_escapes(char *str, int len)
-{
-    int out = 0;
-    int in = 0;
-    while (in < len) {
-        if (str[in] == '\\' && in + 1 < len) {
-            switch (str[in + 1]) {
-            case 'n':
-                str[out++] = '\n';
-                in += 2;
-                break;
-            case 'r':
-                str[out++] = '\r';
-                in += 2;
-                break;
-            case 't':
-                str[out++] = '\t';
-                in += 2;
-                break;
-            case 'e':
-                str[out++] = '\x1b';
-                in += 2;
-                break;
-            case 'x':
-            {
-                /* \xNN - exactly two hex digits */
-                if (in + 3 < len && isxdigit((unsigned char)str[in + 2]) &&
-                    isxdigit((unsigned char)str[in + 3])) {
-                    int hi = hex_val(str[in + 2]);
-                    int lo = hex_val(str[in + 3]);
-                    str[out++] = (char)((hi << 4) | lo);
-                    in += 4;
-                } else {
-                    /* malformed: keep backslash and continue */
-                    str[out++] = str[in++];
-                }
-                break;
-            }
-            case '\\':
-                str[out++] = '\\';
-                in += 2;
-                break;
-            default:
-                str[out++] = str[in++];
-                break;
-            }
-        } else {
-            str[out++] = str[in++];
-        }
+    if (!ext->panel_fn) {
+        fprintf(stderr, "[%d] panel: not supported by this backend\n", line);
+        return true;
     }
-    str[out] = '\0';
-    return out;
-}
 
-/* Parse hex byte string into a binary buffer.
- * Returns malloc'd buffer (caller frees) or NULL on error.
- * Sets *out_len to the number of bytes. */
-static char *parse_hex_bytes(const char *args, int *out_len)
-{
-    /* Size the buffer from the number of hex digit pairs, not the
-     * whitespace-separated token count: a single long token like
-     * "1b5d31..." holds many pairs and must get a byte each. */
-    size_t cap = 0;
-    for (const char *p = args; *p; p++) {
-        if (isxdigit((unsigned char)*p))
-            cap++;
-    }
-    cap = cap / 2 + 1; /* +1 for the NUL terminator */
-
-    char *buf = malloc(cap);
-    if (!buf)
-        return NULL;
-
-    int idx = 0;
-    const char *p = args;
-    while (*p) {
+    int parsed[5];
+    char *p = args;
+    int count = 0;
+    while (count < 5 && *p) {
         while (*p && isspace((unsigned char)*p))
             p++;
         if (!*p)
             break;
-
-        /* Parse two hex digits */
-        int hi = -1, lo = -1;
-        if (isxdigit((unsigned char)p[0])) {
-            hi = (p[0] >= '0' && p[0] <= '9') ? p[0] - '0' : (p[0] >= 'a' && p[0] <= 'f') ? p[0] - 'a' + 10
-                                                         : (p[0] >= 'A' && p[0] <= 'F')   ? p[0] - 'A' + 10
-                                                                                          : -1;
-        }
-        if (hi >= 0 && isxdigit((unsigned char)p[1])) {
-            lo = (p[1] >= '0' && p[1] <= '9') ? p[1] - '0' : (p[1] >= 'a' && p[1] <= 'f') ? p[1] - 'a' + 10
-                                                         : (p[1] >= 'A' && p[1] <= 'F')   ? p[1] - 'A' + 10
-                                                                                          : -1;
-        }
-
-        if (hi < 0 || lo < 0) {
-            free(buf);
-            return NULL;
-        }
-
-        buf[idx++] = (char)((hi << 4) | lo);
-        p += 2;
-        /* Skip any trailing non-space chars (shouldn't happen for valid hex) */
+        char *end;
+        parsed[count] = (int)strtol(p, &end, 10);
+        if (end == p)
+            break;
+        count++;
+        p = end;
+    }
+    if (count < 5) {
+        fprintf(stderr, "[%d] panel: requires id col row cols rows\n", line);
+        return false;
     }
 
-    buf[idx] = '\0';
-    *out_len = idx;
-    return buf;
+    while (*p && *p != '"')
+        p++;
+    if (*p != '"') {
+        fprintf(stderr, "[%d] panel: requires quoted title and body\n", line);
+        return false;
+    }
+    p++;
+    char *title_start = p;
+    while (*p && !(*p == '"' && (p == title_start || *(p - 1) != '\\')))
+        p++;
+    if (*p != '"') {
+        fprintf(stderr, "[%d] panel: unterminated title string\n", line);
+        return false;
+    }
+    char title[128];
+    size_t title_len = (size_t)(p - title_start);
+    if (title_len >= sizeof(title))
+        title_len = sizeof(title) - 1;
+    memcpy(title, title_start, title_len);
+    title[title_len] = '\0';
+
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    if (*p != '"') {
+        fprintf(stderr, "[%d] panel: requires quoted body string\n", line);
+        return false;
+    }
+    p++;
+    char *body_start = p;
+    while (*p && !(*p == '"' && (p == body_start || *(p - 1) != '\\')))
+        p++;
+    if (*p != '"') {
+        fprintf(stderr, "[%d] panel: unterminated body string\n", line);
+        return false;
+    }
+    char body[256];
+    size_t body_len = (size_t)(p - body_start);
+    if (body_len >= sizeof(body))
+        body_len = sizeof(body) - 1;
+    memcpy(body, body_start, body_len);
+    body[body_len] = '\0';
+
+    int level = 0;
+    unsigned int flags = 0;
+    p++;
+    while (*p && isspace((unsigned char)*p))
+        p++;
+    if (*p) {
+        char *next = NULL;
+        level = (int)strtol(p, &next, 10);
+        if (next && *next) {
+            while (*next && isspace((unsigned char)*next))
+                next++;
+            if (*next)
+                flags = (unsigned int)strtoul(next, NULL, 10);
+        }
+    }
+
+    char *title_x = cfr_script_expand_escapes(title);
+    char *body_x = cfr_script_expand_escapes(body);
+    ext->panel_fn(ext->panel_ud, parsed[0], parsed[1], parsed[2],
+                  parsed[3], parsed[4], title_x ? title_x : title,
+                  body_x ? body_x : body, level, flags);
+    free(title_x);
+    free(body_x);
+    return true;
 }
 
-/* Strip surrounding double quotes from a string in-place */
-static void strip_quotes(char *str)
+/* ── Extension dispatch ── */
+
+static bool exec_ext(void *ud, const char *name, const char *args,
+                     int line, bool *fatal)
 {
-    int len = (int)strlen(str);
-    if (len >= 2 && str[0] == '"' && str[len - 1] == '"') {
-        memmove(str, str + 1, (size_t)(len - 2));
-        str[len - 2] = '\0';
-    }
-}
+    ScriptUIExt *ext = ud;
+    *fatal = false;
 
-/* ── Parser ── */
+    /* Work on a writable copy; the engine's arg string is const. */
+    char buf[1024];
+    snprintf(buf, sizeof(buf), "%s", args ? args : "");
 
-static ScriptCmd *script_new_cmd(PorttyScript *s)
-{
-    if (!script_ensure_capacity(s))
-        return NULL;
-    ScriptCmd *cmd = &s->cmds[s->count++];
-    memset(cmd, 0, sizeof(ScriptCmd));
-    cmd->col_start = 0;
-    cmd->col_end = 0;
-    cmd->row = 0;
-    cmd->wait_seconds = 0;
-    cmd->text = NULL;
-    cmd->path[0] = '\0';
-    return cmd;
-}
-
-static bool parse_command(PorttyScript *s, char *line, int line_num)
-{
-    /* Skip leading whitespace */
-    line = skip_ws(line);
-    if (*line == '\0' || *line == '#')
-        return true; /* blank or comment */
-
-    /* Split on first whitespace into keyword + args */
-    char *space = line;
-    while (*space && !isspace((unsigned char)*space))
-        space++;
-    char *args = NULL;
-    if (*space) {
-        *space = '\0';
-        args = skip_ws(space + 1);
-    } else {
-        args = line + strlen(line); /* points to '\0' */
-    }
-
-    strip_trailing(args);
-
-    if (strcmp(line, "wait") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_WAIT;
-        cmd->wait_seconds = atof(args);
-        return true;
-    }
-
-    if (strcmp(line, "dumpgrid") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_DUMPGRID;
-        return true;
-    }
-
-    if (strcmp(line, "wait-for") == 0) {
-        if (*args == '\0') {
-            script_set_error(s, line_num,
-                             "wait-for: requires text and optional timeout-seconds");
-            return false;
+    if (strcmp(name, "screendump") == 0) {
+        if (!ext->pending_screendump || !ext->screendump_path_buf) {
+            fprintf(stderr, "[%d] screendump: not supported\n", line);
+            return true;
         }
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_WAIT_FOR;
-        /* wait-for <text> [timeout-seconds] [line-end]
-         * Trailing whitespace-separated tokens after the needle are
-         * options: a number sets the timeout, the keyword "line-end"
-         * anchors the match to rows that end with the needle (after
-         * trailing-space trim). Options may come in any order; the
-         * first unrecognized token ends option parsing. For unquoted
-         * needles the options must not be glued to the text — at least
-         * one space separates them, which the split below guarantees
-         * for all but a bare single-word needle with no options. */
-        bool line_end = false;
-        bool got_num = false;
-        /* Trim trailing option tokens off args, right to left */
-        for (;;) {
-            char *last_ws = NULL;
-            for (char *p = args; *p; p++) {
-                if (isspace((unsigned char)*p))
-                    last_ws = p;
-            }
-            if (!last_ws || *(last_ws + 1) == '\0')
-                break; /* no trailing token to consider */
-            const char *tok = last_ws + 1;
-            if (!got_num && isdigit((unsigned char)*tok)) {
-                cmd->wait_seconds = atof(tok);
-                got_num = true;
-                *last_ws = '\0';
-                continue;
-            }
-            if (strcmp(tok, "line-end") == 0) {
-                line_end = true;
-                *last_ws = '\0';
-                continue;
-            }
-            break; /* not an option token — leave it in the needle */
+        strip_quotes(buf);
+        snprintf(ext->screendump_path_buf, 512, "%s", buf);
+        *ext->pending_screendump = true;
+        return true;
+    }
+
+    if (strcmp(name, "renderdump") == 0) {
+        if (!ext->pending_renderdump || !ext->renderdump_path_buf) {
+            fprintf(stderr, "[%d] renderdump: not supported\n", line);
+            return true;
         }
-        if (args[0] == '"') {
-            /* Quoted needle: strip the surrounding quotes */
-            char *end = strchr(args + 1, '"');
-            if (!end) {
-                script_set_error(s, line_num,
-                                 "wait-for: unterminated quoted text");
-                return false;
-            }
-            size_t text_len = (size_t)(end - (args + 1));
-            if (text_len == 0) {
-                script_set_error(s, line_num, "wait-for: empty text");
-                return false;
-            }
-            cmd->text = malloc(text_len + 1);
-            if (!cmd->text)
-                return false;
-            memcpy(cmd->text, args + 1, text_len);
-            cmd->text[text_len] = '\0';
-            expand_escapes(cmd->text, (int)text_len);
-        } else {
-            cmd->text = strdup(args);
-            if (!cmd->text)
-                return false;
-            expand_escapes(cmd->text, (int)strlen(cmd->text));
+        strip_quotes(buf);
+        snprintf(ext->renderdump_path_buf, 512, "%s", buf);
+        *ext->pending_renderdump = true;
+        return true;
+    }
+
+    if (strcmp(name, "dumpstate") == 0) {
+        if (!ext->dump_fn) {
+            fprintf(stderr, "[%d] dumpstate: not supported\n", line);
+            return true;
         }
-        cmd->wait_line_end = line_end;
-        if (cmd->wait_seconds <= 0)
-            cmd->wait_seconds = 600; /* default timeout */
-        return true;
-    }
-
-    if (strcmp(line, "send") == 0 || strcmp(line, "sendln") == 0 ||
-        strcmp(line, "emit") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        if (strcmp(line, "emit") == 0) {
-            cmd->type = SCRIPT_CMD_EMIT;
-        } else if (strcmp(line, "sendln") == 0) {
-            cmd->type = SCRIPT_CMD_SENDLN;
-        } else {
-            cmd->type = SCRIPT_CMD_SEND;
-        }
-        strip_quotes(args);
-        int len = (int)strlen(args);
-        len = expand_escapes(args, len);
-        cmd->text = malloc((size_t)len + 1);
-        if (!cmd->text)
-            return false;
-        memcpy(cmd->text, args, (size_t)len + 1);
-        return true;
-    }
-
-    if (strcmp(line, "raw") == 0 || strcmp(line, "emit-raw") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = (strcmp(line, "emit-raw") == 0) ? SCRIPT_CMD_EMIT_RAW : SCRIPT_CMD_RAW;
-        int raw_len = 0;
-        char *raw = parse_hex_bytes(args, &raw_len);
-        if (!raw) {
-            script_set_error(s, line_num, "invalid hex bytes in raw command: %s", args);
-            return false;
-        }
-        cmd->text = raw;
-        /* Store length in col_start as a hack? No — text is NUL-terminated
-         * but may contain NULs. We store the length separately by using
-         * a convention: for RAW, text is a malloc'd buffer and we store
-         * the length as the buffer size. But ScriptCmd doesn't have a len
-         * field. For now, raw bytes that are NUL will truncate at NUL
-         * when used as a C string. This is acceptable for debug scripts
-         * where raw is typically escape sequences (no NULs). */
-        return true;
-    }
-
-    if (strcmp(line, "assert-contains") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_ASSERT_CONTAINS;
-        strip_quotes(args);
-        cmd->text = strdup(args);
-        if (!cmd->text)
-            return false;
-        return true;
-    }
-
-    if (strcmp(line, "assert-not-contains") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_ASSERT_NOT_CONTAINS;
-        strip_quotes(args);
-        cmd->text = strdup(args);
-        if (!cmd->text)
-            return false;
-        return true;
-    }
-
-    if (strcmp(line, "screendump") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_SCREENDUMP;
-        strip_quotes(args);
-        snprintf(cmd->path, sizeof(cmd->path), "%s", args);
-        return true;
-    }
-
-    if (strcmp(line, "renderdump") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_RENDERDUMP;
-        strip_quotes(args);
-        snprintf(cmd->path, sizeof(cmd->path), "%s", args);
-        return true;
-    }
-
-    if (strcmp(line, "dumpstate") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_DUMPSTATE;
-        /* Optional PATH argument; empty = default location, "-" = stdout. */
-        strip_quotes(args);
-        snprintf(cmd->path, sizeof(cmd->path), "%s", args);
-        return true;
-    }
-
-    if (strcmp(line, "dumprow") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_DUMPROW;
-        cmd->col_start = -1; /* all columns */
-        cmd->col_end = 0;
-        if (sscanf(args, "%d", &cmd->row) != 1) {
-            script_set_error(s, line_num, "dumprow: missing or invalid row argument");
+        strip_quotes(buf);
+        const char *path = buf[0] ? buf : NULL;
+        if (!ext->dump_fn(ext->dump_ud, path)) {
+            fprintf(stderr, "[%d] dumpstate: failed to write state\n", line);
+            *fatal = true;
             return false;
         }
         return true;
     }
 
-    if (strcmp(line, "dumpcells") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_DUMPCELLS;
-        if (sscanf(args, "%d %d %d", &cmd->row, &cmd->col_start, &cmd->col_end) != 3) {
-            script_set_error(s, line_num, "dumpcells: requires row col_start col_end");
-            return false;
+    if (strcmp(name, "record-start") == 0) {
+        if (!ext->recorder) {
+            fprintf(stderr, "[%d] record-start: not supported\n", line);
+            return true;
         }
-        return true;
-    }
-
-    if (strcmp(line, "panel") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_PANEL;
-        cmd->panel_level = 0; /* default */
-        /* Format: panel <id> <col> <row> <cols> <rows> "title" "body" [level] */
-        int pos_count = 0;
-        char *p = args;
-        int parsed[5];
-        while (pos_count < 5 && *p) {
-            while (*p && isspace(*p))
-                p++;
-            if (!*p)
-                break;
-            char *end;
-            parsed[pos_count] = (int)strtol(p, &end, 10);
-            if (end == p)
-                break;
-            pos_count++;
-            p = end;
-        }
-        if (pos_count < 5) {
-            script_set_error(s, line_num, "panel: requires id col row cols rows");
-            return false;
-        }
-        cmd->panel_id = parsed[0];
-        cmd->panel_col = parsed[1];
-        cmd->panel_row = parsed[2];
-        cmd->panel_cols = parsed[3];
-        cmd->panel_rows = parsed[4];
-        /* Skip to first quote */
-        while (*p && *p != '"')
-            p++;
-        if (*p != '"') {
-            script_set_error(s, line_num, "panel: requires quoted title and body");
-            return false;
-        }
-        p++; /* skip opening quote */
-        char *title_start = p;
-        while (*p && !(*p == '"' && (p == title_start || *(p - 1) != '\\')))
-            p++;
-        if (*p != '"') {
-            script_set_error(s, line_num, "panel: unterminated title string");
-            return false;
-        }
-        size_t title_len = (size_t)(p - title_start);
-        if (title_len >= sizeof(cmd->panel_title))
-            title_len = sizeof(cmd->panel_title) - 1;
-        memcpy(cmd->panel_title, title_start, title_len);
-        cmd->panel_title[title_len] = '\0';
-        expand_escapes(cmd->panel_title, (int)strlen(cmd->panel_title));
-        p++; /* skip closing quote */
-        while (*p && isspace(*p))
-            p++;
-        if (*p != '"') {
-            script_set_error(s, line_num, "panel: requires quoted body string");
-            return false;
-        }
-        p++; /* skip opening quote of body */
-        char *body_start = p;
-        while (*p && !(*p == '"' && (p == body_start || *(p - 1) != '\\')))
-            p++;
-        if (*p != '"') {
-            script_set_error(s, line_num, "panel: unterminated body string");
-            return false;
-        }
-        size_t body_len = (size_t)(p - body_start);
-        if (body_len >= sizeof(cmd->panel_body))
-            body_len = sizeof(cmd->panel_body) - 1;
-        memcpy(cmd->panel_body, body_start, body_len);
-        cmd->panel_body[body_len] = '\0';
-        expand_escapes(cmd->panel_body, (int)strlen(cmd->panel_body));
-
-        p++; /* skip closing quote */
-        while (*p && isspace(*p))
-            p++;
-        if (*p) {
-            char *next = NULL;
-            cmd->panel_level = (int)strtol(p, &next, 10);
-            /* Check for optional flags parameter */
-            if (next && *next) {
-                while (*next && isspace(*next))
-                    next++;
-                if (*next) {
-                    cmd->panel_flags = (unsigned int)strtoul(next, NULL, 10);
-                }
-            }
-        }
-        return true;
-    }
-
-    if (strcmp(line, "panel_hide") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_PANEL_HIDE;
-        if (sscanf(args, "%d", &cmd->panel_id) != 1) {
-            script_set_error(s, line_num, "panel_hide: requires id");
-            return false;
-        }
-        return true;
-    }
-
-    if (strcmp(line, "mousemove") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_MOUSEMOVE;
-        if (sscanf(args, "%d %d", &cmd->mouse_x, &cmd->mouse_y) != 2) {
-            script_set_error(s, line_num, "mousemove: requires x y");
-            return false;
-        }
-        return true;
-    }
-
-    if (strcmp(line, "mousedown") == 0 || strcmp(line, "mouseup") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = (strcmp(line, "mousedown") == 0) ? SCRIPT_CMD_MOUSEDOWN
-                                                     : SCRIPT_CMD_MOUSEUP;
-        cmd->mouse_button = 1;
-        cmd->mouse_clicks = 1;
-        int n = sscanf(args, "%d %d %d %d", &cmd->mouse_x, &cmd->mouse_y,
-                       &cmd->mouse_button, &cmd->mouse_clicks);
-        if (n < 2) {
-            script_set_error(s, line_num, "mousedown/mouseup: requires x y [button] [clicks]");
-            return false;
-        }
-        if (cmd->mouse_button <= 0)
-            cmd->mouse_button = 1;
-        if (cmd->mouse_clicks <= 0)
-            cmd->mouse_clicks = 1;
-        return true;
-    }
-
-    if (strcmp(line, "resize") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_RESIZE;
-        if (sscanf(args, "%d %d", &cmd->resize_cols, &cmd->resize_rows) != 2) {
-            script_set_error(s, line_num, "resize: requires cols rows");
-            return false;
-        }
-        return true;
-    }
-
-    if (strcmp(line, "winsize") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_WINSIZE;
-        if (sscanf(args, "%d %d", &cmd->winsize_w, &cmd->winsize_h) != 2) {
-            script_set_error(s, line_num, "winsize: requires width height");
-            return false;
-        }
-        return true;
-    }
-
-    if (strcmp(line, "record-start") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_RECORD_START;
-        cmd->record_fps = 30;
-        char *dir = strtok(args, " \t\n");
+        int fps = 30;
+        char *dir = strtok(buf, " \t");
         if (!dir) {
-            script_set_error(s, line_num, "record-start requires directory");
+            fprintf(stderr, "[%d] record-start requires directory\n", line);
+            *fatal = true;
             return false;
         }
         strip_quotes(dir);
-        snprintf(cmd->record_dir, sizeof(cmd->record_dir), "%s", dir);
-        char *fps_str = strtok(NULL, " \t\n");
+        char *fps_str = strtok(NULL, " \t");
         if (fps_str)
-            cmd->record_fps = atoi(fps_str);
+            fps = atoi(fps_str);
+        frame_recorder_start(ext->recorder, dir, fps);
+        if (ext->record_start_fn)
+            ext->record_start_fn(ext->record_ud,
+                                 ext->recorder->target_fps);
         return true;
     }
 
-    if (strcmp(line, "record-stop") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
+    if (strcmp(name, "record-stop") == 0) {
+        if (!ext->recorder) {
+            fprintf(stderr, "[%d] record-stop: not supported\n", line);
+            return true;
+        }
+        if (ext->record_stop_fn)
+            ext->record_stop_fn(ext->record_ud);
+        frame_recorder_stop(ext->recorder);
+        return true;
+    }
+
+    if (strcmp(name, "panel") == 0)
+        return exec_panel(ext, buf, line);
+
+    if (strcmp(name, "panel_hide") == 0) {
+        if (!ext->panel_hide_fn) {
+            fprintf(stderr, "[%d] panel_hide: not supported\n", line);
+            return true;
+        }
+        ext->panel_hide_fn(ext->panel_hide_ud, atoi(buf));
+        return true;
+    }
+
+    if (strcmp(name, "mousemove") == 0) {
+        int x = 0, y = 0;
+        if (sscanf(buf, "%d %d", &x, &y) != 2) {
+            fprintf(stderr, "[%d] mousemove: requires x y\n", line);
+            *fatal = true;
             return false;
-        cmd->type = SCRIPT_CMD_RECORD_STOP;
+        }
+        if (!ext->mousemove_fn) {
+            fprintf(stderr, "[%d] mousemove: not supported\n", line);
+            return true;
+        }
+        ext->mousemove_fn(ext->mousemove_ud, x, y);
         return true;
     }
 
-    if (strcmp(line, "quit") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
+    if (strcmp(name, "mousedown") == 0 || strcmp(name, "mouseup") == 0) {
+        int x = 0, y = 0, button = 1, clicks = 1;
+        if (sscanf(buf, "%d %d %d %d", &x, &y, &button, &clicks) < 2) {
+            fprintf(stderr, "[%d] %s: requires x y [button] [clicks]\n",
+                    line, name);
+            *fatal = true;
             return false;
-        cmd->type = SCRIPT_CMD_QUIT;
+        }
+        if (button <= 0)
+            button = 1;
+        if (clicks <= 0)
+            clicks = 1;
+        if (!ext->mouse_button_fn) {
+            fprintf(stderr, "[%d] %s: not supported\n", line, name);
+            return true;
+        }
+        ext->mouse_button_fn(ext->mouse_button_ud, x, y, button,
+                             strcmp(name, "mousedown") == 0, clicks);
         return true;
     }
 
-    if (strcmp(line, "assert-hover") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
+    if (strcmp(name, "winsize") == 0) {
+        int w = 0, h = 0;
+        if (sscanf(buf, "%d %d", &w, &h) != 2) {
+            fprintf(stderr, "[%d] winsize: requires width height\n", line);
+            *fatal = true;
             return false;
-        cmd->type = SCRIPT_CMD_ASSERT_HOVER;
+        }
+        if (!ext->winsize_fn) {
+            fprintf(stderr, "[%d] winsize: not supported\n", line);
+            return true;
+        }
+        ext->winsize_fn(ext->winsize_ud, w, h);
         return true;
     }
 
-    if (strcmp(line, "assert-no-hover") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
+    if (strcmp(name, "assert-hover") == 0 ||
+        strcmp(name, "assert-no-hover") == 0) {
+        bool want_hover = name[7] != 'n'; /* "assert-hover" vs "no-hover" */
+        if (!ext->term) {
+            fprintf(stderr, "[%d] %s: no terminal\n", line, name);
+            *fatal = true;
             return false;
-        cmd->type = SCRIPT_CMD_ASSERT_NO_HOVER;
-        return true;
+        }
+        uint16_t hid = terminal_hovered_hyperlink(ext->term);
+        bool hovered = hid != 0;
+        if (hovered == want_hover) {
+            fprintf(stderr, "[%d] %s: PASS (hid=%u)\n", line, name, hid);
+            return true;
+        }
+        fprintf(stderr, "[%d] %s: FAIL (hid=%u)\n", line, name, hid);
+        *fatal = true;
+        return false;
     }
 
-    if (strcmp(line, "dump-sixel") == 0) {
-        ScriptCmd *cmd = script_new_cmd(s);
-        if (!cmd)
-            return false;
-        cmd->type = SCRIPT_CMD_DUMP_SIXEL;
-        return true;
-    }
-
-    script_set_error(s, line_num, "unknown command: %s", line);
+    fprintf(stderr, "[%d] unhandled extension command: %s\n", line, name);
+    *fatal = true;
     return false;
 }
 
 /* ── Public API ── */
 
-static void script_wait_deadline_reset(void);
-
-PorttyScript *portty_script_load(const char *path)
+PorttyScript *portty_script_load(const char *path, ScriptUIExt *ext,
+                                 char *err, size_t errlen)
 {
-    /* A newly loaded script starts with a clean wait deadline. The static
-     * deadline is executor state shared across loads; without this reset a
-     * later script would inherit a stale (possibly already-expired) deadline
-     * from the previous one. */
-    script_wait_deadline_reset();
+    CfrScript *script = cfr_script_load(path, err, errlen, EXT_NAMES);
+    if (!script)
+        return NULL;
 
-    FILE *fp = fopen(path, "r");
-    if (!fp) {
-        // Create a struct to hold the file open error
-        PorttyScript *s = calloc(1, sizeof(PorttyScript));
-        if (s)
-            script_set_error(s, 0, "cannot open file: %s", strerror(errno));
-        return s;
-    }
-
-    PorttyScript *s = calloc(1, sizeof(PorttyScript));
-    if (!s) {
-        fclose(fp);
+    CfrScriptHost host = {
+        .term = ext->cfr_term,
+        .pty_write = host_pty_write,
+        .emit = host_emit,
+        .poll_exit = host_poll_exit,
+        .resize = host_resize,
+        .exec_ext = exec_ext,
+        .ud = ext,
+    };
+    CfrScriptRun *run = cfr_script_run_new(script, &host);
+    if (!run) {
+        cfr_script_free(script);
+        snprintf(err, errlen, "out of memory");
         return NULL;
     }
 
-    char line[4096];
-    int line_num = 0;
-    while (fgets(line, sizeof(line), fp)) {
-        line_num++;
-        /* Remove trailing newline */
-        int len = (int)strlen(line);
-        while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
-            line[--len] = '\0';
-
-        if (!parse_command(s, line, line_num)) {
-            /* parse_command set error; return struct with error */
-            fclose(fp);
-            return s;
-        }
+    PorttyScript *s = calloc(1, sizeof(*s));
+    if (!s) {
+        cfr_script_run_free(run);
+        cfr_script_free(script);
+        snprintf(err, errlen, "out of memory");
+        return NULL;
     }
-
-    fclose(fp);
+    s->script = script;
+    s->run = run;
     return s;
 }
 
@@ -741,636 +385,26 @@ void portty_script_free(PorttyScript *s)
 {
     if (!s)
         return;
-    if (s->cmds) {
-        for (int i = 0; i < s->count; i++) {
-            free(s->cmds[i].text);
-        }
-        free(s->cmds);
-    }
+    cfr_script_run_free(s->run);
+    cfr_script_free(s->script);
     free(s);
 }
 
-int portty_script_count(const PorttyScript *s)
+CfrScriptStatus portty_script_step(PorttyScript *s)
 {
-    return s ? s->count : 0;
+    if (!s)
+        return CFR_SCRIPT_FAILED;
+    return cfr_script_step(s->run);
 }
 
-const ScriptCmd *portty_script_get(const PorttyScript *s, int index)
+uint32_t portty_script_wait_ms(PorttyScript *s)
 {
-    if (!s || index < 0 || index >= s->count)
-        return NULL;
-    return &s->cmds[index];
-}
-
-const char *portty_script_error(const PorttyScript *s)
-{
-    if (!s || !s->has_error)
-        return NULL;
-
-    // If error has a line number, prepend it
-    static char full_error[320];
-    if (s->error_line > 0)
-        snprintf(full_error, sizeof(full_error), "line %d: %s", s->error_line, s->error);
-    else
-        snprintf(full_error, sizeof(full_error), "%s", s->error);
-
-    return full_error;
-}
-
-/* ── Shared execution helpers ── */
-
-double portty_now_seconds(void)
-{
-#ifdef _WIN32
-    static LARGE_INTEGER freq = { 0 };
-    if (freq.QuadPart == 0)
-        QueryPerformanceFrequency(&freq);
-    LARGE_INTEGER now;
-    QueryPerformanceCounter(&now);
-    return (double)now.QuadPart / (double)freq.QuadPart;
-#else
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
-#endif
-}
-
-bool portty_debug_grid_contains(TerminalBackend *term, int rows, int cols,
-                                const char *needle)
-{
-    return portty_debug_grid_find(term, rows, cols, needle, NULL, false);
-}
-
-/* Render one terminal row to a freshly malloc'd NUL-terminated UTF-8
- * string (spaces for blank cells, continuation cells skipped).
- * Returns NULL on allocation failure. */
-static char *grid_build_row_text(TerminalBackend *term, int cols, int row)
-{
-    char *row_text = malloc((size_t)cols * 4 + 1);
-    if (!row_text)
-        return NULL;
-    int pos = 0;
-    for (int col = 0; col < cols; col++) {
-        TerminalCell cell;
-        if (terminal_get_cell(term, row, col, &cell) != 0)
-            break;
-        if (cell.cp == 0 || cell.cp == 0x20) {
-            row_text[pos++] = ' ';
-        } else if (cell.width == 0) {
-            /* continuation cell, skip */
-        } else {
-            /* Encode codepoint as UTF-8 */
-            uint32_t cp = cell.cp;
-            if (cp < 0x80) {
-                row_text[pos++] = (char)cp;
-            } else if (cp < 0x800) {
-                row_text[pos++] = (char)(0xC0 | (cp >> 6));
-                row_text[pos++] = (char)(0x80 | (cp & 0x3F));
-            } else if (cp < 0x10000) {
-                row_text[pos++] = (char)(0xE0 | (cp >> 12));
-                row_text[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                row_text[pos++] = (char)(0x80 | (cp & 0x3F));
-            } else {
-                row_text[pos++] = (char)(0xF0 | (cp >> 18));
-                row_text[pos++] = (char)(0x80 | ((cp >> 12) & 0x3F));
-                row_text[pos++] = (char)(0x80 | ((cp >> 6) & 0x3F));
-                row_text[pos++] = (char)(0x80 | (cp & 0x3F));
-            }
-        }
-    }
-    row_text[pos] = '\0';
-    return row_text;
-}
-
-/* Grid scan shared by assert-contains / assert-not-contains / wait-for.
- * Searches all visible rows for the needle string. Returns true if
- * found; *row_out (if non-NULL) receives the row that matched.
- * line_end=false: substring match anywhere in the row.
- * line_end=true:  the row must END with the needle, after trimming
- *                 trailing spaces from the row. */
-bool portty_debug_grid_find(TerminalBackend *term, int rows, int cols,
-                            const char *needle, int *row_out,
-                            bool line_end)
-{
-    if (!term || !needle || needle[0] == '\0')
-        return false;
-
-    int needle_len = (int)strlen(needle);
-
-    for (int row = 0; row < rows; row++) {
-        char *row_text = grid_build_row_text(term, cols, row);
-        if (!row_text)
-            return false;
-        int pos = (int)strlen(row_text);
-        bool found;
-        if (line_end) {
-            while (pos > 0 && row_text[pos - 1] == ' ')
-                pos--;
-            row_text[pos] = '\0';
-            found = pos >= needle_len &&
-                    strncmp(row_text + pos - needle_len, needle,
-                            (size_t)needle_len) == 0;
-        } else {
-            found = pos >= needle_len && strstr(row_text, needle) != NULL;
-        }
-        free(row_text);
-        if (found) {
-            if (row_out)
-                *row_out = row;
-            return true;
-        }
-    }
-
-    return false;
-}
-
-/* Print the visible grid as text, one line per row (trailing blanks
- * trimmed) — a capture-pane-style dump for script diagnostics. */
-void portty_debug_grid_dump_text(TerminalBackend *term, int rows, int cols)
-{
-    if (!term)
-        return;
-
-    printf("=== grid dump %dx%d ===\n", cols, rows);
-    for (int row = 0; row < rows; row++) {
-        char *row_text = grid_build_row_text(term, cols, row);
-        if (!row_text)
-            break;
-        int len = (int)strlen(row_text);
-        while (len > 0 && row_text[len - 1] == ' ')
-            row_text[--len] = '\0';
-        printf("%3d|%s\n", row, row_text);
-        free(row_text);
-    }
-    printf("=== end grid dump ===\n");
-}
-
-/* Execute dumpcells/dumprow — shared between backends */
-static void execute_dumpcells(TerminalBackend *term, int scroll_offset,
-                              int row, int col_start, int col_end)
-{
-    int unified_row = rend_display_row_to_unified(scroll_offset, row);
-
-    printf("=== dumpcells row=%d (unified=%d) cols %d-%d ===\n",
-           row, unified_row, col_start, col_end);
-
-    for (int col = col_start; col <= col_end; col++) {
-        TerminalCell cell;
-        int ret;
-        if (unified_row < 0) {
-            ret = terminal_get_scrollback_cell(term, -unified_row - 1, col, &cell);
-        } else {
-            ret = terminal_get_cell(term, unified_row, col, &cell);
-        }
-        if (ret != 0)
-            continue;
-
-        printf("  col=%3d cp=%04X w=%d rev=%d invis=%d dim=%d "
-               "fg(%s %02X%02X%02X) "
-               "bg(%s %02X%02X%02X) "
-               "ul=%d ul_color(%s %02X%02X%02X) "
-               "hid=%u\n",
-               col, cell.cp, cell.width, cell.attrs.reverse,
-               cell.attrs.invis, cell.attrs.dim,
-               cell.fg.is_default ? "def" : "set",
-               cell.fg.r, cell.fg.g, cell.fg.b,
-               cell.bg.is_default ? "def" : "set",
-               cell.bg.r, cell.bg.g, cell.bg.b,
-               cell.attrs.underline,
-               cell.ul_color.is_default ? "def" : "set",
-               cell.ul_color.r, cell.ul_color.g, cell.ul_color.b,
-               cell.hyperlink_id);
-    }
-    printf("=== end dumpcells ===\n");
-}
-
-/* ── Script step execution ── */
-
-/* Static-local wait deadline (safe because only one script runs at a time).
- * Shared by WAIT (fixed sleep) and WAIT_FOR (grid-watch timeout). */
-static double s_wait_deadline = 0;
-static bool s_wait_deadline_valid = false;
-
-static double script_wait_deadline_for(const ScriptCmd *cmd)
-{
-    if (!s_wait_deadline_valid) {
-        s_wait_deadline = portty_now_seconds() + cmd->wait_seconds;
-        s_wait_deadline_valid = true;
-    }
-    return s_wait_deadline;
-}
-
-static void script_wait_deadline_reset(void)
-{
-    s_wait_deadline_valid = false;
-}
-
-uint32_t portty_script_wait_remaining_ms(const PorttyScript *script,
-                                         int cmd_index)
-{
-    if (!script || cmd_index < 0 || cmd_index >= script->count)
+    if (!s)
         return UINT32_MAX;
-
-    const ScriptCmd *cmd = &script->cmds[cmd_index];
-    if (cmd->type != SCRIPT_CMD_WAIT && cmd->type != SCRIPT_CMD_WAIT_FOR)
-        return UINT32_MAX;
-
-    double deadline = script_wait_deadline_for(cmd);
-    double remaining = deadline - portty_now_seconds();
-    if (remaining <= 0)
-        return 0;
-
-    double ms = remaining * 1000.0;
-    uint32_t rounded = (uint32_t)ms;
-    if ((double)rounded < ms)
-        rounded++; // ceil so we never wake before the deadline
-    if (rounded == 0)
-        rounded = 1;
-
-    return rounded;
+    return cfr_script_wait_ms(s->run);
 }
 
-void portty_script_step(PorttyScript *script,
-                        int *cmd_index,
-                        ScriptExecCtx *ctx)
+bool portty_script_quit_requested(const PorttyScript *s)
 {
-    if (!script || !cmd_index || !ctx)
-        return;
-
-    if (*cmd_index >= script->count)
-        return;
-
-    const ScriptCmd *cmd = &script->cmds[*cmd_index];
-
-    switch (cmd->type) {
-    case SCRIPT_CMD_WAIT:
-    {
-        double deadline = script_wait_deadline_for(cmd);
-        if (portty_now_seconds() >= deadline) {
-            script_wait_deadline_reset();
-            (*cmd_index)++;
-        }
-        break;
-    }
-
-    case SCRIPT_CMD_WAIT_FOR:
-    {
-        double deadline = script_wait_deadline_for(cmd);
-        int rows = 0, cols = 0;
-        if (ctx->term)
-            terminal_get_dimensions(ctx->term, &rows, &cols);
-        int match_row = -1;
-        bool found = ctx->term && portty_debug_grid_find(
-                                      ctx->term, rows, cols,
-                                      cmd->text ? cmd->text : "", &match_row,
-                                      cmd->wait_line_end);
-        if (found) {
-            printf("wait-for \"%s\"%s: found at row %d after %.1fs\n",
-                   cmd->text ? cmd->text : "",
-                   cmd->wait_line_end ? " line-end" : "", match_row,
-                   cmd->wait_seconds - (deadline - portty_now_seconds()));
-            script_wait_deadline_reset();
-            (*cmd_index)++;
-        } else if (portty_now_seconds() >= deadline) {
-            printf("wait-for \"%s\": TIMEOUT after %.0fs\n",
-                   cmd->text ? cmd->text : "", cmd->wait_seconds);
-            script_wait_deadline_reset();
-            (*cmd_index)++;
-        }
-        break;
-    }
-
-    case SCRIPT_CMD_SEND:
-    {
-        if (ctx->pty && cmd->text)
-            pty_write(ctx->pty, cmd->text, strlen(cmd->text));
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_SENDLN:
-    {
-        if (ctx->pty && cmd->text) {
-            pty_write(ctx->pty, cmd->text, strlen(cmd->text));
-            pty_write(ctx->pty, "\r\n", 2);
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_RAW:
-    {
-        if (ctx->pty && cmd->text)
-            pty_write(ctx->pty, cmd->text, strlen(cmd->text));
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_EMIT:
-    {
-        if (ctx->emit_fn && cmd->text) {
-            ctx->emit_fn(ctx->emit_user_data, cmd->text, strlen(cmd->text));
-        } else {
-            fprintf(stderr, "emit: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_EMIT_RAW:
-    {
-        if (ctx->emit_fn && cmd->text) {
-            ctx->emit_fn(ctx->emit_user_data, cmd->text, strlen(cmd->text));
-        } else {
-            fprintf(stderr, "emit-raw: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_ASSERT_CONTAINS:
-    {
-        int rows = 0, cols = 0;
-        if (ctx->term)
-            terminal_get_dimensions(ctx->term, &rows, &cols);
-        bool found = portty_debug_grid_contains(ctx->term, rows, cols,
-                                                cmd->text ? cmd->text : "");
-        if (found) {
-            printf("assert-contains \"%s\": PASS\n",
-                   cmd->text ? cmd->text : "");
-        } else {
-            printf("assert-contains \"%s\": FAIL\n",
-                   cmd->text ? cmd->text : "");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_ASSERT_NOT_CONTAINS:
-    {
-        int rows = 0, cols = 0;
-        if (ctx->term)
-            terminal_get_dimensions(ctx->term, &rows, &cols);
-        bool found = portty_debug_grid_contains(ctx->term, rows, cols,
-                                                cmd->text ? cmd->text : "");
-        if (!found) {
-            printf("assert-not-contains \"%s\": PASS\n",
-                   cmd->text ? cmd->text : "");
-        } else {
-            printf("assert-not-contains \"%s\": FAIL\n",
-                   cmd->text ? cmd->text : "");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_SCREENDUMP:
-    {
-        if (ctx->pending_screendump && ctx->screendump_path_buf) {
-            *ctx->pending_screendump = true;
-            snprintf(ctx->screendump_path_buf, 512, "%s", cmd->path);
-        } else {
-            fprintf(stderr, "screendump: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_RENDERDUMP:
-    {
-        if (ctx->pending_renderdump && ctx->renderdump_path_buf) {
-            *ctx->pending_renderdump = true;
-            snprintf(ctx->renderdump_path_buf, 512, "%s", cmd->path);
-        } else {
-            fprintf(stderr, "renderdump: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_DUMPROW:
-    {
-        int rows = 0, cols = 0;
-        if (ctx->term)
-            terminal_get_dimensions(ctx->term, &rows, &cols);
-        execute_dumpcells(ctx->term, ctx->scroll_offset,
-                          cmd->row, 0, cols - 1);
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_DUMPCELLS:
-    {
-        execute_dumpcells(ctx->term, ctx->scroll_offset,
-                          cmd->row, cmd->col_start, cmd->col_end);
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_DUMPGRID:
-    {
-        int rows = 0, cols = 0;
-        if (ctx->term)
-            terminal_get_dimensions(ctx->term, &rows, &cols);
-        if (ctx->term)
-            portty_debug_grid_dump_text(ctx->term, rows, cols);
-        else
-            fprintf(stderr, "dumpgrid: no terminal\n");
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_PANEL:
-    {
-        if (ctx->panel_fn) {
-            ctx->panel_fn(ctx->panel_user_data,
-                          cmd->panel_id,
-                          cmd->panel_col,
-                          cmd->panel_row,
-                          cmd->panel_cols,
-                          cmd->panel_rows,
-                          cmd->panel_title,
-                          cmd->panel_body,
-                          cmd->panel_level,
-                          cmd->panel_flags);
-        } else {
-            fprintf(stderr, "panel: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_PANEL_HIDE:
-    {
-        if (ctx->panel_hide_fn) {
-            ctx->panel_hide_fn(ctx->panel_hide_user_data, cmd->panel_id);
-        } else {
-            fprintf(stderr, "panel_hide: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_MOUSEMOVE:
-    {
-        if (ctx->mousemove_fn) {
-            ctx->mousemove_fn(ctx->mousemove_user_data,
-                              cmd->mouse_x, cmd->mouse_y);
-        } else {
-            fprintf(stderr, "mousemove: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_MOUSEDOWN:
-    case SCRIPT_CMD_MOUSEUP:
-    {
-        if (ctx->mouse_button_fn) {
-            ctx->mouse_button_fn(ctx->mouse_button_user_data,
-                                 cmd->mouse_x, cmd->mouse_y, cmd->mouse_button,
-                                 cmd->type == SCRIPT_CMD_MOUSEDOWN,
-                                 cmd->mouse_clicks);
-        } else {
-            fprintf(stderr, "mousedown/mouseup: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_RESIZE:
-    {
-        if (ctx->resize_fn) {
-            ctx->resize_fn(ctx->resize_user_data,
-                           cmd->resize_cols, cmd->resize_rows);
-        } else {
-            fprintf(stderr, "resize: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_WINSIZE:
-    {
-        if (ctx->winsize_fn) {
-            ctx->winsize_fn(ctx->winsize_user_data,
-                            cmd->winsize_w, cmd->winsize_h);
-        } else {
-            fprintf(stderr, "winsize: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_RECORD_START:
-    {
-        if (ctx->recorder) {
-            frame_recorder_start(ctx->recorder, cmd->record_dir, cmd->record_fps);
-            if (ctx->record_start_fn)
-                ctx->record_start_fn(ctx->record_user_data,
-                                     ctx->recorder->target_fps);
-        } else {
-            fprintf(stderr, "record-start: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_RECORD_STOP:
-    {
-        if (ctx->recorder) {
-            if (ctx->record_stop_fn)
-                ctx->record_stop_fn(ctx->record_user_data);
-            frame_recorder_stop(ctx->recorder);
-        } else {
-            fprintf(stderr, "record-stop: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_QUIT:
-    {
-        if (ctx->backend && ctx->backend->request_quit)
-            ctx->backend->request_quit(ctx->backend);
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_ASSERT_HOVER:
-    {
-        if (ctx->term) {
-            uint16_t hid = terminal_hovered_hyperlink(ctx->term);
-            if (hid != 0) {
-                printf("assert-hover: PASS (hid=%u)\n", hid);
-            } else {
-                printf("assert-hover: FAIL (no hover)\n");
-            }
-        } else {
-            fprintf(stderr, "assert-hover: no terminal\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_ASSERT_NO_HOVER:
-    {
-        if (ctx->term) {
-            uint16_t hid = terminal_hovered_hyperlink(ctx->term);
-            if (hid == 0) {
-                printf("assert-no-hover: PASS\n");
-            } else {
-                printf("assert-no-hover: FAIL (hid=%u)\n", hid);
-            }
-        } else {
-            fprintf(stderr, "assert-no-hover: no terminal\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_DUMP_SIXEL:
-    {
-        if (ctx->term) {
-            int count = 0;
-            const CfrImage *imgs = terminal_get_images(ctx->term, &count);
-            vlog("dump-sixel: %d image(s)\n", count);
-            for (int i = 0; i < count; i++) {
-                vlog("  [%d] id=%llu row=%d col=%d %dx%dpx\n",
-                     i, (unsigned long long)imgs[i].id,
-                     imgs[i].row, imgs[i].col,
-                     imgs[i].width_px, imgs[i].height_px);
-            }
-            int pl_count = 0;
-            const CfrImagePlacement *pls =
-                terminal_get_image_placements(ctx->term, &pl_count);
-            vlog("dump-sixel: %d placement(s)\n", pl_count);
-            for (int i = 0; i < pl_count; i++) {
-                vlog("  [%d] id=%llu image=%llu row=%d col=%d %dx%d cells "
-                     "src=%d,%d %dx%d z=%d\n",
-                     i, (unsigned long long)pls[i].id,
-                     (unsigned long long)pls[i].image_id, pls[i].row,
-                     pls[i].col, pls[i].rows, pls[i].cols, pls[i].src_x,
-                     pls[i].src_y, pls[i].src_w, pls[i].src_h, pls[i].z_index);
-            }
-        } else {
-            vlog("dump-sixel: no terminal\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-
-    case SCRIPT_CMD_DUMPSTATE:
-    {
-        if (ctx->dump_fn) {
-            const char *path = cmd->path[0] ? cmd->path : NULL;
-            if (!ctx->dump_fn(ctx->dump_user_data, path))
-                fprintf(stderr, "dumpstate: failed to write terminal state\n");
-        } else {
-            fprintf(stderr, "dumpstate: not supported by this backend\n");
-        }
-        (*cmd_index)++;
-        break;
-    }
-    }
+    return s && cfr_script_run_quit_requested(s->run);
 }

@@ -1,5 +1,5 @@
 # Test: hover cleared when terminal scrolls
-# Run: build/src/portty -v -s 1000 -S scripts/test-hover-scroll.script 2>&1 | grep -E "(assert-hover|dumpcells.*hid=)"
+# Run: build/src/portty -v -s 1000 -S scripts/test-hover-scroll.script 2>&1 | grep -E "(assert-hover|render cells.*link=)"
 # Scenario: Emit link, hover, verify hover set, scroll, verify hover cleared
 
 wait 0.5
@@ -34,7 +34,7 @@ emit LINE_20\r\n
 wait 0.5
 
 # Check row 0 has the link with hyperlink_id
-dumpcells 0 0 9
+render cells 0 0 9
 
 # Position mouse over row 0, column 5 (middle of LINK_TEXT)
 # Cell size ~12x27, so y=13 is middle of row 0
@@ -60,7 +60,7 @@ emit SCROLL_LINE_10\r\n
 wait 0.3
 
 # Row 0 should now be a different line (was LINE_01, now LINE_11)
-dumpcells 0 0 9
+render cells 0 0 9
 
 # Verify hover IS cleared (should show PASS with hid == 0)
 assert-no-hover

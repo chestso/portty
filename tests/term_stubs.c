@@ -25,6 +25,13 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
     return (ssize_t)len;
 }
 
+int pty_poll_exit(PtyContext *ctx, int *out_status)
+{
+    (void)ctx;
+    (void)out_status;
+    return 0; /* never exits */
+}
+
 int terminal_get_scrollback_lines(TerminalBackend *term)
 {
     (void)term;

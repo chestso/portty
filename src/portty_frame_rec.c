@@ -11,7 +11,6 @@
 
 #include "common.h"
 #include "portty_frame_rec.h"
-#include "portty_script.h"
 
 #include <dirent.h>
 #include <stdio.h>
@@ -19,9 +18,30 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#ifndef _WIN32
+#ifdef _WIN32
+#include <windows.h>
+#else
+#include <time.h>
 #include <unistd.h>
 #endif
+
+/* Monotonic clock for frame pacing (moved here from the old script
+ * module — the recorder is its only user). */
+static double portty_now_seconds(void)
+{
+#ifdef _WIN32
+    static LARGE_INTEGER freq = { 0 };
+    if (freq.QuadPart == 0)
+        QueryPerformanceFrequency(&freq);
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    return (double)now.QuadPart / (double)freq.QuadPart;
+#else
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1e9;
+#endif
+}
 
 static int find_next_frame_index(const char *dir)
 {

@@ -30,6 +30,8 @@ struct PtyContext
     int rows;
     int cols;
     bool use_bundled_conpty; /* true if hpc was created via conpty.dll */
+    int exit_status;         /* valid once exited is true */
+    bool exited;             /* sticky: child exit observed */
 };
 
 /* ── conpty.dll sideloading ───────────────────────────────────────────
@@ -639,9 +641,32 @@ bool pty_is_running(PtyContext *ctx)
     DWORD result = WaitForSingleObject(ctx->process, 0);
     if (result == WAIT_OBJECT_0) {
         vlog("PTY child exited\n");
+        DWORD code = 0;
+        if (GetExitCodeProcess(ctx->process, &code))
+            ctx->exit_status = (int)code;
+        ctx->exited = true;
         return false;
     }
     return true;
+}
+
+int pty_poll_exit(PtyContext *ctx, int *out_status)
+{
+    if (!ctx)
+        return -1;
+    if (!ctx->exited) {
+        if (ctx->process == INVALID_HANDLE_VALUE)
+            return -1;
+        if (WaitForSingleObject(ctx->process, 0) != WAIT_OBJECT_0)
+            return 0;
+        DWORD code = 0;
+        if (GetExitCodeProcess(ctx->process, &code))
+            ctx->exit_status = (int)code;
+        ctx->exited = true;
+    }
+    if (out_status)
+        *out_status = ctx->exit_status;
+    return 1;
 }
 
 int pty_get_master_fd(PtyContext *ctx)
