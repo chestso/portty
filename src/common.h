@@ -37,4 +37,14 @@ void vlog_impl(const char *file, const char *func, int line, const char *format,
 #define SCROLL_LINES_PER_TICK    1
 #define AUTOSCROLL_INTERVAL_MS   33
 
+/* The cell-width contract this engine implements, declared to child
+ * processes as PORTTY_WIDTH alongside the identity marker PORTTY=1 (see
+ * pty.c / pty_w32.c). "uts51" means VS15 takes one cell where UTS #51
+ * defines a text glyph for the base (coffer's TEXT_PRES rule) and VS16
+ * forces two — the rules pinned by tests/test_term_cfr.c. A TUI can read
+ * the variable instead of maintaining a terminal-name list; if the width
+ * engine ever changes, change this one constant so the declaration and
+ * the behavior move together. */
+#define PORTTY_WIDTH_CONTRACT "uts51"
+
 #endif /* COMMON_H */

@@ -349,6 +349,12 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
             L"TERM=portty-vty-256color",
             L"COLORTERM=truecolor",
             L"TERM_PROGRAM=ghostty",
+            /* Cell-width contract (see common.h). PORTTY is identity,
+             * PORTTY_WIDTH is the contract, so a TUI follows an engine
+             * change without a terminal-name list. TERM_PROGRAM=ghostty
+             * is unrelated compatibility posture. */
+            L"PORTTY=1",
+            L"PORTTY_WIDTH=" PORTTY_WIDTH_CONTRACT,
             /* Inject PROMPT_COMMAND so bash/zsh emit OSC 7 on every
              * directory change. This allows Ctrl+Shift+N to open the
              * new terminal in the shell's CWD. The PEB-walk approach
@@ -370,7 +376,7 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
              * CreateProcessW. */
             L"CHERE_INVOKING=1",
         };
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < (int)(sizeof(overrides) / sizeof(overrides[0])); i++) {
             size_t len = wcslen(overrides[i]);
             if (ep + len + 1 >= envBlock + 65536)
                 break;

@@ -19,6 +19,7 @@
 
 #include "test_helpers.h"
 
+#include "common.h"
 #include "term.h"
 #include "term_cfr.h"
 
@@ -236,6 +237,51 @@ static void test_vs15_cluster_takes_one_cell(void)
     ASSERT_EQ(terminal_get_cell(&t, 0, 2, &next), 0);
     ASSERT_EQ(next.cp, (uint32_t)'A');
     terminal_destroy(&t);
+}
+
+/* The cell-width contract the child environment declares (common.h's
+ * PORTTY_WIDTH_CONTRACT, exported as PORTTY_WIDTH): the declaration and
+ * the grid behavior must agree, because a TUI (boba) sizes its columns
+ * from the variable. This pins the full vector, not just VS15-on-⚡. */
+static void test_width_contract_declared(void)
+{
+    ASSERT_TRUE(strcmp(PORTTY_WIDTH_CONTRACT, "uts51") == 0);
+
+    static const struct
+    {
+        const char *text;
+        uint32_t cp;
+        int width;
+    } v[] = {
+        { "\xe2\x9a\xa1", 0x26A1, 2 },                         /* ⚡ */
+        { "\xe2\x9a\xa1\xef\xb8\x8e", 0x26A1, 1 },             /* ⚡︎ */
+        { "\xe2\x9a\xa1\xef\xb8\x8f", 0x26A1, 2 },             /* ⚡️ */
+        { "\xe2\xad\x90\xef\xb8\x8e", 0x2B50, 1 },             /* ⭐︎ */
+        { "\xe2\x9d\xa4\xef\xb8\x8e", 0x2764, 1 },             /* ❤︎ */
+        { "\xe2\x9d\xa4\xef\xb8\x8f", 0x2764, 2 },             /* ❤️ */
+        { "\xe2\x9c\x8f\xef\xb8\x8f", 0x270F, 2 },             /* ✏️ */
+        { "\xe4\xb8\xad\xef\xb8\x8e", 0x4E2D, 2 },             /* 中︎ */
+        { "\xf0\x9f\x98\x80\xef\xb8\x8e", 0x1F600, 2 },        /* 😀︎ */
+        { "\xe2\x9a\xa1\xef\xb8\x8f\xef\xb8\x8e", 0x26A1, 1 }, /* last wins */
+        { "\xe2\x9a\xa1\xef\xb8\x8e\xef\xb8\x8f", 0x26A1, 2 },
+    };
+
+    for (size_t i = 0; i < sizeof(v) / sizeof(v[0]); i++) {
+        TerminalBackend t = terminal_backend_cfr;
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 8;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+        feed(&t, v[i].text);
+
+        TerminalCell c;
+        ASSERT_EQ(terminal_get_cell(&t, 0, 0, &c), 0);
+        ASSERT_EQ(c.cp, v[i].cp);
+        ASSERT_EQ(c.width, v[i].width);
+        terminal_destroy(&t);
+    }
 }
 
 /* Spaces between words must round-trip through the clipboard. Typed spaces
@@ -691,6 +737,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_resize_shrinks_and_reflows);
     RUN_TEST(test_long_cluster_survives_accessor);
     RUN_TEST(test_vs15_cluster_takes_one_cell);
+    RUN_TEST(test_width_contract_declared);
     RUN_TEST(test_selection_preserves_spaces);
     RUN_TEST(test_selection_across_rows);
     RUN_TEST(test_selection_with_tab);

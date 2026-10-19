@@ -181,6 +181,15 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         // apps that ignore terminfo and check the env var.
         setenv("TERM", "portty-vty-256color", 1);
 
+        // Declare the cell-width contract to child processes (see
+        // common.h). TERM already names the terminal, but a capability
+        // marker lets a TUI follow an engine change without maintaining
+        // a terminal-name list: PORTTY is identity, PORTTY_WIDTH is the
+        // contract. TERM_PROGRAM=ghostty below is unrelated — it exists
+        // so third-party keyboard-protocol allowlists opt in.
+        setenv("PORTTY", "1", 1);
+        setenv("PORTTY_WIDTH", PORTTY_WIDTH_CONTRACT, 1);
+
         // Point to our installed terminfo database
 #ifdef PORTTY_DATADIR
         {
