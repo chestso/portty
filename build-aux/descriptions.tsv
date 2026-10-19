@@ -29,6 +29,7 @@ src/portty_conf.c	INI-style configuration parsing
 src/portty_frame_rec.c	Frame recording (QOI frames to a directory)
 src/portty_panel.c	Panel layout and state management of the notification panel
 src/portty_script.c	Script engine wiring: coffer core + UI extension commands
+src/porttyw.c	Windowed launcher: starts portty.exe with its console hidden
 src/pty.c	POSIX pseudo-terminal (PTY) management
 src/pty_w32.c	Windows ConPTY pseudo-terminal (PTY) management
 src/qoi_writer.c	RGBA pixel buffers to QOI encoding

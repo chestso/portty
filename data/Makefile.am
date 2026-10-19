@@ -51,7 +51,7 @@ install-data-local:
 	    || echo "  WARNING: Failed to install terminfo (is ncurses installed?)" >&2
 	@powershell -NoProfile -ExecutionPolicy Bypass \
 	    -File "$(top_srcdir)/scripts/install-shortcut.ps1" \
-	    -ExePath "$(DESTDIR)$(bindir)/portty.exe" \
+	    -ExePath "$(DESTDIR)$(bindir)/porttyw.exe" \
 	    || echo "  WARNING: Failed to create Start Menu shortcut" >&2
 
 uninstall-local:

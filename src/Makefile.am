@@ -14,7 +14,7 @@
 # contributes its digits and nothing else — never an unexpanded macro, never
 # an empty one.
 BUILT_SOURCES = portty_version.h
-CLEANFILES = portty_version.h portty-resources.o
+CLEANFILES = portty_version.h portty-resources.o porttyw-resources.o
 
 .PHONY: portty_version_force regen-shaders regen-icon
 portty_version.h: portty_version_force
@@ -40,6 +40,20 @@ portty_version.h: portty_version_force
 portty_version_force:
 
 bin_PROGRAMS = portty
+
+if HOST_WINDOWS
+# porttyw.exe — the windowed launcher: a GUI-subsystem binary that starts the
+# console-subsystem portty.exe with the same command line and hides the console
+# Windows creates for it. Explorer double-clicks, the Start Menu shortcut and
+# portty.cmd point here; shells and scripts call portty.exe, where the console
+# subsystem is what makes cmd wait and report a real exit status. It carries no
+# application code, so it links nothing but Win32.
+bin_PROGRAMS += porttyw
+porttyw_SOURCES = porttyw.c
+porttyw_CFLAGS = -Wall -Wextra
+porttyw_LDADD = -lkernel32 -luser32 -lshell32 $(porttyw_resources)
+porttyw_LDFLAGS = -mwindows
+endif
 
 # Platform-specific implementations
 if HOST_WINDOWS
@@ -85,8 +99,10 @@ portty_LDADD = $(PORTTY_COMMON_LDADD) $(SDL3_LIBS)
 
 if HAVE_RC
 portty_resources = portty-resources.o
+porttyw_resources = porttyw-resources.o
 else
 portty_resources =
+porttyw_resources =
 endif
 
 portty_LDADD += $(portty_resources)
@@ -106,7 +122,7 @@ endif
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
 EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h \
-    portty.rc portty_icon_png.h \
+    portty.rc portty_icon_png.h porttyw.c \
     backend_sdl3.h base64.h common.h diag.h display_info.h \
     dump.h \
     embedded_term.h \
@@ -146,22 +162,41 @@ regen-icon:
 CLEANFILES += portty_icon_256.png
 
 if HAVE_RC
-# Compile the Windows resource file (portty.rc) with windres to embed the
-# app icon and version metadata into the .exe. Automake has no built-in
+# Compile the Windows resource file (portty.rc) with windres to embed the app
+# icon and version metadata into each Windows binary. Automake has no built-in
 # .rc → .o build rule, so we provide an explicit one and link the resulting
 # object into portty. The .rc takes its version fields from the build-generated
 # portty_version.h, so the header's directory is on windres's include path and
 # the rule waits for the header (BUILT_SOURCES orders `make all`; the explicit
 # prerequisite covers a parallel build and `make -C src portty-resources.o`).
+#
+# The launcher compiles the same script with its own module name, passed as a
+# macro. The backslashes around the value are load-bearing: windres re-quotes
+# -D values on the way to the preprocessor, so a bare "portty.exe" reaches it
+# unquoted and the OriginalFilename line fails to parse.
 portty-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico \
     portty_version.h
 	$(AM_V_GEN)$(RC) $(RCFLAGS) -I$(top_builddir)/src -I$(srcdir) \
-	    -I$(top_srcdir)/data/icons -i $< -o $@
+	    -I$(top_srcdir)/data/icons \
+	    -DPORTTY_ORIGINAL_FILENAME='\"portty.exe\"' -i $< -o $@
+
+porttyw-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico \
+    portty_version.h
+	$(AM_V_GEN)$(RC) $(RCFLAGS) -I$(top_builddir)/src -I$(srcdir) \
+	    -I$(top_srcdir)/data/icons \
+	    -DPORTTY_ORIGINAL_FILENAME='\"porttyw.exe\"' -i $< -o $@
 endif HAVE_RC
 
 if HOST_WINDOWS
 portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite -lwinpthread
-portty_LDFLAGS = -mwindows
+# Console subsystem, explicitly: `pkg-config --libs sdl3` expands to
+# `-lSDL3 -mwindows`, so leaving -mwindows off the link line is not enough —
+# the dependency puts it back through portty_LDADD. -mconsole wins wherever it
+# appears on the line, and libtool places portty_LDFLAGS before portty_LDADD.
+# The result is what makes cmd wait for portty.exe and report its exit status,
+# and what keeps a pipe or redirect handle intact; the windowed entry point is
+# porttyw.exe. .github/workflows/windows.yml asserts the subsystem.
+portty_LDFLAGS = -mconsole
 else !HOST_WINDOWS
 if HOST_MACOS
 portty_LDFLAGS = -framework CoreText -framework CoreFoundation \

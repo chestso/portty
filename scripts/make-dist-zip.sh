@@ -334,11 +334,21 @@ else
 	# ── Windows (MSYS2) ───────────────────────────────────────────────
 	# Original Windows portable ZIP logic below.
 
-	# --- Binary ----------------------------------------------------------------
-	# libtool wraps the real binary in .libs/ — use that if it exists.
+	# --- Binaries --------------------------------------------------------------
+	# libtool wraps the real binaries in .libs/ — use those if they exist.
 	REAL_EXE="$BUILD_DIR/src/portty.exe"
 	if [ -f "$BUILD_DIR/src/.libs/portty.exe" ]; then
 		REAL_EXE="$BUILD_DIR/src/.libs/portty.exe"
+	fi
+	# porttyw.exe is the windowed launcher (GUI subsystem, Win32 only), so the
+	# DLL walk below covers the app binary alone.
+	LAUNCHER_EXE="$BUILD_DIR/src/porttyw.exe"
+	if [ -f "$BUILD_DIR/src/.libs/porttyw.exe" ]; then
+		LAUNCHER_EXE="$BUILD_DIR/src/.libs/porttyw.exe"
+	fi
+	if [ ! -f "$LAUNCHER_EXE" ]; then
+		echo "ERROR: windowed launcher not found: $LAUNCHER_EXE" >&2
+		exit 1
 	fi
 
 	# Detect target architecture from the built binary
@@ -354,8 +364,9 @@ else
 	mkdir -p "$STAGE_DIR/share/icons/hicolor/scalable/apps" \
 		"$STAGE_DIR/share/emacs/site-lisp"
 
-	echo "==> Copying portty.exe (from $REAL_EXE)"
+	echo "==> Copying portty.exe + porttyw.exe (from $REAL_EXE, $LAUNCHER_EXE)"
 	cp "$REAL_EXE" "$STAGE_DIR/portty.exe"
+	cp "$LAUNCHER_EXE" "$STAGE_DIR/porttyw.exe"
 
 	# --- Data files ------------------------------------------------------------
 	echo "==> Copying data files (icons, emacs)"
@@ -439,16 +450,21 @@ else
 
 	# --- Launcher script -------------------------------------------------------
 	echo "==> Writing launcher script"
-	cat >"$STAGE_DIR/portty.cmd" <<'LAUNCHER'
+	# CRLF endings, like any other Windows batch file: cmd parses `::` comments
+	# in an LF-only file as commands (the comment text shows up as "not
+	# recognized", and the script can hang outright).
+	sed 's/$/\r/' >"$STAGE_DIR/portty.cmd" <<'LAUNCHER'
 @echo off
 :: portty.cmd — launcher for portable portty
-:: Sets TERMINFO_DIRS so MSYS2/ncurses programs find our terminfo,
-:: then starts portty.exe. All paths are relative to this script.
+:: Sets TERMINFO_DIRS so MSYS2/ncurses programs find our terminfo, then runs
+:: the windowed launcher (porttyw.exe), which has no console window. All paths
+:: are relative to this script. porttyw waits and returns the exit status, so
+:: %errorlevel% is portty's own.
 setlocal
 set "HERE=%~dp0"
 set "TERMINFO_DIRS=%HERE%share\terminfo;%HOME%\.terminfo;"
-for %%I in ("%HERE%portty.exe") do set "PORTTY_EXE=%%~fI"
-start "" /b "%PORTTY_EXE%" %*
+for %%I in ("%HERE%porttyw.exe") do set "PORTTY_EXE=%%~fI"
+"%PORTTY_EXE%" %*
 endlocal
 LAUNCHER
 
@@ -462,11 +478,22 @@ This is a self-contained build of portty — no MSYS2 installation required.
 
 Quick start:
   1. Extract the ZIP anywhere.
-  2. Double-click portty.cmd (or portty.exe directly).
+  2. Double-click portty.cmd (or porttyw.exe directly).
 
-portty.cmd sets up TERMINFO_DIRS so that MSYS2/ncurses programs
-(find, vim, etc.) find portty's terminfo definitions. If you run
-portty.exe directly, terminfo may not be found by child programs.
+The ZIP carries two executables, and which one to use depends on where
+you are:
+
+  portty.exe    the program itself, for shells, scripts and pipelines
+                (Cmd, PowerShell, MSYS2 bash). It is a console program, so
+                Cmd waits for it, reports its exit status and routes its
+                output wherever you redirected it.
+  porttyw.exe   the same program with no console window: it starts
+                portty.exe and hides the console. Double-click this one
+                (or portty.cmd) from Explorer or a shortcut.
+
+portty.cmd additionally sets up TERMINFO_DIRS so that MSYS2/ncurses
+programs (find, vim, etc.) find portty's terminfo definitions. If you run
+porttyw.exe directly, terminfo may not be found by child programs.
 
 To create a Start Menu shortcut:
   Right-click portty.cmd > Create shortcut

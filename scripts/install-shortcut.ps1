@@ -4,17 +4,18 @@
 
 .DESCRIPTION
     Creates a .lnk shortcut in the user's Start Menu Programs folder that
-    points to the portty executable. The shortcut icon is extracted from
+    points to the windowed launcher (porttyw.exe), so clicking it opens the
+    terminal without a console window. The shortcut icon is extracted from
     the executable itself (the ICO embedded via windres).
 
     Called from `make install` on Windows (HOST_WINDOWS).
 
 .PARAMETER ExePath
-    Full path to portty.exe (e.g. C:\Users\...\.local\bin\portty.exe)
+    Full path to porttyw.exe (e.g. C:\Users\...\.local\bin\porttyw.exe)
 
 .EXAMPLE
     powershell -NoProfile -File install-shortcut.ps1 \
-        -ExePath "$HOME/.local/bin/portty.exe"
+        -ExePath "$HOME/.local/bin/porttyw.exe"
 #>
 param(
     [Parameter(Mandatory=$true)][string]$ExePath

@@ -534,19 +534,14 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
 #endif
 
 #if defined(PORTTY_BACKEND_SDL3)
+/* portty.exe is a console-subsystem program on Windows, so the standard
+ * handles it starts with are already the right ones: cmd, bash, a pipe or a
+ * redirect all hand them over, and Windows creates a console when there is
+ * none. Nothing here attaches to or detaches from a console — doing so would
+ * replace the handles a launcher provided. Windowed entry points go through
+ * the GUI-subsystem porttyw.exe instead. */
 int main(int argc, char *argv[])
 {
-#ifdef _WIN32
-    bool console_attached = false;
-    if (AttachConsole(ATTACH_PARENT_PROCESS)) {
-        freopen("CONOUT$", "w", stdout);
-        freopen("CONOUT$", "w", stderr);
-        fflush(stdout);
-        fflush(stderr);
-        console_attached = true;
-    }
-#endif
-
     PorttyConf conf;
     portty_conf_init(&conf);
     portty_conf_load(&conf);
@@ -558,10 +553,6 @@ int main(int argc, char *argv[])
     int ret = parse_args(&args, argc, argv);
     if (ret >= 0) {
         portty_conf_free(&conf);
-#ifdef _WIN32
-        if (console_attached)
-            FreeConsole();
-#endif
         return ret;
     }
 
@@ -588,11 +579,6 @@ int main(int argc, char *argv[])
     ret = portty_run_sdl3(&args, &conf);
 
     portty_conf_free(&conf);
-
-#ifdef _WIN32
-    if (console_attached)
-        FreeConsole();
-#endif
 
     return ret;
 }

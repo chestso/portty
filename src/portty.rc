@@ -1,8 +1,10 @@
 // portty.rc - Windows resource script
 //
-// Embeds the application icon and version metadata into portty.exe (compiled
-// via windres, see src/Makefile.am). The icon is data/icons/portty.ico, on
-// windres's include path.
+// Embeds the application icon and version metadata into the portty binaries
+// (compiled via windres, see src/Makefile.am). The icon is
+// data/icons/portty.ico, on windres's include path. The launcher porttyw.exe
+// compiles this same script with its own module name, so both binaries carry
+// the icon and matching version metadata.
 //
 // The version is NOT written here: it comes from the build-generated
 // portty_version.h, the single version source (git-version.sh, recomputed on
@@ -12,6 +14,13 @@
 
 #include <windows.h>
 #include "portty_version.h"
+
+// The module this resource object belongs to, passed by the build
+// (-DPORTTY_ORIGINAL_FILENAME=...). The default is what a bare
+// `windres portty.rc` would report.
+#ifndef PORTTY_ORIGINAL_FILENAME
+#define PORTTY_ORIGINAL_FILENAME "portty.exe"
+#endif
 
 #define VER_FILEVERSION        PORTTY_VERSION_MAJOR,PORTTY_VERSION_MINOR,PORTTY_VERSION_PATCH,0
 #define VER_FILEVERSION_STR    PORTTY_VERSION
@@ -38,7 +47,7 @@ BEGIN
             VALUE "FileVersion",      VER_FILEVERSION_STR
             VALUE "InternalName",     "portty"
             VALUE "LegalCopyright",   "no rights reserved"
-            VALUE "OriginalFilename", "portty.exe"
+            VALUE "OriginalFilename", PORTTY_ORIGINAL_FILENAME
             VALUE "ProductName",      "portty"
             VALUE "ProductVersion",   VER_PRODUCTVERSION_STR
         END

@@ -133,10 +133,30 @@ jobs:
           test "${#stages[@]}" -eq 1
           stage="${stages[0]}"
           exe="${stage}portty.exe"
-          for file in "$exe" "${stage}portty.cmd" "${stage}README-PORTABLE.txt"; do
+          launcher="${stage}porttyw.exe"
+          for file in "$exe" "$launcher" "${stage}portty.cmd" "${stage}README-PORTABLE.txt"; do
             test -f "$file"
           done
           test -n "$(find "$stage" -maxdepth 1 -iname 'SDL3.dll' -print -quit)"
+
+          # The two-binary split is a PE-subsystem decision: portty.exe must be
+          # CUI (cmd waits for it, reports its status, keeps pipe/redirect
+          # handles intact) and porttyw.exe GUI (no console window for the
+          # windowed entry points). SDL3's pkg-config injects -mwindows, so the
+          # app's console subsystem rests on the explicit -mconsole winning over
+          # it — assert the field instead of trusting the link line.
+          # objdump prints e.g. "Subsystem               00000003        (Windows CUI)".
+          subsystem() { objdump -p "$1" | awk '/^Subsystem/ { print $2; exit }'; }
+          app_subsystem=$(subsystem "$exe")
+          launcher_subsystem=$(subsystem "$launcher")
+          if [ "$app_subsystem" != "00000003" ]; then
+            echo "ERROR: portty.exe is not a console-subsystem binary (got $app_subsystem)" >&2
+            exit 1
+          fi
+          if [ "$launcher_subsystem" != "00000002" ]; then
+            echo "ERROR: porttyw.exe is not a GUI-subsystem binary (got $launcher_subsystem)" >&2
+            exit 1
+          fi
 
           # The launcher advertises the bundled terminfo through TERMINFO_DIRS,
           # so a bundle that lost it is incomplete even though it still launches.
@@ -164,6 +184,108 @@ jobs:
           fi
 
           echo "PORTTY_PACKAGED_EXE=$exe" >> "$(cygpath -u "$GITHUB_ENV")"
+          echo "PORTTY_PACKAGED_LAUNCHER=$launcher" >> "$(cygpath -u "$GITHUB_ENV")"
+
+      - name: Packaged CLI stdio matrix
+        run: |
+          exe="$PORTTY_PACKAGED_EXE"
+          launcher="$PORTTY_PACKAGED_LAUNCHER"
+          work=$(mktemp -d)
+
+          # Both binaries have to survive a pipe, a redirect and command
+          # substitution with the version line intact: portty.exe writes to
+          # whatever handles it was given, and the launcher passes the handles it
+          # was given straight on. Attaching a console in-process is what used to
+          # destroy them.
+          check_stdio() {
+            binary="$1"
+            label="$2"
+            if ! "$binary" -V | grep -q '^portty '; then
+              echo "ERROR: $label lost its output when writing to a pipe" >&2
+              return 1
+            fi
+            if ! "$binary" -V > "$work/version.txt"; then
+              echo "ERROR: $label failed when writing to a file" >&2
+              return 1
+            fi
+            if ! grep -q '^portty ' "$work/version.txt"; then
+              echo "ERROR: $label redirected nothing into a file" >&2
+              return 1
+            fi
+            out=$("$binary" -V) || {
+              echo "ERROR: $label failed under command substitution" >&2
+              return 1
+            }
+            case "$out" in
+            portty*) ;;
+            *)
+              echo "ERROR: $label lost its output under command substitution" >&2
+              return 1
+              ;;
+            esac
+          }
+          check_stdio "$exe" portty.exe
+          check_stdio "$launcher" porttyw.exe
+
+          # A bad flag exits nonzero with the usage text, and the status has to
+          # survive the launcher's wait for its child.
+          if "$exe" --no-such-flag >"$work/bad.out" 2>"$work/bad.err"; then
+            echo "ERROR: portty.exe --no-such-flag exited 0" >&2
+            exit 1
+          fi
+          grep -q 'Usage:' "$work/bad.out" "$work/bad.err"
+          if "$launcher" --no-such-flag >/dev/null 2>&1; then
+            echo "ERROR: porttyw.exe --no-such-flag exited 0" >&2
+            exit 1
+          fi
+
+          # cmd only waits for a console-subsystem child and only then reports
+          # its status — the reason portty.exe is CUI at all. In a batch file
+          # the version line therefore precedes the echoed status, and
+          # %errorlevel% is portty's own rather than the launcher's. cmd needs
+          # native paths.
+          win_exe=$(cygpath -w "$exe")
+          win_launcher=$(cygpath -w "$launcher")
+          {
+            printf '@echo off\r\n'
+            printf '"%s" -V\r\n' "$win_exe"
+            printf 'echo APP_EXIT:%%errorlevel%%\r\n'
+            printf '"%s" --no-such-flag >nul 2>nul\r\n' "$win_launcher"
+            printf 'echo LAUNCHER_BADFLAG_EXIT:%%errorlevel%%\r\n'
+          } >"$work/status.bat"
+          cmd_out=$(cd "$work" && cmd //c "$(cygpath -w "$work/status.bat")")
+          printf '%s\n' "$cmd_out"
+          printf '%s\n' "$cmd_out" | grep -q '^portty ' ||
+            { echo "ERROR: cmd lost portty.exe's output" >&2; exit 1; }
+          printf '%s\n' "$cmd_out" | grep -q '^APP_EXIT:0' ||
+            { echo "ERROR: cmd saw the wrong status for portty.exe -V" >&2; exit 1; }
+          printf '%s\n' "$cmd_out" | grep -q '^LAUNCHER_BADFLAG_EXIT:1' ||
+            { echo "ERROR: the launcher did not propagate a nonzero status to cmd" >&2; exit 1; }
+
+          # The bundled portty.cmd is the "double-click this" entry point, so it
+          # has to reach the launcher and hand back portty's own status. Driving
+          # it from a batch file keeps %errorlevel% readable (delayed expansion
+          # and `cmd /c "a & b"` both bite here), and it catches a packaging
+          # regression in the script's line endings: cmd parses `::` comments in
+          # an LF-only batch file as commands.
+          win_cmd="${win_launcher%porttyw.exe}portty.cmd"
+          {
+            printf '@echo off\r\n'
+            printf 'call "%s" -V\r\n' "$win_cmd"
+            printf 'echo PORTTY_CMD_EXIT:%%errorlevel%%\r\n'
+            printf 'call "%s" --no-such-flag >nul 2>nul\r\n' "$win_cmd"
+            printf 'echo PORTTY_CMD_BADFLAG_EXIT:%%errorlevel%%\r\n'
+          } >"$work/porttycmd.bat"
+          cmd_out=$(cd "$work" && cmd //c "$(cygpath -w "$work/porttycmd.bat")")
+          printf '%s\n' "$cmd_out"
+          printf '%s\n' "$cmd_out" | grep -q '^portty ' ||
+            { echo "ERROR: the bundled portty.cmd produced no version line" >&2; exit 1; }
+          printf '%s\n' "$cmd_out" | grep -q '^PORTTY_CMD_EXIT:0' ||
+            { echo "ERROR: the bundled portty.cmd did not report portty's status" >&2; exit 1; }
+          printf '%s\n' "$cmd_out" | grep -q '^PORTTY_CMD_BADFLAG_EXIT:1' ||
+            { echo "ERROR: the bundled portty.cmd reported success for a bad flag" >&2; exit 1; }
+
+          rm -rf "$work"
 
       - name: Packaged GUI smoke test (selection drag)
         run: |
