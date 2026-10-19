@@ -53,11 +53,11 @@ tests/test_common.c	Shared test helpers: vlog stub and CLI parsing
 tests/test_conf.c	Configuration parser tests
 tests/test_content_scale.c	Content scale calculation tests
 tests/test_cursor_render.c	Cursor blink handler render regression tests
-tests/test_debug_script.c	Debug script parser tests
+tests/test_debug_script.c	Debug script tests (coffer engine wiring + UI extensions)
 tests/test_diag.c	Diagnostics report generation tests
 tests/test_dpi_scale.c	DPI scale argument parsing tests
 tests/test_dump.c	Terminal state dump (JSON) tests
-tests/test_link_hint.c	OSC-8 link hint panel positioning tests
+tests/test_link_hint.c	OSC-8 link hint panel geometry tests
 tests/test_lottie.c	Lottie animation end-to-end tests through the host bridge
 tests/test_lottie_cache.c	Lottie cache logic tests
 tests/test_osc52.c	OSC 52 clipboard sequence tests
@@ -114,3 +114,8 @@ src/timer.h	Poll-based event timer manager interface
 tests/test_selection_scroll.c	Selection scroll adjustment and damage-aware clearing tests
 src/embedded_term.c	Embedded terminal substrate for PTY-less coffer terminals
 src/embedded_term.h	Embedded terminal substrate interface
+tests/test_helpers.h	Test assertion macros and run/summary helpers
+tests/test_kitty.c	Kitty graphics (APC G) end-to-end tests through the host bridge
+tests/test_mouse_scale.c	Mouse coordinate scaling regression tests
+tests/test_osc1337.c	iTerm2 inline image (OSC 1337) end-to-end tests through the host bridge
+tests/test_version.c	Generated version header contract tests

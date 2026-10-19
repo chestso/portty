@@ -1,5 +1,5 @@
 /*
- * portty — kitty graphics (APC G) end-to-end tests through the host bridge
+ * portty — Kitty graphics (APC G) end-to-end tests through the host bridge
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen

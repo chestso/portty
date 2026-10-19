@@ -1,5 +1,5 @@
 /*
- * portty — selection scroll adjustment and damage-aware clearing tests
+ * portty — Selection scroll adjustment and damage-aware clearing tests
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen

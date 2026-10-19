@@ -1,3 +1,10 @@
+/*
+ * portty — Test assertion macros and run/summary helpers
+ *
+ * SPDX-License-Identifier: MIT
+ * Copyright (c) 2026 Thomas Christensen
+ */
+
 #ifndef TEST_HELPERS_H
 #define TEST_HELPERS_H
 
