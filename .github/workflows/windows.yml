@@ -158,6 +158,29 @@ jobs:
             exit 1
           fi
 
+          # The taskbar half of the split. A pin made from a running window is a
+          # shortcut that runs the process image — console-subsystem portty.exe —
+          # unless the window names a relaunch command, and the pinned button
+          # only stacks with the running terminal when both carry the same
+          # AppUserModelID. So portty.exe has to name porttyw.exe as its
+          # relaunch command, and both binaries have to claim the one ID from
+          # src/portty_appmodel.h; these wide strings are the part of that
+          # contract a packaged bundle can be checked for.
+          # `strings -e l` split wide strings; -x keeps it from matching a
+          # neighbouring literal that merely contains the ID.
+          check_wide_string() {
+            binary="$1"
+            label="$2"
+            literal="$3"
+            if ! strings -e l "$binary" | grep -qx "$literal"; then
+              echo "ERROR: $label carries no \"$literal\"" >&2
+              exit 1
+            fi
+          }
+          check_wide_string "$exe" portty.exe 'Chestso.Portty'
+          check_wide_string "$launcher" porttyw.exe 'Chestso.Portty'
+          check_wide_string "$exe" portty.exe 'porttyw.exe'
+
           # The launcher advertises the bundled terminfo through TERMINFO_DIRS,
           # so a bundle that lost it is incomplete even though it still launches.
           # tic names the leaf directory after the ncurses build (a wide build

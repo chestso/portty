@@ -128,7 +128,8 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     embedded_term.h \
     font_ft.h font_ft_internal.h font.h font_resolve_ct.h font_resolve_fc.h \
     font_resolve.h font_resolve_w32.h heap_harden.h os_compat.h pager.h \
-    path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h portty_backend.h \
+    path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h \
+    portty_appmodel.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
     term_cfr.h term.h term_colors.h timer.h \
@@ -188,7 +189,11 @@ porttyw-resources.o: $(srcdir)/portty.rc $(top_srcdir)/data/icons/portty.ico \
 endif HAVE_RC
 
 if HOST_WINDOWS
-portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite -lwinpthread
+# -lole32 is COM for the window's AppUserModel property store and -luuid the
+# PKEY_AppUserModel_* keys that propkey.h only defines through INITGUID or this
+# library (backend_sdl3.c); both are how a taskbar pin learns to run porttyw.exe.
+portty_LDADD += -ladvapi32 -lshell32 -ldwmapi -lgdi32 -ldwrite -lwinpthread \
+    -lole32 -luuid
 # Console subsystem, explicitly: `pkg-config --libs sdl3` expands to
 # `-lSDL3 -mwindows`, so leaving -mwindows off the link line is not enough —
 # the dependency puts it back through portty_LDADD. -mconsole wins wherever it

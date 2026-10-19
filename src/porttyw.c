@@ -14,7 +14,7 @@
  * subsystem is what makes cmd wait for the process and report its exit status.
  * The "w" postfix is the established convention (emacsclientw.exe, runemacs).
  *
- * Three properties carry the contract:
+ * Four properties carry the contract:
  *
  *  - It never replaces a standard handle. It hands the ones it was given to the
  *    child unchanged, so `porttyw -V | grep` and `porttyw -V > f.txt` behave
@@ -24,6 +24,8 @@
  *  - It holds the child in a kill-on-close job object, assigned before the
  *    child's main thread is resumed, so killing the launcher cannot leave an
  *    orphaned terminal behind.
+ *  - It claims the app's AppUserModelID (portty_appmodel.h), so a pinned button
+ *    and the terminal's window are one taskbar entry rather than two.
  *
  * It carries no application logic — no config, no fonts, no terminal, no link
  * against anything but Win32.
@@ -34,15 +36,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Long enough for a \\?\ extended-length module path. */
-#define PORTTY_PATH_MAX 32768
+#include "portty_appmodel.h"
 
-#define PORTTY_CHILD_EXE L"portty.exe"
-
-/* Taskbar grouping: the app and its launcher are one entry. The explicit ID is
- * inherited by child processes, so the terminal portty.exe creates below
- * carries it too. */
-#define PORTTY_APP_USER_MODEL_ID L"chestso.portty"
+/* Taskbar grouping: the app and its launcher are one entry. portty.exe claims
+ * the same ID for the window it owns, and both are set rather than one being
+ * passed to the other — a launcher is not guaranteed to be the parent of every
+ * app process (a pin, a script or a shell can run portty.exe directly), and
+ * grouping is decided per process. runemacs.exe/emacs.exe do the same. */
 
 /* A GUI-subsystem process has no stderr to complain into, so a failed launch
  * has to say so in a dialog. */
@@ -118,7 +118,7 @@ static HANDLE inheritable_handle(HANDLE h, HANDLE *owned)
 
 int main(void)
 {
-    wchar_t module[PORTTY_PATH_MAX];
+    wchar_t module[PORTTY_MODULE_PATH_MAX];
     wchar_t *child_path;
     wchar_t *cmdline;
     const wchar_t *rest;
@@ -132,8 +132,8 @@ int main(void)
 
     (void)SetCurrentProcessExplicitAppUserModelID(PORTTY_APP_USER_MODEL_ID);
 
-    DWORD n = GetModuleFileNameW(NULL, module, PORTTY_PATH_MAX);
-    if (n == 0 || n >= PORTTY_PATH_MAX)
+    DWORD n = GetModuleFileNameW(NULL, module, PORTTY_MODULE_PATH_MAX);
+    if (n == 0 || n >= PORTTY_MODULE_PATH_MAX)
         return launcher_fail();
 
     /* The app binary is this launcher's sibling. */
@@ -145,11 +145,11 @@ int main(void)
         return launcher_fail();
     sep[1] = L'\0';
 
-    child_path = malloc((wcslen(module) + wcslen(PORTTY_CHILD_EXE) + 1) * sizeof(wchar_t));
+    child_path = malloc((wcslen(module) + wcslen(PORTTY_APP_EXE) + 1) * sizeof(wchar_t));
     if (!child_path)
         return launcher_fail();
     wcscpy(child_path, module);
-    wcscat(child_path, PORTTY_CHILD_EXE);
+    wcscat(child_path, PORTTY_APP_EXE);
     child_len = wcslen(child_path);
 
     /* "<dir>\portty.exe" <original args> — the path is quoted in case it has

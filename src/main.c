@@ -16,6 +16,7 @@
 #include "font_resolve.h"
 #include "pager.h"
 #include "portty_app.h"
+#include "portty_appmodel.h"
 #include "portty_conf.h"
 #include "portty_pty.h"
 #ifdef _WIN32
@@ -39,6 +40,7 @@
 
 #ifdef _WIN32
 #include <io.h>
+#include <shobjidl.h>
 #include <windows.h>
 #else
 #include <unistd.h>
@@ -390,6 +392,14 @@ static TerminalBackend *create_terminal(PorttyArgs *args)
 #if defined(PORTTY_BACKEND_SDL3)
 static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
 {
+#ifdef _WIN32
+    /* Claim the app identity before any window exists (portty_appmodel.h):
+     * the taskbar stamps a pin made from this window with it, and the window
+     * carries it so a pin and the running terminal are one button. Set on the
+     * process so it covers every launch path — a pin, the launcher, a shell. */
+    (void)SetCurrentProcessExplicitAppUserModelID(PORTTY_APP_USER_MODEL_ID);
+#endif
+
     TerminalBackend *term = create_terminal(args);
     if (!term)
         return 1;

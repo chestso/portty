@@ -94,6 +94,7 @@ src/path_compat.h	MSYS2/Unix to native Windows path conversion interface
 src/png_reader.h	PNG decoding into RGBA pixel buffers interface
 src/png_writer.h	RGBA pixel buffers to PNG encoding interface
 src/portty_app.h	Application-level glue interface
+src/portty_appmodel.h	Taskbar identity shared by both Windows entry points
 src/portty_backend.h	PorttyBackend function-pointer interface
 src/portty_bug.h	Crash policy and diagnostic dump registration interface
 src/portty_conf.h	INI-style configuration parsing interface

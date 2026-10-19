@@ -21,6 +21,7 @@
 #include "png_writer.h"
 #include "qoi_writer.h"
 #include "portty_app.h"
+#include "portty_appmodel.h"
 #include "portty_frame_rec.h"
 #include "portty_panel.h"
 #include "portty_pty.h"
@@ -42,6 +43,9 @@
 #ifdef _WIN32
 #include <dwmapi.h>
 #include <io.h>
+#include <objbase.h>
+#include <propkey.h>
+#include <shobjidl.h>
 #include <windows.h>
 #define access _access
 #define R_OK   4
@@ -677,6 +681,89 @@ static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
 
 // ── Lifecycle ────────────────────────────────────────────────────────────
 
+#ifdef _WIN32
+/* Set one string property. SetValue copies the value, so the copy is freed as
+ * soon as the call returns. VT_LPWSTR is built by hand rather than with
+ * InitPropVariantFromString so nothing links against propsys. */
+static void store_string(IPropertyStore *store, REFPROPERTYKEY key, const wchar_t *text)
+{
+    PROPVARIANT value;
+    size_t bytes = (wcslen(text) + 1) * sizeof(wchar_t);
+    LPWSTR copy = (LPWSTR)CoTaskMemAlloc(bytes);
+
+    if (!copy)
+        return;
+    memcpy(copy, text, bytes);
+
+    memset(&value, 0, sizeof(value));
+    value.vt = VT_LPWSTR;
+    value.pwszVal = copy;
+    store->lpVtbl->SetValue(store, key, &value);
+    CoTaskMemFree(copy);
+}
+
+/* Hand the window the app identity and the relaunch information the taskbar
+ * needs to build a pin (portty_appmodel.h).
+ *
+ * A pin made from a running window is a shortcut whose target is the process
+ * image — portty.exe, console subsystem — unless the window names a relaunch
+ * command, and it is stamped with the window's AppUserModelID, which is what
+ * makes the pinned button and the running window one entry instead of two.
+ * Naming porttyw.exe here keeps the pin a windowed launch; the display name and
+ * the icon are what the pinned button shows when nothing is running. Without a
+ * sibling launcher (a lone portty.exe) only the identity is claimed, and the
+ * shell falls back to the process image as it always would. */
+static void set_window_appmodel(HWND hwnd)
+{
+    wchar_t module[PORTTY_MODULE_PATH_MAX];
+    wchar_t launcher[PORTTY_MODULE_PATH_MAX];
+    wchar_t command[PORTTY_MODULE_PATH_MAX];
+    wchar_t icon[PORTTY_MODULE_PATH_MAX];
+    wchar_t *slash;
+    DWORD n;
+    IPropertyStore *store = NULL;
+
+    n = GetModuleFileNameW(NULL, module, PORTTY_MODULE_PATH_MAX);
+    /* Room for the sibling's name, the quotes around the command and the icon's
+     * ",0" index suffix, all of which land in same-sized buffers below. */
+    if (n == 0 || n + 32 >= PORTTY_MODULE_PATH_MAX)
+        return;
+    slash = wcsrchr(module, L'\\');
+    if (!slash)
+        return;
+    slash[1] = L'\0'; /* keep the directory, drop "portty.exe" */
+
+    swprintf(launcher, PORTTY_MODULE_PATH_MAX, L"%ls%ls", module, PORTTY_LAUNCHER_EXE);
+    /* Quoted: the relaunch command is a ShellExecute command line, and an
+     * install under "C:\Program Files" has a space in it. */
+    swprintf(command, PORTTY_MODULE_PATH_MAX, L"\"%ls\"", launcher);
+    swprintf(icon, PORTTY_MODULE_PATH_MAX, L"%ls,0", launcher);
+
+    /* SDL may already have initialized COM for this thread; another apartment
+     * is not a reason to leave the window unidentified. */
+    (void)CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    if (FAILED(SHGetPropertyStoreForWindow(hwnd, &IID_IPropertyStore, (void **)&store)))
+        return;
+
+    store_string(store, &PKEY_AppUserModel_ID, PORTTY_APP_USER_MODEL_ID);
+
+    /* Without a sibling launcher (a lone portty.exe) only the identity is
+     * claimed; the shell then falls back to the process image, as it would
+     * anyway. RelaunchCommand and RelaunchDisplayNameResource are
+     * all-or-nothing: with either missing, the shell ignores both. */
+    if (GetFileAttributesW(launcher) != INVALID_FILE_ATTRIBUTES) {
+        store_string(store, &PKEY_AppUserModel_RelaunchCommand, command);
+        store_string(store, &PKEY_AppUserModel_RelaunchDisplayNameResource,
+                     PORTTY_APP_DISPLAY_NAME);
+        store_string(store, &PKEY_AppUserModel_RelaunchIconResource, icon);
+    }
+
+    store->lpVtbl->Commit(store);
+    store->lpVtbl->Release(store);
+}
+#endif /* _WIN32 */
+
 static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
                       const char *title, int width, int height)
 {
@@ -785,11 +872,15 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     vlog("Window display scale: %.2fx\n", (double)d->window_scale);
 
 #ifdef _WIN32
-    if (!app->borderless) {
+    {
         HWND hwnd = (HWND)SDL_GetPointerProperty(
             SDL_GetWindowProperties(d->window),
             SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL);
-        if (hwnd) {
+        /* The taskbar identity goes on before the window is ever shown: a
+         * window the shell has seen keeps the identity it had at that point. */
+        if (hwnd)
+            set_window_appmodel(hwnd);
+        if (!app->borderless && hwnd) {
             BOOL dark = TRUE;
             DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
                                   &dark, sizeof(dark));
