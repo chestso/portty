@@ -1199,6 +1199,36 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
     }
 }
 
+// The image's identity for the texture cache.
+//
+// The public id is only unique WITHIN one protocol's id space: kitty's
+// client-chosen i= and the engine's own counter hand out the same
+// numbers, and the engine lets a kitty image and an iTerm2 image with
+// the same id coexist. The handle is the engine's own identity for an
+// image — unique across the protocols, never reused — so the cache
+// keys on it. An engine without the handle leaves the id as the
+// identity.
+static inline uint64_t image_identity(const CfrImage *img)
+{
+#ifdef HAVE_COFFER_IMAGE_HANDLE
+    return img->handle;
+#else
+    return img->id;
+#endif
+}
+
+// Does this placement belong to this image? Same reasoning as
+// image_identity: the placement names its image by the handle.
+static inline bool placement_belongs_to(const CfrImagePlacement *pl,
+                                        const CfrImage *img)
+{
+#ifdef HAVE_COFFER_IMAGE_HANDLE
+    return pl->image_handle == img->handle;
+#else
+    return pl->image_id == img->id;
+#endif
+}
+
 // Destroy all cached sixel textures
 static void image_cache_clear(RendererSdl3Data *data)
 {
@@ -1210,7 +1240,7 @@ static void image_cache_clear(RendererSdl3Data *data)
     data->image_cache_count = 0;
 }
 
-// Drop cached textures whose image id is no longer live, so the cache
+// Drop cached textures whose image is no longer live, so the cache
 // tracks the engine's current image set (and frees textures for evicted /
 // scrolled-off / cleared images). O(cache * live) but both are small.
 static void image_cache_reconcile(RendererSdl3Data *data, const CfrImage *imgs, int count)
@@ -1218,7 +1248,7 @@ static void image_cache_reconcile(RendererSdl3Data *data, const CfrImage *imgs, 
     for (int i = 0; i < data->image_cache_count;) {
         bool live = false;
         for (int j = 0; j < count; j++) {
-            if (imgs[j].id == data->image_cache[i].id) {
+            if (image_identity(&imgs[j]) == data->image_cache[i].handle) {
                 live = true;
                 break;
             }
@@ -1247,7 +1277,7 @@ static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *im
     const uint8_t *pixels = linear ? linear : img->rgba;
 
     for (int i = 0; i < data->image_cache_count; i++) {
-        if (data->image_cache[i].id != img->id)
+        if (image_identity(img) != data->image_cache[i].handle)
             continue;
         if (data->image_cache[i].w != bw ||
             data->image_cache[i].h != bh) {
@@ -1279,6 +1309,7 @@ static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *im
         data->image_cache[i].version = img->version;
         data->image_cache[i].w = bw;
         data->image_cache[i].h = bh;
+        data->image_cache[i].handle = image_identity(img);
         free(linear);
         return t;
     }
@@ -1303,6 +1334,7 @@ static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *im
     int n = data->image_cache_count++;
     data->image_cache[n].texture = tex;
     data->image_cache[n].id = img->id;
+    data->image_cache[n].handle = image_identity(img);
     data->image_cache[n].version = img->version;
     data->image_cache[n].w = bw;
     data->image_cache[n].h = bh;
@@ -1340,7 +1372,7 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
             // their placements. Draw the ones matching this pass.
             for (int j = 0; j < pl_count; j++) {
                 const CfrImagePlacement *pl = &pls[j];
-                if (pl->image_id != img->id)
+                if (!placement_belongs_to(pl, img))
                     continue;
                 bool neg = pl->z_index < 0;
                 if (neg != negative_z)

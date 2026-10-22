@@ -17,6 +17,8 @@
 
 #include "test_helpers.h"
 
+#include "config.h"
+
 #include "term.h"
 #include "term_cfr.h"
 
@@ -276,6 +278,68 @@ static void test_bridge_retransmit_same_id(void)
     terminal_destroy(&t);
 }
 
+/* The host uploads the image's PIXEL BUFFER: buf_w * buf_h * 4 bytes
+ * taken from the engine's rgba. The buffer holds the decoded (native)
+ * pixels, so buf_w/buf_h are the buffer's real extent — the display
+ * scale lives in width_px/height_px. Copying the scaled size out of
+ * the native buffer reads past the end of the allocation, so the test
+ * copies exactly what the renderer copies: under ASan an overread
+ * fails the test.
+ *
+ * Gated on the engine that reports the buffer's real extent (the
+ * configure check for the image handle detects it). */
+#ifdef HAVE_COFFER_IMAGE_HANDLE
+static void test_texture_upload_at_content_scale(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    terminal_set_cell_px(&t, 10, 6);
+    terminal_set_content_scale(&t, 2.0f);
+
+    uint8_t rgba[2 * 2 * 4] = { 255, 0, 0, 255, 255, 0, 0, 255,
+                                255, 0, 0, 255, 255, 0, 0, 255 };
+    char b64[64];
+    b64_encode(rgba, sizeof(rgba), b64);
+
+    char seq[256];
+    snprintf(seq, sizeof(seq),
+             "\x1b_Ga=t,f=32,s=2,v=2,i=1;%s\x1b\\", b64);
+    feed(&t, seq);
+
+    int n = 0;
+    const CfrImage *s = terminal_get_images(&t, &n);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(n, 1);
+
+    /* The DISPLAY is scaled: the 2x2 image is drawn 4x4 physical. */
+    ASSERT_EQ(s[0].width_px, 4);
+    ASSERT_EQ(s[0].height_px, 4);
+    /* The BUFFER is not: it holds the 2x2 decoded pixels. */
+    ASSERT_EQ(s[0].buf_w, 2);
+    ASSERT_EQ(s[0].buf_h, 2);
+
+    /* What the renderer does: copy buf_w * buf_h * 4 bytes out of the
+     * engine's buffer. Under ASan an overread fails the test. */
+    size_t bytes = (size_t)s[0].buf_w * (size_t)s[0].buf_h * 4;
+    ASSERT_EQ(bytes, (size_t)(2 * 2 * 4));
+    uint8_t *copy = malloc(bytes);
+    ASSERT_NOT_NULL(copy);
+    memcpy(copy, s[0].rgba, bytes);
+    ASSERT_EQ(copy[0], 255);
+    ASSERT_EQ(copy[3], 255);
+    free(copy);
+
+    terminal_destroy(&t);
+}
+#endif /* HAVE_COFFER_IMAGE_HANDLE */
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -286,6 +350,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_bridge_mixed_sources);
     RUN_TEST(test_bridge_chunked_transmit_no_action);
     RUN_TEST(test_bridge_retransmit_same_id);
+#ifdef HAVE_COFFER_IMAGE_HANDLE
+    RUN_TEST(test_texture_upload_at_content_scale);
+#endif
 
     TEST_SUMMARY();
 }

@@ -83,6 +83,9 @@ typedef struct RendererSdl3Data
     {
         SDL_Texture *texture;
         uint64_t id;
+        uint64_t handle; /* the engine's image identity (see
+                          * image_identity) — the id alone is not unique
+                          * across the protocols */
         uint32_t version;
         int w, h;
     } image_cache[IMAGE_CACHE_MAX];

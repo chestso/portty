@@ -146,6 +146,29 @@ PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
 PKG_CHECK_MODULES([COFFER], [coffer >= 0.8.0])
 
+dnl coffer exposes the image HANDLE (CfrImage.handle / the placement's
+dnl image_handle) from 0.9 on: the public image id is only unique WITHIN
+dnl one protocol's id space (kitty's client-chosen i= and the engine's own
+dnl counter hand out the same numbers), so the host needs the engine's
+dnl own identity to key its texture cache and to pair a placement with
+dnl its image. Older coffer releases have no handle — the id is all they
+dnl offer, and the code falls back to it.
+AC_CACHE_CHECK([whether coffer exposes the image handle],
+               [portty_cv_coffer_image_handle], [
+  save_CPPFLAGS="$CPPFLAGS"
+  CPPFLAGS="$CPPFLAGS $COFFER_CFLAGS"
+  AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([[#include <coffer/coffer.h>]],
+                     [[CfrImage img; (void)img.handle;]])],
+    [portty_cv_coffer_image_handle=yes],
+    [portty_cv_coffer_image_handle=no])
+  CPPFLAGS="$save_CPPFLAGS"
+])
+if test "x$portty_cv_coffer_image_handle" = "xyes"; then
+  AC_DEFINE([HAVE_COFFER_IMAGE_HANDLE], [1],
+            [Define if coffer exposes CfrImage.handle (the image identity).])
+fi
+
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
 
