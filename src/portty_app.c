@@ -359,6 +359,50 @@ void portty_app_clear_hover(PorttyApp *app)
     }
 }
 
+// Lifetime of the transient status messages shown by the app.
+#define DUMP_NOTIFY_TTL_MS       4000
+#define DUMP_ERROR_NOTIFY_TTL_MS 8000
+#define LINK_ERROR_NOTIFY_TTL_MS 6000
+
+// Show a transient status message, if the backend supports it. The text is
+// elided to the grid width so the message stays on one line per row: the
+// body keeps its tail (the file name, the end of the URL), which is the
+// informative part.
+static void app_notify(PorttyApp *app, const char *title, const char *body,
+                       PorttyNotifyLevel level, unsigned int ttl_ms)
+{
+    if (!app || !app->backend || !app->backend->notify)
+        return;
+
+    int rows = 0, cols = 0;
+    if (app->term)
+        terminal_get_dimensions(app->term, &rows, &cols);
+    (void)rows; // the grid height does not affect the message width
+
+    size_t budget = 8;
+    if (cols > PANEL_DECORATION_COLS + 8)
+        budget = (size_t)(cols - PANEL_DECORATION_COLS);
+
+    char t[256];
+    char b[1024];
+    panel_elide_front(title, budget, t, sizeof(t));
+    panel_elide_front(body, budget, b, sizeof(b));
+
+    app->backend->notify(app->backend, t, b, level, ttl_ms);
+}
+
+// Report the outcome of a terminal-state dump: the destination path on
+// success, the failure reason otherwise.
+static void app_notify_dump_result(PorttyApp *app, const PorttyDumpResult *res)
+{
+    if (res->ok)
+        app_notify(app, "State dump written", res->path, PORTTY_NOTIFY_INFO,
+                   DUMP_NOTIFY_TTL_MS);
+    else
+        app_notify(app, "State dump failed", res->error, PORTTY_NOTIFY_ERROR,
+                   DUMP_ERROR_NOTIFY_TTL_MS);
+}
+
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
                                      int mod, uint32_t codepoint)
 {
@@ -458,7 +502,9 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
 
     // Ctrl+Shift+F7 → dump the full terminal state to a JSON file
     if (term_key == TERM_KEY_F7 && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
-        portty_app_dump_state(app, NULL);
+        PorttyDumpResult res;
+        portty_app_dump_state(app, NULL, &res);
+        app_notify_dump_result(app, &res);
         result.handled = true;
         return result;
     }
@@ -601,16 +647,16 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
                         snprintf(title, sizeof(title), "Couldn't open %.200s", url);
                         snprintf(body, sizeof(body), "Error is: %.256s", err);
                         fprintf(stderr, "ERROR: %s — %s\n", title, body);
-                        // TODO: panel_show - notification panels coming soon
-                        (void)title;
-                        (void)body;
+                        app_notify(app, "Couldn't open link", body,
+                                   PORTTY_NOTIFY_ERROR, LINK_ERROR_NOTIFY_TTL_MS);
                     }
                 } else if (n > 0) {
                     char title[256];
                     snprintf(title, sizeof(title), "Refusing to open %.200s", url);
                     fprintf(stderr, "WARNING: %s (disallowed scheme)\n", title);
-                    // TODO: panel_show - notification panels coming soon
-                    (void)title;
+                    app_notify(app, "Refusing to open link",
+                               "Disallowed URL scheme", PORTTY_NOTIFY_WARNING,
+                               LINK_ERROR_NOTIFY_TTL_MS);
                 }
                 return true;
             }
@@ -871,8 +917,14 @@ void portty_app_show_diagnostics(PorttyApp *app)
     free(report);
 }
 
-bool portty_app_dump_state(PorttyApp *app, const char *path)
+bool portty_app_dump_state(PorttyApp *app, const char *path,
+                           PorttyDumpResult *res)
 {
+    if (res) {
+        res->ok = false;
+        res->path[0] = '\0';
+        res->error[0] = '\0';
+    }
     if (!app || !app->term)
         return false;
 
@@ -889,12 +941,21 @@ bool portty_app_dump_state(PorttyApp *app, const char *path)
     };
 
     char resolved[4096];
-    if (!portty_dump_write(app->term, &meta, path, resolved, sizeof(resolved))) {
-        fprintf(stderr, "ERROR: failed to write terminal state dump\n");
+    char err[256];
+    if (!portty_dump_write(app->term, &meta, path, resolved, sizeof(resolved),
+                           err, sizeof(err))) {
+        vlog("terminal state dump failed: %s\n", err);
+        if (res)
+            snprintf(res->error, sizeof(res->error), "%s", err);
         return false;
     }
 
     vlog("terminal state dump written to %s\n", resolved);
     fprintf(stderr, "Terminal state dump written to %s\n", resolved);
+    if (res) {
+        res->ok = true;
+        snprintf(res->path, sizeof(res->path), "%.*s",
+                 (int)sizeof(res->path) - 1, resolved);
+    }
     return true;
 }

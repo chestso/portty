@@ -181,6 +181,48 @@ static void test_selection_serialized(void)
     terminal_destroy(&t);
 }
 
+static void test_dump_write_reports_outcome(void)
+{
+    TerminalBackend t;
+    make_term(&t, 8, 3);
+    feed(&t, "hi");
+
+    char resolved[512];
+    char err[256];
+
+    // A successful write reports the destination and no error.
+    const char *ok_path = "portty_test_dump_outcome.json";
+    err[0] = 'x';
+    bool ok = portty_dump_write(&t, NULL, ok_path, resolved, sizeof(resolved),
+                                err, sizeof(err));
+    ASSERT_TRUE(ok);
+    ASSERT_STR_EQ(resolved, ok_path);
+    ASSERT_STR_EQ(err, "");
+    remove(ok_path);
+
+    // A regular file where a directory should be: the write fails and the
+    // reason is reported instead of being lost.
+    const char *blocker = "portty_test_dump_outcome_blocker";
+    FILE *bf = fopen(blocker, "wb");
+    ASSERT_NOT_NULL(bf);
+    if (!bf) {
+        terminal_destroy(&t);
+        return;
+    }
+    fputs("x", bf);
+    fclose(bf);
+
+    char bad_path[512];
+    snprintf(bad_path, sizeof(bad_path), "%s/state.json", blocker);
+    ok = portty_dump_write(&t, NULL, bad_path, resolved, sizeof(resolved),
+                           err, sizeof(err));
+    ASSERT_FALSE(ok);
+    ASSERT_TRUE(strlen(err) > 0);
+
+    remove(blocker);
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -192,6 +234,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_hyperlink_interned_once);
     RUN_TEST(test_scrollback_captured);
     RUN_TEST(test_selection_serialized);
+    RUN_TEST(test_dump_write_reports_outcome);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

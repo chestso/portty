@@ -43,8 +43,10 @@ bool portty_dump_build_path(const TerminalDumpMeta *meta, const char *path,
 // Write a dump to `path` (NULL = default, "-" = stdout). Creates the
 // destination directory, writes atomically (temp file + rename) with 0600
 // permissions, and copies the resolved path into `resolved` when non-NULL.
-// Returns true on success.
+// On failure `err` (when non-NULL) receives a one-line reason, e.g.
+// "cannot open /tmp/x.json: Permission denied". Returns true on success.
 bool portty_dump_write(TerminalBackend *term, const TerminalDumpMeta *meta,
-                       const char *path, char *resolved, size_t resolved_n);
+                       const char *path, char *resolved, size_t resolved_n,
+                       char *err, size_t errlen);
 
 #endif // DUMP_H

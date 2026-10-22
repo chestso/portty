@@ -2400,14 +2400,15 @@ void rend_sdl3_panel_hide(RendererSdl3Data *data, int id)
 
     for (int i = 0; i < PORTTY_PANEL_MAX; i++) {
         if (data->panels.panels[i].active && data->panels.panels[i].id == id) {
-            // Reserved (negative) ids — the link-hint pill and the resize
-            // overlay — are hidden and re-shown constantly (pointer motion
-            // between links, every resize frame). Their slot keeps its
-            // embedded terminal and content texture, so a re-show only
-            // re-feeds the ANSI instead of rebuilding the terminal and
-            // reallocating the GPU texture. build_panel_terminal recreates
-            // either one when a re-show needs a different size, and
-            // panels_free_all releases them at renderer teardown.
+            // Reserved (negative) ids — the link-hint pill, the resize
+            // overlay, and the status message — are hidden and re-shown
+            // constantly (pointer motion between links, every resize frame).
+            // Their slot keeps its embedded terminal and content texture, so
+            // a re-show only re-feeds the ANSI instead of rebuilding the
+            // terminal and reallocating the GPU texture.
+            // build_panel_terminal recreates any of them when a re-show
+            // needs a different size, and panels_free_all releases them at
+            // renderer teardown.
             if (id >= 0)
                 panel_free_slot(data, i);
             panel_mgr_hide(&data->panels, id);

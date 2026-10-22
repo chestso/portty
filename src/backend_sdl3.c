@@ -165,10 +165,17 @@ typedef struct
     TimerId autoscroll_timer;
     TimerId lottie_timer;
     Uint64 resize_overlay_hide_at; // SDL ticks deadline for hiding the resize overlay (0 = hidden)
+    Uint64 notify_hide_at;         // SDL ticks deadline for hiding the status message (0 = hidden)
     Uint64 run_start_ticks;        // SDL ticks when the event loop started (primes the resize overlay)
     SDL_TimerID wake_timer;
     bool cursor_blink_visible;
     bool has_focus;
+
+    // The status message on screen, kept so a resize can place it again in
+    // the new grid.
+    char notify_title[256];
+    char notify_body[512];
+    PorttyNotifyLevel notify_level;
 
     SDL_Cursor *cursor_text;
     SDL_Cursor *cursor_pointer;
@@ -647,8 +654,8 @@ static uint32_t sdl3_timer_wake_cb(void *userdata, SDL_TimerID id,
 
 /* Arm a single SDL timer for the earliest pending deadline so the blocking
  * SDL_WaitEvent wakes just in time to service it. Must be called on the
- * main thread. It factors in the TimerManager, a pending script wait, and
- * the resize-overlay hide deadline. */
+ * main thread. It factors in the TimerManager, a pending script wait, the
+ * resize-overlay hide deadline, and the status-message hide deadline. */
 static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
 {
     if (d->wake_timer) {
@@ -671,6 +678,15 @@ static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
                                   : 0;
         if (overlay_ms < delay)
             delay = overlay_ms;
+    }
+
+    if (d->notify_hide_at != 0) {
+        Uint64 now = SDL_GetTicks();
+        uint32_t notify_ms = (d->notify_hide_at > now)
+                                 ? (uint32_t)(d->notify_hide_at - now)
+                                 : 0;
+        if (notify_ms < delay)
+            delay = notify_ms;
     }
 
     if (delay == UINT32_MAX)
@@ -1413,6 +1429,72 @@ static void sdl3_panel_set_hover(PorttyBackend *self, int id, bool hovered)
         terminal_mark_dirty(d->term);
 }
 
+// ── Transient status messages ────────────────────────────────────────────
+// A notification is a two-row box (title, detail) that the backend places at
+// the top of the grid and hides again once its lifetime is over. The
+// deadline is absolute rather than a timer-manager interval, matching the
+// resize overlay: the loop's elapsed-time accounting is frame-relative, so
+// a freshly armed interval would fire immediately when a frame happened to
+// carry more elapsed time than that.
+#define NOTIFY_DEFAULT_TTL_MS 4000
+
+// Display width of a UTF-8 string in terminal cells.
+static int sdl3_text_cols(const char *text)
+{
+    if (!text || !*text)
+        return 0;
+    int cols = cfr_utf8_display_width(text, strlen(text));
+    return cols > 0 ? cols : 0;
+}
+
+static void sdl3_notify_hide(Sdl3BackendData *d)
+{
+    if (!d)
+        return;
+    d->notify_hide_at = 0;
+    if (d->app && d->app->backend)
+        d->app->backend->panel_hide(d->app->backend, PANEL_ID_NOTIFY);
+}
+
+// Place the current status message in the grid. Called when the message
+// appears and again after a resize, which changes the grid the message is
+// placed in.
+static void sdl3_notify_place(Sdl3BackendData *d)
+{
+    if (!d || !d->term || !d->app || !d->app->backend)
+        return;
+
+    int rows = 0, cols = 0;
+    terminal_get_dimensions(d->term, &rows, &cols);
+    if (rows <= 0 || cols <= 0)
+        return;
+
+    int content_cols = sdl3_text_cols(d->notify_title);
+    int detail_cols = sdl3_text_cols(d->notify_body);
+    if (detail_cols > content_cols)
+        content_cols = detail_cols;
+
+    PanelRect r = panel_notify_rect(cols, rows, content_cols);
+    d->app->backend->panel_show(d->app->backend, PANEL_ID_NOTIFY, r.col, r.row,
+                                r.cols, r.rows, d->notify_title, d->notify_body,
+                                d->notify_level, PANEL_FLAG_NO_CLOSE);
+}
+
+static void sdl3_notify(PorttyBackend *self, const char *title, const char *body,
+                        PorttyNotifyLevel level, unsigned int ttl_ms)
+{
+    Sdl3BackendData *d = sdl3_data(self);
+    if (!d || !d->term)
+        return;
+
+    snprintf(d->notify_title, sizeof(d->notify_title), "%s", title ? title : "");
+    snprintf(d->notify_body, sizeof(d->notify_body), "%s", body ? body : "");
+    d->notify_level = level;
+
+    sdl3_notify_place(d);
+    d->notify_hide_at = SDL_GetTicks() + (ttl_ms ? ttl_ms : NOTIFY_DEFAULT_TTL_MS);
+}
+
 // ── Rendering ────────────────────────────────────────────────────────────
 
 static int sdl3_load_fonts(PorttyBackend *self, float size,
@@ -1688,6 +1770,9 @@ static void sdl3_script_resize(void *user_data, int cols, int rows)
     int pixel_h = rows * cell_h;
     portty_app_handle_resize(d->app, pixel_w, pixel_h);
     sdl3_resize_overlay_update(d);
+    // The status message was placed for the old geometry.
+    if (d->notify_hide_at != 0)
+        sdl3_notify_place(d);
     vlog("resize: %d cols x %d rows\n", cols, rows);
 }
 
@@ -1735,7 +1820,11 @@ static bool sdl3_script_dumpstate(void *user_data, const char *path)
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
     if (!d || !d->app)
         return false;
-    return portty_app_dump_state(d->app, path);
+    PorttyDumpResult res;
+    if (portty_app_dump_state(d->app, path, &res))
+        return true;
+    fprintf(stderr, "ERROR: dumpstate: %s\n", res.error);
+    return false;
 }
 
 static void sdl3_record_start(void *user_data, int fps)
@@ -2014,6 +2103,9 @@ static void sdl3_run(PorttyBackend *self)
                 SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
                 portty_app_handle_resize(d->app, pix_w, pix_h);
                 sdl3_resize_overlay_update(d);
+                // The status message was placed for the old geometry.
+                if (d->notify_hide_at != 0)
+                    sdl3_notify_place(d);
                 terminal_mark_dirty(term);
                 break;
             }
@@ -2229,6 +2321,13 @@ static void sdl3_run(PorttyBackend *self)
             terminal_mark_dirty(term);
         }
 
+        // Hide the transient status message once its lifetime is over.
+        if (d->notify_hide_at != 0 &&
+            SDL_GetTicks() >= d->notify_hide_at) {
+            sdl3_notify_hide(d);
+            terminal_mark_dirty(term);
+        }
+
         // Flush buffered button-up if no more events pending
         sdl3_flush_buffered_button_up(d, term);
 
@@ -2383,6 +2482,8 @@ PorttyBackend backend_sdl3 = {
     .panel_hide = sdl3_panel_hide,
     .panel_hit_test = sdl3_panel_hit_test,
     .panel_set_hover = sdl3_panel_set_hover,
+
+    .notify = sdl3_notify,
 
     .load_fonts = sdl3_load_fonts,
     .draw_terminal = sdl3_draw_terminal,

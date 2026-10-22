@@ -91,9 +91,19 @@ int portty_app_display_row_to_unified(PorttyApp *app, int display_row);
 // Diagnostics report
 void portty_app_show_diagnostics(PorttyApp *app);
 
+// Outcome of a terminal-state dump.
+typedef struct
+{
+    bool ok;         // the dump was written
+    char path[1024]; // resolved destination, when ok
+    char error[256]; // reason for the failure, when not ok
+} PorttyDumpResult;
+
 // Dump the entire terminal state to a JSON file for debugging. `path` NULL
-// selects the default location; "-" writes to stdout. Returns true on success.
-bool portty_app_dump_state(PorttyApp *app, const char *path);
+// selects the default location; "-" writes to stdout. `res` (when non-NULL)
+// receives the outcome. Returns true on success.
+bool portty_app_dump_state(PorttyApp *app, const char *path,
+                           PorttyDumpResult *res);
 
 // Lifecycle helpers.
 void portty_app_set_autoscroll(PorttyApp *app, bool enabled);

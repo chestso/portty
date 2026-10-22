@@ -27,6 +27,7 @@
 #include <coffer/coffer.h>
 #include <errno.h>
 #include <limits.h>
+#include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -781,17 +782,34 @@ bool portty_dump_build_path(const TerminalDumpMeta *meta, const char *path,
     return true;
 }
 
-bool portty_dump_write(TerminalBackend *term, const TerminalDumpMeta *meta,
-                       const char *path, char *resolved, size_t resolved_n)
+// Record a failure reason for the caller and report the failure.
+static bool dump_fail(char *err, size_t errlen, const char *fmt, ...)
 {
+    if (err && errlen) {
+        va_list ap;
+        va_start(ap, fmt);
+        vsnprintf(err, errlen, fmt, ap);
+        va_end(ap);
+    }
+    return false;
+}
+
+bool portty_dump_write(TerminalBackend *term, const TerminalDumpMeta *meta,
+                       const char *path, char *resolved, size_t resolved_n,
+                       char *err, size_t errlen)
+{
+    if (err && errlen)
+        err[0] = '\0';
     if (!term)
-        return false;
+        return dump_fail(err, errlen, "no terminal");
 
     if (path && strcmp(path, "-") == 0) {
         int rc = terminal_dump_json(stdout, term, meta);
         if (resolved && resolved_n)
             snprintf(resolved, resolved_n, "-");
-        return rc == 0;
+        if (rc != 0)
+            return dump_fail(err, errlen, "write failed: stdout");
+        return true;
     }
 
     /* A caller-supplied path may sit in a directory that does not exist yet. */
@@ -799,29 +817,23 @@ bool portty_dump_write(TerminalBackend *term, const TerminalDumpMeta *meta,
         ensure_parent_dir(path);
 
     char full[DUMP_PATH_MAX];
-    if (!portty_dump_build_path(meta, path, full, sizeof(full))) {
-        fprintf(stderr, "ERROR: dump: could not resolve destination path\n");
-        return false;
-    }
+    if (!portty_dump_build_path(meta, path, full, sizeof(full)))
+        return dump_fail(err, errlen, "could not resolve destination path");
 
     char tmp[DUMP_PATH_MAX];
-    if (snprintf(tmp, sizeof(tmp), "%s.tmp", full) >= (int)sizeof(tmp)) {
-        fprintf(stderr, "ERROR: dump: destination path too long: %s\n", full);
-        return false;
-    }
+    if (snprintf(tmp, sizeof(tmp), "%s.tmp", full) >= (int)sizeof(tmp))
+        return dump_fail(err, errlen, "destination path too long: %s", full);
 
     FILE *f = fopen(tmp, "wb");
-    if (!f) {
-        fprintf(stderr, "ERROR: dump: cannot open %s: %s\n", tmp, strerror(errno));
-        return false;
-    }
+    if (!f)
+        return dump_fail(err, errlen, "cannot open %s: %s", tmp,
+                         strerror(errno));
     int rc = terminal_dump_json(f, term, meta);
     if (fclose(f) != 0 && rc == 0)
         rc = -1;
     if (rc != 0) {
         remove(tmp);
-        fprintf(stderr, "ERROR: dump: write failed: %s\n", tmp);
-        return false;
+        return dump_fail(err, errlen, "write failed: %s", tmp);
     }
 
 #ifndef _WIN32
@@ -832,9 +844,8 @@ bool portty_dump_write(TerminalBackend *term, const TerminalDumpMeta *meta,
         remove(full);
         if (rename(tmp, full) != 0) {
             remove(tmp);
-            fprintf(stderr, "ERROR: dump: cannot rename %s: %s\n", tmp,
-                    strerror(errno));
-            return false;
+            return dump_fail(err, errlen, "cannot rename %s: %s", tmp,
+                             strerror(errno));
         }
     }
 

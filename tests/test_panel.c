@@ -393,6 +393,62 @@ static void test_panel_set_cell_size_same_is_noop(void)
     panel_mgr_hide_all(&mgr);
 }
 
+static void test_panel_notify_rect(void)
+{
+    // A message that fits: the box is the text plus the decoration padding,
+    // centered horizontally and flush with the top edge.
+    PanelRect r = panel_notify_rect(80, 24, 20);
+    ASSERT_EQ(r.cols, 20 + PANEL_DECORATION_COLS);
+    ASSERT_EQ(r.rows, 2 + PANEL_DECORATION_ROWS);
+    ASSERT_EQ(r.row, 0);
+    ASSERT_EQ(r.col, (80 - r.cols) / 2);
+
+    // A message wider than the grid clamps to the grid width.
+    r = panel_notify_rect(80, 24, 200);
+    ASSERT_EQ(r.cols, 80);
+    ASSERT_EQ(r.col, 0);
+
+    // A grid shorter than the box clamps the height.
+    r = panel_notify_rect(80, 2, 10);
+    ASSERT_EQ(r.rows, 2);
+    ASSERT_EQ(r.row, 0);
+
+    // A degenerate grid yields an empty rectangle.
+    r = panel_notify_rect(0, 0, 10);
+    ASSERT_EQ(r.cols, 0);
+    ASSERT_EQ(r.rows, 0);
+}
+
+static void test_panel_elide_front(void)
+{
+    char out[64];
+
+    // Short text is copied verbatim.
+    panel_elide_front("/tmp/x.json", 32, out, sizeof(out));
+    ASSERT_STR_EQ(out, "/tmp/x.json");
+
+    // Long text keeps its tail and is marked with an ellipsis.
+    panel_elide_front("/home/user/.local/state/portty/dumps/portty-state.json", 20,
+                      out, sizeof(out));
+    ASSERT_EQ(strlen(out), 20);
+    ASSERT_TRUE(strncmp(out, "\xE2\x80\xA6", 3) == 0);
+    ASSERT_TRUE(strstr(out, "portty-state.json") != NULL);
+
+    // The cut never splits a UTF-8 codepoint.
+    panel_elide_front("/tmp/\xC3\xA4\xC3\xB6\xC3\xBC/x.json", 12, out, sizeof(out));
+    ASSERT_EQ(strlen(out), 12);
+    ASSERT_TRUE(strstr(out, "\xC3\xBC") != NULL);
+    ASSERT_TRUE(strstr(out, "\xC3\xA4") == NULL);
+
+    // No room for the ellipsis: the message is dropped rather than mangled.
+    panel_elide_front("/tmp/x.json", 2, out, sizeof(out));
+    ASSERT_STR_EQ(out, "");
+
+    // A NULL source is handled.
+    panel_elide_front(NULL, 32, out, sizeof(out));
+    ASSERT_STR_EQ(out, "");
+}
+
 int main(void)
 {
     RUN_TEST(test_panel_init);
@@ -416,6 +472,8 @@ int main(void)
     RUN_TEST(test_panel_show_change_marks_dirty);
     RUN_TEST(test_panel_show_identical_keeps_hover);
     RUN_TEST(test_panel_set_cell_size_same_is_noop);
+    RUN_TEST(test_panel_notify_rect);
+    RUN_TEST(test_panel_elide_front);
 
     TEST_SUMMARY();
 }

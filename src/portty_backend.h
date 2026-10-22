@@ -127,6 +127,14 @@ struct PorttyBackend
     int (*panel_hit_test)(PorttyBackend *self, int px, int py, bool *close_btn);
     void (*panel_set_hover)(PorttyBackend *self, int id, bool hovered);
 
+    // ── Notifications ──────────────────────────────────────────
+    // Show a transient status message that disappears again after
+    // `ttl_ms`. The backend owns the placement and the hide timer, so
+    // the caller only supplies the text. `title` is a short headline,
+    // `body` the detail line; both may be NULL.
+    void (*notify)(PorttyBackend *self, const char *title, const char *body,
+                   PorttyNotifyLevel level, unsigned int ttl_ms);
+
     // ── Rendering ──────────────────────────────────────────────
     int (*load_fonts)(PorttyBackend *self, float size,
                       const char *name, int ft_hint_target);

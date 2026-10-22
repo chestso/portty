@@ -10,6 +10,7 @@
 #endif
 
 #include "portty_panel.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -259,4 +260,57 @@ PanelRect panel_link_hint_rect(int term_cols, int term_rows, int link_row)
     else
         r.row = term_rows - r.rows; // neither fits: bottom-align
     return r;
+}
+
+PanelRect panel_notify_rect(int term_cols, int term_rows, int content_cols)
+{
+    PanelRect r = { 0, 0, 0, 0 };
+
+    if (term_cols <= 0 || term_rows <= 0)
+        return r;
+
+    int panel_cols = content_cols + PANEL_DECORATION_COLS;
+    int panel_rows = 2 + PANEL_DECORATION_ROWS; // title row + body row
+    if (panel_cols > term_cols)
+        panel_cols = term_cols;
+    if (panel_rows > term_rows)
+        panel_rows = term_rows;
+
+    r.cols = panel_cols;
+    r.rows = panel_rows;
+    r.col = (term_cols - panel_cols) / 2; // centered horizontally
+    r.row = 0;                            // flush with the top edge
+    return r;
+}
+
+void panel_elide_front(const char *text, size_t max_bytes,
+                       char *out, size_t out_n)
+{
+    static const char ellipsis[] = "\xE2\x80\xA6"; // U+2026 HORIZONTAL ELLIPSIS
+    const size_t ellipsis_len = sizeof(ellipsis) - 1;
+
+    if (!out || out_n == 0)
+        return;
+    out[0] = '\0';
+    if (!text)
+        return;
+
+    size_t len = strlen(text);
+    if (len <= max_bytes) {
+        snprintf(out, out_n, "%s", text);
+        return;
+    }
+    if (max_bytes <= ellipsis_len) {
+        // Not even room for the ellipsis: show nothing rather than a
+        // truncated marker.
+        return;
+    }
+
+    size_t budget = max_bytes - ellipsis_len;
+    size_t start = len - budget;
+    // Drop the rest of a codepoint the cut landed in.
+    while (start < len && ((unsigned char)text[start] & 0xC0) == 0x80)
+        start++;
+
+    snprintf(out, out_n, "%s%s", ellipsis, text + start);
 }

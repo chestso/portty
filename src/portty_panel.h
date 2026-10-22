@@ -16,6 +16,7 @@
 // Reserved panel IDs (negative to avoid collision with user/script panels)
 #define PANEL_ID_LINK_HINT      -1 // OSC-8 URL hover hint pill
 #define PANEL_ID_RESIZE_OVERLAY -2 // transient cols x rows readout during a window resize
+#define PANEL_ID_NOTIFY         -3 // transient status message (state dump result, errors)
 
 // Panel decoration flags (bitwise OR)
 #define PANEL_FLAG_NO_ACCENT 0x01
@@ -110,6 +111,18 @@ void panel_center_in_grid(int term_cols, int term_rows,
 // otherwise the row below, otherwise bottom-aligned. A link_row outside the
 // grid clamps into it.
 PanelRect panel_link_hint_rect(int term_cols, int term_rows, int link_row);
+
+// Cell rectangle of a transient status message. The box sits at the top of
+// the grid, centered horizontally, and is two content rows tall (a title row
+// and a body row) plus the decoration padding. `content_cols` is the width
+// of the message text in cells; the box never grows wider than the grid.
+PanelRect panel_notify_rect(int term_cols, int term_rows, int content_cols);
+
+// Shorten `text` to at most `max_bytes` bytes, keeping the tail (the
+// informative end of a path) and marking the cut with a leading ellipsis.
+// Never splits a UTF-8 codepoint. Writes a NUL-terminated string into `out`.
+void panel_elide_front(const char *text, size_t max_bytes,
+                       char *out, size_t out_n);
 
 void panel_pixel_to_grid(int cell_w, int cell_h,
                          int px, int py, int *col, int *row);

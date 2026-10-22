@@ -116,8 +116,12 @@ build/src/portty --demo "Hello, world!"
 | Right-click              | Copy selection if active, otherwise paste (works in altscreen too)           |
 | `Ctrl+click` on link     | Open OSC-8 URL via the system handler                                        |
 | `Ctrl+Shift+F6`          | Open the diagnostics report (built-in pager)                                 |
-| `Ctrl+Shift+F7`          | Dump the full terminal state to a JSON file                                  |
+| `Ctrl+Shift+F7`          | Dump the full terminal state to a JSON file (path shown in a status panel)   |
 | `Ctrl+Shift+N`           | Spawn a new terminal window in the shell's CWD                               |
+
+### Status Panels
+
+Short-lived messages appear as a transient panel at the top of the grid and disappear on their own: the destination of a `Ctrl+Shift+F7` state dump (or the reason it failed), and failures to open an OSC-8 link. The panel is coloured by severity — blue for information, red for errors.
 
 ### Diagnostics Report
 

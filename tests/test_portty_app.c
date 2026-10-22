@@ -14,8 +14,15 @@
 #include "../src/term_cfr.h"
 #include "../src/portty_pty.h"
 #include <coffer/coffer.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 float portty_text_gamma = 1.0f;
 float portty_text_contrast = 0.0f;
@@ -43,6 +50,12 @@ typedef struct
     int hover_set_id;     // last id passed to panel_set_hover
     bool hover_set_value; // last value passed to panel_set_hover
     int panel_set_hover_calls;
+    // Notification tracking
+    bool notify_called;
+    char notify_title[128];
+    char notify_body[512];
+    PorttyNotifyLevel notify_level;
+    unsigned int notify_ttl_ms;
 } StubPlatState;
 
 static StubPlatState g_state = { 0 };
@@ -122,6 +135,20 @@ static void backend_set_cursor(PorttyBackend *self, PorttyCursor shape)
     g_state.set_cursor_call_count++;
 }
 
+static void backend_notify(PorttyBackend *self, const char *title,
+                           const char *body, PorttyNotifyLevel level,
+                           unsigned int ttl_ms)
+{
+    (void)self;
+    g_state.notify_called = true;
+    snprintf(g_state.notify_title, sizeof(g_state.notify_title), "%s",
+             title ? title : "");
+    snprintf(g_state.notify_body, sizeof(g_state.notify_body), "%s",
+             body ? body : "");
+    g_state.notify_level = level;
+    g_state.notify_ttl_ms = ttl_ms;
+}
+
 static void reset_state(void)
 {
     g_state = (StubPlatState){ 0 };
@@ -136,6 +163,7 @@ static void reset_state(void)
         .get_scroll_offset = backend_get_scroll_offset,
         .get_cell_size = backend_get_cell_size,
         .set_cursor = backend_set_cursor,
+        .notify = backend_notify,
     };
 }
 
@@ -435,6 +463,112 @@ static void test_clear_hover_clears_panel_hover(void)
     destroy_key_mock_term(term);
 }
 
+// ---- State dump notification ----
+
+// Create a scratch directory for the dump test. Returns a malloc'd path the
+// caller must free, or NULL on failure.
+static char *make_temp_dir(void)
+{
+#ifdef _WIN32
+    char base[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, base) == 0)
+        return NULL;
+    char path[MAX_PATH];
+    snprintf(path, sizeof(path), "%sportty_test_dump_%lu", base,
+             (unsigned long)GetCurrentProcessId());
+    if (CreateDirectoryA(path, NULL) == 0 &&
+        GetLastError() != ERROR_ALREADY_EXISTS)
+        return NULL;
+    return strdup(path);
+#else
+    char tmpl[] = "/tmp/portty_test_dump_XXXXXX";
+    if (!mkdtemp(tmpl))
+        return NULL;
+    return strdup(tmpl);
+#endif
+}
+
+// Create a regular file inside `dir`; the caller must free the path.
+static char *make_blocker_file(const char *dir)
+{
+    char path[1024];
+    snprintf(path, sizeof(path), "%s/blocker", dir);
+    FILE *f = fopen(path, "wb");
+    if (!f)
+        return NULL;
+    fputs("x", f);
+    fclose(f);
+    return strdup(path);
+}
+
+static void remove_temp_dir(const char *dir)
+{
+#ifdef _WIN32
+    _rmdir(dir);
+#else
+    rmdir(dir);
+#endif
+}
+
+static void test_ctrl_shift_f7_notifies_dump_result(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    char *dir = make_temp_dir();
+    ASSERT_NOT_NULL(dir);
+
+    PorttyConf conf = { 0 };
+    conf.dump_dir = dir; // keep the dump out of the user's state directory
+    PorttyApp app = { .term = term, .backend = &g_stub_backend, .conf = &conf };
+
+    KeyboardResult r = portty_app_handle_key(&app, TERM_KEY_F7,
+                                             TERM_MOD_CTRL | TERM_MOD_SHIFT, 0);
+    ASSERT_TRUE(r.handled);
+    ASSERT_TRUE(g_state.notify_called);
+    ASSERT_EQ(g_state.notify_level, PORTTY_NOTIFY_INFO);
+    ASSERT_TRUE(g_state.notify_ttl_ms > 0);
+    ASSERT_TRUE(strstr(g_state.notify_body, dir) != NULL);
+
+    // The dump landed in the scratch directory.
+    FILE *f = fopen(g_state.notify_body, "rb");
+    ASSERT_NOT_NULL(f);
+    if (f)
+        fclose(f);
+
+    remove(g_state.notify_body);
+    remove_temp_dir(dir);
+    free(dir);
+    destroy_key_mock_term(term);
+}
+
+static void test_ctrl_shift_f7_notifies_dump_failure(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    char *dir = make_temp_dir();
+    ASSERT_NOT_NULL(dir);
+    // A regular file where the dump directory should be: the write fails.
+    char *blocker = make_blocker_file(dir);
+    ASSERT_NOT_NULL(blocker);
+
+    PorttyConf conf = { 0 };
+    conf.dump_dir = blocker;
+    PorttyApp app = { .term = term, .backend = &g_stub_backend, .conf = &conf };
+
+    KeyboardResult r = portty_app_handle_key(&app, TERM_KEY_F7,
+                                             TERM_MOD_CTRL | TERM_MOD_SHIFT, 0);
+    ASSERT_TRUE(r.handled);
+    ASSERT_TRUE(g_state.notify_called);
+    ASSERT_EQ(g_state.notify_level, PORTTY_NOTIFY_ERROR);
+    ASSERT_TRUE(strlen(g_state.notify_body) > 0);
+
+    remove(blocker);
+    free(blocker);
+    remove_temp_dir(dir);
+    free(dir);
+    destroy_key_mock_term(term);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -456,6 +590,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_keypress_resumes_pty_during_selection);
     RUN_TEST(test_ctrl_c_still_copies_and_clears);
     RUN_TEST(test_text_input_does_not_clear_selection);
+
+    // State dump notification
+    RUN_TEST(test_ctrl_shift_f7_notifies_dump_result);
+    RUN_TEST(test_ctrl_shift_f7_notifies_dump_failure);
 
     TEST_SUMMARY();
 }
