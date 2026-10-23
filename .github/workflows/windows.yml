@@ -22,7 +22,7 @@ jobs:
       # coffer-install cache key in this file. Bump alongside configure.ac's
       # pkg-config minimum; the same ref lives in linux.yml / macos.yml
       # (bump all three together).
-      COFFER_REF: v0.9.1
+      COFFER_REF: v0.9.2
 
     steps:
       - name: Checkout portty
