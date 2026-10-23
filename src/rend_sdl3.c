@@ -1384,6 +1384,10 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
                 int box_w = pl->cols * data->cell_width;
                 int box_h = pl->rows * data->cell_height;
 
+                // X=/Y= shift the image inside its first cell.
+                px += pl->cell_off_x;
+                py += pl->cell_off_y;
+
                 if (py + box_h <= 0 || py >= data->height)
                     continue;
                 if (px + box_w <= 0 || px >= data->width)

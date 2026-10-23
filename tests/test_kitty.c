@@ -105,15 +105,25 @@ static void test_bridge_place(void)
     };
     terminal_set_cell_px(&t, 10, 6);
 
-    uint8_t rgba[4] = { 0, 255, 0, 255 };
-    char b64[64];
+    /* A 10x10 green image. */
+    uint8_t rgba[10 * 10 * 4];
+    for (int i = 0; i < 10 * 10; i++) {
+        rgba[i * 4 + 0] = 0;
+        rgba[i * 4 + 1] = 255;
+        rgba[i * 4 + 2] = 0;
+        rgba[i * 4 + 3] = 255;
+    }
+    char b64[1024];
     b64_encode(rgba, sizeof(rgba), b64);
-    char seq[256];
+    char seq[2048];
     snprintf(seq, sizeof(seq),
-             "\x1b_Ga=t,f=32,s=1,v=1,i=9;%s\x1b\\", b64);
+             "\x1b_Ga=t,f=32,s=10,v=10,i=9;%s\x1b\\", b64);
     feed(&t, seq);
 
-    feed(&t, "\x1b_Ga=p,i=9,p=77,z=-3,x=2,y=4,w=5,h=6\x1b\\");
+    /* The placement sits at the cursor; x=/y=/w=/h= are the source rect
+     * in pixels, c=/r= the display box in cells, X=/Y= the offset inside
+     * the first cell. */
+    feed(&t, "\x1b_Ga=p,i=9,p=77,z=-3,x=2,y=4,w=5,h=6,c=3,r=2,X=1,Y=2\x1b\\");
 
     int n = 0;
     const CfrImagePlacement *pls =
@@ -123,10 +133,16 @@ static void test_bridge_place(void)
     ASSERT_EQ((long long)pls[0].image_id, 9);
     ASSERT_EQ((long long)pls[0].id, 77);
     ASSERT_EQ(pls[0].z_index, -3);
-    ASSERT_EQ(pls[0].col, 2);
-    ASSERT_EQ(pls[0].row, 4);
-    ASSERT_EQ(pls[0].cols, 5);
-    ASSERT_EQ(pls[0].rows, 6);
+    ASSERT_EQ(pls[0].col, 0);
+    ASSERT_EQ(pls[0].row, 0);
+    ASSERT_EQ(pls[0].cols, 3);
+    ASSERT_EQ(pls[0].rows, 2);
+    ASSERT_EQ(pls[0].src_x, 2);
+    ASSERT_EQ(pls[0].src_y, 4);
+    ASSERT_EQ(pls[0].src_w, 5);
+    ASSERT_EQ(pls[0].src_h, 6);
+    ASSERT_EQ(pls[0].cell_off_x, 1);
+    ASSERT_EQ(pls[0].cell_off_y, 2);
 
     terminal_destroy(&t);
 }
