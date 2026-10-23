@@ -465,6 +465,25 @@ static void test_clear_hover_clears_panel_hover(void)
 
 // ---- State dump notification ----
 
+// The path separator the dump uses when it joins a directory and a file
+// name.
+#ifdef _WIN32
+#define DUMP_SEP '\\'
+#else
+#define DUMP_SEP '/'
+#endif
+
+// The last path separator in `s`, of either kind: a path can carry both
+// (a Windows temp path handed to the test by the environment, say).
+static const char *last_sep(const char *s)
+{
+    const char *last = NULL;
+    for (const char *p = s; *p; p++)
+        if (*p == '/' || *p == '\\')
+            last = p;
+    return last;
+}
+
 // Create a scratch directory for the dump test. Returns a malloc'd path the
 // caller must free, or NULL on failure.
 static char *make_temp_dir(void)
@@ -527,15 +546,26 @@ static void test_ctrl_shift_f7_notifies_dump_result(void)
     ASSERT_TRUE(g_state.notify_called);
     ASSERT_EQ(g_state.notify_level, PORTTY_NOTIFY_INFO);
     ASSERT_TRUE(g_state.notify_ttl_ms > 0);
-    ASSERT_TRUE(strstr(g_state.notify_body, dir) != NULL);
+    ASSERT_STR_EQ(g_state.notify_title, "State dump written");
 
-    // The dump landed in the scratch directory.
-    FILE *f = fopen(g_state.notify_body, "rb");
+    // The panel shows the path elided to the grid width, so it keeps the
+    // tail: the file name stays visible however long the path is.
+    const char *sep = last_sep(g_state.notify_body);
+    ASSERT_NOT_NULL(sep);
+    const char *name = sep + 1;
+    ASSERT_TRUE(strncmp(name, "portty-state-", 13) == 0);
+    ASSERT_TRUE(strstr(name, ".json") != NULL);
+
+    // The dump landed in the scratch directory, under the name the panel
+    // shows.
+    char full[1024];
+    snprintf(full, sizeof(full), "%s%c%s", dir, DUMP_SEP, name);
+    FILE *f = fopen(full, "rb");
     ASSERT_NOT_NULL(f);
     if (f)
         fclose(f);
 
-    remove(g_state.notify_body);
+    remove(full);
     remove_temp_dir(dir);
     free(dir);
     destroy_key_mock_term(term);
@@ -560,6 +590,7 @@ static void test_ctrl_shift_f7_notifies_dump_failure(void)
     ASSERT_TRUE(r.handled);
     ASSERT_TRUE(g_state.notify_called);
     ASSERT_EQ(g_state.notify_level, PORTTY_NOTIFY_ERROR);
+    ASSERT_STR_EQ(g_state.notify_title, "State dump failed");
     ASSERT_TRUE(strlen(g_state.notify_body) > 0);
 
     remove(blocker);
