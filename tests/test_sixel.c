@@ -63,10 +63,11 @@ static void test_bridge_decode(void)
     ASSERT_EQ(px(&s[0], 0, 0)[0], 255); /* red */
     ASSERT_EQ(px(&s[0], 0, 0)[3], 255); /* opaque */
 
-    /* Cell pixel size (10x6) → a 6px image is one row tall; the sixel
-     * landing puts the cursor on the image's last row (row 0). */
+    /* Cell pixel size (10x6) → a 6px image is one row tall; the cursor
+     * lands below the image, so the text that follows it is never
+     * under the image's pixels. */
     TerminalPos cur = terminal_get_cursor_pos(&t);
-    ASSERT_EQ(cur.row, 0);
+    ASSERT_EQ(cur.row, 1);
 
     terminal_destroy(&t);
 }

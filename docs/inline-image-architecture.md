@@ -49,7 +49,10 @@ Key operations:
   placements' `abs_line`, not the record's (which is `0` for named images).
 
 `img_advance_cursor` is shared; sixel's DECSDM/8452 modes are checked inside
-it, and non-sixel callers get default cursor-below behavior.
+it, and it lands the cursor below the image's cell footprint, so the text
+that follows a 1:1 image (sixel, iTerm2) is never under its pixels. A kitty
+placement has its own landing (`k_advance_cursor`): the cursor moves right
+past the image and stays on its last row, kitty's rule.
 
 ### Per-system integration
 
