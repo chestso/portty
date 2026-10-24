@@ -1,5 +1,7 @@
 # portty
 
+**Homepage:** <https://chest.so/portty/>
+
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chestso/portty)
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
