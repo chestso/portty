@@ -279,6 +279,27 @@ void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod)
     term->send_char(term, codepoint, mod);
 }
 
+void terminal_reset_input_state(TerminalBackend *term)
+{
+    if (!term || !term->reset_input_state)
+        return;
+    term->reset_input_state(term);
+}
+
+void terminal_reset(TerminalBackend *term)
+{
+    if (!term || !term->reset)
+        return;
+    term->reset(term);
+}
+
+uint32_t terminal_get_kitty_kb_flags(TerminalBackend *term)
+{
+    if (!term || !term->get_kitty_kb_flags)
+        return 0;
+    return term->get_kitty_kb_flags(term);
+}
+
 void terminal_start_paste(TerminalBackend *term)
 {
     if (!term || !term->start_paste)

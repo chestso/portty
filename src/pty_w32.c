@@ -681,6 +681,29 @@ int pty_get_master_fd(PtyContext *ctx)
     return -1;
 }
 
+/* ConPTY keeps the console line discipline on the Windows side: there
+ * are no termios settings to restore, so the terminal reset only
+ * resets the VT state. */
+bool pty_reset_termios(PtyContext *ctx)
+{
+    (void)ctx;
+    return false;
+}
+
+/* Windows has no process groups on a console pseudo-terminal, so the
+ * "the program that had the keyboard died" detection is unavailable. */
+int pty_get_fg_pgrp(PtyContext *ctx)
+{
+    (void)ctx;
+    return -1;
+}
+
+bool pty_pgrp_alive(int pgrp)
+{
+    (void)pgrp;
+    return false;
+}
+
 void *pty_get_process_handle(PtyContext *ctx)
 {
     if (!ctx)

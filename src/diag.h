@@ -9,6 +9,7 @@
 #define DIAG_H
 
 #include <stdbool.h>
+#include <stdint.h>
 
 // Tri-state driver licensing classification for the diagnostics report.
 typedef enum
@@ -64,14 +65,15 @@ typedef struct
     int mouse_mode;
 
     // VT engine features (coffer)
-    const char *vt_backend; // VT engine name, e.g. "coffer"
-    bool lottie_rasterizer; // ThorVG available for Lottie rasterization
-    bool osc52;             // OSC 52 clipboard set wired up
-    bool bracketed_paste;   // CFR_MODE_BRACKETED_PASTE active
-    bool sync_output;       // CFR_MODE_SYNC_OUTPUT active
-    bool focus_reporting;   // CFR_MODE_FOCUS_REPORTING active
-    bool sixel_scrolling;   // CFR_MODE_SIXEL_SCROLLING active
-    bool hardened_heap;     // PORTTY_HARDEN_HEAP compile-time guard
+    const char *vt_backend;  // VT engine name, e.g. "coffer"
+    bool lottie_rasterizer;  // ThorVG available for Lottie rasterization
+    bool osc52;              // OSC 52 clipboard set wired up
+    bool bracketed_paste;    // CFR_MODE_BRACKETED_PASTE active
+    bool sync_output;        // CFR_MODE_SYNC_OUTPUT active
+    bool focus_reporting;    // CFR_MODE_FOCUS_REPORTING active
+    bool sixel_scrolling;    // CFR_MODE_SIXEL_SCROLLING active
+    uint32_t kitty_kb_flags; // kitty keyboard protocol flags (0 = off)
+    bool hardened_heap;      // PORTTY_HARDEN_HEAP compile-time guard
 
 #ifdef _WIN32
     bool conpty_dcs_ok;      // ConPTY passes DCS (sixel) sequences through

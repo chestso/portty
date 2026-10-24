@@ -45,6 +45,14 @@ typedef struct PorttyApp
     bool cursor_visible;
     int hovered_panel_id; // panel whose close button is hovered (0 = none)
 
+    // Kitty keyboard protocol recovery. `kb_flags_seen` is the flag mask
+    // last observed in the terminal, `kb_flags_owner_pgrp` the foreground
+    // process group that was in the foreground when those flags appeared.
+    // When the foreground group changes and the owner is gone, the
+    // program that pushed the flags died without popping them.
+    uint32_t kb_flags_seen;
+    int kb_flags_owner_pgrp;
+
     PorttyBackend *backend;           // selected backend (filled by entry point)
     FontResolveBackend *font_resolve; // platform-specific via #ifdef
 
@@ -80,6 +88,11 @@ void portty_app_handle_autoscroll_tick(PorttyApp *app);
 void portty_app_feed_terminal(void *app, const char *data, size_t len);
 void portty_app_handle_pty_closed(PorttyApp *app);
 void portty_app_handle_child_exit(PorttyApp *app, int status);
+
+// Pop the kitty keyboard protocol flags when the program that pushed
+// them has died without popping them. Call after PTY output is fed to
+// the terminal.
+void portty_app_check_kb_protocol_owner(PorttyApp *app);
 
 // Pixel-to-cell conversion (used by both backends' mouse handlers).
 bool portty_app_pixel_to_cell(PorttyApp *app, int px, int py,

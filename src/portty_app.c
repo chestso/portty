@@ -363,6 +363,7 @@ void portty_app_clear_hover(PorttyApp *app)
 #define DUMP_NOTIFY_TTL_MS       4000
 #define DUMP_ERROR_NOTIFY_TTL_MS 8000
 #define LINK_ERROR_NOTIFY_TTL_MS 6000
+#define RESET_NOTIFY_TTL_MS      5000
 
 // Show a transient status message, if the backend supports it. The text is
 // elided to the grid width so the message stays on one line per row: the
@@ -401,6 +402,138 @@ static void app_notify_dump_result(PorttyApp *app, const PorttyDumpResult *res)
     else
         app_notify(app, "State dump failed", res->error, PORTTY_NOTIFY_ERROR,
                    DUMP_ERROR_NOTIFY_TTL_MS);
+}
+
+/* ------------------------------------------------------------------ */
+/* Terminal reset                                                      */
+/* ------------------------------------------------------------------ */
+
+/* Describe the input-protocol state that is currently active, so the
+ * reset notification can name what was stuck. */
+static void input_state_summary(TerminalBackend *term, char *buf, size_t cap)
+{
+    if (!buf || cap == 0)
+        return;
+    buf[0] = '\0';
+    if (!term)
+        return;
+
+    size_t used = 0;
+    uint32_t flags = terminal_get_kitty_kb_flags(term);
+    if (flags)
+        used += (size_t)snprintf(buf + used, cap - used,
+                                 "kitty keyboard flags 0x%x", flags);
+
+    if (terminal_get_mode(term, CFR_MODE_MOUSE_ANY_EVENT) ||
+        terminal_get_mode(term, CFR_MODE_MOUSE_BTN_EVENT) ||
+        terminal_get_mode(term, CFR_MODE_MOUSE_DRAG) ||
+        terminal_get_mode(term, CFR_MODE_MOUSE_X10)) {
+        used += (size_t)snprintf(buf + used, cap - used, "%smouse reporting",
+                                 used ? ", " : "");
+    }
+
+    if (used == 0)
+        snprintf(buf, cap, "no input protocol was active");
+    else if (used >= cap)
+        buf[cap - 1] = '\0';
+}
+
+/* Reset the input-protocol state: kitty keyboard flags, modifyOtherKeys,
+ * application cursor/keypad modes, mouse and focus reporting. The
+ * screen and the scrollback are left alone. This is the recovery for a
+ * program that enabled one of those protocols and died without
+ * cleaning up — the shell then gets legacy key encodings again. */
+static void portty_app_reset_input_state(PorttyApp *app)
+{
+    if (!app || !app->term)
+        return;
+
+    char what[256];
+    input_state_summary(app->term, what, sizeof(what));
+
+    terminal_reset_input_state(app->term);
+    terminal_selection_clear(app->term);
+
+    vlog("Terminal input state reset: %s\n", what);
+    app_notify(app, "Terminal reset", what, PORTTY_NOTIFY_INFO,
+               RESET_NOTIFY_TTL_MS);
+}
+
+/* Full reset (RIS) — what the shell command `reset` does: the screen,
+ * the scrollback and every mode go back to their initial state, and
+ * the line discipline is restored so a program that died in raw mode
+ * does not leave the shell without echo. */
+static void portty_app_full_reset(PorttyApp *app)
+{
+    if (!app || !app->term)
+        return;
+
+    terminal_reset(app->term);
+    terminal_selection_clear(app->term);
+
+    bool modes_restored = false;
+    if (app->pty)
+        modes_restored = pty_reset_termios(app->pty);
+
+    if (app->backend && app->backend->reset_scroll)
+        app->backend->reset_scroll(app->backend);
+
+    vlog("Terminal fully reset (termios restored: %s)\n",
+         modes_restored ? "yes" : "no");
+    app_notify(app, "Terminal fully reset",
+               modes_restored ? "screen and scrollback cleared, terminal modes restored"
+                              : "screen and scrollback cleared",
+               PORTTY_NOTIFY_INFO, RESET_NOTIFY_TTL_MS);
+}
+
+/* Pop the kitty keyboard protocol flags when the program that pushed
+ * them is gone. A program that enables the protocol and dies without
+ * popping it leaves every Ctrl+key routed through CSI-u, and the shell
+ * can no longer read a line.
+ *
+ * The owner is the foreground process group at the time the flags
+ * appeared. When the foreground group changes and the owner is gone,
+ * the program died and the flags are stale. A suspended job (Ctrl+Z)
+ * keeps its process group alive, so its flags are left alone. */
+void portty_app_check_kb_protocol_owner(PorttyApp *app)
+{
+    if (!app || !app->term || !app->pty)
+        return;
+
+    uint32_t flags = terminal_get_kitty_kb_flags(app->term);
+    if (flags == 0) {
+        app->kb_flags_seen = 0;
+        app->kb_flags_owner_pgrp = 0;
+        return;
+    }
+
+    int fg = pty_get_fg_pgrp(app->pty);
+
+    if (flags != app->kb_flags_seen) {
+        /* New flags: the program in the foreground owns them. */
+        app->kb_flags_seen = flags;
+        app->kb_flags_owner_pgrp = fg;
+        return;
+    }
+
+    if (fg <= 0 || app->kb_flags_owner_pgrp <= 0)
+        return;
+    if (fg == app->kb_flags_owner_pgrp)
+        return;
+    if (pty_pgrp_alive(app->kb_flags_owner_pgrp))
+        return;
+
+    vlog("Foreground program %d died holding the kitty keyboard flags "
+         "(0x%x) — popping them\n",
+         app->kb_flags_owner_pgrp, flags);
+
+    terminal_reset_input_state(app->term);
+    app->kb_flags_seen = 0;
+    app->kb_flags_owner_pgrp = 0;
+
+    app_notify(app, "Keyboard protocol reset",
+               "the previous program exited without clearing it",
+               PORTTY_NOTIFY_INFO, RESET_NOTIFY_TTL_MS);
 }
 
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
@@ -505,6 +638,27 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
         PorttyDumpResult res;
         portty_app_dump_state(app, NULL, &res);
         app_notify_dump_result(app, &res);
+        result.handled = true;
+        return result;
+    }
+
+    // Ctrl+Delete → reset the terminal's input-protocol state.
+    // Same chord as kitty's "reset terminal" (kitty_mod+delete): a
+    // program that enabled the kitty keyboard protocol or application
+    // cursor keys and died leaves the shell unable to read a line.
+    if (term_key == TERM_KEY_DEL && (mod & TERM_MOD_CTRL)) {
+        portty_app_reset_input_state(app);
+        result.force_redraw = true;
+        result.handled = true;
+        return result;
+    }
+
+    // Ctrl+Shift+F8 → full reset (RIS), like the shell command `reset`:
+    // the screen, the scrollback and every mode go back to their
+    // initial state, and the terminal line discipline is restored.
+    if (term_key == TERM_KEY_F8 && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
+        portty_app_full_reset(app);
+        result.force_redraw = true;
         result.handled = true;
         return result;
     }
@@ -897,6 +1051,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .sync_output = terminal_get_mode(app->term, CFR_MODE_SYNC_OUTPUT),
         .focus_reporting = terminal_get_mode(app->term, CFR_MODE_FOCUS_REPORTING),
         .sixel_scrolling = terminal_get_mode(app->term, CFR_MODE_SIXEL_SCROLLING),
+        .kitty_kb_flags = terminal_get_kitty_kb_flags(app->term),
 #ifdef _WIN32
         .conpty_dcs_ok = pty_conpty_dcs_passthrough(),
         .conpty_host = pty_conpty_host_name(),

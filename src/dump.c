@@ -477,6 +477,12 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
     fputs(terminal_is_altscreen(term) ? "true,\n" : "false,\n", out);
     fprintf(out, "  \"mouse_mode\": %d,\n", terminal_get_mouse_mode(term));
 
+    /* Keyboard protocol. The kitty flags are 0 while the protocol is
+     * off; a non-zero value means every Ctrl+key is encoded as CSI-u,
+     * which a shell cannot read. */
+    fprintf(out, "  \"kitty_kb_flags\": %u,\n",
+            (unsigned)terminal_get_kitty_kb_flags(term));
+
     /* Cursor. */
     {
         bool first = true;

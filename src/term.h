@@ -206,6 +206,19 @@ struct TerminalBackend
     void (*send_key)(TerminalBackend *term, int key, int mod);
     void (*send_char)(TerminalBackend *term, uint32_t codepoint, int mod);
 
+    // Reset the input-protocol state: kitty keyboard flags,
+    // modifyOtherKeys, application cursor/keypad modes, mouse and focus
+    // reporting. The screen and the scrollback are left alone. Use it to
+    // recover from a program that enabled one of those protocols and died
+    // without cleaning up.
+    void (*reset_input_state)(TerminalBackend *term);
+    // Full reset (RIS): everything reset_input_state() clears, plus the
+    // screen, the scrollback and the rest of the terminal state.
+    void (*reset)(TerminalBackend *term);
+    // Kitty keyboard protocol flags currently in effect (0 = the protocol
+    // is off and keys are encoded the legacy way).
+    uint32_t (*get_kitty_kb_flags)(TerminalBackend *term);
+
     // Bracketed paste support
     void (*start_paste)(TerminalBackend *term);
     void (*end_paste)(TerminalBackend *term);
@@ -361,6 +374,18 @@ enum
 
 void terminal_send_key(TerminalBackend *term, int key, int mod);
 void terminal_send_char(TerminalBackend *term, uint32_t codepoint, int mod);
+
+// Reset the input-protocol state (kitty keyboard flags, modifyOtherKeys,
+// application cursor/keypad modes, mouse and focus reporting). The screen
+// and the scrollback are left alone.
+void terminal_reset_input_state(TerminalBackend *term);
+
+// Full reset (RIS): the input-protocol state, the screen, the scrollback
+// and the rest of the terminal state.
+void terminal_reset(TerminalBackend *term);
+
+// Kitty keyboard protocol flags currently in effect (0 = off).
+uint32_t terminal_get_kitty_kb_flags(TerminalBackend *term);
 
 // Bracketed paste support
 void terminal_start_paste(TerminalBackend *term);

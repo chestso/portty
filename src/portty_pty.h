@@ -97,6 +97,40 @@ bool pty_is_running(PtyContext *ctx);
 int pty_get_master_fd(PtyContext *ctx);
 
 /**
+ * Restore the line-discipline settings captured when the PTY was created.
+ *
+ * A program that puts the terminal in raw mode (no echo, no canonical
+ * input) and dies without restoring it leaves the shell in that mode.
+ * Restoring the snapshot puts the terminal back the way portty set it
+ * up. Called by the terminal-reset shortcut.
+ *
+ * @param ctx PTY context
+ * @return true if the settings were restored, false if unavailable
+ */
+bool pty_reset_termios(PtyContext *ctx);
+
+/**
+ * Get the foreground process group of the PTY.
+ *
+ * Used to tell which program owns the keyboard: when the foreground
+ * group changes and the previous group is gone, the program that had
+ * the terminal has died.
+ *
+ * @param ctx PTY context
+ * @return Process group id, or -1 when unavailable (always -1 on
+ *         Windows, which has no process groups)
+ */
+int pty_get_fg_pgrp(PtyContext *ctx);
+
+/**
+ * Check whether a process group still has any member.
+ *
+ * @param pgrp Process group id (positive)
+ * @return true if at least one process is still in the group
+ */
+bool pty_pgrp_alive(int pgrp);
+
+/**
  * Initialize SIGCHLD signal handling.
  *
  * Sets up a self-pipe for async-signal-safe notification of child exit.

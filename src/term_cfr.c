@@ -1028,6 +1028,30 @@ static bool cfr_back_get_mode(TerminalBackend *term, CfrMode mode)
     return cfr_get_mode(d->vt, mode);
 }
 
+static void cfr_back_reset_input_state(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d)
+        return;
+    cfr_reset_input_state(d->vt);
+}
+
+static void cfr_back_reset(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d)
+        return;
+    cfr_reset(d->vt);
+}
+
+static uint32_t cfr_back_get_kitty_kb_flags(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d)
+        return 0;
+    return cfr_get_kitty_kb_flags(d->vt);
+}
+
 static bool cfr_back_get_selection(TerminalBackend *term, TerminalSelection *out)
 {
     CfrBackendData *d = term->backend_data;
@@ -1082,6 +1106,9 @@ TerminalBackend terminal_backend_cfr = {
     .set_output_callback = cfr_back_set_output_callback,
     .send_key = cfr_back_send_key,
     .send_char = cfr_back_send_char,
+    .reset_input_state = cfr_back_reset_input_state,
+    .reset = cfr_back_reset,
+    .get_kitty_kb_flags = cfr_back_get_kitty_kb_flags,
     .start_paste = cfr_back_start_paste,
     .end_paste = cfr_back_end_paste,
     .get_line_continuation = cfr_back_get_line_continuation,

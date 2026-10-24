@@ -59,6 +59,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
 - Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. The capabilities line lists all three inline image protocols (sixel, iTerm2, kitty graphics) alongside OSC 8, grapheme clusters, and reflow. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
+- Terminal reset (`Ctrl+Delete`, `Ctrl+Shift+F8`) — recovers a shell that a program left unable to read a line, and clears the keyboard protocol flags on its own when the program that pushed them is gone
 - Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs, including automatic `xterm-mouse-mode` so the mouse works in `emacs -nw`
 - Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
 
@@ -120,6 +121,18 @@ build/src/portty --demo "Hello, world!"
 | `Ctrl+Shift+F6`          | Open the diagnostics report (built-in pager)                                 |
 | `Ctrl+Shift+F7`          | Dump the full terminal state to a JSON file (path shown in a status panel)   |
 | `Ctrl+Shift+N`           | Spawn a new terminal window in the shell's CWD                               |
+| `Ctrl+Delete`            | Reset the terminal's input protocol (see below)                              |
+| `Ctrl+Shift+F8`          | Full terminal reset — clears the screen and the scrollback (see below)       |
+
+### Terminal Reset
+
+A program can leave the terminal in a mode the shell cannot talk to: the usual case is a TUI that enables the [kitty keyboard protocol](https://sw.kovidgoyal.net/kitty/keyboard-protocol/) (`CSI > flags u`) and dies without popping it. Every `Ctrl`+key is then sent as `CSI 97;5u` instead of a control byte, `Enter` stops submitting the line, and the shell looks like it is echoing escape codes.
+
+`Ctrl+Delete` (the same chord as kitty's `kitty_mod+delete` "reset terminal") clears that state: the kitty keyboard flags, xterm `modifyOtherKeys`, application cursor keys (`DECCKM`), application keypad, mouse reporting and focus reporting all go back to their defaults. The screen and the scrollback are left alone. A status panel names what was stuck.
+
+`Ctrl+Shift+F8` does the full reset — the same thing the shell command `reset` does: the screen, the scrollback and every mode go back to their initial state, and the terminal line discipline is restored so a program that died in raw mode does not leave the shell without echo.
+
+portty also pops the kitty keyboard flags on its own when the program that pushed them is gone (detected on POSIX from the terminal's foreground process group), so a crashed TUI normally cannot leave the shell unusable in the first place.
 
 ### Status Panels
 

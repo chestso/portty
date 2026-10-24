@@ -30,8 +30,10 @@ struct PtyContext
     pid_t child_pid;
     int rows;
     int cols;
-    int exit_status; /* valid once exited is true */
-    bool exited;     /* sticky: child reaped (by anyone) */
+    int exit_status;              /* valid once exited is true */
+    bool exited;                  /* sticky: child reaped (by anyone) */
+    struct termios saved_termios; /* line discipline as portty set it up */
+    bool have_saved_termios;
 };
 
 // Self-pipe for SIGCHLD notification
@@ -156,6 +158,17 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
         fprintf(stderr, "ERROR: forkpty failed: %s\n", strerror(errno));
         free(ctx);
         return NULL;
+    }
+
+    /* Snapshot the slave's line-discipline settings so the terminal
+     * reset can restore them: a program that puts the terminal in raw
+     * mode and dies without restoring it leaves the shell without echo
+     * and without line editing. VERASE is forced to DEL here to match
+     * what the child sets up after exec, so the snapshot is what the
+     * child actually ends up with. */
+    if (tcgetattr(ctx->master_fd, &ctx->saved_termios) == 0) {
+        ctx->saved_termios.c_cc[VERASE] = 0x7f;
+        ctx->have_saved_termios = true;
     }
 
     if (pid == 0) {
@@ -443,6 +456,44 @@ int pty_get_master_fd(PtyContext *ctx)
     if (!ctx)
         return -1;
     return ctx->master_fd;
+}
+
+bool pty_reset_termios(PtyContext *ctx)
+{
+    if (!ctx || ctx->master_fd < 0 || !ctx->have_saved_termios)
+        return false;
+
+    if (tcsetattr(ctx->master_fd, TCSANOW, &ctx->saved_termios) != 0) {
+        vlog("PTY: restoring terminal modes failed: %s\n", strerror(errno));
+        return false;
+    }
+
+    vlog("PTY: terminal modes restored\n");
+    return true;
+}
+
+int pty_get_fg_pgrp(PtyContext *ctx)
+{
+    if (!ctx || ctx->master_fd < 0)
+        return -1;
+
+    pid_t pgrp = tcgetpgrp(ctx->master_fd);
+    if (pgrp < 0)
+        return -1;
+    return (int)pgrp;
+}
+
+bool pty_pgrp_alive(int pgrp)
+{
+    if (pgrp <= 0)
+        return false;
+
+    /* Signal the whole group with signal 0: the call only checks for
+     * existence. EPERM means the group exists but is not ours to
+     * signal — still alive. */
+    if (kill(-pgrp, 0) == 0)
+        return true;
+    return errno == EPERM;
 }
 
 bool pty_get_child_cwd(PtyContext *ctx, char *buf, size_t bufsize)

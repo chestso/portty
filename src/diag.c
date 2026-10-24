@@ -336,6 +336,10 @@ char *diag_build_report(const DiagSources *s)
         kv(&sb, "mouse mode", "off");
     else
         kvf(&sb, "mouse mode", "on (mode %d)", s->mouse_mode);
+    if (s->kitty_kb_flags == 0)
+        kv(&sb, "kitty keyboard", "off");
+    else
+        kvf(&sb, "kitty keyboard", "on (flags 0x%x)", s->kitty_kb_flags);
 
     // Session / environment
     section(&sb, "SESSION");

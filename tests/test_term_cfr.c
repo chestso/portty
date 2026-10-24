@@ -727,6 +727,109 @@ static void test_altscreen_resize_narrower_reflows(void)
     terminal_destroy(&t);
 }
 
+/* Captures the bytes the terminal would send to the PTY — that is how
+ * key encodings reach the child. */
+static char g_out[256];
+static size_t g_out_len;
+
+static void capture_output(const char *data, size_t len, void *user)
+{
+    (void)user;
+    if (g_out_len + len >= sizeof(g_out))
+        return;
+    memcpy(g_out + g_out_len, data, len);
+    g_out_len += len;
+    g_out[g_out_len] = '\0';
+}
+
+static void clear_output(void)
+{
+    g_out_len = 0;
+    g_out[0] = '\0';
+}
+
+/* A program that pushes the kitty keyboard protocol and dies without
+ * popping it leaves the flags set: every Ctrl+key is then sent as
+ * CSI-u, which a shell cannot read. The input-state reset pops them. */
+static void test_reset_input_state_restores_key_encoding(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 80;
+        cfg.rows = 24;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    terminal_set_output_callback(&t, capture_output, NULL);
+
+    feed(&t, "\x1b[>1u"); /* push the disambiguate flag */
+    ASSERT_EQ(terminal_get_kitty_kb_flags(&t), 1);
+
+    clear_output();
+    terminal_send_char(&t, 'a', TERM_MOD_CTRL);
+    ASSERT_STR_EQ(g_out, "\x1b[97;5u");
+
+    terminal_reset_input_state(&t);
+    ASSERT_EQ(terminal_get_kitty_kb_flags(&t), 0);
+
+    clear_output();
+    terminal_send_char(&t, 'a', TERM_MOD_CTRL);
+    ASSERT_STR_EQ(g_out, "\x01");
+
+    terminal_destroy(&t);
+}
+
+/* The input-state reset only touches the key encodings — the screen
+ * stays as it is. */
+static void test_reset_input_state_keeps_screen(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 80;
+        cfg.rows = 24;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    feed(&t, "hello");
+    terminal_reset_input_state(&t);
+
+    TerminalCell c;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &c), 0);
+    ASSERT_EQ(c.cp, (uint32_t)'h');
+
+    terminal_destroy(&t);
+}
+
+/* The full reset (RIS) clears the screen — like the shell command
+ * `reset`. */
+static void test_reset_clears_screen(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 80;
+        cfg.rows = 24;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    feed(&t, "hello");
+    terminal_reset(&t);
+
+    TerminalCell c;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &c), 0);
+    ASSERT_EQ(c.cp, 0);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -752,6 +855,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_cfr_new_independent);
     RUN_TEST(test_altscreen_resize_wider_readable);
     RUN_TEST(test_altscreen_resize_narrower_reflows);
+    RUN_TEST(test_reset_input_state_restores_key_encoding);
+    RUN_TEST(test_reset_input_state_keeps_screen);
+    RUN_TEST(test_reset_clears_screen);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

@@ -571,6 +571,57 @@ static void test_ctrl_shift_f7_notifies_dump_result(void)
     destroy_key_mock_term(term);
 }
 
+/* Ctrl+Delete resets the input-protocol state. A program that pushed
+ * the kitty keyboard protocol and died without popping it leaves every
+ * Ctrl+key encoded as CSI-u, which a shell cannot read. */
+static void test_ctrl_delete_resets_input_state(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    terminal_process_input(term, "\x1b[>1u", 6);
+    ASSERT_EQ(terminal_get_kitty_kb_flags(term), 1);
+
+    int keys_before = mock_send_key_call_count;
+    KeyboardResult r = portty_app_handle_key(&app, TERM_KEY_DEL,
+                                             TERM_MOD_CTRL, 0);
+    ASSERT_TRUE(r.handled);
+    ASSERT_EQ(terminal_get_kitty_kb_flags(term), 0);
+
+    /* The chord is consumed by portty — it never reaches the app. */
+    ASSERT_EQ(mock_send_key_call_count, keys_before);
+    ASSERT_TRUE(g_state.notify_called);
+    ASSERT_EQ(g_state.notify_level, PORTTY_NOTIFY_INFO);
+    ASSERT_STR_EQ(g_state.notify_title, "Terminal reset");
+
+    destroy_key_mock_term(term);
+}
+
+/* Ctrl+Shift+F8 does the full reset: the screen is cleared, like the
+ * shell command `reset` does. */
+static void test_ctrl_shift_f8_resets_terminal(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    terminal_process_input(term, "hello", 5);
+    TerminalCell cell;
+    ASSERT_EQ(terminal_get_cell(term, 0, 0, &cell), 0);
+    ASSERT_EQ(cell.cp, (uint32_t)'h');
+
+    KeyboardResult r = portty_app_handle_key(&app, TERM_KEY_F8,
+                                             TERM_MOD_CTRL | TERM_MOD_SHIFT, 0);
+    ASSERT_TRUE(r.handled);
+    ASSERT_EQ(terminal_get_cell(term, 0, 0, &cell), 0);
+    ASSERT_EQ(cell.cp, 0);
+    ASSERT_TRUE(g_state.notify_called);
+    ASSERT_STR_EQ(g_state.notify_title, "Terminal fully reset");
+
+    destroy_key_mock_term(term);
+}
+
 static void test_ctrl_shift_f7_notifies_dump_failure(void)
 {
     reset_state();
@@ -625,6 +676,8 @@ int main(int argc, char *argv[])
     // State dump notification
     RUN_TEST(test_ctrl_shift_f7_notifies_dump_result);
     RUN_TEST(test_ctrl_shift_f7_notifies_dump_failure);
+    RUN_TEST(test_ctrl_delete_resets_input_state);
+    RUN_TEST(test_ctrl_shift_f8_resets_terminal);
 
     TEST_SUMMARY();
 }

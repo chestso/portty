@@ -1970,6 +1970,10 @@ static void sdl3_run(PorttyBackend *self)
                         int pushed = rend_sdl3_process_pty_data(rend, term, payload->data, payload->len);
                         if (pushed > 0)
                             pty_scrolled = true;
+                        /* A program that pushed the kitty keyboard flags
+                         * and died leaves them set; the shell then gets
+                         * CSI-u encodings it cannot read. */
+                        portty_app_check_kb_protocol_owner(d->app);
                         self->set_window_title(self, terminal_get_title(term));
                         free(payload);
                         pty_processed = true;
