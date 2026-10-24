@@ -9,7 +9,8 @@ from textual.containers import Container, Horizontal, Vertical
 from textual.reactive import reactive
 from textual.widgets import Label, Static
 
-from .palette import charm
+from . import __version__
+from .palette import dracula
 from .protocol import (
     apc_delete,
     apc_load,
@@ -107,14 +108,14 @@ class OpacityDisplay(Static):
 
 
 class InfoBar(Horizontal):
-    """Bottom info bar — Charm-style with progress bar inline."""
+    """Bottom info bar — Dracula-style with progress bar inline."""
 
-    DEFAULT_CSS = charm("""
+    DEFAULT_CSS = dracula("""
     InfoBar {
         dock: bottom;
         height: 3;
         width: 100%;
-        background: {{BBQ}};
+        background: {{Background Dark}};
         padding: 1 3;
         align: left middle;
     }
@@ -130,43 +131,47 @@ class InfoBar(Horizontal):
     }
 
     InfoBar PlayIndicator {
-        color: {{Guac}};
+        color: {{Green}};
         text-style: bold;
     }
 
     InfoBar PlayIndicator.is-paused {
-        color: {{Zest}};
+        color: {{Yellow}};
     }
 
     InfoBar ProgressBar {
-        color: {{Larple}};
+        color: {{Purple}};
         width: 22;
         padding: 0 1 0 0;
     }
 
     InfoBar FrameCounter {
-        color: {{Squid}};
+        color: {{Comment}};
+    }
+
+    InfoBar .fps {
+        color: {{Comment}};
     }
 
     InfoBar SpeedDisplay {
-        color: {{Lilac}};
+        color: {{Pink}};
         text-style: bold;
     }
 
     InfoBar LoopIndicator.is-loop {
-        color: {{Guac}};
+        color: {{Green}};
     }
 
     InfoBar LoopIndicator.is-once {
-        color: {{Zest}};
+        color: {{Yellow}};
     }
 
     InfoBar LayerIndicator {
-        color: {{Squid}};
+        color: {{Comment}};
     }
 
     InfoBar OpacityDisplay {
-        color: {{Squid}};
+        color: {{Comment}};
     }
     """)
 
@@ -184,7 +189,7 @@ class InfoBar(Horizontal):
         yield PlayIndicator(classes="info-item")
         yield ProgressBar(total_frames=self.total_frames, classes="info-item")
         yield FrameCounter(total_frames=self.total_frames, classes="info-item")
-        yield Label(f"{self.fps}fps", classes="info-item")
+        yield Label(f"{self.fps}fps", classes="info-item fps")
         yield SpeedDisplay(classes="info-item")
         yield LoopIndicator(classes="info-item")
         yield LayerIndicator(classes="info-item")
@@ -194,12 +199,12 @@ class InfoBar(Horizontal):
 class HelpPanel(Vertical):
     """Right-aligned help panel showing keyboard shortcuts."""
 
-    DEFAULT_CSS = charm("""
+    DEFAULT_CSS = dracula("""
     HelpPanel {
         dock: right;
         width: 30;
         height: 100%;
-        background: {{BBQ}};
+        background: {{Background Dark}};
         padding: 1 2;
         display: none;
     }
@@ -209,7 +214,7 @@ class HelpPanel(Vertical):
     }
 
     HelpPanel .help-title {
-        color: {{Lilac}};
+        color: {{Purple}};
         text-style: bold;
         height: 1;
         width: 100%;
@@ -222,16 +227,20 @@ class HelpPanel(Vertical):
     }
 
     HelpPanel .key {
-        color: {{Larple}};
+        color: {{Cyan}};
         text-style: bold;
+        height: 1;
+        width: 9;
     }
 
     HelpPanel .desc {
-        color: {{Squid}};
+        color: {{Comment}};
+        height: 1;
+        width: 1fr;
     }
 
     HelpPanel .help-footer {
-        color: {{Iron}};
+        color: {{Selection}};
         height: 1;
         width: 100%;
         margin: 1 0 0 0;
@@ -251,47 +260,51 @@ class HelpPanel(Vertical):
             ("g", "toggle bg color"),
             ("q", "quit"),
         ]:
-            yield Label(f"  {key:7s} {desc}", classes="shortcut-row")
-        yield Label("  ?       close help", classes="shortcut-row")
+            with Horizontal(classes="shortcut-row"):
+                yield Label(f"  {key:7s}", classes="key")
+                yield Label(desc, classes="desc")
+        with Horizontal(classes="shortcut-row"):
+            yield Label("  ?      ", classes="key")
+            yield Label("close help", classes="desc")
         yield Label("press ? to toggle", classes="help-footer")
 
 
 class LottiePlayerApp(App):
     """A TUI Lottie animation player for portty."""
 
-    CSS = charm("""
+    CSS = dracula("""
     Screen {
-        background: {{Pepper}};
+        background: {{Background}};
     }
 
     #anim-area {
         height: 1fr;
         width: 100%;
         align: center middle;
-        border: round {{Larple}} 40%;
+        border: round {{Purple}} 40%;
         background: #000000;
     }
 
     #anim-area.soft-bg {
-        background: {{BBQ}};
+        background: {{Background Dark}};
     }
 
     #title-bar {
         dock: top;
         height: 3;
         width: 100%;
-        background: {{BBQ}};
+        background: {{Background Dark}};
         padding: 0 4;
         align: left middle;
     }
 
     #title-bar .app-name {
-        color: {{Lilac}};
+        color: {{Purple}};
         text-style: bold;
     }
 
     #title-bar .filename {
-        color: {{Orchid}};
+        color: {{Cyan}};
         text-style: italic;
     }
 
@@ -300,11 +313,12 @@ class LottiePlayerApp(App):
     }
 
     #title-bar .anim-info {
-        color: {{Iron}};
+        color: {{Comment}};
     }
 
     #title-bar .version {
-        color: {{Char}};
+        color: {{Selection}};
+        margin: 0 0 0 2;
     }
     """)
 
@@ -370,7 +384,7 @@ class LottiePlayerApp(App):
                 f"{self.meta['w']}×{self.meta['h']}  {self.meta['fr']}fps",
                 classes="anim-info",
             )
-            yield Label("  v0.2", classes="version")
+            yield Label(f"v{__version__}", classes="version")
         with Container(id="anim-area"):
             yield Label("")
         yield HelpPanel(id="help-panel")

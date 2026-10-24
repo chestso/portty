@@ -551,7 +551,7 @@ macOS only:
 
 ## plotty — Lottie Player
 
-[plotty](contrib/plotty) is a Python TUI application that plays Lottie animations in portty using the APC protocol. It provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling.
+[plotty](contrib/plotty) is a Python TUI application that plays Lottie animations in portty using the APC protocol. It provides interactive playback with keyboard controls for pause, seek, speed, opacity, and layer toggling. The interface is themed with the [Dracula Theme](https://draculatheme.com/spec) color palette.
 
 ### Install
 

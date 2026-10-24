@@ -3,6 +3,14 @@
 A Python TUI application that plays Lottie animations in [portty](https://github.com/nicm/portty),
 using the coffer Lottie APC protocol.
 
+## Theme
+
+The interface uses the [Dracula Theme](https://draculatheme.com/spec) color
+palette (Dracula Classic). Colors are referenced by token name in the CSS —
+`{{Purple}}`, `{{Background Dark}}`, `{{Comment}}` — and resolved from
+`src/plotty/assets/dracula.json`. Add a token there and reference it as
+`{{Token Name}}` in `src/plotty/tui.py` to extend the palette.
+
 ## Installation
 
 ```bash
