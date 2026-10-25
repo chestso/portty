@@ -41,7 +41,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Bold, italic, and bold-italic font styles (variable font axes, platform-native resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
-- Dynamic font fallback (up to 8 runtime fallback fonts with codepoint cache; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
+- Dynamic font fallback (up to 16 runtime fallback fonts; the covering font and its glyph id are resolved once per codepoint and memoised for the renderer's lifetime; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
 - Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering
@@ -200,7 +200,7 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `mouseup <x> <y> [button] [clicks]`                                   | Simulate a mouse button release                                                                                                                                           |
 | `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows (pops the same geometry overlay as an interactive resize)                                                                      |
 | `winsize <width> <height>`                                            | Set window pixel size                                                                                                                                                     |
-| `display-scale <scale>`                                              | Simulate the window moving to a display with another scale factor: the fonts are re-rasterized for the new DPI and the grid is derived from the new cell size                |
+| `display-scale <scale>`                                               | Simulate the window moving to a display with another scale factor: the fonts are re-rasterized for the new DPI and the grid is derived from the new cell size             |
 | `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                                                                                                         |
 | `panel_hide <id>`                                                     | Hide panel by ID                                                                                                                                                          |
 | `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |

@@ -35,6 +35,13 @@ static void test_plan_glyph_box_math_operator_keeps_width_fit(void);
 static void test_content_scale_changed(void);
 static void test_content_scale_unchanged(void);
 
+/* Fallback route cache — the covering font and its glyph id are resolved
+ * once per codepoint. */
+static void test_route_resolved_once_per_codepoint(void);
+static void test_route_negative_entry_cached(void);
+static void test_route_survives_face_eviction(void);
+static void test_route_dies_with_state(void);
+
 /* Helpers exported by font_stubs.c for testing the policy functions in
  * rend_common.c that consult the FontBackend for style/emoji decisions. */
 FontBackend make_test_font_backend(void);
@@ -42,6 +49,10 @@ void test_font_set_loaded_styles(uint32_t mask);
 void test_font_reset(void);
 bool test_font_get_box(FontStyle style, int *width, int *height,
                        bool *height_only_fit);
+void test_font_set_glyph(uint32_t cp, uint32_t glyph_id);
+void test_resolve_add_route(uint32_t cp, const char *path);
+int test_resolve_query_count(void);
+void test_resolve_reset(void);
 
 /* Helper: a letter 'A' trivially falls through the bold/italic cascade. */
 #define TEST_LATIN_A ((uint32_t)'A')
@@ -520,7 +531,6 @@ static void test_content_scale_changed(void)
     // is the same content scale as a 2x compositor with no user scale.
     ASSERT_TRUE(rend_content_scale_changed(2.0f, 1.0f));
 }
-
 static void test_content_scale_unchanged(void)
 {
     ASSERT_FALSE(rend_content_scale_changed(1.0f, 1.0f));
@@ -528,6 +538,136 @@ static void test_content_scale_unchanged(void)
     // Compositor jitter: a hair below the epsilon is not a change.
     ASSERT_FALSE(rend_content_scale_changed(1.0f, 1.001f));
     ASSERT_FALSE(rend_content_scale_changed(2.0f, 2.0f - REND_CONTENT_SCALE_EPSILON / 2.0f));
+}
+
+/* The fallback route cache: a codepoint's covering font and its glyph id
+ * are resolved once and memoised for the life of the fallback state. */
+
+static void test_route_resolved_once_per_codepoint(void)
+{
+    test_resolve_reset();
+    test_font_reset();
+    test_resolve_add_route(0x1234, "/fonts/a.ttf");
+    test_font_set_glyph(0x1234, 77);
+
+    FontBackend fb = make_test_font_backend();
+    FontResolveBackend resolve = { 0 };
+    FontOptions opts = { 0 };
+    RendFallbackState st;
+    rend_fallback_init(&st);
+
+    RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x1234, 12.0f, &opts, 10);
+    RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x1234, 12.0f, &opts, 10);
+
+    // The resolver is consulted once; the second call is served from the
+    // route table.
+    ASSERT_EQ(test_resolve_query_count(), 1);
+    ASSERT_NOT_NULL(r1.identity);
+    ASSERT_TRUE(r1.identity == r2.identity);
+    ASSERT_EQ(r1.glyph_id, 77);
+    ASSERT_EQ(r2.glyph_id, 77);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_route_negative_entry_cached(void)
+{
+    test_resolve_reset();
+    test_font_reset();
+
+    FontBackend fb = make_test_font_backend();
+    FontResolveBackend resolve = { 0 };
+    FontOptions opts = { 0 };
+    RendFallbackState st;
+    rend_fallback_init(&st);
+
+    // No font covers this codepoint — the negative answer is memoised too.
+    RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x9999, 12.0f, &opts, 10);
+    RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x9999, 12.0f, &opts, 10);
+
+    ASSERT_EQ(test_resolve_query_count(), 1);
+    ASSERT_NULL(r1.identity);
+    ASSERT_EQ(r1.glyph_id, 0);
+    ASSERT_NULL(r2.identity);
+    ASSERT_EQ(r2.glyph_id, 0);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_route_survives_face_eviction(void)
+{
+    test_resolve_reset();
+    test_font_reset();
+
+    // More distinct paths than the pool holds, so the oldest face is
+    // evicted while the routes live on.
+    const int n = REND_MAX_LOADED_FALLBACKS + 1;
+    uint32_t cps[REND_MAX_LOADED_FALLBACKS + 1];
+    for (int i = 0; i < n; i++) {
+        cps[i] = 0x2000 + i;
+        char path[64];
+        snprintf(path, sizeof(path), "/fonts/f%d.ttf", i);
+        test_resolve_add_route(cps[i], path);
+        test_font_set_glyph(cps[i], (uint32_t)(100 + i));
+    }
+
+    FontBackend fb = make_test_font_backend();
+    FontResolveBackend resolve = { 0 };
+    FontOptions opts = { 0 };
+    RendFallbackState st;
+    rend_fallback_init(&st);
+
+    RendRoute first[REND_MAX_LOADED_FALLBACKS + 1];
+    for (int i = 0; i < n; i++)
+        first[i] = rend_route_get(&st, &fb, &resolve, cps[i], 12.0f, &opts, 10);
+
+    for (int i = 0; i < n; i++) {
+        RendRoute again =
+            rend_route_get(&st, &fb, &resolve, cps[i], 12.0f, &opts, 10);
+        ASSERT_EQ(test_resolve_query_count(), n);
+        ASSERT_TRUE(first[i].identity != NULL);
+        ASSERT_TRUE(first[i].identity == again.identity);
+        ASSERT_EQ(first[i].glyph_id, again.glyph_id);
+        ASSERT_EQ(again.glyph_id, (uint32_t)(100 + i));
+    }
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_route_dies_with_state(void)
+{
+    test_resolve_reset();
+    test_font_reset();
+    test_resolve_add_route(0x1234, "/fonts/a.ttf");
+    test_font_set_glyph(0x1234, 77);
+
+    FontBackend fb = make_test_font_backend();
+    FontResolveBackend resolve = { 0 };
+    FontOptions opts = { 0 };
+    RendFallbackState st;
+    rend_fallback_init(&st);
+
+    RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x1234, 12.0f, &opts, 10);
+    ASSERT_NOT_NULL(r1.identity);
+
+    // The route cache lives inside the fallback state, so a fresh state
+    // asks the resolver again.
+    rend_fallback_destroy(&st, &fb);
+    rend_fallback_init(&st);
+    RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x1234, 12.0f, &opts, 10);
+    ASSERT_EQ(test_resolve_query_count(), 2);
+    ASSERT_NOT_NULL(r2.identity);
+    ASSERT_TRUE(r1.identity != r2.identity);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
 }
 
 int main(int argc, char *argv[])
@@ -570,6 +710,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_plan_glyph_box_math_operator_keeps_width_fit);
     RUN_TEST(test_content_scale_changed);
     RUN_TEST(test_content_scale_unchanged);
+    RUN_TEST(test_route_resolved_once_per_codepoint);
+    RUN_TEST(test_route_negative_entry_cached);
+    RUN_TEST(test_route_survives_face_eviction);
+    RUN_TEST(test_route_dies_with_state);
 
     TEST_SUMMARY();
 }

@@ -460,17 +460,10 @@ void rend_make_close_x_bitmap(uint8_t *buf, int size);
 // Fallback font resolution — GPU-agnostic
 // =============================================================================
 
-#define REND_FALLBACK_CACHE_SIZE 2048
 // Each loaded fallback is a whole face, but a screen full of text from many
 // scripts resolves to a handful; too small a pool evicts and reloads faces
 // (and re-rasterizes their glyphs) on every frame.
 #define REND_MAX_LOADED_FALLBACKS 16
-
-typedef struct
-{
-    uint32_t codepoint;
-    char *font_path;
-} RendFallbackCacheEntry;
 
 typedef struct
 {
@@ -486,12 +479,39 @@ typedef struct
     // keep a face's glyphs after the face itself has been evicted and find
     // them again when the path is reloaded — even at a different address.
     void *key;
+    // Whether the face for this path is a color font. Set when the face is
+    // loaded; the atlas-hit path needs the baked-color decision without
+    // loading the face again. Stable for the life of the font file.
+    bool color_font;
 } RendFallbackIdentity;
+
+// The route table: which font covers a codepoint, and which glyph id it has
+// there. A screen full of codepoints the primary font does not cover asks
+// the same question once per cell; the answer depends only on the codepoint
+// and the installed fonts, so it is memoised here.
+#define REND_ROUTE_TABLE_SIZE 32768 // power of two
+// Stop memoising at 75% fill; a full table would make the probe walk
+// forever. Past the limit a codepoint is still resolved, just not stored.
+#define REND_ROUTE_STORE_LIMIT (REND_ROUTE_TABLE_SIZE / 4 * 3)
 
 typedef struct
 {
-    RendFallbackCacheEntry cache[REND_FALLBACK_CACHE_SIZE];
-    int cache_count;
+    RendFallbackIdentity *identity; // NULL = no installed font covers it
+    uint32_t glyph_id;              // glyph id in identity's font file; 0 = absent
+} RendRoute;
+
+typedef struct
+{
+    bool used;
+    uint32_t codepoint;
+    uint32_t glyph_id;
+    RendFallbackIdentity *identity;
+} RendRouteEntry;
+
+typedef struct
+{
+    RendRouteEntry routes[REND_ROUTE_TABLE_SIZE];
+    int route_count;
     RendLoadedFallbackFont loaded[REND_MAX_LOADED_FALLBACKS];
     int loaded_count;
     // One record per distinct fallback path seen, kept for the life of the
@@ -503,15 +523,23 @@ typedef struct
 
 void rend_fallback_init(RendFallbackState *st);
 void rend_fallback_destroy(RendFallbackState *st, FontBackend *font);
-const char *rend_fallback_lookup(RendFallbackState *st,
-                                 FontResolveBackend *resolve,
-                                 uint32_t codepoint);
-// Load `font_path` as the FONT_STYLE_FALLBACK face, reusing an already loaded
-// one when possible. Loading a new face past REND_MAX_LOADED_FALLBACKS drops
-// the oldest; the glyphs it cached stay in the atlas under `rend_fallback_key`
-// and are found again if the path comes back.
+// Resolve (and memoise) the rendering route for `codepoint`: the covering
+// font and the glyph id it maps to there. The resolver is consulted at most
+// once per codepoint for the life of the fallback state; identity == NULL
+// (also memoised) means no installed font covers it. The covering font is
+// loaded once to learn its glyph id; ids are per font file, so they stay
+// valid across face evictions and reloads.
+RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
+                         FontResolveBackend *resolve, uint32_t codepoint,
+                         float font_size, const FontOptions *options,
+                         int cell_width);
+// Load the face behind `identity` as the FONT_STYLE_FALLBACK face, reusing
+// an already loaded one when possible. Loading a new face past
+// REND_MAX_LOADED_FALLBACKS drops the oldest; the glyphs it cached stay in
+// the atlas under `rend_fallback_key` and are found again if the path comes
+// back.
 bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
-                          const char *font_path, float font_size,
+                          RendFallbackIdentity *identity, float font_size,
                           const FontOptions *options, int cell_width);
 
 // Atlas key for the glyphs rasterized from `font_path`. The key depends only on

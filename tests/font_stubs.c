@@ -9,7 +9,33 @@
 // code. The atlas/rend_common tests don't actually call rend_load_fonts,
 // but the linker pulls in all symbols from rend_common.o.
 #include "font_resolve.h"
+#include <stdlib.h>
 #include <string.h>
+
+// --- Configurable codepoint routes (route-cache tests) ---
+static char *s_cp_paths[64];
+static uint32_t s_cp_codepoints[64];
+static int s_cp_count;
+static int s_resolve_queries;
+
+void test_resolve_add_route(uint32_t cp, const char *path)
+{
+    if (s_cp_count < 64) {
+        s_cp_codepoints[s_cp_count] = cp;
+        s_cp_paths[s_cp_count] = strdup(path);
+        s_cp_count++;
+    }
+}
+
+int test_resolve_query_count(void) { return s_resolve_queries; }
+
+void test_resolve_reset(void)
+{
+    for (int i = 0; i < s_cp_count; i++)
+        free(s_cp_paths[i]);
+    s_cp_count = 0;
+    s_resolve_queries = 0;
+}
 
 FontResolveBackend *font_resolve_init(FontResolveBackend *backend)
 {
@@ -37,8 +63,14 @@ int font_resolve_find_font_for_codepoint(FontResolveBackend *resolve,
                                          FontResolutionResult *result)
 {
     (void)resolve;
-    (void)codepoint;
     memset(result, 0, sizeof(*result));
+    s_resolve_queries++;
+    for (int i = 0; i < s_cp_count; i++) {
+        if (s_cp_codepoints[i] == codepoint) {
+            result->font_path = strdup(s_cp_paths[i]);
+            return 0;
+        }
+    }
     return -1;
 }
 
@@ -72,6 +104,26 @@ void font_resolve_list_monospace(FontResolveBackend *resolve)
 static uint32_t s_test_loaded_styles = 0;
 #define TEST_STUB_EMOJI_CP 0x26A1 // ⚡ — has emoji presentation + stub claims glyph
 
+// Glyph ids the stub hands out for specific codepoints, so a test can pin
+// the id a route memoises.
+static uint32_t s_glyph_map[64];
+static uint32_t s_glyph_cps[64];
+static int s_glyph_map_count;
+
+void test_font_set_glyph(uint32_t cp, uint32_t glyph_id)
+{
+    for (int i = 0; i < s_glyph_map_count; i++)
+        if (s_glyph_cps[i] == cp) {
+            s_glyph_map[i] = glyph_id;
+            return;
+        }
+    if (s_glyph_map_count < 64) {
+        s_glyph_cps[s_glyph_map_count] = cp;
+        s_glyph_map[s_glyph_map_count] = glyph_id;
+        s_glyph_map_count++;
+    }
+}
+
 // Recorded per-style presentation budget, so tests can assert what
 // rend_plan_glyph hands the backend for a given cell.
 typedef struct
@@ -91,6 +143,9 @@ void test_font_reset(void)
     s_test_loaded_styles = 0;
     memset(s_boxes, 0, sizeof(s_boxes));
     memset(s_box_set, 0, sizeof(s_box_set));
+    memset(s_glyph_map, 0, sizeof(s_glyph_map));
+    memset(s_glyph_cps, 0, sizeof(s_glyph_cps));
+    s_glyph_map_count = 0;
 }
 
 // Read back the budget the helper pushed for `style`. Returns false when the
@@ -127,7 +182,42 @@ static uint32_t stub_get_glyph_index(FontBackend *font, void *font_data,
 {
     (void)font;
     (void)font_data;
+    for (int i = 0; i < s_glyph_map_count; i++)
+        if (s_glyph_cps[i] == cp)
+            return s_glyph_map[i];
     return cp == TEST_STUB_EMOJI_CP ? 1 : 0;
+}
+
+// The fallback loader calls these directly on the backend, so the stub
+// backend needs them: a face handle per load, a no-op destroy, and metrics
+// that report success.
+static void *stub_init_font(FontBackend *font, const char *font_path,
+                            float font_size, FontStyle style,
+                            const FontOptions *options)
+{
+    (void)font;
+    (void)font_path;
+    (void)font_size;
+    (void)style;
+    (void)options;
+    // Unique non-NULL handle per load; the state machine compares them.
+    static int seq = 0;
+    return (void *)(intptr_t)(++seq + 1000);
+}
+
+static void stub_destroy_font(FontBackend *font, void *font_data)
+{
+    (void)font;
+    (void)font_data;
+}
+
+static bool stub_get_metrics(FontBackend *font, void *font_data,
+                             FontMetrics *metrics)
+{
+    (void)font;
+    (void)font_data;
+    memset(metrics, 0, sizeof(*metrics));
+    return true;
 }
 
 FontBackend make_test_font_backend(void)
@@ -137,6 +227,9 @@ FontBackend make_test_font_backend(void)
     fb.loaded_styles = s_test_loaded_styles;
     fb.get_glyph_index = stub_get_glyph_index;
     fb.set_presentation_box = stub_set_presentation_box;
+    fb.init_font = stub_init_font;
+    fb.destroy_font = stub_destroy_font;
+    fb.get_metrics = stub_get_metrics;
     // Non-NULL font_data per style: font.c's set_presentation_box wrapper
     // (like every other wrapper) skips styles with no loaded face. The value
     // encodes the style index so the recorder can attribute the call.

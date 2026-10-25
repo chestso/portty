@@ -901,6 +901,10 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
     int cache_h = plan.cache_h;
     bool downscale_glyph = plan.downscale_glyph;
     bool center_horizontally = plan.center_horizontally;
+    // The fallback route for this cell: the covering font and the glyph id
+    // it maps to there. Shared by the shaped and the single-glyph path, so
+    // the face selected by one is known to the other.
+    RendRoute route = { 0 };
 
     // Shaped rendering path (multiple codepoints)
     if (cp_count > 1 && data->font->render_shaped) {
@@ -943,11 +947,15 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
         // Dynamic fallback: try fontconfig-resolved font for the first codepoint
         if (!shaped && cp_count > 0) {
-            const char *fb_path = rend_fallback_lookup(&data->fallback, data->resolve, cps[0]);
-            void *fb_key = fb_path ? rend_fallback_key(&data->fallback, fb_path) : NULL;
-            if (fb_key && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
+            route = rend_route_get(&data->fallback, data->font, data->resolve,
+                                   cps[0], data->font_size,
+                                   &data->font_options, data->cell_width);
+            if (route.identity &&
+                rend_fallback_ensure(&data->fallback, data->font, route.identity,
+                                     data->font_size, &data->font_options,
+                                     data->cell_width)) {
                 style = FONT_STYLE_FALLBACK;
-                font_data = fb_key;
+                font_data = route.identity;
                 // Lazily loaded — set the cell budget now
                 font_set_presentation_box(data->font, style, avail_w, avail_h,
                                           plan.height_only_fit);
@@ -1083,21 +1091,19 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
         // Dynamic fallback: if still missing, query fontconfig for a covering font
         if (glyph_index == 0) {
-            const char *fb_path = rend_fallback_lookup(&data->fallback, data->resolve, codepoint);
-            void *fb_key = fb_path ? rend_fallback_key(&data->fallback, fb_path) : NULL;
-            if (fb_key && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
+            route = rend_route_get(&data->fallback, data->font, data->resolve,
+                                   codepoint, data->font_size,
+                                   &data->font_options, data->cell_width);
+            if (route.identity && route.glyph_id != 0) {
                 style = FONT_STYLE_FALLBACK;
-                font_data = fb_key;
-                // Lazily loaded — set the cell budget now
-                font_set_presentation_box(data->font, style, avail_w, avail_h,
-                                          plan.height_only_fit);
-                color_baked = rend_is_color_font(data->font, style);
+                font_data = route.identity;
+                color_baked = route.identity->color_font;
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;
                 render_b = color_baked ? b : 255;
                 color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
                                         : 0xFFFFFF;
-                glyph_index = font_get_glyph_index(data->font, style, codepoint);
+                glyph_index = route.glyph_id;
             }
         }
 
@@ -1110,6 +1116,31 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         if (atlas_glyph_id != 0)
             entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_glyph_id, color_key);
         if (!entry && atlas_inserts_allowed()) {
+            if (style == FONT_STYLE_FALLBACK) {
+                if (!rend_fallback_ensure(&data->fallback, data->font, route.identity,
+                                          data->font_size, &data->font_options,
+                                          data->cell_width)) {
+                    // The font file disappeared since it was resolved:
+                    // render like an uncovered codepoint, from the primary
+                    // face.
+                    style = FONT_STYLE_NORMAL;
+                    font_data = data->font->font_data[style];
+                    color_baked = rend_is_color_font(data->font, style);
+                    render_r = color_baked ? r : 255;
+                    render_g = color_baked ? g : 255;
+                    render_b = color_baked ? b : 255;
+                    color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                            : 0xFFFFFF;
+                    glyph_index = font_get_glyph_index(data->font, style, codepoint);
+                    atlas_glyph_id = glyph_index;
+                    if (columns_to_consume >= 2 && atlas_glyph_id != 0)
+                        atlas_glyph_id |= ATLAS_WIDE_GLYPH_TAG;
+                } else {
+                    // Lazily loaded — set the cell budget before rasterizing.
+                    font_set_presentation_box(data->font, style, avail_w, avail_h,
+                                              plan.height_only_fit);
+                }
+            }
             GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1,
                                                            render_r, render_g, render_b);
             if (glyph_bitmap) {

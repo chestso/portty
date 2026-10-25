@@ -1516,8 +1516,6 @@ void rend_fallback_destroy(RendFallbackState *st, FontBackend *font)
     }
     font->font_data[FONT_STYLE_FALLBACK] = NULL;
     font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
-    for (int i = 0; i < st->cache_count; i++)
-        free(st->cache[i].font_path);
     // The identity records key the glyph cache. Whatever holds that cache has
     // to drop its entries along with this state — the keys stop existing here.
     for (int i = 0; i < st->identity_count; i++) {
@@ -1563,14 +1561,36 @@ void *rend_fallback_key(RendFallbackState *st, const char *font_path)
     return identity->key;
 }
 
-const char *rend_fallback_lookup(RendFallbackState *st,
-                                 FontResolveBackend *resolve,
-                                 uint32_t codepoint)
+static uint32_t route_slot(uint32_t codepoint)
 {
-    for (int i = 0; i < st->cache_count; i++) {
-        if (st->cache[i].codepoint == codepoint)
-            return st->cache[i].font_path;
+    // FNV-1a over the codepoint's bytes, folded into the table.
+    uint32_t h = 2166136261u;
+    for (int i = 0; i < 4; i++) {
+        h ^= (codepoint >> (8 * i)) & 0xffu;
+        h *= 16777619u;
     }
+    return h & (REND_ROUTE_TABLE_SIZE - 1);
+}
+
+RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
+                         FontResolveBackend *resolve, uint32_t codepoint,
+                         float font_size, const FontOptions *options,
+                         int cell_width)
+{
+    uint32_t slot = route_slot(codepoint);
+    RendRouteEntry *store = NULL;
+    for (;;) {
+        RendRouteEntry *e = &st->routes[slot];
+        if (!e->used) {
+            store = e; // first free slot along the probe chain
+            break;
+        }
+        if (e->codepoint == codepoint)
+            return (RendRoute){ .identity = e->identity, .glyph_id = e->glyph_id };
+        slot = (slot + 1) & (REND_ROUTE_TABLE_SIZE - 1);
+    }
+
+    RendRoute route = { .identity = NULL, .glyph_id = 0 };
 
     FontResolutionResult result;
     char *path = NULL;
@@ -1580,25 +1600,41 @@ const char *rend_fallback_lookup(RendFallbackState *st,
         font_resolve_free_result(&result);
     }
 
-    if (st->cache_count >= REND_FALLBACK_CACHE_SIZE) {
-        free(st->cache[0].font_path);
-        memmove(&st->cache[0], &st->cache[1],
-                (REND_FALLBACK_CACHE_SIZE - 1) * sizeof(RendFallbackCacheEntry));
-        st->cache_count = REND_FALLBACK_CACHE_SIZE - 1;
+    if (path) {
+        // rend_fallback_key() returns the identity record's own address and
+        // owns the path copy; the record never moves.
+        RendFallbackIdentity *identity =
+            (RendFallbackIdentity *)rend_fallback_key(st, path);
+        free(path);
+        if (identity &&
+            rend_fallback_ensure(st, font, identity, font_size, options,
+                                 cell_width))
+            route.glyph_id = font_get_glyph_index(font, FONT_STYLE_FALLBACK,
+                                                  codepoint);
+        route.identity = identity;
     }
-    st->cache[st->cache_count].codepoint = codepoint;
-    st->cache[st->cache_count].font_path = path;
-    st->cache_count++;
 
-    return path;
+    // Past the store limit the table degrades: resolve without memoising, so
+    // the probe above can never walk a completely full table.
+    if (st->route_count < REND_ROUTE_STORE_LIMIT && store) {
+        store->used = true;
+        store->codepoint = codepoint;
+        store->glyph_id = route.glyph_id;
+        store->identity = route.identity;
+        st->route_count++;
+    }
+
+    return route;
 }
 
 bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
-                          const char *font_path, float font_size,
+                          RendFallbackIdentity *identity, float font_size,
                           const FontOptions *options, int cell_width)
 {
-    if (!font_path)
+    if (!identity)
         return false;
+
+    const char *font_path = identity->font_path;
 
     for (int i = 0; i < st->loaded_count; i++) {
         if (strcmp(st->loaded[i].font_path, font_path) == 0) {
@@ -1646,6 +1682,11 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
 
     font->font_data[FONT_STYLE_FALLBACK] = new_font_data;
     font->loaded_styles |= (1u << FONT_STYLE_FALLBACK);
+
+    // The baked-color decision depends only on the font file, so it is
+    // recorded on the identity: a later atlas hit needs it without
+    // loading the face again.
+    identity->color_font = rend_is_color_font(font, FONT_STYLE_FALLBACK);
 
     font_set_target_cell_width(font, cell_width);
     font_set_variation_axis(font, FONT_STYLE_FALLBACK, "wght", 400);
