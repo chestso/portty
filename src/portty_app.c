@@ -762,6 +762,25 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
     }
 }
 
+bool portty_app_handle_display_scale_changed(PorttyApp *app, int pixel_w, int pixel_h)
+{
+    if (!app || !app->backend)
+        return false;
+    if (!app->backend->reload_fonts || !app->backend->get_display_scale)
+        return false;
+
+    // The compositor scale moved: the fonts are rasterized for the
+    // content scale, so they have to be redone for the new DPI.
+    float content_scale = portty_compute_content_scale(
+        app->backend->get_display_scale(app->backend), app->dpi_scale);
+    if (!app->backend->reload_fonts(app->backend, content_scale))
+        return false; // the cell size did not move
+
+    // The cell size moved, so the grid is derived from it again.
+    portty_app_handle_resize(app, pixel_w, pixel_h);
+    return true;
+}
+
 void portty_app_handle_scroll(PorttyApp *app, int delta)
 {
     if (delta == 0)

@@ -62,8 +62,20 @@ typedef struct RendererSdl3Data
 
     float content_scale;
 
+    // The compositor scale of the window the fonts are rasterized for.
+    // The backend owns the window and publishes the scale here; the
+    // renderer never asks SDL itself.
+    float display_scale;
+
     char *font_path;
     const char *hint_name;
+
+    // The font request, kept so the fonts can be re-rasterized for a new
+    // content scale — the window moved to a display with another scale
+    // factor, and the cell metrics follow the scale.
+    char *font_name_req;
+    float font_size_req;
+    int ft_hint_target;
 
     char gpu_name[128];
     char gpu_driver[160];
@@ -106,6 +118,10 @@ typedef struct RendererSdl3Data
 bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window, SDL_Renderer *renderer);
 void rend_sdl3_destroy(RendererSdl3Data *data);
 int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *font_name, int ft_hint_target);
+// Re-rasterize the fonts for a new content scale. Returns true when the
+// fonts were reloaded, so the caller can re-derive the grid from the new
+// cell size.
+bool rend_sdl3_reload_fonts(RendererSdl3Data *data, float content_scale);
 void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term, bool cursor_visible);
 void rend_sdl3_present(RendererSdl3Data *data);
 void rend_sdl3_resize(RendererSdl3Data *data, int width, int height);
@@ -127,6 +143,9 @@ int rend_sdl3_panel_hit_test(RendererSdl3Data *data, int px, int py, bool *close
 void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered);
 int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term, const char *output_path);
 void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale);
+// Publish the window's compositor scale. The fonts are rasterized for it,
+// so a change means the fonts have to be redone.
+void rend_sdl3_set_display_scale(RendererSdl3Data *data, float scale);
 int rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term, const char *data_bytes, size_t len);
 
 #endif // REND_SDL3_H

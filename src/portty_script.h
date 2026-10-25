@@ -13,7 +13,7 @@
  *
  *   screendump, renderdump, dumpstate, record-start, record-stop,
  *   panel, panel_hide, mousemove, mousedown, mouseup, winsize,
- *   assert-hover, assert-no-hover
+ *   display-scale, assert-hover, assert-no-hover
  */
 
 #ifndef PORTTY_SCRIPT_H
@@ -71,6 +71,11 @@ typedef struct
     void *resize_ud;
     void (*winsize_fn)(void *ud, int w, int h);
     void *winsize_ud;
+
+    /* Display-scale change (the window moved to a display with another
+     * scale factor). */
+    void (*display_scale_fn)(void *ud, float scale);
+    void *display_scale_ud;
 
     /* Frame recorder. */
     FrameRecorder *recorder;

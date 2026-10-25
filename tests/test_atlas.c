@@ -424,6 +424,44 @@ static void test_regression_repeated_eviction_cycles(void)
     rend_sdl3_atlas_destroy(&atlas);
 }
 
+// Test: the reset drops every cached glyph and the shelf layout, and the
+// atlas takes new glyphs again. A font reload relies on this: the atlas
+// keys its glyphs on the font_data pointers, and the new face can be
+// allocated at the address of the face it replaces.
+static void test_reset_drops_entries(void)
+{
+    RendSdl3Atlas atlas;
+    ASSERT_TRUE(rend_sdl3_atlas_init(&atlas, NULL));
+
+    void *font = (void *)0x3000;
+
+    GlyphBitmap *bmp = make_bitmap(10, 10, 0x33);
+    ASSERT_TRUE(rend_sdl3_atlas_insert(&atlas, font, 7, 0xFF0000, bmp, false) != NULL);
+    ASSERT_TRUE(rend_sdl3_atlas_lookup(&atlas, font, 7, 0xFF0000) != NULL);
+    ASSERT_EQ(atlas.packing.entry_count, 1);
+    ASSERT_EQ(atlas.packing.num_shelves, 1);
+
+    rend_sdl3_atlas_reset(&atlas);
+
+    // The cached glyph is gone.
+    ASSERT_NULL(rend_sdl3_atlas_lookup(&atlas, font, 7, 0xFF0000));
+    ASSERT_EQ(atlas.packing.entry_count, 0);
+    ASSERT_EQ(atlas.packing.num_shelves, 0);
+
+    // A new face at the same address does not answer with the old
+    // bitmap: the glyph is inserted again, at the shelf origin.
+    GlyphBitmap *bmp2 = make_bitmap(10, 10, 0x44);
+    RendSdl3AtlasEntry *e = rend_sdl3_atlas_insert(&atlas, font, 7, 0xFF0000, bmp2, false);
+    ASSERT_NOT_NULL(e);
+    ASSERT_EQ(e->region.x, 0);
+    ASSERT_EQ(e->region.y, 0);
+    ASSERT_EQ(atlas.packing.entry_count, 1);
+
+    free_bitmap(bmp);
+    free_bitmap(bmp2);
+    rend_sdl3_atlas_destroy(&atlas);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -444,6 +482,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_regression_post_eviction_all_entries_reachable);
     RUN_TEST(test_regression_multi_glyph_staging_after_eviction);
     RUN_TEST(test_regression_repeated_eviction_cycles);
+
+    printf("\nFont reload tests\n");
+
+    RUN_TEST(test_reset_drops_entries);
 
     TEST_SUMMARY();
 }

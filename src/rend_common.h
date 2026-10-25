@@ -121,6 +121,16 @@ static inline float logical_to_physical_f(float logical, float scale)
     return logical * scale;
 }
 
+// Two content scales count as the same when they differ by less than this.
+// A compositor's reported scale jitters by a fraction of a percent, and
+// re-rasterizing every font for that is wasted work.
+#define REND_CONTENT_SCALE_EPSILON 0.01f
+
+// Whether a content-scale change is big enough to move the cell metrics.
+// The fonts are rasterized for the content scale, so this decides whether
+// a scale change needs a font reload.
+bool rend_content_scale_changed(float old_scale, float new_scale);
+
 // Convert an SDL input coordinate (mouse/wheel, in window logical points)
 // to a physical pixel coordinate for the renderer's coordinate space.
 // `window_scale` is the compositor scale (SDL_GetWindowDisplayScale), NOT
@@ -325,6 +335,13 @@ void rend_atlas_init(RendAtlas *atlas, uint8_t *staging);
 
 // Begin a new frame: increments the frame counter for LRU tracking.
 void rend_atlas_begin_frame(RendAtlas *atlas);
+
+// Drop every cached glyph and the shelf layout, keeping the staging
+// buffer. Used when the fonts are re-rasterized: the atlas keys its
+// glyphs on the font_data pointers, and a new face can be allocated at
+// the address of the face it replaces, so a stale entry would answer a
+// lookup with the old face's bitmap.
+void rend_atlas_reset(RendAtlas *atlas);
 
 // Look up a cached glyph. Returns NULL on miss.
 RendAtlasEntry *rend_atlas_lookup(RendAtlas *atlas, void *font_data,

@@ -2,22 +2,7 @@
 
 ---
 
-## 0. HiDPI / Display-Migration Follow-ups
-
-**Out of scope (flagged, not doing now):** re-rasterizing fonts when the window
-moves between displays of different DPI. The content scale is recomputed from
-`portty_compute_content_scale()` (`--dpi-scale` × compositor scale) at startup
-and on resize; `SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED` refreshes only the
-cached compositor scale, which the next resize then folds into the content
-scale. Font faces are loaded and sized once by `load_fonts()`, and nothing
-re-sizes them, so after a migration to a display with a different scale factor
-cell metrics and glyph rasterization stay sized for the original display for
-the life of the process. A full fix needs a font-reload pass on
-`SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED`.
-
----
-
-## 1. Variable Font Axes
+## 0. Variable Font Axes
 
 The variation axis infrastructure is fully implemented: `cache_mm_var()` caches axis
 metadata, `ft_set_variation_axis()` / `ft_set_variation_axes()` set values, and
@@ -91,7 +76,7 @@ italic_slant = -12
 
 ---
 
-## 2. Bidirectional Text (BiDi) Support
+## 1. Bidirectional Text (BiDi) Support
 
 ### Goals
 
@@ -224,7 +209,7 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ---
 
-## 3. Unimplemented Terminfo Capabilities
+## 2. Unimplemented Terminfo Capabilities
 
 These capabilities reach portty through `coffer-vty-256color` (which is
 `use=xterm-256color`), but they have no implementation anywhere in the
@@ -246,7 +231,7 @@ from the font resolver for font select.
 
 ---
 
-## 4. Popular Unsupported Capabilities
+## 3. Popular Unsupported Capabilities
 
 None of these is implemented. Some are inherited from `xterm-256color` as
 accepted-but-ignored SGR codes, the rest are absent from the terminfo entry
@@ -285,4 +270,4 @@ modification of all erase operations to check it.
 
 ### SGR font selection (10-19)
 
-The cell fields exist but neither end of the pipeline uses them — see §3.
+The cell fields exist but neither end of the pipeline uses them — see §2.

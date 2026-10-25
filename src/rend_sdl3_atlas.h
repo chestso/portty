@@ -32,6 +32,7 @@ typedef RendAtlasRegion RendSdl3AtlasRegion;
 
 bool rend_sdl3_atlas_init(RendSdl3Atlas *atlas, SDL_Renderer *renderer);
 void rend_sdl3_atlas_destroy(RendSdl3Atlas *atlas);
+void rend_sdl3_atlas_reset(RendSdl3Atlas *atlas);
 void rend_sdl3_atlas_begin_frame(RendSdl3Atlas *atlas);
 RendSdl3AtlasEntry *rend_sdl3_atlas_lookup(RendSdl3Atlas *atlas, void *font_data,
                                            int glyph_id, uint32_t color);

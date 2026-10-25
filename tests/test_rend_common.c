@@ -30,6 +30,11 @@ static void test_plan_glyph_box_symbol_class_height_only(void);
 static void test_plan_glyph_box_dingbat_is_symbol_class(void);
 static void test_plan_glyph_box_math_operator_keeps_width_fit(void);
 
+/* Content-scale comparison — decides whether a display-scale change needs
+ * a font reload. */
+static void test_content_scale_changed(void);
+static void test_content_scale_unchanged(void);
+
 /* Helpers exported by font_stubs.c for testing the policy functions in
  * rend_common.c that consult the FontBackend for style/emoji decisions. */
 FontBackend make_test_font_backend(void);
@@ -504,6 +509,27 @@ static void test_layout_shaped_run_nothing_drawable(void)
     ASSERT_EQ(rend_layout_shaped_run(&run2, 20, 10, 2, slots, 8), 0);
 }
 
+static void test_content_scale_changed(void)
+{
+    // A window moving from a 1x display to a 2x one.
+    ASSERT_TRUE(rend_content_scale_changed(1.0f, 2.0f));
+    ASSERT_TRUE(rend_content_scale_changed(2.0f, 1.0f));
+    // A compositor scale that moves by a whole step.
+    ASSERT_TRUE(rend_content_scale_changed(1.0f, 1.5f));
+    // The user's --dpi-scale folds in: 1x compositor with a 2x user scale
+    // is the same content scale as a 2x compositor with no user scale.
+    ASSERT_TRUE(rend_content_scale_changed(2.0f, 1.0f));
+}
+
+static void test_content_scale_unchanged(void)
+{
+    ASSERT_FALSE(rend_content_scale_changed(1.0f, 1.0f));
+    ASSERT_FALSE(rend_content_scale_changed(2.0f, 2.0f));
+    // Compositor jitter: a hair below the epsilon is not a change.
+    ASSERT_FALSE(rend_content_scale_changed(1.0f, 1.001f));
+    ASSERT_FALSE(rend_content_scale_changed(2.0f, 2.0f - REND_CONTENT_SCALE_EPSILON / 2.0f));
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -542,6 +568,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_plan_glyph_box_symbol_class_height_only);
     RUN_TEST(test_plan_glyph_box_dingbat_is_symbol_class);
     RUN_TEST(test_plan_glyph_box_math_operator_keeps_width_fit);
+    RUN_TEST(test_content_scale_changed);
+    RUN_TEST(test_content_scale_unchanged);
 
     TEST_SUMMARY();
 }

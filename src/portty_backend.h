@@ -145,6 +145,11 @@ struct PorttyBackend
     // ── Rendering ──────────────────────────────────────────────
     int (*load_fonts)(PorttyBackend *self, float size,
                       const char *name, int ft_hint_target);
+    // Re-rasterize the fonts for a new content scale — the window moved to
+    // a display with another scale factor. Returns true when the fonts
+    // were reloaded, so the caller can re-derive the grid from the new
+    // cell size.
+    bool (*reload_fonts)(PorttyBackend *self, float content_scale);
     void (*draw_terminal)(PorttyBackend *self, TerminalBackend *term,
                           bool cursor_visible);
     void (*present)(PorttyBackend *self);

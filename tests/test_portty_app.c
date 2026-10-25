@@ -58,6 +58,12 @@ typedef struct
     unsigned int notify_ttl_ms;
     bool notify_showing; // a message is on screen (notify_active)
     bool focused;        // window keyboard focus (has_focus)
+    // Display-scale change (the window moved to another display)
+    float display_scale; // compositor scale (get_display_scale)
+    bool reload_called;  // reload_fonts was asked for a new scale
+    float reload_scale;  // the content scale it was given
+    bool reload_result;  // what reload_fonts reported back
+    bool resize_called;  // the grid was re-derived
 } StubPlatState;
 
 static StubPlatState g_state = { 0 };
@@ -164,6 +170,28 @@ static bool backend_has_focus(PorttyBackend *self)
     return g_state.focused;
 }
 
+static float backend_get_display_scale(PorttyBackend *self)
+{
+    (void)self;
+    return g_state.display_scale;
+}
+
+static bool backend_reload_fonts(PorttyBackend *self, float content_scale)
+{
+    (void)self;
+    g_state.reload_called = true;
+    g_state.reload_scale = content_scale;
+    return g_state.reload_result;
+}
+
+static void backend_resize(PorttyBackend *self, int w, int h)
+{
+    (void)self;
+    (void)w;
+    (void)h;
+    g_state.resize_called = true;
+}
+
 static void reset_state(void)
 {
     g_state = (StubPlatState){ 0 };
@@ -181,6 +209,9 @@ static void reset_state(void)
         .notify = backend_notify,
         .notify_active = backend_notify_active,
         .has_focus = backend_has_focus,
+        .get_display_scale = backend_get_display_scale,
+        .reload_fonts = backend_reload_fonts,
+        .resize = backend_resize,
     };
 }
 
@@ -753,6 +784,77 @@ static void test_ctrl_shift_f7_notifies_dump_failure(void)
     destroy_key_mock_term(term);
 }
 
+/* The window moved to a display with another scale factor: the fonts are
+ * re-rasterized for the new DPI, and the grid is derived from the new
+ * cell size. */
+static void test_display_scale_change_reloads_fonts(void)
+{
+    reset_state();
+    g_state.display_scale = 2.0f;
+    g_state.reload_result = true;
+
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend, .dpi_scale = 1.0f };
+
+    bool changed = portty_app_handle_display_scale_changed(&app, 800, 600);
+
+    ASSERT_TRUE(changed);
+    ASSERT_TRUE(g_state.reload_called);
+    ASSERT_FLOAT_NEAR(g_state.reload_scale, 2.0f, 0.01f);
+    ASSERT_TRUE(g_state.resize_called);
+
+    // The grid follows the new cell size (the stub reports 10x6 px).
+    int rows = 0, cols = 0;
+    terminal_get_dimensions(term, &rows, &cols);
+    ASSERT_EQ(cols, 80);
+    ASSERT_EQ(rows, 100);
+
+    destroy_key_mock_term(term);
+}
+
+/* A scale change that does not move the cell size leaves the grid alone. */
+static void test_display_scale_change_without_reload_keeps_grid(void)
+{
+    reset_state();
+    g_state.display_scale = 1.0f;
+    g_state.reload_result = false;
+
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend, .dpi_scale = 1.0f };
+
+    bool changed = portty_app_handle_display_scale_changed(&app, 800, 600);
+
+    ASSERT_FALSE(changed);
+    ASSERT_TRUE(g_state.reload_called);
+    ASSERT_FALSE(g_state.resize_called);
+
+    int rows = 0, cols = 0;
+    terminal_get_dimensions(term, &rows, &cols);
+    ASSERT_EQ(cols, 80);
+    ASSERT_EQ(rows, 24);
+
+    destroy_key_mock_term(term);
+}
+
+/* The user's --dpi-scale folds into the content scale the fonts are
+ * rasterized for. */
+static void test_display_scale_change_applies_user_scale(void)
+{
+    reset_state();
+    g_state.display_scale = 1.5f;
+    g_state.reload_result = true;
+
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend, .dpi_scale = 2.0f };
+
+    portty_app_handle_display_scale_changed(&app, 800, 600);
+
+    ASSERT_TRUE(g_state.reload_called);
+    ASSERT_FLOAT_NEAR(g_state.reload_scale, 3.0f, 0.01f);
+
+    destroy_key_mock_term(term);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -784,6 +886,11 @@ int main(int argc, char *argv[])
     RUN_TEST(test_ctrl_shift_f7_notifies_dump_failure);
     RUN_TEST(test_ctrl_delete_resets_input_state);
     RUN_TEST(test_ctrl_shift_f8_resets_terminal);
+
+    // Display-scale change (the window moved to another display)
+    RUN_TEST(test_display_scale_change_reloads_fonts);
+    RUN_TEST(test_display_scale_change_without_reload_keeps_grid);
+    RUN_TEST(test_display_scale_change_applies_user_scale);
 
     TEST_SUMMARY();
 }

@@ -354,7 +354,11 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Rende
     data->font_size = 0;
     memset(&data->font_options, 0, sizeof(data->font_options));
     data->content_scale = 1.0f;
+    data->display_scale = 0.0f;
     data->font_path = NULL;
+    data->font_name_req = NULL;
+    data->font_size_req = 0.0f;
+    data->ft_hint_target = FT_LOAD_TARGET_LIGHT;
     memset(&data->panels, 0, sizeof(data->panels));
     memset(data->panel_renders, 0, sizeof(data->panel_renders));
     data->linear_target = NULL;
@@ -441,6 +445,9 @@ void rend_sdl3_destroy(RendererSdl3Data *data)
     free(data->font_path);
     data->font_path = NULL;
 
+    free(data->font_name_req);
+    data->font_name_req = NULL;
+
     // Destroy glyph atlas
     rend_sdl3_atlas_destroy(&data->atlas);
 
@@ -458,37 +465,45 @@ void rend_sdl3_destroy(RendererSdl3Data *data)
     }
 }
 
-int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *font_name, int ft_hint_target)
+// The content scale the fonts are rasterized for: the requested scale, or
+// the compositor's own when the requested one is not set (a window on a
+// 2x display with no --dpi-scale gets the compositor's scale).
+static float rend_sdl3_effective_content_scale(RendererSdl3Data *data,
+                                               float requested)
 {
-    if (!data)
-        return -1;
+    float content_scale = requested;
+    if (content_scale <= 1.0f && data->display_scale > 1.0f)
+        content_scale = data->display_scale;
+    return content_scale;
+}
 
+// Load every font style for an already-resolved content scale. The
+// resolver is created here, so the caller must not hold one.
+static int rend_sdl3_load_fonts_at(RendererSdl3Data *data, float content_scale)
+{
+    if (data->resolve) {
+        font_resolve_destroy(data->resolve);
+        data->resolve = NULL;
+    }
     data->resolve = font_resolve_init(&FONT_RESOLVE_BACKEND);
     if (!data->resolve) {
         fprintf(stderr, "Failed to initialize font resolver\n");
         return -1;
     }
-
-    // Determine content scale from SDL window if available
-    float content_scale = data->content_scale;
-    if (data->window && content_scale <= 1.0f) {
-        float sdl_scale = SDL_GetWindowDisplayScale(data->window);
-        if (sdl_scale > 1.0f)
-            content_scale = sdl_scale;
-    }
     data->content_scale = content_scale;
 
     const char *hint_name = "none";
-    if (ft_hint_target == FT_LOAD_TARGET_LIGHT)
+    if (data->ft_hint_target == FT_LOAD_TARGET_LIGHT)
         hint_name = "light";
-    else if (ft_hint_target == FT_LOAD_TARGET_NORMAL)
+    else if (data->ft_hint_target == FT_LOAD_TARGET_NORMAL)
         hint_name = "normal";
-    else if (ft_hint_target == FT_LOAD_TARGET_MONO)
+    else if (data->ft_hint_target == FT_LOAD_TARGET_MONO)
         hint_name = "mono";
 
     RendFontLoadResult r = { 0 };
-    if (rend_load_fonts(&r, data->font, data->resolve, font_size, font_name,
-                        ft_hint_target, content_scale, hint_name) != 0) {
+    if (rend_load_fonts(&r, data->font, data->resolve, data->font_size_req,
+                        data->font_name_req, data->ft_hint_target,
+                        content_scale, hint_name) != 0) {
         font_resolve_destroy(data->resolve);
         data->resolve = NULL;
         return -1;
@@ -512,6 +527,64 @@ int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *fo
     panel_mgr_set_cell_size(&data->panels, data->cell_width, data->cell_height);
 
     return 0;
+}
+
+int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *font_name, int ft_hint_target)
+{
+    if (!data)
+        return -1;
+
+    // Remember the request: the fonts are re-rasterized from it when the
+    // window moves to a display with another scale factor.
+    free(data->font_name_req);
+    data->font_name_req = font_name ? strdup(font_name) : NULL;
+    data->font_size_req = font_size;
+    data->ft_hint_target = ft_hint_target;
+
+    return rend_sdl3_load_fonts_at(data,
+                                   rend_sdl3_effective_content_scale(data, data->content_scale));
+}
+
+bool rend_sdl3_reload_fonts(RendererSdl3Data *data, float content_scale)
+{
+    if (!data || !data->font)
+        return false;
+
+    float effective = rend_sdl3_effective_content_scale(data, content_scale);
+    if (!rend_content_scale_changed(data->content_scale, effective))
+        return false; // the cell size cannot have moved
+
+    float previous = data->content_scale;
+    vlog("Fonts: re-rasterizing for content scale %.2f (was %.2f)\n",
+         (double)effective, (double)previous);
+
+    // Tear the old faces down. The atlas keys its glyphs on the font_data
+    // pointers, and the new face can be allocated at the address of the
+    // one it replaces, so the cache has to forget every entry before the
+    // new faces exist.
+    rend_fallback_destroy(&data->fallback, data->font);
+    rend_fallback_init(&data->fallback);
+    font_destroy(data->font);
+    font_init(data->font);
+    rend_sdl3_atlas_reset(&data->atlas);
+    font_resolve_destroy(data->resolve);
+    data->resolve = NULL;
+
+    if (rend_sdl3_load_fonts_at(data, effective) != 0) {
+        // The new scale did not work out — go back to the scale the fonts
+        // were loaded for, so the terminal keeps its metrics.
+        fprintf(stderr, "ERROR: Failed to reload fonts at scale %.2f, restoring %.2f\n",
+                (double)effective, (double)previous);
+        data->content_scale = previous;
+        if (rend_sdl3_load_fonts_at(data, previous) != 0)
+            fprintf(stderr, "ERROR: Failed to restore fonts at scale %.2f\n",
+                    (double)previous);
+        return false;
+    }
+
+    vlog("Fonts: reloaded, cell is now %dx%d px\n",
+         data->cell_width, data->cell_height);
+    return true;
 }
 
 static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
@@ -2651,6 +2724,14 @@ void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale)
         data->content_scale = scale;
         vlog("Content scale set to %.2f\n", scale);
     }
+}
+
+void rend_sdl3_set_display_scale(RendererSdl3Data *data, float scale)
+{
+    if (!data)
+        return;
+    if (scale > 0.0f)
+        data->display_scale = scale;
 }
 
 int rend_sdl3_process_pty_data(RendererSdl3Data *data, TerminalBackend *term,

@@ -27,8 +27,8 @@ struct PorttyScript
 static const char *const EXT_NAMES[] = {
     "screendump", "renderdump", "dumpstate", "record-start",
     "record-stop", "panel", "panel_hide", "mousemove",
-    "mousedown", "mouseup", "winsize", "assert-hover",
-    "assert-no-hover", NULL
+    "mousedown", "mouseup", "winsize", "display-scale",
+    "assert-hover", "assert-no-hover", NULL
 };
 
 /* ── Engine host hooks (adapt ScriptUIExt to CfrScriptHost) ── */
@@ -317,6 +317,22 @@ static bool exec_ext(void *ud, const char *name, const char *args,
             return true;
         }
         ext->winsize_fn(ext->winsize_ud, w, h);
+        return true;
+    }
+
+    if (strcmp(name, "display-scale") == 0) {
+        float scale = 0.0f;
+        if (sscanf(buf, "%f", &scale) != 1 || scale <= 0.0f) {
+            fprintf(stderr, "[%d] display-scale: requires a positive scale\n",
+                    line);
+            *fatal = true;
+            return false;
+        }
+        if (!ext->display_scale_fn) {
+            fprintf(stderr, "[%d] display-scale: not supported\n", line);
+            return true;
+        }
+        ext->display_scale_fn(ext->display_scale_ud, scale);
         return true;
     }
 

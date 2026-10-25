@@ -62,7 +62,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Resize geometry overlay — while the window is resized, a centered panel reports the grid geometry (cols x rows) and cell size in pixels, then hides itself once resizing settles
 - Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down (page) / Ctrl+Shift+Up/Down (line)
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
-- HiDPI support (pixel density scaling for underlines and UI elements)
+- HiDPI support (pixel density scaling for underlines and UI elements) — moving the window to a display with another scale factor re-rasterizes the fonts for the new DPI and re-derives the grid from the new cell size
 - Window title — sets platform window title from coffer-parsed OSC 2
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
 - Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
@@ -200,6 +200,7 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `mouseup <x> <y> [button] [clicks]`                                   | Simulate a mouse button release                                                                                                                                           |
 | `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows (pops the same geometry overlay as an interactive resize)                                                                      |
 | `winsize <width> <height>`                                            | Set window pixel size                                                                                                                                                     |
+| `display-scale <scale>`                                              | Simulate the window moving to a display with another scale factor: the fonts are re-rasterized for the new DPI and the grid is derived from the new cell size                |
 | `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                                                                                                         |
 | `panel_hide <id>`                                                     | Hide panel by ID                                                                                                                                                          |
 | `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |
@@ -354,6 +355,20 @@ quit
 ```
 
 `assert-hover` and `assert-no-hover` check whether an OSC-8 hyperlink is currently hovered, printing PASS or FAIL. These are useful for regression testing hover state management.
+
+### Display-scale changes
+
+`display-scale <scale>` simulates the window moving to a display with another scale factor. The compositor scale changes, the fonts are re-rasterized for the new DPI, the cell size moves, and the grid is derived from it again — the same path a real display migration takes:
+
+```
+# Run with: portty -S display_scale.script
+wait 0.5
+screendump /tmp/portty-1x.png
+display-scale 2.0
+wait 0.5
+screendump /tmp/portty-2x.png
+quit
+```
 
 ### Frame Recording
 

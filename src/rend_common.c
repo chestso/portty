@@ -57,6 +57,14 @@ bool is_regional_indicator(uint32_t cp)
     return (cp >= 0x1F1E6 && cp <= 0x1F1FF);
 }
 
+bool rend_content_scale_changed(float old_scale, float new_scale)
+{
+    float delta = old_scale - new_scale;
+    if (delta < 0.0f)
+        delta = -delta;
+    return delta >= REND_CONTENT_SCALE_EPSILON;
+}
+
 float rend_srgb_to_linear(uint8_t v)
 {
     double c = v / 255.0;
@@ -1085,6 +1093,25 @@ void rend_atlas_init(RendAtlas *atlas, uint8_t *staging)
 void rend_atlas_begin_frame(RendAtlas *atlas)
 {
     atlas->current_frame++;
+}
+
+void rend_atlas_reset(RendAtlas *atlas)
+{
+    if (!atlas)
+        return;
+
+    memset(atlas->entries, 0, sizeof(atlas->entries));
+    atlas->entry_count = 0;
+    atlas->num_shelves = 0;
+    atlas->next_shelf_y = 0;
+    atlas->dirty = false;
+    atlas->dirty_rect = (RendAtlasRegion){ 0, 0, 0, 0 };
+    atlas->eviction_occurred = false;
+
+    // The staging buffer keeps the pixels of the glyphs that were just
+    // dropped. No entry points at them any more, and every glyph that
+    // comes back is rasterized again and uploaded over the region it
+    // takes, so the stale pixels are never read.
 }
 
 RendAtlasEntry *rend_atlas_lookup(RendAtlas *atlas, void *font_data,

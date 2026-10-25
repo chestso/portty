@@ -88,6 +88,8 @@ typedef struct
     char panel_body[256];
     int panel_hide_id, panel_hide_calls;
     int win_w, win_h, winsize_calls;
+    float display_scale_value;
+    int display_scale_calls;
     int resize_cols, resize_rows, resize_calls;
     char dump_path[512];
     int dump_calls;
@@ -156,6 +158,13 @@ static void fake_winsize(void *ud, int w, int h)
     f->winsize_calls++;
 }
 
+static void fake_display_scale(void *ud, float scale)
+{
+    FakeExt *f = ud;
+    f->display_scale_value = scale;
+    f->display_scale_calls++;
+}
+
 static bool fake_dump(void *ud, const char *path)
 {
     FakeExt *f = ud;
@@ -196,6 +205,8 @@ static void fake_ext_init(FakeExt *f)
         .resize_ud = f,
         .winsize_fn = fake_winsize,
         .winsize_ud = f,
+        .display_scale_fn = fake_display_scale,
+        .display_scale_ud = f,
         .dump_fn = fake_dump,
         .dump_ud = f,
         .emit_fn = fake_emit,
@@ -275,6 +286,7 @@ static void test_load_ext_names_registered(void)
         "mousedown 1 2\n"
         "mouseup 1 2\n"
         "winsize 800 600\n"
+        "display-scale 2.0\n"
         "assert-no-hover\n"
         "quit\n");
     ASSERT_NOT_NULL(path);
@@ -444,6 +456,27 @@ static void test_mousemove(void)
     ASSERT_EQ(f.mouse_y, 34);
 }
 
+/* The display-scale command carries the new compositor scale. */
+static void test_display_scale(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "display-scale 2.0\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.display_scale_calls, 1);
+    ASSERT_FLOAT_NEAR(f.display_scale_value, 2.0f, 0.001f);
+}
+
+/* A scale that is not a positive number is a script error. */
+static void test_display_scale_rejects_bad_value(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "display-scale 0\n"), CFR_SCRIPT_FAILED);
+    ASSERT_EQ(f.display_scale_calls, 0);
+    ASSERT_EQ(run_to_end(&f, "display-scale\n"), CFR_SCRIPT_FAILED);
+    ASSERT_EQ(f.display_scale_calls, 0);
+}
+
 static void test_mouse_buttons(void)
 {
     FakeExt f;
@@ -611,6 +644,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_dumpstate_default_path);
     RUN_TEST(test_dumpstate_failure_fails_run);
     RUN_TEST(test_mousemove);
+    RUN_TEST(test_display_scale);
+    RUN_TEST(test_display_scale_rejects_bad_value);
     RUN_TEST(test_mouse_buttons);
     RUN_TEST(test_mouse_button_defaults);
     RUN_TEST(test_mouse_bad_args_fail);

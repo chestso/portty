@@ -148,7 +148,8 @@ typedef struct
 
     SDL_Window *window;
     SDL_Renderer *sdl_renderer;
-    float window_scale; // compositor scale (SDL_GetWindowDisplayScale)
+    float window_scale;   // compositor scale (SDL_GetWindowDisplayScale)
+    float scale_override; // simulated compositor scale (script); 0 = none
     SDL_Thread *pty_reader_thread;
     SDL_AtomicInt running;
     SDL_AtomicInt quit_requested;
@@ -230,15 +231,25 @@ static int sdl_mod_to_term(int mod)
 // SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED. All SDL logical↔physical
 // coordinate conversion (mouse input, window sizing) must go through this
 // value — never content_scale, which also includes the user's --dpi-scale.
+//
+// A debug script can simulate a display migration with the
+// `display-scale` command; the override then stands in for the value the
+// compositor reports.
 static float sdl3_refresh_window_scale(Sdl3BackendData *d)
 {
-    if (d && d->window) {
+    if (d && d->scale_override > 0.0f) {
+        d->window_scale = d->scale_override;
+    } else if (d && d->window) {
         float scale = SDL_GetWindowDisplayScale(d->window);
         if (scale > 0.0f)
             d->window_scale = scale;
     }
     if (d && d->window_scale <= 0.0f)
         d->window_scale = 1.0f;
+    // The fonts are rasterized for the compositor scale, so the renderer
+    // needs it (the renderer never asks SDL itself).
+    if (d && d->rend.window)
+        rend_sdl3_set_display_scale(&d->rend, d->window_scale);
     return d ? d->window_scale : 1.0f;
 }
 
@@ -956,6 +967,9 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
         d->window = NULL;
         goto fail_wakeup;
     }
+    // The renderer is up: hand it the compositor scale it has to
+    // rasterize the fonts for.
+    rend_sdl3_set_display_scale(&d->rend, d->window_scale);
 
     return true;
 
@@ -1111,6 +1125,8 @@ static bool sdl3_get_drawable_size(PorttyBackend *self, int *w, int *h)
 static float sdl3_get_display_scale(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
+    if (d && d->scale_override > 0.0f)
+        return d->scale_override;
     if (d && d->window) {
         float scale = SDL_GetWindowDisplayScale(d->window);
         if (scale > 0.0f)
@@ -1521,6 +1537,11 @@ static int sdl3_load_fonts(PorttyBackend *self, float size,
     return rend_sdl3_load_fonts(&sdl3_data(self)->rend, size, name, ft_hint_target);
 }
 
+static bool sdl3_reload_fonts(PorttyBackend *self, float content_scale)
+{
+    return rend_sdl3_reload_fonts(&sdl3_data(self)->rend, content_scale);
+}
+
 static void sdl3_draw_terminal(PorttyBackend *self, TerminalBackend *term,
                                bool cursor_visible)
 {
@@ -1811,6 +1832,28 @@ static void sdl3_script_winsize(void *user_data, int w, int h)
     vlog("winsize: %dx%d (logical %dx%d)\n", w, h, logical_w, logical_h);
 }
 
+// Simulate the window moving to a display with another scale factor: the
+// compositor scale changes, the fonts are re-rasterized for the new DPI,
+// and the grid is derived from the new cell size.
+static void sdl3_script_display_scale(void *user_data, float scale)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->window || !d->app)
+        return;
+    d->scale_override = scale;
+    sdl3_refresh_window_scale(d);
+    int pix_w, pix_h;
+    SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
+    if (portty_app_handle_display_scale_changed(d->app, pix_w, pix_h)) {
+        sdl3_resize_overlay_update(d);
+        // The status message was placed for the old geometry.
+        if (d->notify_hide_at != 0)
+            sdl3_notify_place(d);
+    }
+    terminal_mark_dirty(d->term);
+    vlog("display-scale: %.2fx\n", (double)scale);
+}
+
 static void sdl3_script_mousemove(void *user_data, int x, int y)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
@@ -1925,6 +1968,8 @@ static void sdl3_run(PorttyBackend *self)
             .resize_ud = d,
             .winsize_fn = sdl3_script_winsize,
             .winsize_ud = d,
+            .display_scale_fn = sdl3_script_display_scale,
+            .display_scale_ud = d,
             .recorder = d->frame_recorder,
             .record_start_fn = sdl3_record_start,
             .record_stop_fn = sdl3_record_stop,
@@ -2133,14 +2178,24 @@ static void sdl3_run(PorttyBackend *self)
             }
 
             case SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED:
-                // Refresh the cached compositor scale. Mouse coordinate
-                // conversion (via sdl3_scale_mouse_coords) picks it up on
-                // the next event. Re-rasterizing fonts for the new DPI is
-                // a known follow-up (see TODO.md).
+                // The window moved to a display with another scale factor.
+                // The compositor scale changed, so the fonts are
+                // re-rasterized for the new DPI and the grid is derived
+                // from the new cell size.
                 vlog("Window display scale changed: %.2fx -> %.2fx\n",
                      (double)d->window_scale,
                      (double)SDL_GetWindowDisplayScale(d->window));
                 sdl3_refresh_window_scale(d);
+                {
+                    int pix_w, pix_h;
+                    SDL_GetWindowSizeInPixels(d->window, &pix_w, &pix_h);
+                    if (portty_app_handle_display_scale_changed(d->app, pix_w, pix_h)) {
+                        sdl3_resize_overlay_update(d);
+                        // The status message was placed for the old geometry.
+                        if (d->notify_hide_at != 0)
+                            sdl3_notify_place(d);
+                    }
+                }
                 terminal_mark_dirty(term);
                 break;
 
@@ -2510,6 +2565,7 @@ PorttyBackend backend_sdl3 = {
     .notify_active = sdl3_notify_active,
 
     .load_fonts = sdl3_load_fonts,
+    .reload_fonts = sdl3_reload_fonts,
     .draw_terminal = sdl3_draw_terminal,
     .present = sdl3_present,
     .resize = sdl3_resize,

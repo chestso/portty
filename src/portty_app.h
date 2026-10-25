@@ -82,6 +82,10 @@ bool portty_app_handle_mouse(PorttyApp *app, int px, int py,
                              int button, bool pressed, int clicks, int mod);
 void portty_app_handle_scroll(PorttyApp *app, int delta);
 void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h);
+// The window moved to a display with another scale factor: the fonts are
+// re-rasterized for the new DPI and the grid is derived from the new cell
+// size. Returns true when the grid was re-derived.
+bool portty_app_handle_display_scale_changed(PorttyApp *app, int pixel_w, int pixel_h);
 void portty_app_handle_mouse_leave(PorttyApp *app, int px, int py);
 void portty_app_handle_mouse_enter(PorttyApp *app);
 bool portty_app_revalidate_hover(PorttyApp *app, int px, int py);

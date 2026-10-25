@@ -64,6 +64,14 @@ void rend_sdl3_atlas_begin_frame(RendSdl3Atlas *atlas)
     rend_atlas_begin_frame(&atlas->packing);
 }
 
+void rend_sdl3_atlas_reset(RendSdl3Atlas *atlas)
+{
+    if (!atlas)
+        return;
+    rend_atlas_reset(&atlas->packing);
+    vlog("Atlas: reset (glyph cache dropped)\n");
+}
+
 RendSdl3AtlasEntry *rend_sdl3_atlas_lookup(RendSdl3Atlas *atlas, void *font_data,
                                            int glyph_id, uint32_t color)
 {
