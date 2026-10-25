@@ -24,12 +24,19 @@ static void test_resolve_cell_style_emoji_falls_back_when_glyph_missing(void);
 static void test_plan_glyph_sets_emoji_flags(void);
 static void test_plan_glyph_emoji_square_clamps_avail(void);
 static void test_plan_glyph_regional_passes_through(void);
+static void test_plan_glyph_box_matches_cell(void);
+static void test_plan_glyph_box_wide_fallback_keeps_width_fit(void);
+static void test_plan_glyph_box_symbol_class_height_only(void);
+static void test_plan_glyph_box_dingbat_is_symbol_class(void);
+static void test_plan_glyph_box_math_operator_keeps_width_fit(void);
 
 /* Helpers exported by font_stubs.c for testing the policy functions in
  * rend_common.c that consult the FontBackend for style/emoji decisions. */
 FontBackend make_test_font_backend(void);
 void test_font_set_loaded_styles(uint32_t mask);
 void test_font_reset(void);
+bool test_font_get_box(FontStyle style, int *width, int *height,
+                       bool *height_only_fit);
 
 /* Helper: a letter 'A' trivially falls through the bold/italic cascade. */
 #define TEST_LATIN_A ((uint32_t)'A')
@@ -291,6 +298,115 @@ static void test_plan_glyph_regional_passes_through(void)
     ASSERT_EQ(p.cache_h, 24);
 }
 
+static void test_plan_glyph_box_matches_cell(void)
+{
+    // A plain 1-cell letter hands every style the whole cell box and asks
+    // for nothing special.
+    test_font_reset();
+    test_font_set_loaded_styles(1u << FONT_STYLE_NORMAL);
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { TEST_LATIN_A };
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_NORMAL, false, cps, 1,
+                    11, 21, 1, 255, 255, 255, &p);
+    ASSERT_FALSE(p.symbol_cell);
+    ASSERT_FALSE(p.height_only_fit);
+    for (int s = 0; s < FONT_STYLE_COUNT; s++) {
+        int w = 0, h = 0;
+        bool hof = true;
+        ASSERT_TRUE(test_font_get_box((FontStyle)s, &w, &h, &hof));
+        ASSERT_EQ(w, 11);
+        ASSERT_EQ(h, 21);
+        ASSERT_FALSE(hof);
+    }
+    test_font_reset();
+}
+
+static void test_plan_glyph_box_wide_fallback_keeps_width_fit(void)
+{
+    // Wide (2-cell) fallback text keeps the width-fit policy: the box is
+    // twice the cell width and height_only_fit stays off, so a CJK glyph too
+    // wide for its slot is still scaled to fit.
+    test_font_reset();
+    test_font_set_loaded_styles(1u << FONT_STYLE_NORMAL);
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { 0x4E00 }; // 一
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_NORMAL, false, cps, 1,
+                    11, 21, 2, 255, 255, 255, &p);
+    ASSERT_FALSE(p.symbol_cell);
+    ASSERT_FALSE(p.height_only_fit);
+    int w = 0, h = 0;
+    bool hof = true;
+    ASSERT_TRUE(test_font_get_box(FONT_STYLE_FALLBACK, &w, &h, &hof));
+    ASSERT_EQ(w, 22);
+    ASSERT_EQ(h, 21);
+    ASSERT_FALSE(hof);
+    test_font_reset();
+}
+
+static void test_plan_glyph_box_symbol_class_height_only(void)
+{
+    // ❖ U+2756 is Geometric Shapes: symbol-class, so the rasterizer is told
+    // to allow horizontal overhang and scale only on vertical overflow.
+    test_font_reset();
+    test_font_set_loaded_styles(1u << FONT_STYLE_NORMAL);
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { 0x2756 };
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_NORMAL, false, cps, 1,
+                    11, 21, 1, 255, 255, 255, &p);
+    ASSERT_TRUE(p.symbol_cell);
+    ASSERT_TRUE(p.height_only_fit);
+    ASSERT_TRUE(p.center_horizontally);
+    int w = 0, h = 0;
+    bool hof = false;
+    ASSERT_TRUE(test_font_get_box(FONT_STYLE_FALLBACK, &w, &h, &hof));
+    ASSERT_EQ(w, 11);
+    ASSERT_EQ(h, 21);
+    ASSERT_TRUE(hof);
+    test_font_reset();
+}
+
+static void test_plan_glyph_box_dingbat_is_symbol_class(void)
+{
+    // ✶ U+2736 is Dingbats, which reaches the symbol class through the emoji
+    // presentation band (U+2600–27BF), so it gets height-only fitting like
+    // the Geometric Shapes glyphs.
+    test_font_reset();
+    test_font_set_loaded_styles(1u << FONT_STYLE_NORMAL);
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { 0x2736 };
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_NORMAL, false, cps, 1,
+                    11, 21, 1, 255, 255, 255, &p);
+    ASSERT_TRUE(p.symbol_cell);
+    ASSERT_TRUE(p.height_only_fit);
+    test_font_reset();
+}
+
+static void test_plan_glyph_box_math_operator_keeps_width_fit(void)
+{
+    // ∀ U+2200 (Mathematical Operators) is not symbol-class: only the bands
+    // in rend_is_symbol_cell_cp qualify, so ordinary fallback text keeps the
+    // width-fit policy.
+    test_font_reset();
+    test_font_set_loaded_styles(1u << FONT_STYLE_NORMAL);
+    FontBackend fb = make_test_font_backend();
+    uint32_t cps[] = { 0x2200 };
+    RendGlyphPlan p = { 0 };
+    rend_plan_glyph(&fb, FONT_STYLE_NORMAL, false, cps, 1,
+                    11, 21, 1, 255, 255, 255, &p);
+    ASSERT_FALSE(p.symbol_cell);
+    ASSERT_FALSE(p.height_only_fit);
+    ASSERT_FALSE(p.center_horizontally);
+    int w = 0, h = 0;
+    bool hof = true;
+    ASSERT_TRUE(test_font_get_box(FONT_STYLE_FALLBACK, &w, &h, &hof));
+    ASSERT_FALSE(hof);
+    test_font_reset();
+}
+
 /* Build a shaped run from parallel arrays. */
 static ShapedGlyphs make_run(const uint32_t *ids, const int *advances, int n)
 {
@@ -421,6 +537,11 @@ int main(int argc, char *argv[])
     RUN_TEST(test_plan_glyph_sets_emoji_flags);
     RUN_TEST(test_plan_glyph_emoji_square_clamps_avail);
     RUN_TEST(test_plan_glyph_regional_passes_through);
+    RUN_TEST(test_plan_glyph_box_matches_cell);
+    RUN_TEST(test_plan_glyph_box_wide_fallback_keeps_width_fit);
+    RUN_TEST(test_plan_glyph_box_symbol_class_height_only);
+    RUN_TEST(test_plan_glyph_box_dingbat_is_symbol_class);
+    RUN_TEST(test_plan_glyph_box_math_operator_keeps_width_fit);
 
     TEST_SUMMARY();
 }

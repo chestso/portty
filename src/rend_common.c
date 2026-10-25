@@ -294,10 +294,17 @@ void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
 {
     // Tell the font backend the pixel budget for every style. Oversized
     // glyphs (CJK via fallback, etc.) use this when sizing their output.
+    // Symbol-class cells ask for height-only fitting: their ink is centered
+    // and allowed to overhang the cell horizontally (resolved by the row
+    // draw), but vertical overflow would be clipped by the next row, so the
+    // rasterizer scales those to the cell height. The flag is set for every
+    // style here so a style the cell later falls back to (NORMAL, or a
+    // lazily loaded fontconfig face) inherits this cell's policy.
     int avail_w = columns_to_consume * cell_w;
     int avail_h = cell_h;
+    bool symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
     for (int s = 0; s < FONT_STYLE_COUNT; s++)
-        font_set_presentation_width(font, s, avail_w);
+        font_set_presentation_box(font, s, avail_w, avail_h, symbol_cell);
 
     // Emoji prefers a square aspect ratio within the cell box.
     if (style == FONT_STYLE_EMOJI && avail_h < avail_w)
@@ -312,12 +319,13 @@ void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
                          ? ((uint32_t)fg_r << 16) | ((uint32_t)fg_g << 8) | (uint32_t)fg_b
                          : 0xFFFFFF;
 
-    out->symbol_cell = (cp_count > 0) && rend_is_symbol_cell_cp(cps[0]);
+    out->symbol_cell = symbol_cell;
     out->downscale_glyph = (emoji_render && out->color_baked);
     // Symbol-class glyphs from a text font have a FreeType bitmap_left
     // calibrated against an oversized advance (mono fonts often use
     // 1.2em+). Override x_offset so the ink sits centered horizontally.
     out->center_horizontally = out->symbol_cell && !out->color_baked;
+    out->height_only_fit = out->symbol_cell;
 
     out->avail_w = avail_w;
     out->avail_h = avail_h;

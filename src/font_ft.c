@@ -1007,33 +1007,50 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
         return NULL;
     }
 
-    // If the glyph's actual ink width exceeds the available pixel budget,
-    // apply a uniform scale transform and re-rasterize so the bitmap fits
-    // (avoids lossy post-render bitmap scaling in the renderer).
-    // Use metrics.width (ink extent) not advance.x (which includes sidebearings).
+    // Fallback fonts are sized to the cell budget the renderer handed us:
+    //  - Ordinary fallback text (CJK, symbols the primary font covers in a
+    //    wide slot) is pre-scaled on its ink width, so the rasterized glyph
+    //    fits the cell at high quality and stays baseline-aware. Use
+    //    metrics.width (ink extent) not advance.x (which includes
+    //    sidebearings).
+    //  - Symbol-class glyphs (height_only_fit) are exempt on the width
+    //    axis: the renderer centers their ink and lets it overhang into the
+    //    neighbour cell, which the per-row two-pass draw resolves. Only
+    //    vertical overflow is scaled here, because a glyph taller than the
+    //    cell is painted over by the next row's background pass and would
+    //    be clipped.
+    // Plain text glyphs (ASCII bold) that overflow are left to the renderer
+    // to clip so stroke weight is preserved.
     FT_GlyphSlot slot_pre = face->glyph;
     int ink_width = (int)(slot_pre->metrics.width >> 6);
+    int ink_height = (int)(slot_pre->metrics.height >> 6);
     int bearing_x = (int)(slot_pre->metrics.horiBearingX >> 6);
     int glyph_extent = bearing_x + ink_width; // rightmost pixel
     double glyph_scale = 0.0;                 // non-zero when glyph was scaled down
-    // CJK fallback: pre-scale via FreeType so the rasterized glyph fits the
-    // cell at high quality and stays baseline-aware.
-    // Symbols/emoji are intentionally not pre-scaled here — the renderer
-    // routes them through its CPU box-filter downscale (same path color
-    // emoji use), which gives a softer result than re-rasterizing at a
-    // non-design-grid size.
-    // Plain text glyphs (ASCII bold) that overflow are left to the renderer
-    // to clip so stroke weight is preserved.
     bool is_fallback = (ft_data->style == FONT_STYLE_FALLBACK);
-    int target = ft_data->presentation_width > 0 ? ft_data->presentation_width
-                                                 : ft_data->target_cell_width;
-    if (is_fallback && target > 0 && glyph_extent > target) {
-        glyph_scale = (double)target / glyph_extent;
+    int x_budget = ft_data->presentation_width > 0 ? ft_data->presentation_width
+                                                   : ft_data->target_cell_width;
+    int y_budget = ft_data->presentation_height > 0
+                       ? ft_data->presentation_height
+                       : (int)(face->size->metrics.height >> 6);
+    if (is_fallback) {
+        if (ft_data->height_only_fit) {
+            if (y_budget > 0 && ink_height > y_budget)
+                glyph_scale = (double)y_budget / ink_height;
+        } else if (x_budget > 0 && glyph_extent > x_budget) {
+            glyph_scale = (double)x_budget / glyph_extent;
+        }
+    }
+    if (glyph_scale > 0.0) {
         FT_Fixed scale_16_16 = (FT_Fixed)(glyph_scale * 0x10000);
         FT_Matrix matrix = { scale_16_16, 0, 0, scale_16_16 };
-        vlog("rasterize_glyph_index: glyph %u extent %d (ink=%d+bearing=%d) > target %d, scaling by %.3f\n",
-             glyph_index, glyph_extent, ink_width, bearing_x,
-             target, glyph_scale);
+        if (ft_data->height_only_fit)
+            vlog("rasterize_glyph_index: glyph %u ink height %d > cell %d, scaling by %.3f\n",
+                 glyph_index, ink_height, y_budget, glyph_scale);
+        else
+            vlog("rasterize_glyph_index: glyph %u extent %d (ink=%d+bearing=%d) > target %d, scaling by %.3f\n",
+                 glyph_index, glyph_extent, ink_width, bearing_x,
+                 x_budget, glyph_scale);
         FT_Set_Transform(face, &matrix, NULL);
         error = FT_Load_Glyph(face, glyph_index, load_flags);
         FT_Set_Transform(face, NULL, NULL); // reset transform
@@ -1079,7 +1096,7 @@ GlyphBitmap *rasterize_glyph_index(FtFontData *ft_data, FT_UInt glyph_index,
     // cell). Mark it for cell-centered placement and let the renderer drop
     // the baseline arithmetic for this entry.
     if (glyph_scale > 0.0) {
-        glyph_bitmap->x_offset = (target - (int)bitmap->width) / 2;
+        glyph_bitmap->x_offset = (x_budget - (int)bitmap->width) / 2;
         glyph_bitmap->centered = true;
     }
 
@@ -1341,12 +1358,16 @@ static void ft_set_target_cell_width(void *font_data, int cell_width)
         ft_data->target_cell_width = cell_width;
 }
 
-// Set per-render presentation width (vtable callback)
-static void ft_set_presentation_width(void *font_data, int width)
+// Set the per-render pixel budget (vtable callback)
+static void ft_set_presentation_box(void *font_data, int width, int height,
+                                    bool height_only_fit)
 {
     FtFontData *ft_data = (FtFontData *)font_data;
-    if (ft_data)
-        ft_data->presentation_width = width;
+    if (!ft_data)
+        return;
+    ft_data->presentation_width = width;
+    ft_data->presentation_height = height;
+    ft_data->height_only_fit = height_only_fit;
 }
 
 FontBackend font_backend_ft = {
@@ -1369,5 +1390,5 @@ FontBackend font_backend_ft = {
     .style_has_colr = ft_style_has_colr,
     .get_glyph_index = ft_get_glyph_index,
     .set_target_cell_width = ft_set_target_cell_width,
-    .set_presentation_width = ft_set_presentation_width
+    .set_presentation_box = ft_set_presentation_box
 };

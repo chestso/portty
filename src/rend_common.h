@@ -250,9 +250,10 @@ int rend_layout_shaped_run(const ShapedGlyphs *run, int box_w, int cell_w,
 // Per-cell glyph rendering decisions: presentation sizes, color-baked
 // flag, atlas color key, render colors, symbol-class flag, and the
 // downscale-or-center policy. Caller already picked a FontStyle via
-// rend_resolve_cell_style. The helper also pushes font_set_presentation_width
-// into the font backend for every style — backends must call this once at
-// the top of render_cell before font_render_*.
+// rend_resolve_cell_style. The helper also pushes
+// font_set_presentation_box into the font backend for every style —
+// backends must call this once at the top of render_cell before
+// font_render_*.
 typedef struct
 {
     void *font_data;
@@ -262,10 +263,12 @@ typedef struct
     bool symbol_cell;
     bool downscale_glyph;     // 4x emoji pipeline only
     bool center_horizontally; // symbol-class without color-baked
+    bool height_only_fit;     // symbol-class: rasterizer may overhang the
+                              // cell horizontally, scales only on height
     int avail_w, avail_h;     // post-emoji square clamp
     int cache_w, cache_h;     // — initially equals avail_w/avail_h.
                               // Kept as a separate field so backends can
-                              // override without recomputing presentation_width.
+                              // override without recomputing the budget.
 } RendGlyphPlan;
 
 void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,

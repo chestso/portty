@@ -150,9 +150,14 @@ struct FontBackend
     // Set target cell width for oversized glyph scaling (backend-specific)
     void (*set_target_cell_width)(void *font_data, int cell_width);
 
-    // Set per-render presentation width (pixel budget for the current glyph).
-    // This is the actual available space: columns_to_consume * cell_width.
-    void (*set_presentation_width)(void *font_data, int width);
+    // Set the per-render pixel budget for the glyph about to be rasterized.
+    // width is the actual available space (columns_to_consume * cell_width),
+    // height the cell height. height_only_fit asks the backend to leave
+    // horizontal overflow alone — the renderer centers the ink and lets it
+    // overhang the cell — and to scale only when the ink is taller than the
+    // cell, which would otherwise be clipped by the next row's background.
+    void (*set_presentation_box)(void *font_data, int width, int height,
+                                 bool height_only_fit);
 };
 
 // Font font API
@@ -190,7 +195,8 @@ bool font_style_has_colr(FontBackend *font, FontStyle style);
 // Set target cell width on all loaded font styles (for oversized glyph scaling)
 void font_set_target_cell_width(FontBackend *font, int cell_width);
 
-// Set per-render presentation width on a single font style
-void font_set_presentation_width(FontBackend *font, FontStyle style, int width);
+// Set the per-render pixel budget on a single font style
+void font_set_presentation_box(FontBackend *font, FontStyle style,
+                               int width, int height, bool height_only_fit);
 
 #endif // FONT_H

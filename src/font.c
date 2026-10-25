@@ -200,11 +200,13 @@ void font_set_target_cell_width(FontBackend *font, int cell_width)
     }
 }
 
-// Set per-render presentation width on a single font style
-void font_set_presentation_width(FontBackend *font, FontStyle style, int width)
+// Set the per-render pixel budget on a single font style
+void font_set_presentation_box(FontBackend *font, FontStyle style,
+                               int width, int height, bool height_only_fit)
 {
-    if (!font || !font->set_presentation_width)
+    if (!font || !font->set_presentation_box)
         return;
     if (style < FONT_STYLE_COUNT && font->font_data[style])
-        font->set_presentation_width(font->font_data[style], width);
+        font->set_presentation_box(font->font_data[style], width, height,
+                                   height_only_fit);
 }

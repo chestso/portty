@@ -846,8 +846,9 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (fb_path && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
                 style = FONT_STYLE_FALLBACK;
                 font_data = data->font->font_data[style];
-                // Lazily loaded — set presentation_width now
-                font_set_presentation_width(data->font, style, avail_w);
+                // Lazily loaded — set the cell budget now
+                font_set_presentation_box(data->font, style, avail_w, avail_h,
+                                          plan.height_only_fit);
                 color_baked = rend_is_color_font(data->font, style);
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;
@@ -984,8 +985,9 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             if (fb_path && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
                 style = FONT_STYLE_FALLBACK;
                 font_data = data->font->font_data[style];
-                // Lazily loaded — set presentation_width now
-                font_set_presentation_width(data->font, style, avail_w);
+                // Lazily loaded — set the cell budget now
+                font_set_presentation_box(data->font, style, avail_w, avail_h,
+                                          plan.height_only_fit);
                 color_baked = rend_is_color_font(data->font, style);
                 render_r = color_baked ? r : 255;
                 render_g = color_baked ? g : 255;

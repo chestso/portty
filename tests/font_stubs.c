@@ -72,9 +72,55 @@ void font_resolve_list_monospace(FontResolveBackend *resolve)
 static uint32_t s_test_loaded_styles = 0;
 #define TEST_STUB_EMOJI_CP 0x26A1 // ⚡ — has emoji presentation + stub claims glyph
 
+// Recorded per-style presentation budget, so tests can assert what
+// rend_plan_glyph hands the backend for a given cell.
+typedef struct
+{
+    int width;
+    int height;
+    bool height_only_fit;
+} TestFontBox;
+
+static TestFontBox s_boxes[FONT_STYLE_COUNT];
+static bool s_box_set[FONT_STYLE_COUNT];
+
 void test_font_set_loaded_styles(uint32_t mask) { s_test_loaded_styles = mask; }
 uint32_t test_font_get_loaded_styles(void) { return s_test_loaded_styles; }
-void test_font_reset(void) { s_test_loaded_styles = 0; }
+void test_font_reset(void)
+{
+    s_test_loaded_styles = 0;
+    memset(s_boxes, 0, sizeof(s_boxes));
+    memset(s_box_set, 0, sizeof(s_box_set));
+}
+
+// Read back the budget the helper pushed for `style`. Returns false when the
+// style was never given one. Out-params avoid sharing the recording struct
+// across translation units.
+bool test_font_get_box(FontStyle style, int *width, int *height,
+                       bool *height_only_fit)
+{
+    if ((int)style < 0 || style >= FONT_STYLE_COUNT || !s_box_set[style])
+        return false;
+    if (width)
+        *width = s_boxes[style].width;
+    if (height)
+        *height = s_boxes[style].height;
+    if (height_only_fit)
+        *height_only_fit = s_boxes[style].height_only_fit;
+    return true;
+}
+
+static void stub_set_presentation_box(void *font_data, int width, int height,
+                                      bool height_only_fit)
+{
+    int style = (int)(intptr_t)font_data - 1;
+    if (style < 0 || style >= FONT_STYLE_COUNT)
+        return;
+    s_boxes[style].width = width;
+    s_boxes[style].height = height;
+    s_boxes[style].height_only_fit = height_only_fit;
+    s_box_set[style] = true;
+}
 
 static uint32_t stub_get_glyph_index(FontBackend *font, void *font_data,
                                      uint32_t cp)
@@ -90,6 +136,12 @@ FontBackend make_test_font_backend(void)
     fb.name = "test-font-stub";
     fb.loaded_styles = s_test_loaded_styles;
     fb.get_glyph_index = stub_get_glyph_index;
+    fb.set_presentation_box = stub_set_presentation_box;
+    // Non-NULL font_data per style: font.c's set_presentation_box wrapper
+    // (like every other wrapper) skips styles with no loaded face. The value
+    // encodes the style index so the recorder can attribute the call.
+    for (int i = 0; i < FONT_STYLE_COUNT; i++)
+        fb.font_data[i] = (void *)(intptr_t)(i + 1);
     // All other callbacks left NULL — font.c's wrapper layer short-circuits
     // when a function pointer is missing, so the unit tests only need to
     // drive decisions via loaded_styles + the emoji-codepoint branch.
