@@ -329,6 +329,10 @@ static void capture_sdl_gpu_info(RendererSdl3Data *data)
                            dname, dinfo, dver);
 }
 
+// A fallback face comes and goes as the pool fills, but the atlas keys its
+// glyphs on the path's identity record, so a face's glyphs survive the eviction
+// of the face itself and a reload at any address finds them again.
+
 bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Renderer *renderer_handle)
 {
     data->window = window_handle;
@@ -587,6 +591,19 @@ bool rend_sdl3_reload_fonts(RendererSdl3Data *data, float content_scale)
     return true;
 }
 
+// True while the draw pass walks the cells. The populate pass caches every
+// glyph of the frame with the render queue empty and uploads it to the texture
+// before drawing starts; a glyph rasterized later would sit in the staging
+// buffer while the blit samples texels the GPU does not have yet. So the draw
+// pass only reads the cache: a miss is a glyph the atlas could not hold, and
+// it stays blank for this frame.
+static bool g_atlas_draw_pass = false;
+
+static bool atlas_inserts_allowed(void)
+{
+    return !g_atlas_draw_pass;
+}
+
 static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
                                        uint32_t glyph_id, uint32_t color_key,
                                        GlyphBitmap *bitmap, bool downscale,
@@ -596,6 +613,9 @@ static RendSdl3AtlasEntry *cache_glyph(RendSdl3Atlas *atlas, void *font_data,
     RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(atlas, font_data, glyph_id, color_key);
     if (entry)
         return entry;
+
+    if (!atlas_inserts_allowed())
+        return NULL;
 
     GlyphBitmap *scaled = rend_apply_glyph_layout(bitmap, downscale,
                                                   center_horizontally,
@@ -820,7 +840,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
             rend_sdl3_atlas_lookup(&data->atlas, BOXDRAW_FONT_DATA,
                                    (int)bd_cp, color_key);
 
-        if (!entry) {
+        if (!entry && atlas_inserts_allowed()) {
             GlyphBitmap *bmp = rend_boxdraw_render(bd_cp,
                                                    data->cell_width,
                                                    data->cell_height,
@@ -924,9 +944,10 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         // Dynamic fallback: try fontconfig-resolved font for the first codepoint
         if (!shaped && cp_count > 0) {
             const char *fb_path = rend_fallback_lookup(&data->fallback, data->resolve, cps[0]);
-            if (fb_path && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
+            void *fb_key = fb_path ? rend_fallback_key(&data->fallback, fb_path) : NULL;
+            if (fb_key && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
                 style = FONT_STYLE_FALLBACK;
-                font_data = data->font->font_data[style];
+                font_data = fb_key;
                 // Lazily loaded — set the cell budget now
                 font_set_presentation_box(data->font, style, avail_w, avail_h,
                                           plan.height_only_fit);
@@ -972,7 +993,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
                     RendSdl3AtlasEntry *entry =
                         rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
-                    if (!entry) {
+                    if (!entry && atlas_inserts_allowed()) {
                         GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
                                                                render_r, render_g, render_b);
                         if (gb) {
@@ -1008,7 +1029,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                              : gid;
                     RendSdl3AtlasEntry *entry =
                         rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
-                    if (!entry) {
+                    if (!entry && atlas_inserts_allowed()) {
                         GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
                                                                render_r, render_g, render_b);
                         if (gb) {
@@ -1063,9 +1084,10 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         // Dynamic fallback: if still missing, query fontconfig for a covering font
         if (glyph_index == 0) {
             const char *fb_path = rend_fallback_lookup(&data->fallback, data->resolve, codepoint);
-            if (fb_path && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
+            void *fb_key = fb_path ? rend_fallback_key(&data->fallback, fb_path) : NULL;
+            if (fb_key && rend_fallback_ensure(&data->fallback, data->font, fb_path, data->font_size, &data->font_options, data->cell_width)) {
                 style = FONT_STYLE_FALLBACK;
-                font_data = data->font->font_data[style];
+                font_data = fb_key;
                 // Lazily loaded — set the cell budget now
                 font_set_presentation_box(data->font, style, avail_w, avail_h,
                                           plan.height_only_fit);
@@ -1087,7 +1109,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
         if (atlas_glyph_id != 0)
             entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_glyph_id, color_key);
-        if (!entry) {
+        if (!entry && atlas_inserts_allowed()) {
             GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1,
                                                            render_r, render_g, render_b);
             if (glyph_bitmap) {
@@ -1188,6 +1210,7 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
                                  bool cursor_visible, bool populate_only, int scroll_offset)
 {
+    g_atlas_draw_pass = !populate_only;
     TerminalPos cursor_pos = terminal_get_cursor_pos(term);
     // Hide the cursor when the terminal says it's not visible, when
     // cursor_visible (blink phase) is false, or when its row is outside the
@@ -2289,27 +2312,37 @@ static void build_panel_terminal(RendererSdl3Data *data, int slot)
 }
 
 // Two-phase atlas populate (shared by sdl3_draw_terminal and sdl3_render_to_png):
-// insert glyphs with no draw calls, and if eviction occurred mid-pass, flush the
-// partial staging and re-populate so destroyed glyphs are re-rasterized; then
-// flush staging to the GPU. The caller must have called rend_sdl3_atlas_begin_frame
-// first; on return the atlas is ready for the draw pass. Doing the upload while
-// the render queue is empty avoids the implicit flush inside SDL_UpdateTexture
-// interfering with in-flight draw commands.
-// Returns true if any eviction occurred during the pass.
+// insert glyphs with no draw calls, then flush staging to the GPU. The caller
+// must have called rend_sdl3_atlas_begin_frame first; on return the atlas is
+// ready for the draw pass. Doing the upload while the render queue is empty
+// avoids the implicit flush inside SDL_UpdateTexture interfering with in-flight
+// draw commands.
+//
+// Room for a new glyph comes from the entries this frame has not touched, so a
+// single pass leaves the atlas complete — recycling never disturbs what the
+// pass has already staged. Only a full reset of the atlas, which happens when
+// nothing is recyclable and the frame's own glyphs fill it, discards that work
+// and makes the pass start over.
+// Returns true if the atlas dropped anything during the pass.
 static bool populate_atlas(RendererSdl3Data *data, TerminalBackend *term,
                            int rows, int cols, bool cursor_visible, int scroll_offset)
 {
-    bool eviction = false;
     data->atlas.packing.eviction_occurred = false;
+    data->atlas.packing.reset_occurred = false;
     render_visible_cells(data, term, rows, cols, cursor_visible, true, scroll_offset);
-    if (data->atlas.packing.eviction_occurred) {
-        eviction = true;
+
+    // A reset is bounded: if the frame does not fit the atlas even after two
+    // restarts, the cells that did not make it stay blank for this frame.
+    int restarts = 0;
+    while (data->atlas.packing.reset_occurred && restarts < 2) {
+        restarts++;
+        data->atlas.packing.reset_occurred = false;
         rend_sdl3_atlas_flush(&data->atlas);
-        data->atlas.packing.eviction_occurred = false;
         render_visible_cells(data, term, rows, cols, cursor_visible, true, scroll_offset);
     }
+
     rend_sdl3_atlas_flush(&data->atlas);
-    return eviction;
+    return data->atlas.packing.eviction_occurred || restarts > 0;
 }
 
 void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,

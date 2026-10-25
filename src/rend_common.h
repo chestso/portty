@@ -287,9 +287,19 @@ void rend_plan_glyph(FontBackend *font, FontStyle style, bool emoji_render,
                      uint8_t fg_r, uint8_t fg_g, uint8_t fg_b,
                      RendGlyphPlan *out);
 
-#define REND_ATLAS_HASH_SIZE    8192
+// Cached glyphs survive across frames; they are only dropped when the atlas
+// runs out of room, and then the entries the current frame did not touch go
+// first. The table is sized so a full screen of distinct codepoints — plus the
+// fallback fonts that serve them — fits without eviction: rebuilding the atlas
+// mid-frame is what makes a redraw blink.
+#define REND_ATLAS_HASH_SIZE    32768
 #define REND_ATLAS_TEXTURE_SIZE 2048
 #define REND_ATLAS_MAX_SHELVES  128
+
+// Regions of evicted glyphs are recycled before a new shelf is opened. The
+// list is bounded; space it cannot account for comes back with the next full
+// reset of the atlas.
+#define REND_ATLAS_FREE_REGIONS 2048
 
 typedef struct
 {
@@ -323,17 +333,25 @@ typedef struct
     RendAtlasShelf shelves[REND_ATLAS_MAX_SHELVES];
     int num_shelves;
     int next_shelf_y;
+    RendAtlasRegion free_regions[REND_ATLAS_FREE_REGIONS];
+    int num_free_regions;
     RendAtlasEntry entries[REND_ATLAS_HASH_SIZE];
     int entry_count;
     uint64_t current_frame;
     bool eviction_occurred;
+    // Set when the atlas had to drop everything inside a populate pass (no
+    // room and nothing recyclable): the glyphs staged for that pass are gone
+    // with it, so the pass has to walk the cells again.
+    bool reset_occurred;
 } RendAtlas;
 
 // Initialize the packing state. `staging` must be a pre-allocated RGBA buffer
 // of size REND_ATLAS_TEXTURE_SIZE * REND_ATLAS_TEXTURE_SIZE * 4.
 void rend_atlas_init(RendAtlas *atlas, uint8_t *staging);
 
-// Begin a new frame: increments the frame counter for LRU tracking.
+// Begin a new frame: increments the frame counter for LRU tracking. Entries
+// touched since the previous call are the current frame's working set and are
+// never evicted to make room for that same frame.
 void rend_atlas_begin_frame(RendAtlas *atlas);
 
 // Drop every cached glyph and the shelf layout, keeping the staging
@@ -442,8 +460,11 @@ void rend_make_close_x_bitmap(uint8_t *buf, int size);
 // Fallback font resolution — GPU-agnostic
 // =============================================================================
 
-#define REND_FALLBACK_CACHE_SIZE  2048
-#define REND_MAX_LOADED_FALLBACKS 8
+#define REND_FALLBACK_CACHE_SIZE 2048
+// Each loaded fallback is a whole face, but a screen full of text from many
+// scripts resolves to a handful; too small a pool evicts and reloads faces
+// (and re-rasterizes their glyphs) on every frame.
+#define REND_MAX_LOADED_FALLBACKS 16
 
 typedef struct
 {
@@ -459,10 +480,25 @@ typedef struct
 
 typedef struct
 {
+    char *font_path; // owned by the fallback state
+    // Atlas key for the glyphs of this face. It is the address of this record,
+    // which never moves and outlives every load of the file, so the atlas can
+    // keep a face's glyphs after the face itself has been evicted and find
+    // them again when the path is reloaded — even at a different address.
+    void *key;
+} RendFallbackIdentity;
+
+typedef struct
+{
     RendFallbackCacheEntry cache[REND_FALLBACK_CACHE_SIZE];
     int cache_count;
     RendLoadedFallbackFont loaded[REND_MAX_LOADED_FALLBACKS];
     int loaded_count;
+    // One record per distinct fallback path seen, kept for the life of the
+    // state so the atlas keys stay valid across evictions and reloads.
+    RendFallbackIdentity **identities;
+    int identity_count;
+    int identity_cap;
 } RendFallbackState;
 
 void rend_fallback_init(RendFallbackState *st);
@@ -470,9 +506,20 @@ void rend_fallback_destroy(RendFallbackState *st, FontBackend *font);
 const char *rend_fallback_lookup(RendFallbackState *st,
                                  FontResolveBackend *resolve,
                                  uint32_t codepoint);
+// Load `font_path` as the FONT_STYLE_FALLBACK face, reusing an already loaded
+// one when possible. Loading a new face past REND_MAX_LOADED_FALLBACKS drops
+// the oldest; the glyphs it cached stay in the atlas under `rend_fallback_key`
+// and are found again if the path comes back.
 bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
                           const char *font_path, float font_size,
                           const FontOptions *options, int cell_width);
+
+// Atlas key for the glyphs rasterized from `font_path`. The key depends only on
+// the path, never on the loaded face's address: a cached glyph survives the
+// eviction of its face, and a face loaded at an address a previous one used
+// cannot answer with the previous face's bitmaps. Returns NULL on allocation
+// failure.
+void *rend_fallback_key(RendFallbackState *st, const char *font_path);
 
 // =============================================================================
 // Scroll offset management — GPU-agnostic

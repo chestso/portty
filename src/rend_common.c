@@ -1028,6 +1028,45 @@ static void atlas_reset(RendAtlas *atlas)
     atlas_clear(atlas);
     atlas->num_shelves = 0;
     atlas->next_shelf_y = 0;
+    atlas->num_free_regions = 0;
+}
+
+// Hand a glyph's pixels back for reuse. The region keeps its size, so a later
+// glyph only takes it when it fits; the part it leaves to its right stays on
+// the list for the next one.
+static void atlas_free_region(RendAtlas *atlas, const RendAtlasRegion *region)
+{
+    if (region->w <= 0 || region->h <= 0)
+        return;
+    if (atlas->num_free_regions >= REND_ATLAS_FREE_REGIONS)
+        return;
+    atlas->free_regions[atlas->num_free_regions++] = *region;
+}
+
+// Take the left part of a recycled region. The 1px gap that shelf packing
+// leaves between neighbours stays in front of the remainder, so a glyph that
+// lands next to a leftover keeps its bleed margin.
+static bool atlas_alloc_recycled(RendAtlas *atlas, int w, int h,
+                                 RendAtlasRegion *out)
+{
+    for (int i = 0; i < atlas->num_free_regions; i++) {
+        RendAtlasRegion *f = &atlas->free_regions[i];
+        if (f->w < w || f->h < h)
+            continue;
+
+        out->x = f->x;
+        out->y = f->y;
+        out->w = w;
+        out->h = h;
+
+        int advance = w + 1;
+        f->x += advance;
+        f->w -= advance;
+        if (f->w <= 0)
+            atlas->free_regions[i] = atlas->free_regions[--atlas->num_free_regions];
+        return true;
+    }
+    return false;
 }
 
 static bool atlas_alloc(RendAtlas *atlas, int w, int h,
@@ -1035,6 +1074,9 @@ static bool atlas_alloc(RendAtlas *atlas, int w, int h,
 {
     int padded_w = w + 1;
     int padded_h = h + 1;
+
+    if (atlas_alloc_recycled(atlas, w, h, out))
+        return true;
 
     for (int i = 0; i < atlas->num_shelves; i++) {
         RendAtlasShelf *shelf = &atlas->shelves[i];
@@ -1068,13 +1110,72 @@ static bool atlas_alloc(RendAtlas *atlas, int w, int h,
     return true;
 }
 
-static void atlas_evict(RendAtlas *atlas)
+// Remove one entry from the open-addressed table without breaking the probe
+// chains of the entries that follow it: they slide back over the hole for as
+// long as their home slot is not the slot they would move into.
+static void atlas_remove_at(RendAtlas *atlas, uint32_t idx)
+{
+    const uint32_t mask = REND_ATLAS_HASH_SIZE - 1;
+    uint32_t hole = idx;
+    uint32_t i = idx;
+
+    for (;;) {
+        i = (i + 1) & mask;
+        RendAtlasEntry *e = &atlas->entries[i];
+        if (!e->occupied)
+            break;
+
+        uint32_t home = atlas_hash(e->font_data, e->glyph_id, e->color) & mask;
+        bool can_move = (i > hole) ? (home <= hole || home > i)
+                                   : (home <= hole && home > i);
+        if (can_move) {
+            atlas->entries[hole] = *e;
+            hole = i;
+        }
+    }
+
+    memset(&atlas->entries[hole], 0, sizeof(atlas->entries[hole]));
+    atlas->entry_count--;
+}
+
+// Drop the entries the current frame has not touched. Those are exactly the
+// glyphs the frame being built does not need, so their pixels can go back to
+// the pool while the ones staged for this frame stay put.
+static int atlas_evict_stale(RendAtlas *atlas)
+{
+    int evicted = 0;
+
+    for (int i = 0; i < REND_ATLAS_HASH_SIZE; i++) {
+        RendAtlasEntry *e = &atlas->entries[i];
+        if (!e->occupied || e->last_used_frame >= atlas->current_frame)
+            continue;
+        atlas_free_region(atlas, &e->region);
+        atlas_remove_at(atlas, (uint32_t)i);
+        evicted++;
+        // The removal can slide a later entry into this slot.
+        i--;
+    }
+
+    if (evicted > 0) {
+        atlas->eviction_occurred = true;
+        vlog("Atlas: evicted %d glyph(s) unused this frame (%d cached, %d recycled regions)\n",
+             evicted, atlas->entry_count, atlas->num_free_regions);
+    }
+    return evicted;
+}
+
+// Last resort when recycling cannot produce a region of the size asked for:
+// drop everything and start the shelf layout over. This also discards the
+// pixels of glyphs already staged for the current frame, so the caller has to
+// populate again.
+static void atlas_evict_all(RendAtlas *atlas)
 {
     vlog("Atlas: evicting all entries (%d entries removed)\n", atlas->entry_count);
     memset(atlas->entries, 0, sizeof(atlas->entries));
     atlas->entry_count = 0;
     atlas_reset(atlas);
     atlas->eviction_occurred = true;
+    atlas->reset_occurred = true;
 }
 
 void rend_atlas_init(RendAtlas *atlas, uint8_t *staging)
@@ -1104,9 +1205,11 @@ void rend_atlas_reset(RendAtlas *atlas)
     atlas->entry_count = 0;
     atlas->num_shelves = 0;
     atlas->next_shelf_y = 0;
+    atlas->num_free_regions = 0;
     atlas->dirty = false;
     atlas->dirty_rect = (RendAtlasRegion){ 0, 0, 0, 0 };
     atlas->eviction_occurred = false;
+    atlas->reset_occurred = false;
 
     // The staging buffer keeps the pixels of the glyphs that were just
     // dropped. No entry points at them any more, and every glyph that
@@ -1144,15 +1247,27 @@ RendAtlasEntry *rend_atlas_insert(RendAtlas *atlas, void *font_data,
 
     RendAtlasRegion region;
 
-    if (atlas->entry_count >= REND_ATLAS_HASH_SIZE * 3 / 4)
-        atlas_evict(atlas);
+    if (atlas->entry_count >= REND_ATLAS_HASH_SIZE * 3 / 4) {
+        atlas_evict_stale(atlas);
+        if (atlas->entry_count >= REND_ATLAS_HASH_SIZE * 3 / 4) {
+            // Nothing is recyclable: every cached glyph is one this frame draws.
+            // Refusing the glyph keeps the table below its load factor — at 100%
+            // load a miss probes every slot.
+            vlog("Atlas: table full (%d entries, all in use this frame), skipping glyph %d\n",
+                 atlas->entry_count, glyph_id);
+            return NULL;
+        }
+    }
 
     if (!atlas_alloc(atlas, bmp->width, bmp->height, &region)) {
-        atlas_evict(atlas);
+        atlas_evict_stale(atlas);
         if (!atlas_alloc(atlas, bmp->width, bmp->height, &region)) {
-            vlog("Atlas: glyph %d too large (%dx%d)\n",
-                 glyph_id, bmp->width, bmp->height);
-            return NULL;
+            atlas_evict_all(atlas);
+            if (!atlas_alloc(atlas, bmp->width, bmp->height, &region)) {
+                vlog("Atlas: glyph %d too large (%dx%d)\n",
+                     glyph_id, bmp->width, bmp->height);
+                return NULL;
+            }
         }
     }
 
@@ -1229,8 +1344,11 @@ RendAtlasEntry *rend_atlas_insert(RendAtlas *atlas, void *font_data,
 RendAtlasEntry *rend_atlas_insert_empty(RendAtlas *atlas, void *font_data,
                                         int glyph_id, uint32_t color)
 {
-    if (atlas->entry_count >= REND_ATLAS_HASH_SIZE * 3 / 4)
-        atlas_evict(atlas);
+    if (atlas->entry_count >= REND_ATLAS_HASH_SIZE * 3 / 4) {
+        atlas_evict_stale(atlas);
+        if (atlas->entry_count >= REND_ATLAS_HASH_SIZE * 3 / 4)
+            return NULL;
+    }
 
     uint32_t h = atlas_hash(font_data, glyph_id, color);
     uint32_t idx = h & (REND_ATLAS_HASH_SIZE - 1);
@@ -1400,7 +1518,49 @@ void rend_fallback_destroy(RendFallbackState *st, FontBackend *font)
     font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
     for (int i = 0; i < st->cache_count; i++)
         free(st->cache[i].font_path);
+    // The identity records key the glyph cache. Whatever holds that cache has
+    // to drop its entries along with this state — the keys stop existing here.
+    for (int i = 0; i < st->identity_count; i++) {
+        free(st->identities[i]->font_path);
+        free(st->identities[i]);
+    }
+    free(st->identities);
     memset(st, 0, sizeof(*st));
+}
+
+void *rend_fallback_key(RendFallbackState *st, const char *font_path)
+{
+    if (!st || !font_path)
+        return NULL;
+
+    for (int i = 0; i < st->identity_count; i++) {
+        if (strcmp(st->identities[i]->font_path, font_path) == 0)
+            return st->identities[i]->key;
+    }
+
+    if (st->identity_count == st->identity_cap) {
+        int cap = st->identity_cap ? st->identity_cap * 2 : 16;
+        RendFallbackIdentity **grown =
+            realloc(st->identities, (size_t)cap * sizeof(*grown));
+        if (!grown)
+            return NULL;
+        st->identities = grown;
+        st->identity_cap = cap;
+    }
+
+    // The record is referenced by its own address, so it is allocated on its
+    // own and never moves, unlike the array that indexes it.
+    RendFallbackIdentity *identity = calloc(1, sizeof(*identity));
+    if (!identity)
+        return NULL;
+    identity->font_path = strdup(font_path);
+    if (!identity->font_path) {
+        free(identity);
+        return NULL;
+    }
+    identity->key = identity;
+    st->identities[st->identity_count++] = identity;
+    return identity->key;
 }
 
 const char *rend_fallback_lookup(RendFallbackState *st,
@@ -1455,6 +1615,9 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
             font->font_data[FONT_STYLE_FALLBACK] = NULL;
             font->loaded_styles &= ~(1u << FONT_STYLE_FALLBACK);
         }
+        // The face is destroyed, but the glyphs it produced stay cached: the
+        // atlas keys them on the path's identity record, not on the face, so
+        // reloading this path finds them again.
         font->destroy_font(font, victim->font_data);
         free(victim->font_path);
         memmove(&st->loaded[0], &st->loaded[1],
