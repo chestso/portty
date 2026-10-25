@@ -364,6 +364,7 @@ void portty_app_clear_hover(PorttyApp *app)
 #define DUMP_ERROR_NOTIFY_TTL_MS 8000
 #define LINK_ERROR_NOTIFY_TTL_MS 6000
 #define RESET_NOTIFY_TTL_MS      5000
+#define BELL_NOTIFY_TTL_MS       2000
 
 // Show a transient status message, if the backend supports it. The text is
 // elided to the grid width so the message stays on one line per row: the
@@ -402,6 +403,21 @@ static void app_notify_dump_result(PorttyApp *app, const PorttyDumpResult *res)
     else
         app_notify(app, "State dump failed", res->error, PORTTY_NOTIFY_ERROR,
                    DUMP_ERROR_NOTIFY_TTL_MS);
+}
+
+/* BEL from the child. The panel is the whole visual bell: there is no audible
+ * bell, so a beep from a long-running command becomes a two-second status
+ * message. The window title is the detail line — the only context portty has
+ * about who rang. Repeated BELs refresh the panel rather than stacking. */
+void portty_app_bell(void *user_data)
+{
+    PorttyApp *app = (PorttyApp *)user_data;
+    if (!app)
+        return;
+
+    const char *title = app->term ? terminal_get_title(app->term) : NULL;
+    app_notify(app, "Bell", (title && title[0]) ? title : NULL,
+               PORTTY_NOTIFY_INFO, BELL_NOTIFY_TTL_MS);
 }
 
 /* ------------------------------------------------------------------ */

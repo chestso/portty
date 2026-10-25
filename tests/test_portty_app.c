@@ -305,6 +305,47 @@ static void destroy_key_mock_term(TerminalBackend *term)
     free(term);
 }
 
+/* BEL is presented as the transient status panel — portty has no audible
+ * bell. With no title set there is no detail line. */
+static void test_bell_notifies_panel(void)
+{
+    reset_state();
+    PorttyApp app = { 0 };
+    app.backend = &g_stub_backend;
+
+    portty_app_bell(&app);
+    ASSERT_TRUE(g_state.notify_called);
+    ASSERT_STR_EQ(g_state.notify_title, "Bell");
+    ASSERT_STR_EQ(g_state.notify_body, "");
+    ASSERT_EQ(g_state.notify_level, PORTTY_NOTIFY_INFO);
+    ASSERT_TRUE(g_state.notify_ttl_ms > 0);
+
+    // A NULL app must be inert.
+    g_state.notify_called = false;
+    portty_app_bell(NULL);
+    ASSERT_FALSE(g_state.notify_called);
+}
+
+/* The detail line is the window title: the one piece of context portty has
+ * about which program rang. */
+static void test_bell_body_carries_window_title(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+
+    const char *osc = "\x1b]2;make -j8\a";
+    terminal_process_input(term, osc, strlen(osc));
+    ASSERT_STR_EQ(terminal_get_title(term), "make -j8");
+
+    portty_app_bell(&app);
+    ASSERT_TRUE(g_state.notify_called);
+    ASSERT_STR_EQ(g_state.notify_title, "Bell");
+    ASSERT_STR_EQ(g_state.notify_body, "make -j8");
+
+    destroy_key_mock_term(term);
+}
+
 static void test_keypress_does_not_clear_selection(void)
 {
     reset_state();
@@ -658,6 +699,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_selection_change_pauses_and_resumes);
     RUN_TEST(test_clipboard_set_forwards_text);
     RUN_TEST(test_cwd_change_forwards_dir);
+    RUN_TEST(test_bell_notifies_panel);
+    RUN_TEST(test_bell_body_carries_window_title);
     RUN_TEST(test_term_output_to_pty_writes);
     RUN_TEST(test_clear_hover_when_active);
     RUN_TEST(test_clear_hover_noop_when_no_hover);

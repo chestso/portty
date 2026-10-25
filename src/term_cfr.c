@@ -293,7 +293,14 @@ static void cb_output(const uint8_t *bytes, size_t len, void *user)
         d->output_cb((const char *)bytes, len, d->output_user);
 }
 
-static void cb_bell(void *user) { (void)user; /* TODO: visual bell hook */ }
+// BEL. The engine has no audible bell of its own; the host presents it.
+static void cb_bell(void *user)
+{
+    CfrBackendData *d = user;
+    vlog("coffer: BEL\n");
+    if (d && d->term && d->term->bell_cb)
+        d->term->bell_cb(d->term->bell_cb_data);
+}
 
 static void cb_sb_push(const CfrCell *c, int n, uint32_t lineage, void *u)
 {

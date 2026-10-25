@@ -470,6 +470,15 @@ void terminal_set_cwd_callback(TerminalBackend *term, TerminalCwdFn cb,
     term->cwd_cb_data = user_data;
 }
 
+void terminal_set_bell_callback(TerminalBackend *term, TerminalBellFn cb,
+                                void *user_data)
+{
+    if (!term)
+        return;
+    term->bell_cb = cb;
+    term->bell_cb_data = user_data;
+}
+
 void terminal_selection_start(TerminalBackend *term, int row, int col, TerminalSelectMode mode)
 {
     CfrTerm *vt = get_cfr(term);

@@ -57,6 +57,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation, with icons rendered inline alongside text
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
+- Visual bell — BEL shows a transient status panel (`Bell` plus the window title) for two seconds; there is no audible bell
 - Resize geometry overlay — while the window is resized, a centered panel reports the grid geometry (cols x rows) and cell size in pixels, then hides itself once resizing settles
 - Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down (page) / Ctrl+Shift+Up/Down (line)
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz

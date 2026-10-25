@@ -284,6 +284,53 @@ static void test_width_contract_declared(void)
     }
 }
 
+/* BEL reaches the host hook. The engine reports it through callbacks.bell and
+ * the bridge forwards it to whatever the application installed — portty hangs
+ * its visual bell off this. */
+static int g_bell_count;
+
+static void on_bell(void *user)
+{
+    int *count = user;
+    (*count)++;
+    g_bell_count = *count;
+}
+
+static void test_bell_reaches_host_callback(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    int bells = 0;
+    g_bell_count = 0;
+    terminal_set_bell_callback(&t, on_bell, &bells);
+
+    feed(&t, "a\ab");
+    ASSERT_EQ(bells, 1);
+    ASSERT_EQ(g_bell_count, 1);
+
+    /* BEL is a control character, not content. */
+    TerminalCell c;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &c), 0);
+    ASSERT_EQ(c.cp, (uint32_t)'a');
+    ASSERT_EQ(terminal_get_cell(&t, 0, 1, &c), 0);
+    ASSERT_EQ(c.cp, (uint32_t)'b');
+
+    /* Clearing the hook stops delivery. */
+    terminal_set_bell_callback(&t, NULL, NULL);
+    feed(&t, "\a");
+    ASSERT_EQ(bells, 1);
+
+    terminal_destroy(&t);
+}
+
 /* Spaces between words must round-trip through the clipboard. Typed spaces
  * land as cp=0x20, width=1 cells and were always preserved — this guards
  * the simple case while the harder cases (TAB, CUF) sit below. */
@@ -841,6 +888,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_long_cluster_survives_accessor);
     RUN_TEST(test_vs15_cluster_takes_one_cell);
     RUN_TEST(test_width_contract_declared);
+    RUN_TEST(test_bell_reaches_host_callback);
     RUN_TEST(test_selection_preserves_spaces);
     RUN_TEST(test_selection_across_rows);
     RUN_TEST(test_selection_with_tab);

@@ -527,6 +527,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     terminal_set_selection_callback(term, portty_app_selection_change, &app);
     terminal_set_clipboard_set_callback(term, portty_app_clipboard_set, &app);
     terminal_set_cwd_callback(term, portty_app_cwd_change, &app);
+    terminal_set_bell_callback(term, portty_app_bell, &app);
 
     app.pager = pager_create(&backend, &app);
 

@@ -35,6 +35,10 @@ typedef void (*TerminalCwdFn)(const char *utf8, void *user_data);
 // byte count.
 typedef void (*TerminalClipboardSetFn)(const char *text, size_t len, void *user_data);
 
+// Callback fired on BEL. The host decides how to present it; portty shows a
+// transient status panel.
+typedef void (*TerminalBellFn)(void *user_data);
+
 typedef struct
 {
     int row;
@@ -129,6 +133,10 @@ struct TerminalBackend
     // that Ctrl+Shift+N spawns the new terminal in the shell's CWD.
     TerminalCwdFn cwd_cb;
     void *cwd_cb_data;
+
+    // BEL hook. Application installs this to show its visual bell.
+    TerminalBellFn bell_cb;
+    void *bell_cb_data;
 
     // Path to the running executable (set by main.c after init). Used by
     // the OSC 7 / OSC 9;9 handlers on Windows to convert MSYS2/Unix paths
@@ -429,6 +437,7 @@ void terminal_set_selection_callback(TerminalBackend *term, TerminalSelectionCha
 void terminal_set_clipboard_set_callback(TerminalBackend *term, TerminalClipboardSetFn cb,
                                          void *user_data);
 void terminal_set_cwd_callback(TerminalBackend *term, TerminalCwdFn cb, void *user_data);
+void terminal_set_bell_callback(TerminalBackend *term, TerminalBellFn cb, void *user_data);
 
 // Row iterator over a terminal row. coffer stores UAX #11 + #29
 // cluster widths on the cell, so the iterator is now a plain

@@ -71,6 +71,8 @@ void portty_app_term_output_to_pty(const char *data, size_t len, void *user_data
 void portty_app_selection_change(bool active, void *user_data);
 void portty_app_clipboard_set(const char *text, size_t len, void *user_data);
 void portty_app_cwd_change(const char *dir, void *user_data);
+// BEL from the child: shown as a transient status panel.
+void portty_app_bell(void *user_data);
 
 // Input handlers called by backends.
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
