@@ -144,7 +144,7 @@ fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
-PKG_CHECK_MODULES([COFFER], [coffer >= 0.9.3])
+PKG_CHECK_MODULES([COFFER], [coffer >= 0.9.4])
 
 dnl coffer exposes the image HANDLE (CfrImage.handle / the placement's
 dnl image_handle) from 0.9 on: the public image id is only unique WITHIN
