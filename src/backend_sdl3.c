@@ -1493,6 +1493,12 @@ static void sdl3_notify(PorttyBackend *self, const char *title, const char *body
 
     sdl3_notify_place(d);
     d->notify_hide_at = SDL_GetTicks() + (ttl_ms ? ttl_ms : NOTIFY_DEFAULT_TTL_MS);
+
+    // The panel lives in the chrome layer above the grid, so nothing else
+    // may have marked the terminal dirty — a notification that arrives on
+    // its own (a BEL from a finished command, a dump result) has to draw
+    // itself.
+    terminal_mark_dirty(d->term);
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
