@@ -655,15 +655,25 @@ static void test_route_dies_with_state(void)
 
     RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x1234, 12.0f, &opts, 10);
     ASSERT_NOT_NULL(r1.identity);
+    ASSERT_EQ(r1.glyph_id, 77);
 
     // The route cache lives inside the fallback state, so a fresh state
-    // asks the resolver again.
+    // asks the resolver again and resolves the codepoint from scratch.
     rend_fallback_destroy(&st, &fb);
     rend_fallback_init(&st);
     RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x1234, 12.0f, &opts, 10);
     ASSERT_EQ(test_resolve_query_count(), 2);
     ASSERT_NOT_NULL(r2.identity);
-    ASSERT_TRUE(r1.identity != r2.identity);
+    ASSERT_EQ(r2.glyph_id, 77);
+
+    // The fresh state owns its own identity records: two live records never
+    // share an address.
+    test_resolve_add_route(0x5678, "/fonts/b.ttf");
+    test_font_set_glyph(0x5678, 88);
+    RendRoute r3 = rend_route_get(&st, &fb, &resolve, 0x5678, 12.0f, &opts, 10);
+    ASSERT_NOT_NULL(r3.identity);
+    ASSERT_TRUE(r2.identity != r3.identity);
+    ASSERT_EQ(r3.glyph_id, 88);
 
     rend_fallback_destroy(&st, &fb);
     test_font_reset();
