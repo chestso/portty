@@ -54,6 +54,17 @@ jobs:
       - name: Run tests
         run: make -C build check
 
+      # The automake harness keeps the failing test's output in its own log
+      # file, so a red "make check" says nothing about what went wrong.
+      - name: Show test logs
+        if: failure()
+        run: |
+          cat build/tests/test-suite.log || true
+          for f in build/tests/test_*.log; do
+            echo "=== $f"
+            cat "$f"
+          done
+
       - name: Build portable ZIP
         run: make -C build dist-portable
 
