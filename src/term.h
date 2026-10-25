@@ -88,6 +88,7 @@ typedef struct
     unsigned int dhl : 2;
     unsigned int dim : 1;
     unsigned int invis : 1;
+    unsigned int overline : 1;
 } TerminalCellAttr;
 
 typedef struct

@@ -124,6 +124,14 @@ static void draw_underline_single(SDL_Renderer *renderer, int x, int y, int widt
     SDL_RenderFillRect(renderer, &rect);
 }
 
+// Overline: one DPI-aware rule across the top of the cell, drawn over the
+// glyphs so accents poking above cap height cannot hide it.
+static void draw_overline(SDL_Renderer *renderer, int x, int y, int width,
+                          float pixel_density)
+{
+    draw_underline_single(renderer, x, y, width, pixel_density);
+}
+
 static void draw_underline_double(SDL_Renderer *renderer, int x, int y, int width,
                                   float pixel_density)
 {
@@ -1083,6 +1091,26 @@ static void flush_strike_run(RendererSdl3Data *data, int row, int vis_start,
     draw_strikethrough(data->renderer, run_x, strike_y, run_w, pd);
 }
 
+// Flush one coalesced overline run [vis_start, vis_end) on `row`. The rule
+// sits on the cell's top edge, inset by one device pixel so it does not
+// collide with the row above.
+static void flush_overline_run(RendererSdl3Data *data, int row, int vis_start,
+                               int vis_end, Uint8 r, Uint8 g, Uint8 b)
+{
+    float pd = data->content_scale;
+    int thickness = (int)roundf(1.0f * pd);
+    if (thickness < 1)
+        thickness = 1;
+    int cell_y = row * data->cell_height;
+    int overline_y = cell_y + (int)roundf(1.0f * pd);
+    if (overline_y + thickness > cell_y + data->cell_height)
+        overline_y = cell_y + data->cell_height - thickness;
+    int run_x = vis_start * data->cell_width;
+    int run_w = (vis_end - vis_start) * data->cell_width;
+    SDL_SetRenderDrawColor(data->renderer, r, g, b, 255);
+    draw_overline(data->renderer, run_x, overline_y, run_w, pd);
+}
+
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
                                  bool cursor_visible, bool populate_only, int scroll_offset)
@@ -1197,6 +1225,35 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
             if (in_run)
                 flush_strike_run(data, row, vis_run_start, vis_run_end, run_r,
                                  run_g, run_b);
+        }
+        // Pass 5: draw overlines as continuous spans across consecutive cells
+        if (!populate_only) {
+            terminal_row_iter_init(&it, term, unified_row, display_cols);
+            int vis_run_start = -1;
+            int vis_run_end = 0;
+            bool in_run = false;
+            Uint8 run_r = 0, run_g = 0, run_b = 0;
+            while (terminal_row_iter_next(&it)) {
+                bool cs = it.cell.attrs.overline;
+                Uint8 cr = it.cell.fg.r, cg = it.cell.fg.g, cb = it.cell.fg.b;
+                bool same_run = in_run && cs && cr == run_r && cg == run_g && cb == run_b;
+                if (in_run && !same_run) {
+                    flush_overline_run(data, row, vis_run_start, vis_run_end, run_r,
+                                       run_g, run_b);
+                    in_run = false;
+                }
+                if (cs && !in_run) {
+                    vis_run_start = it.vis_col;
+                    in_run = true;
+                    run_r = cr;
+                    run_g = cg;
+                    run_b = cb;
+                }
+                vis_run_end = it.vis_col + it.pres_w;
+            }
+            if (in_run)
+                flush_overline_run(data, row, vis_run_start, vis_run_end, run_r,
+                                   run_g, run_b);
         }
     }
 }

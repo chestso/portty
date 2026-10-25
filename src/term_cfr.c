@@ -591,6 +591,7 @@ static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
         dst->attrs.dhl = 2;
     dst->attrs.dim = (st->attrs & CFR_ATTR_DIM) ? 1 : 0;
     dst->attrs.invis = (st->attrs & CFR_ATTR_INVIS) ? 1 : 0;
+    dst->attrs.overline = (st->attrs & CFR_ATTR_OVERLINE) ? 1 : 0;
     dst->attrs.font = st->font & 0xF;
     dst->attrs.underline = st->underline & 0x7;
 

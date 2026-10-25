@@ -239,6 +239,33 @@ static void test_vs15_cluster_takes_one_cell(void)
     terminal_destroy(&t);
 }
 
+/* SGR 53 (overline) and SGR 21 (double underline) cross the bridge as
+ * attribute state, not just as engine-side bookkeeping: the renderer reads
+ * `attrs.overline` for its span pass and `attrs.underline == 2` to pick the
+ * double rule. */
+static void test_attrs_overline_and_double_underline(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 8;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    feed(&t, "\x1b[53mX\x1b[0m\x1b[21mY");
+
+    TerminalCell over, dbl;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &over), 0);
+    ASSERT_EQ(over.attrs.overline, 1);
+    ASSERT_EQ(over.attrs.underline, 0);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 1, &dbl), 0);
+    ASSERT_EQ(dbl.attrs.underline, 2);
+    ASSERT_EQ(dbl.attrs.overline, 0);
+    terminal_destroy(&t);
+}
+
 /* The cell-width contract the child environment declares (common.h's
  * PORTTY_WIDTH_CONTRACT, exported as PORTTY_WIDTH): the declaration and
  * the grid behavior must agree, because a TUI (boba) sizes its columns
@@ -887,6 +914,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_resize_shrinks_and_reflows);
     RUN_TEST(test_long_cluster_survives_accessor);
     RUN_TEST(test_vs15_cluster_takes_one_cell);
+    RUN_TEST(test_attrs_overline_and_double_underline);
     RUN_TEST(test_width_contract_declared);
     RUN_TEST(test_bell_reaches_host_callback);
     RUN_TEST(test_selection_preserves_spaces);

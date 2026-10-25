@@ -50,7 +50,8 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
 - Soft-wrap aware word selection and copy
-- Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support
+- Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support; SGR 21 selects the double underline
+- Overline (SGR 53/55) — a rule along the top of the cell, drawn in the cell's foreground color
 - OSC-8 hyperlinks — pointer cursor changes on hover; a full-width hint strip shows the full URI. Ctrl+click opens via system handler. Scheme allow-list (http/https/ftp/ftps/mailto/file) refuses `javascript:`, `data:`, etc.
 - Strikethrough rendering (span-based, DPI-aware)
 - Reverse video attribute rendering

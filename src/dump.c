@@ -163,6 +163,8 @@ static void attrs_token(char *buf, size_t n, const TerminalCellAttr *a)
         buf[p++] = 'i';
     if (a->blink)
         buf[p++] = 'k';
+    if (a->overline)
+        buf[p++] = 'o';
     if (a->reverse)
         buf[p++] = 'r';
     if (a->strikethrough)
@@ -631,7 +633,7 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
               "[\"cp\",\"grapheme\",\"width\",\"attrs\",\"fg\",\"bg\",\"ul\",\"link\"],\n",
               out);
         fputs("  \"cell_attr_flags\": {\"bold\":\"b\",\"dim\":\"d\",\"italic\":\"i\","
-              "\"blink\":\"k\",\"reverse\":\"r\",\"strikethrough\":\"s\","
+              "\"blink\":\"k\",\"overline\":\"o\",\"reverse\":\"r\",\"strikethrough\":\"s\","
               "\"invis\":\"v\",\"dwl\":\"w\",\"dhl_top\":\"T\",\"dhl_bottom\":\"B\","
               "\"underline\":\"u<n>\",\"font\":\"f<n>\"},\n",
               out);

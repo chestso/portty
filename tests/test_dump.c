@@ -113,6 +113,23 @@ static void test_cell_codepoint_width_attrs_colors(void)
     terminal_destroy(&t);
 }
 
+/* SGR 53 and SGR 21 reach the dump as canonical tokens, in the fixed
+ * order, and the legend documents the overline flag. */
+static void test_overline_and_double_underline_tokens(void)
+{
+    TerminalBackend t;
+    make_term(&t, 4, 1);
+    feed(&t, "\x1b[53mX\x1b[0m\x1b[21mY\x1b[53mZ\x1b[0m");
+    char *j = dump_to_string(&t, NULL);
+    ASSERT_NOT_NULL(j);
+    ASSERT_TRUE(strstr(j, "[88,0,1,\"o\",") != NULL);  /* overline */
+    ASSERT_TRUE(strstr(j, "[89,0,1,\"u2\",") != NULL); /* double underline */
+    ASSERT_TRUE(strstr(j, "[90,0,1,\"ou2\",") != NULL);
+    ASSERT_TRUE(strstr(j, "\"overline\":\"o\"") != NULL);
+    free(j);
+    terminal_destroy(&t);
+}
+
 static void test_wide_cell(void)
 {
     TerminalBackend t;
@@ -229,6 +246,7 @@ int main(int argc, char *argv[])
     printf("Running dump tests:\n");
     RUN_TEST(test_header_and_geometry);
     RUN_TEST(test_cell_codepoint_width_attrs_colors);
+    RUN_TEST(test_overline_and_double_underline_tokens);
     RUN_TEST(test_wide_cell);
     RUN_TEST(test_mode_flags);
     RUN_TEST(test_hyperlink_interned_once);

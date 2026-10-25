@@ -277,18 +277,6 @@ observable once OSC 12 can set a cursor color, so the two go together.
 Not implemented; coffer logs a one-time warning for each (`CFR_LOGGED_OSC4`,
 `CFR_LOGGED_OSC104`). The 256-color palette is compile-time in coffer.
 
-### SGR 53 (overline)
-
-Inherited from xterm-256color as an accepted-but-ignored SGR. Would need a
-new `CFR_ATTR_OVERLINE` and renderer support (draw a line above the cell).
-Note: terminfo has no standard cap for overline; it is a SGR-only feature.
-
-### SGR 21 (double underline)
-
-Inherited from xterm-256color as an accepted-but-ignored SGR. Could map to
-underline style 2 (double) which coffer already supports via SGR 4:2.
-Alternatively, add `case 21:` that sets `pen.underline = CFR_UL_DOUBLE`.
-
 ### DECSCA (Select Character Protection, CSI " q)
 
 Not in terminfo, not implemented. Used for protected characters that survive
