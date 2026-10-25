@@ -8,7 +8,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 
 ## Documentation
 
-- [![Ask DeepWiki](https://img.shields.io/badge/Ask%20DeepWiki-blueviolet)](https://deepwiki.com/chestso/portty) — AI-generated wiki and searchable code index for this repository
+- [<img src="https://img.shields.io/badge/Ask%20DeepWiki-blueviolet" alt="Ask DeepWiki" height="20" align="middle">](https://deepwiki.com/chestso/portty) — AI-generated wiki and searchable code index for this repository
 - [inline-image-architecture.md](docs/inline-image-architecture.md) — how sixel, iTerm2 inline, and kitty graphics are decoded and composited
 - [embedded-terminals-linear-light.md](docs/embedded-terminals-linear-light.md) — gamma-correct linear-light rendering for embedded terminals
 - [windows-stdio-proposal.md](docs/windows-stdio-proposal.md) — the Windows split-binary design that makes portty pipeable
