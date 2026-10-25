@@ -26,6 +26,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
 - OSC 10/11 color queries — responds to foreground/background color queries with the terminal's default colors
 - XTWINOPS (CSI `t`) — reports text-area size in cells (mode 18), pixels (mode 14), and cell size (mode 16)
+- XTVERSION (CSI `> q`) — reports `portty` as the terminal name, for TUIs that feature-detect by querying it
 - Kitty keyboard protocol — push/pop/set/query plus Disambiguate and Report-all flags
 - Working-directory tracking — OSC 7 (`file://` URI) and OSC 9;9 (ConEmu protocol)
 - Window title — OSC 2 parsing

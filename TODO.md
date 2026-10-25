@@ -5,11 +5,14 @@
 ## 0. HiDPI / Display-Migration Follow-ups
 
 **Out of scope (flagged, not doing now):** re-rasterizing fonts when the window
-moves between displays of different DPI. Currently the content scale is
-computed once at startup (`--dpi-scale` × compositor scale) and on resize; if
-the window migrates to a display with a different scale factor, cell metrics
-and glyph rasterization remain sized for the original display until a font
-reload is triggered. A full fix needs a font-reload pass on
+moves between displays of different DPI. The content scale is recomputed from
+`portty_compute_content_scale()` (`--dpi-scale` × compositor scale) at startup
+and on resize; `SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED` refreshes only the
+cached compositor scale, which the next resize then folds into the content
+scale. Font faces are loaded and sized once by `load_fonts()`, and nothing
+re-sizes them, so after a migration to a display with a different scale factor
+cell metrics and glyph rasterization stay sized for the original display for
+the life of the process. A full fix needs a font-reload pass on
 `SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED`.
 
 ---
@@ -223,44 +226,56 @@ int cursor_move_visual(BiDiContext *ctx, int current_pos, int direction) {
 
 ## 3. Unimplemented Terminfo Capabilities
 
-These capabilities are inherited from `xterm-256color` via `use=xterm-256color`
-but are not yet rendered by portty.
+These capabilities reach portty through `coffer-vty-256color` (which is
+`use=xterm-256color`), but they have no implementation anywhere in the
+pipeline: the cell fields exist, nothing sets them, and nothing reads them.
 
-### Not rendered
+- **font (SGR 10–19)** — `CfrCell.font` is bridged to `TerminalCellAttr.font:4`
+  and printed by `dump.c`, but no code assigns it: coffer does not parse
+  SGR 10–19, and portty loads no alternative faces.
+- **dwl (DECDWL, `ESC # 6`)** — `CFR_ATTR_DWL` is bridged to
+  `TerminalCellAttr.dwl:1` and dumped, but nothing raises the bit: coffer does
+  not handle `ESC #`, and the renderer never reads it.
+- **dhl (DECDHL, `ESC # 3` / `ESC # 4`)** — the same for
+  `CFR_ATTR_DHL_TOP` / `CFR_ATTR_DHL_BOTTOM` → `TerminalCellAttr.dhl:2`.
 
-These attributes are parsed and stored by coffer but not rendered.
-
-| Attribute        | Stored in `TerminalCellAttr` | Rendered by |
-| ---------------- | ---------------------------- | ----------- |
-| font (SGR 10-19) | `font:4`                     | Not read    |
-| dwl (DECDWL)     | `dwl:1`                      | Not read    |
-| dhl (DECDHL)     | `dhl:2`                      | Not read    |
+Implementing any of these spans both repositories: coffer must parse the
+sequence and raise the attribute, and the renderer must act on it — width-scaled
+glyph runs for DWL, a clipped top or bottom half for DHL, and alternate faces
+from the font resolver for font select.
 
 ---
 
 ## 4. Popular Unsupported Capabilities
 
-These capabilities are not in the terminfo entry, not inherited, and not
-implemented, but are commonly expected by modern TUIs.
+None of these is implemented. Some are inherited from `xterm-256color` as
+accepted-but-ignored SGR codes, the rest are absent from the terminfo entry
+entirely; all are commonly expected by modern TUIs.
 
-### OSC 11 (set default foreground color)
+### OSC 10 / OSC 11 set (default foreground / background)
 
-Not in terminfo, not implemented. Some TUIs query this to detect background
-color for contrast detection. coffer's OSC dispatcher forwards unknown OSCs to
-the generic `callbacks.osc` hook, but portty does not handle OSC 11. Full
-implementation would require parsing `OSC 11 ; ?` queries (responding with the
-current default foreground RGB) and `OSC 11 ; rgb:R/G/B` sets.
+The query form is answered: coffer's `osc_color_query()` replies to
+`OSC 10 ; ?` and `OSC 11 ; ?` with the defaults from its Dracula palette, which
+is what image viewers (chafa, viu, lsix) read before alpha-compositing. The set
+form (`OSC 10 ; rgb:R/G/B`) is parsed and dropped, so an application cannot
+recolor the terminal. portty reads its colors once at startup through
+`cfr_default_fg_rgb()` / `cfr_default_bg_rgb()` (`term_colors.c`); no
+configuration key overrides them.
 
-### OSC 12 (set default background color)
+### OSC 12 (set cursor color)
 
-Not in terminfo, not implemented. Same use as OSC 11 for background color
-detection. Would follow the same parse/respond/set pattern.
+Not handled. The cursor color is fixed: `term_colors.c` uses palette entry 4
+(Dracula purple).
 
 ### OSC 112 (reset cursor color)
 
-Not in terminfo, not implemented. Resets cursor color to default (same as
-`Cr=\E]112\007` in xterm-256color, which resets cursor color specifically, as
-opposed to OSC 12 which sets it).
+Not handled — the same reset as `Cr=\E]112\007` in xterm-256color. It is only
+observable once OSC 12 can set a cursor color, so the two go together.
+
+### OSC 4 / OSC 104 (palette set / reset)
+
+Not implemented; coffer logs a one-time warning for each (`CFR_LOGGED_OSC4`,
+`CFR_LOGGED_OSC104`). The 256-color palette is compile-time in coffer.
 
 ### SGR 53 (overline)
 
@@ -274,13 +289,6 @@ Inherited from xterm-256color as an accepted-but-ignored SGR. Could map to
 underline style 2 (double) which coffer already supports via SGR 4:2.
 Alternatively, add `case 21:` that sets `pen.underline = CFR_UL_DOUBLE`.
 
-### XTVERSION (CSI > q)
-
-Not in terminfo, not implemented. TUIs use this to query the terminal's name
-and version for feature detection. The `RV` cap in xterm-256color sends
-`ESC[>c` but coffer does not respond to `CSI > q` (XTVERSION query). DA2
-(`CSI > c`) IS implemented and responds with `ESC[>1;0;0c`.
-
 ### DECSCA (Select Character Protection, CSI " q)
 
 Not in terminfo, not implemented. Used for protected characters that survive
@@ -289,6 +297,4 @@ modification of all erase operations to check it.
 
 ### SGR font selection (10-19)
 
-Parsed and stored in `attrs.font` but no renderer reads it. Full
-implementation would require loading and selecting alternate font faces via
-SGR 10 (primary), 11-19 (alternative fonts).
+The cell fields exist but neither end of the pipeline uses them — see §3.
