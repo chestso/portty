@@ -2,11 +2,16 @@
 
 **Homepage:** <https://chest.so/portty/>
 
-[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chestso/portty)
-
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
 Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+
+## Documentation
+
+- [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/chestso/portty) — AI-generated wiki and searchable code index for this repository
+- [inline-image-architecture.md](docs/inline-image-architecture.md) — how sixel, iTerm2 inline, and kitty graphics are decoded and composited
+- [embedded-terminals-linear-light.md](docs/embedded-terminals-linear-light.md) — gamma-correct linear-light rendering for embedded terminals
+- [windows-stdio-proposal.md](docs/windows-stdio-proposal.md) — the Windows split-binary design that makes portty pipeable
 
 ## Features
 
