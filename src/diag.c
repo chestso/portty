@@ -301,6 +301,7 @@ char *diag_build_report(const DiagSources *s)
         kvf(&sb, "text composition", "gamma %.2f, contrast %.1f", (double)s->text_gamma,
             (double)s->text_contrast);
     kvf(&sb, "dim opacity", "%.2f", (double)s->dim_opacity);
+    kv(&sb, "bell", s->bell ? s->bell : "always");
     kv(&sb, "word chars", or_unset(s->word_chars));
 
     // VT engine features

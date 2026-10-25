@@ -107,6 +107,9 @@ struct PorttyBackend
     bool (*get_drawable_size)(PorttyBackend *self, int *w, int *h);
     float (*get_display_scale)(PorttyBackend *self);
     bool (*get_display_size)(PorttyBackend *self, int *w, int *h);
+    // Whether the window holds keyboard focus. Focus-dependent behavior
+    // (the visual bell's `unfocused` mode) reads it from here.
+    bool (*has_focus)(PorttyBackend *self);
 
     // ── OS integration ─────────────────────────────────────────
     void (*set_cursor)(PorttyBackend *self, PorttyCursor shape);
@@ -134,6 +137,10 @@ struct PorttyBackend
     // `body` the detail line; both may be NULL.
     void (*notify)(PorttyBackend *self, const char *title, const char *body,
                    PorttyNotifyLevel level, unsigned int ttl_ms);
+    // Whether a transient status message is on screen right now. There is one
+    // panel slot, so callers that would overwrite a message (the visual bell)
+    // ask first.
+    bool (*notify_active)(PorttyBackend *self);
 
     // ── Rendering ──────────────────────────────────────────────
     int (*load_fonts)(PorttyBackend *self, float size,

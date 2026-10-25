@@ -1145,6 +1145,12 @@ static bool sdl3_get_display_size(PorttyBackend *self, int *w, int *h)
     return true;
 }
 
+static bool sdl3_has_focus(PorttyBackend *self)
+{
+    Sdl3BackendData *d = sdl3_data(self);
+    return d ? d->has_focus : false;
+}
+
 // ── Clipboard ────────────────────────────────────────────────────────────
 
 static char *sdl3_clipboard_get(PorttyBackend *self)
@@ -1499,6 +1505,12 @@ static void sdl3_notify(PorttyBackend *self, const char *title, const char *body
     // its own (a BEL from a finished command, a dump result) has to draw
     // itself.
     terminal_mark_dirty(d->term);
+}
+
+static bool sdl3_notify_active(PorttyBackend *self)
+{
+    Sdl3BackendData *d = sdl3_data(self);
+    return d && d->notify_hide_at != 0;
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
@@ -2479,6 +2491,7 @@ PorttyBackend backend_sdl3 = {
     .get_drawable_size = sdl3_get_drawable_size,
     .get_display_scale = sdl3_get_display_scale,
     .get_display_size = sdl3_get_display_size,
+    .has_focus = sdl3_has_focus,
 
     .set_cursor = sdl3_set_cursor,
     .open_url = sdl3_open_url,
@@ -2494,6 +2507,7 @@ PorttyBackend backend_sdl3 = {
     .panel_set_hover = sdl3_panel_set_hover,
 
     .notify = sdl3_notify,
+    .notify_active = sdl3_notify_active,
 
     .load_fonts = sdl3_load_fonts,
     .draw_terminal = sdl3_draw_terminal,

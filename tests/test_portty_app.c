@@ -56,6 +56,8 @@ typedef struct
     char notify_body[512];
     PorttyNotifyLevel notify_level;
     unsigned int notify_ttl_ms;
+    bool notify_showing; // a message is on screen (notify_active)
+    bool focused;        // window keyboard focus (has_focus)
 } StubPlatState;
 
 static StubPlatState g_state = { 0 };
@@ -141,12 +143,25 @@ static void backend_notify(PorttyBackend *self, const char *title,
 {
     (void)self;
     g_state.notify_called = true;
+    g_state.notify_showing = true;
     snprintf(g_state.notify_title, sizeof(g_state.notify_title), "%s",
              title ? title : "");
     snprintf(g_state.notify_body, sizeof(g_state.notify_body), "%s",
              body ? body : "");
     g_state.notify_level = level;
     g_state.notify_ttl_ms = ttl_ms;
+}
+
+static bool backend_notify_active(PorttyBackend *self)
+{
+    (void)self;
+    return g_state.notify_showing;
+}
+
+static bool backend_has_focus(PorttyBackend *self)
+{
+    (void)self;
+    return g_state.focused;
 }
 
 static void reset_state(void)
@@ -164,6 +179,8 @@ static void reset_state(void)
         .get_cell_size = backend_get_cell_size,
         .set_cursor = backend_set_cursor,
         .notify = backend_notify,
+        .notify_active = backend_notify_active,
+        .has_focus = backend_has_focus,
     };
 }
 
@@ -344,6 +361,50 @@ static void test_bell_body_carries_window_title(void)
     ASSERT_STR_EQ(g_state.notify_body, "make -j8");
 
     destroy_key_mock_term(term);
+}
+
+/* `bell` decides when the panel shows: `none` never, `unfocused` only while
+ * the window lacks focus, `always` regardless. */
+static void test_bell_respects_config_modes(void)
+{
+    reset_state();
+    PorttyApp app = { 0 };
+    app.backend = &g_stub_backend;
+    PorttyConf conf = { 0 };
+    app.conf = &conf;
+
+    conf.bell = PORTTY_BELL_NONE;
+    g_state.focused = true;
+    portty_app_bell(&app);
+    ASSERT_FALSE(g_state.notify_called);
+
+    conf.bell = PORTTY_BELL_UNFOCUSED;
+    portty_app_bell(&app);
+    ASSERT_FALSE(g_state.notify_called); // focused: silent
+
+    g_state.focused = false;
+    portty_app_bell(&app);
+    ASSERT_TRUE(g_state.notify_called);
+
+    reset_state();
+    conf.bell = PORTTY_BELL_ALWAYS;
+    g_state.focused = true;
+    portty_app_bell(&app);
+    ASSERT_TRUE(g_state.notify_called);
+}
+
+/* One panel slot: a BEL arriving while a message is still up is dropped
+ * instead of restacking the slot, so a program ringing in a loop cannot pin
+ * the panel there. */
+static void test_bell_does_not_restack_message(void)
+{
+    reset_state();
+    PorttyApp app = { 0 };
+    app.backend = &g_stub_backend;
+
+    g_state.notify_showing = true;
+    portty_app_bell(&app);
+    ASSERT_FALSE(g_state.notify_called);
 }
 
 static void test_keypress_does_not_clear_selection(void)
@@ -701,6 +762,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_cwd_change_forwards_dir);
     RUN_TEST(test_bell_notifies_panel);
     RUN_TEST(test_bell_body_carries_window_title);
+    RUN_TEST(test_bell_respects_config_modes);
+    RUN_TEST(test_bell_does_not_restack_message);
     RUN_TEST(test_term_output_to_pty_writes);
     RUN_TEST(test_clear_hover_when_active);
     RUN_TEST(test_clear_hover_noop_when_no_hover);

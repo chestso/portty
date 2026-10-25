@@ -445,6 +445,7 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
             jk_float(out, &first, "text_contrast", (double)c->text_contrast);
         if (c->dim_opacity >= 0.0f)
             jk_float(out, &first, "dim_opacity", (double)c->dim_opacity);
+        jk_str(out, &first, "bell", portty_bell_mode_name(c->bell));
         if (c->dump_dir)
             jk_str(out, &first, "dump_dir", c->dump_dir);
         jclose(out, first, true);

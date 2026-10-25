@@ -57,7 +57,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation, with icons rendered inline alongside text
 - Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
-- Visual bell — BEL shows a transient status panel (`Bell` plus the window title) for two seconds; there is no audible bell
+- Visual bell — BEL shows a transient status panel (`Bell` plus the window title) for two seconds; there is no audible bell, and `bell` selects `always` (default), `unfocused`, or `none`
 - Resize geometry overlay — while the window is resized, a centered panel reports the grid geometry (cols x rows) and cell size in pixels, then hides itself once resizing settles
 - Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down (page) / Ctrl+Shift+Up/Down (line)
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
@@ -407,6 +407,7 @@ scrollback = 1000
 shell = /bin/bash
 text_composition_strategy = kitty
 dim_opacity = 0.6
+bell = always
 ambiguous_wide = false
 borderless = false
 ```
@@ -426,6 +427,7 @@ All keys are optional. Keys appear directly at the top level.
 | `shell`                     | Shell path (optionally with args)                     | `$SHELL`/`COMSPEC`             | Default shell when no `--` args given (e.g. `/bin/bash --norc`); falls back to `$SHELL` then `/bin/sh` on Unix, `$COMSPEC` then `cmd.exe` on Windows |
 | `text_composition_strategy` | `kitty`, `neutral`/`correct`, or `<gamma> <contrast>` | `neutral`                      | Glyph-weight curve on top of linear-light blending, luminance-aware on the GPU renderer (`kitty` = gamma 1.7 / contrast 30)                          |
 | `dim_opacity`               | Number `0.0`–`1.0`                                    | `0.6`                          | Opacity of SGR 2 (dim/faint) foreground text: `0` blends fully into the cell background, `1` leaves dim text at full intensity                       |
+| `bell`                      | `always`, `unfocused`, `none`                         | `always`                       | When BEL shows the visual bell: on every beep, only while the window lacks focus, or never                                                           |
 | `ambiguous_wide`            | `true`/`false`                                        | `false`                        | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
 | `borderless`                | `true`/`false`                                        | `false`                        | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
 | `dump_dir`                  | Directory path                                        | `$XDG_STATE_HOME/portty/dumps` | Directory for `Ctrl+Shift+F7` terminal-state dumps (also `$PORTTY_DUMP_DIR`)                                                                         |

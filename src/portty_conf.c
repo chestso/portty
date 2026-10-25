@@ -108,9 +108,23 @@ void portty_conf_init(PorttyConf *conf)
     conf->text_gamma = -1.0f;
     conf->text_contrast = -1.0f;
     conf->dim_opacity = -1.0f;
+    conf->bell = PORTTY_BELL_ALWAYS;
     conf->shell = NULL;
     conf->dump_dir = NULL;
     conf->source_path = NULL;
+}
+
+const char *portty_bell_mode_name(PorttyBellMode mode)
+{
+    switch (mode) {
+    case PORTTY_BELL_UNFOCUSED:
+        return "unfocused";
+    case PORTTY_BELL_NONE:
+        return "none";
+    case PORTTY_BELL_ALWAYS:
+    default:
+        return "always";
+    }
 }
 
 bool portty_conf_load_path(PorttyConf *conf, const char *path)
@@ -269,6 +283,19 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
             } else {
                 conf->dim_opacity = o;
             }
+        } else if (strcmp(key, "bell") == 0) {
+            if (strcmp(val, "always") == 0) {
+                conf->bell = PORTTY_BELL_ALWAYS;
+            } else if (strcmp(val, "unfocused") == 0) {
+                conf->bell = PORTTY_BELL_UNFOCUSED;
+            } else if (strcmp(val, "none") == 0) {
+                conf->bell = PORTTY_BELL_NONE;
+            } else {
+                fprintf(stderr,
+                        "WARNING: %s:%d: invalid bell '%s' (use always, "
+                        "unfocused, none)\n",
+                        path, lineno, val);
+            }
         } else {
             fprintf(stderr, "WARNING: %s:%d: unknown key '%s'\n", path, lineno, key);
         }
@@ -278,12 +305,14 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
 
     vlog("Config: font=%s cols=%d rows=%d hinting=%d verbose=%d"
          " word_chars=%s scrollback=%d ambiguous_wide=%d shell=%s"
-         " text_gamma=%.2f text_contrast=%.1f dim_opacity=%.2f borderless=%d\n",
+         " text_gamma=%.2f text_contrast=%.1f dim_opacity=%.2f borderless=%d"
+         " bell=%s\n",
          conf->font ? conf->font : "(unset)", conf->cols, conf->rows, conf->hinting,
          conf->verbose, conf->word_chars ? conf->word_chars : "(unset)",
          conf->scrollback, conf->ambiguous_wide,
          conf->shell ? conf->shell : "(unset)",
-         conf->text_gamma, conf->text_contrast, conf->dim_opacity, conf->borderless);
+         conf->text_gamma, conf->text_contrast, conf->dim_opacity, conf->borderless,
+         portty_bell_mode_name(conf->bell));
 
     return true;
 }

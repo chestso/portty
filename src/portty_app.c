@@ -408,11 +408,26 @@ static void app_notify_dump_result(PorttyApp *app, const PorttyDumpResult *res)
 /* BEL from the child. The panel is the whole visual bell: there is no audible
  * bell, so a beep from a long-running command becomes a two-second status
  * message. The window title is the detail line — the only context portty has
- * about who rang. Repeated BELs refresh the panel rather than stacking. */
+ * about who rang.
+ *
+ * `bell` in the config decides when it shows: `always` (default), `unfocused`
+ * (only when the window lacks focus, for people who find a flash while typing
+ * distracting), or `none`. There is one panel slot, so a bell that arrives
+ * while a message is already up is dropped rather than restacking it — a
+ * program ringing in a loop cannot pin the panel there. */
 void portty_app_bell(void *user_data)
 {
     PorttyApp *app = (PorttyApp *)user_data;
-    if (!app)
+    if (!app || !app->backend)
+        return;
+
+    PorttyBellMode mode = app->conf ? app->conf->bell : PORTTY_BELL_ALWAYS;
+    if (mode == PORTTY_BELL_NONE)
+        return;
+    if (mode == PORTTY_BELL_UNFOCUSED && app->backend->has_focus &&
+        app->backend->has_focus(app->backend))
+        return;
+    if (app->backend->notify_active && app->backend->notify_active(app->backend))
         return;
 
     const char *title = app->term ? terminal_get_title(app->term) : NULL;
@@ -1053,6 +1068,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .text_gamma = portty_text_gamma,
         .text_contrast = portty_text_contrast,
         .dim_opacity = portty_dim_opacity,
+        .bell = c ? portty_bell_mode_name(c->bell) : "always",
         .word_chars = c ? c->word_chars : NULL,
         .term_env = "portty-vty-256color",
         .colorterm_env = "truecolor",

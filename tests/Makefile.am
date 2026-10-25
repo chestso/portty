@@ -52,7 +52,8 @@ test_term_cfr_LDADD = $(COFFER_LIBS)
 # Terminal state dump (JSON) serializer. Dumps a coffer terminal to a
 # tmpfile and asserts on the JSON. Needs the generated portty_version.h.
 test_dump_SOURCES = test_dump.c $(TEST_COMMON) ../src/dump.c \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c \
+    ../src/portty_conf.c
 test_dump_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
 test_dump_LDADD = $(COFFER_LIBS)
 

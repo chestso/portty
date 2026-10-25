@@ -357,6 +357,45 @@ static void test_all_hinting_modes(void)
     }
 }
 
+/* BEL presentation. Unset means `always`; an unknown value leaves the
+ * previous setting alone. */
+static void test_bell_modes(void)
+{
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_EQ(conf.bell, PORTTY_BELL_ALWAYS);
+    portty_conf_free(&conf);
+
+    const char *modes[] = { "always", "unfocused", "none" };
+    PorttyBellMode expected[] = { PORTTY_BELL_ALWAYS, PORTTY_BELL_UNFOCUSED,
+                                  PORTTY_BELL_NONE };
+    const char *names[] = { "always", "unfocused", "none" };
+
+    for (int i = 0; i < 3; i++) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "bell = %s\n", modes[i]);
+        char *path = write_tmp_conf(buf);
+        ASSERT_NOT_NULL(path);
+
+        portty_conf_init(&conf);
+        ASSERT_TRUE(portty_conf_load_path(&conf, path));
+        ASSERT_EQ(conf.bell, expected[i]);
+        ASSERT_STR_EQ(portty_bell_mode_name(expected[i]), names[i]);
+
+        portty_conf_free(&conf);
+        cleanup_tmp(path);
+    }
+
+    /* An invalid value is ignored, not applied. */
+    char *path = write_tmp_conf("bell = speaker\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.bell, PORTTY_BELL_ALWAYS);
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -379,6 +418,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_section_headers_tolerated);
     RUN_TEST(test_nonexistent_file);
     RUN_TEST(test_all_hinting_modes);
+    RUN_TEST(test_bell_modes);
 
     TEST_SUMMARY();
 }
