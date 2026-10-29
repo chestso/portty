@@ -165,6 +165,7 @@ typedef struct
     unsigned pty_pause_count; /* owners of the shared reader pause */
     bool flood_paused;        /* pause held by the output-flood guard */
     Uint64 last_present_ns;   /* SDL ticks (ns) of the last presented frame */
+    Uint64 flood_hold_until;  /* SDL ticks deadline of a coalesced frame (0 = none) */
 
 #ifdef _WIN32
     HANDLE wakeup_event;
@@ -709,6 +710,15 @@ static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
                                  : 0;
         if (notify_ms < delay)
             delay = notify_ms;
+    }
+
+    if (d->flood_hold_until != 0) {
+        Uint64 now = SDL_GetTicks();
+        uint32_t hold_ms = (d->flood_hold_until > now)
+                               ? (uint32_t)(d->flood_hold_until - now)
+                               : 0;
+        if (hold_ms < delay)
+            delay = hold_ms;
     }
 
     if (delay == UINT32_MAX)
@@ -2031,7 +2041,7 @@ static void sdl3_run(PorttyBackend *self)
         bool pty_processed = false;
         bool pty_scrolled = false;
         bool flood_break = false;
-        Uint64 pass_start_ns = SDL_GetTicksNS();
+        Uint64 parse_start_ns = 0; /* first PTY chunk processed this pass */
 
         // === 0. Arm the wake timer, then block until real work arrives ===
         sdl3_arm_timer_wakeup(d);
@@ -2067,13 +2077,18 @@ static void sdl3_run(PorttyBackend *self)
                                                         EVENT_LOTTIE_TICK, NULL);
                         }
 
-                        /* Output-flood guard: stop draining once a pass has
-                         * spent its parse budget. The reader pauses so the
-                         * child's write side blocks against the PTY buffer,
-                         * the queued backlog waits for the next pass, and
-                         * input/timers get serviced between passes instead
-                         * of waiting out the whole flood. */
-                        if (SDL_GetTicksNS() - pass_start_ns >=
+                        /* Output-flood guard: stop draining once the pass
+                         * has spent its parse budget. The budget counts
+                         * parsing alone — an event loop pass that blocked
+                         * in SDL_WaitEvent for a long idle stretch must
+                         * not trip it on its first chunk. The reader pauses
+                         * so the child's write side blocks against the PTY
+                         * buffer, the queued backlog waits for the next
+                         * pass, and input/timers get serviced between
+                         * passes instead of waiting out the whole flood. */
+                        if (parse_start_ns == 0)
+                            parse_start_ns = SDL_GetTicksNS();
+                        if (SDL_GetTicksNS() - parse_start_ns >=
                             PTY_FLOOD_PARSE_NS) {
                             if (!d->flood_paused) {
                                 self->pause_pty(self);
@@ -2481,19 +2496,28 @@ static void sdl3_run(PorttyBackend *self)
         // === 3. Render (only blocking call during active rendering) ===
         terminal_flush_damage(term);
         if (terminal_needs_redraw(term)) {
-            // While a parse-backlog is still queued (flood), coalescing to a
-            // minimum frame interval keeps the GPU work affordable; the
-            // redraw flag stays set so the pass that drains the backlog
-            // presents the final state.
-            Uint64 since_present_ns = SDL_GetTicksNS() - d->last_present_ns;
+            // While a parse-backlog is still queued (flood), presenting is
+            // coalesced to a minimum frame interval. Skipping the draw
+            // leaves the redraw flag and the accumulated damage rect
+            // alone: the next pass that presents covers it all. A pending
+            // capture reads the presented buffer, so it always presents.
             bool capture_pending = d->pending_screendump ||
                                    d->pending_renderdump ||
                                    d->pending_record_frame;
-            if (d->flood_paused && !capture_pending &&
-                since_present_ns < FLOOD_RENDER_MIN_NS) {
-                terminal_clear_redraw(term);
-                terminal_mark_dirty(term);
+            bool flood_hold = d->flood_paused && !capture_pending &&
+                              SDL_GetTicksNS() - d->last_present_ns <
+                                  FLOOD_RENDER_MIN_NS;
+            if (flood_hold) {
+                // The hold must not outlive the backlog: a pass can end
+                // with the queue drained and the reader paused (no
+                // further wakeups), so arm the deadline that forces the
+                // final frame out.
+                Uint64 now = SDL_GetTicks();
+                if (d->flood_hold_until == 0)
+                    d->flood_hold_until =
+                        now + (FLOOD_RENDER_MIN_NS / 1000000ULL) + 1;
             } else {
+                d->flood_hold_until = 0;
                 bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
                 rend_sdl3_draw_terminal(rend, term, cursor_vis);
                 SDL_RenderPresent(d->sdl_renderer);
