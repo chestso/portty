@@ -69,6 +69,14 @@ enum PorttyEventCode
     EVENT_TIMER_WAKE,
 };
 
+// Output-flood guard (see the EVENT_PTY_DATA handler): how much wall time
+// one event-loop pass may spend parsing PTY output before the reader is
+// paused and the pass ends, and how long between presented frames while a
+// backlog is still draining. Bounded passes keep input, timers and the
+// script engine serviced during sustained child output.
+#define PTY_FLOOD_PARSE_NS  25000000ULL /* 25 ms of parsing per pass */
+#define FLOOD_RENDER_MIN_NS 12000000ULL /* ≤ ~80 fps while draining */
+
 // PTY data event payload
 typedef struct
 {
@@ -154,6 +162,9 @@ typedef struct
     SDL_AtomicInt running;
     SDL_AtomicInt quit_requested;
     SDL_AtomicInt pty_paused;
+    unsigned pty_pause_count; /* owners of the shared reader pause */
+    bool flood_paused;        /* pause held by the output-flood guard */
+    Uint64 last_present_ns;   /* SDL ticks (ns) of the last presented frame */
 
 #ifdef _WIN32
     HANDLE wakeup_event;
@@ -1221,7 +1232,9 @@ static void sdl3_pause_pty(PorttyBackend *self)
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
         return;
-    if (SDL_GetAtomicInt(&d->pty_paused))
+    /* The pause flag is shared (selection, flood guard); the count keeps a
+     * resume from one owner from releasing another owner's pause. */
+    if (d->pty_pause_count++ > 0)
         return;
     SDL_SetAtomicInt(&d->pty_paused, 1);
     vlog("PTY paused (backpressure)\n");
@@ -1241,7 +1254,9 @@ static void sdl3_resume_pty(PorttyBackend *self)
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
         return;
-    if (!SDL_GetAtomicInt(&d->pty_paused))
+    if (d->pty_pause_count == 0)
+        return;
+    if (--d->pty_pause_count > 0)
         return;
     SDL_SetAtomicInt(&d->pty_paused, 0);
     vlog("PTY resumed\n");
@@ -1997,7 +2012,11 @@ static void sdl3_run(PorttyBackend *self)
         // === Debug script: pre-render commands ===
         // Run before we block so a script that does not emit events (e.g. a
         // bare "wait") can still register its own wake deadline below.
-        if (d->script && !d->script_done) {
+        // While a flood backlog is draining, the step's own buffer scan
+        // (wait-for walks every scrollback row per poll) would run once per
+        // multi-millisecond pass and eat the parse budget; it resumes when
+        // the backlog is gone.
+        if (d->script && !d->script_done && !d->flood_paused) {
             CfrScriptStatus st = portty_script_step(d->script);
             if (st != CFR_SCRIPT_RUNNING) {
                 d->script_done = true;
@@ -2011,6 +2030,8 @@ static void sdl3_run(PorttyBackend *self)
 
         bool pty_processed = false;
         bool pty_scrolled = false;
+        bool flood_break = false;
+        Uint64 pass_start_ns = SDL_GetTicksNS();
 
         // === 0. Arm the wake timer, then block until real work arrives ===
         sdl3_arm_timer_wakeup(d);
@@ -2044,6 +2065,21 @@ static void sdl3_run(PorttyBackend *self)
                             terminal_lottie_count(term) > 0) {
                             d->lottie_timer = timer_add(d->timers, 16,
                                                         EVENT_LOTTIE_TICK, NULL);
+                        }
+
+                        /* Output-flood guard: stop draining once a pass has
+                         * spent its parse budget. The reader pauses so the
+                         * child's write side blocks against the PTY buffer,
+                         * the queued backlog waits for the next pass, and
+                         * input/timers get serviced between passes instead
+                         * of waiting out the whole flood. */
+                        if (SDL_GetTicksNS() - pass_start_ns >=
+                            PTY_FLOOD_PARSE_NS) {
+                            if (!d->flood_paused) {
+                                self->pause_pty(self);
+                                d->flood_paused = true;
+                            }
+                            flood_break = true;
                         }
                     }
                     break;
@@ -2350,6 +2386,8 @@ static void sdl3_run(PorttyBackend *self)
             default:
                 break;
             }
+            if (flood_break)
+                break;
         }
 
         // === 2. Timers ===
@@ -2389,6 +2427,16 @@ static void sdl3_run(PorttyBackend *self)
                     break;
                 }
             }
+        }
+
+        // The drain pass ended because the queue emptied: release the flood
+        // guard's reader pause so the child can push the next slice. A pass
+        // that stopped early on the parse budget leaves the pause held. If
+        // the selection also paused the reader, its own ref keeps the reader
+        // stopped regardless of what we do here.
+        if (!flood_break && d->flood_paused) {
+            self->resume_pty(self);
+            d->flood_paused = false;
         }
 
         // Hide the resize geometry overlay once resize activity has settled.
@@ -2433,10 +2481,25 @@ static void sdl3_run(PorttyBackend *self)
         // === 3. Render (only blocking call during active rendering) ===
         terminal_flush_damage(term);
         if (terminal_needs_redraw(term)) {
-            bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
-            rend_sdl3_draw_terminal(rend, term, cursor_vis);
-            SDL_RenderPresent(d->sdl_renderer);
-            terminal_clear_redraw(term);
+            // While a parse-backlog is still queued (flood), coalescing to a
+            // minimum frame interval keeps the GPU work affordable; the
+            // redraw flag stays set so the pass that drains the backlog
+            // presents the final state.
+            Uint64 since_present_ns = SDL_GetTicksNS() - d->last_present_ns;
+            bool capture_pending = d->pending_screendump ||
+                                   d->pending_renderdump ||
+                                   d->pending_record_frame;
+            if (d->flood_paused && !capture_pending &&
+                since_present_ns < FLOOD_RENDER_MIN_NS) {
+                terminal_clear_redraw(term);
+                terminal_mark_dirty(term);
+            } else {
+                bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
+                rend_sdl3_draw_terminal(rend, term, cursor_vis);
+                SDL_RenderPresent(d->sdl_renderer);
+                d->last_present_ns = SDL_GetTicksNS();
+                terminal_clear_redraw(term);
+            }
         }
 
         // === Debug script: post-render screendump ===
