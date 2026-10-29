@@ -8,6 +8,7 @@
 #include "test_helpers.h"
 #include "../src/portty_app.h"
 #include "../src/portty_backend.h"
+#include "../src/pager.h"
 #include "../src/portty_panel.h"
 #include "../src/common.h"
 #include "../src/term.h"
@@ -64,6 +65,11 @@ typedef struct
     float reload_scale;  // the content scale it was given
     bool reload_result;  // what reload_fonts reported back
     bool resize_called;  // the grid was re-derived
+    // Scroll routing (pager overlay vs. the shell's terminal)
+    int scroll_calls;             // times backend->scroll was asked to scroll
+    int scroll_delta;             // last delta it was given
+    TerminalBackend *scroll_term; // terminal it was asked to scroll
+    TerminalBackend *overlay;     // overlay currently handed to the renderer
 } StubPlatState;
 
 static StubPlatState g_state = { 0 };
@@ -117,6 +123,26 @@ static int backend_get_scroll_offset(PorttyBackend *self)
 {
     (void)self;
     return 0;
+}
+
+static void backend_scroll(PorttyBackend *self, TerminalBackend *term, int delta)
+{
+    (void)self;
+    g_state.scroll_calls++;
+    g_state.scroll_delta = delta;
+    g_state.scroll_term = term;
+}
+
+static void backend_set_overlay(PorttyBackend *self, TerminalBackend *overlay)
+{
+    (void)self;
+    g_state.overlay = overlay;
+}
+
+static void backend_clear_overlay(PorttyBackend *self)
+{
+    (void)self;
+    g_state.overlay = NULL;
 }
 
 static bool backend_get_cell_size(PorttyBackend *self, int *cw, int *ch)
@@ -204,6 +230,9 @@ static void reset_state(void)
         .panel_hit_test = backend_panel_hit_test,
         .panel_set_hover = backend_panel_set_hover,
         .get_scroll_offset = backend_get_scroll_offset,
+        .scroll = backend_scroll,
+        .set_overlay = backend_set_overlay,
+        .clear_overlay = backend_clear_overlay,
         .get_cell_size = backend_get_cell_size,
         .set_cursor = backend_set_cursor,
         .notify = backend_notify,
@@ -855,6 +884,45 @@ static void test_display_scale_change_applies_user_scale(void)
     destroy_key_mock_term(term);
 }
 
+/* The pager draws its own overlay terminal, but the wheel is still the host's
+ * scroll path: the platform asks pager_mouse first and only scrolls when it
+ * declines. A pager that consumed button 4/5 would leave the document stuck. */
+static void test_pager_wheel_declines_to_the_scroll_path(void)
+{
+    reset_state();
+    TerminalBackend *term = create_key_mock_term();
+    PorttyApp app = { .term = term, .backend = &g_stub_backend };
+    app.pager = pager_create(&g_stub_backend, &app);
+    ASSERT_NOT_NULL(app.pager);
+
+    ASSERT_TRUE(pager_open(app.pager, "one\ntwo\nthree\nfour\nfive\n", 80, 24));
+    ASSERT_TRUE(pager_active(app.pager));
+    ASSERT_NOT_NULL(g_state.overlay);
+
+    // Wheel up: not consumed, and no scroll happened behind the app's back.
+    ASSERT_FALSE(portty_app_handle_mouse(&app, 100, 50, 4, true, 0, 0));
+    ASSERT_EQ(g_state.scroll_calls, 0);
+
+    // The fall-through scroll path moves the overlay, not the shell's grid.
+    portty_app_handle_scroll(&app, 1);
+    ASSERT_EQ(g_state.scroll_calls, 1);
+    ASSERT_EQ(g_state.scroll_delta, SCROLL_LINES_PER_TICK);
+    ASSERT_EQ(g_state.scroll_term, g_state.overlay);
+    ASSERT_TRUE(g_state.scroll_term != term);
+
+    // Wheel down declines the same way, with the opposite direction.
+    ASSERT_FALSE(portty_app_handle_mouse(&app, 100, 50, 5, true, 0, 0));
+    portty_app_handle_scroll(&app, -1);
+    ASSERT_EQ(g_state.scroll_calls, 2);
+    ASSERT_EQ(g_state.scroll_delta, -SCROLL_LINES_PER_TICK);
+
+    // Buttons stay modal: a click in the pager never reaches the shell.
+    ASSERT_TRUE(portty_app_handle_mouse(&app, 100, 50, 1, true, 1, 0));
+
+    pager_destroy(app.pager);
+    destroy_key_mock_term(term);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -891,6 +959,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_display_scale_change_reloads_fonts);
     RUN_TEST(test_display_scale_change_without_reload_keeps_grid);
     RUN_TEST(test_display_scale_change_applies_user_scale);
+
+    // Pager overlay: the wheel declines to the host scroll path
+    RUN_TEST(test_pager_wheel_declines_to_the_scroll_path);
 
     TEST_SUMMARY();
 }

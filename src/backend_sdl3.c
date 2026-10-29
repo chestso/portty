@@ -1899,6 +1899,12 @@ static void sdl3_script_mouse_button(void *user_data, int x, int y, int button,
         d->script_button_down = pressed;
     if (portty_app_handle_mouse(d->app, x, y, button, pressed, clicks, 0))
         terminal_mark_dirty(d->term);
+    // Wheel not consumed by the app (no mouse tracking, pager open) is the
+    // scroll path, exactly as the SDL wheel event routes it.
+    else if (pressed && (button == 4 || button == 5)) {
+        portty_app_handle_scroll(d->app, (button == 4) ? clicks : -clicks);
+        terminal_mark_dirty(d->term);
+    }
 }
 
 static bool sdl3_script_dumpstate(void *user_data, const char *path)

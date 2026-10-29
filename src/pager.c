@@ -320,10 +320,14 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
     if (!pager_active(p))
         return false;
 
-    // Wheel events (button 4/5) are not handled here. When the pager is
-    // active, on_mouse delegates to pager_mouse for hover/click/selection,
-    // but wheel buttons return false so the platform falls through to
-    // on_scroll, which routes to pager_scroll via the pager_active check.
+    // Wheel events (button 4/5) are not the pager's to consume: the platform
+    // asks pager_mouse first and only scrolls when it declines, so a wheel
+    // handled here would never move the document. Decline them so the event
+    // falls through to portty_app_handle_scroll, which routes through
+    // pager_scroll (tick scaling plus hover/pill teardown).
+    if (button == 4 || button == 5)
+        return false;
+
     int row = 0, col = 0;
     bool in_grid = cell_at(p, pixel_x, pixel_y, &row, &col);
     uint16_t hid = in_grid ? link_at(p, row, col) : 0;
