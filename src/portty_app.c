@@ -1077,6 +1077,8 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .pixel_height = pd.pixel_height,
         .cell_width = pd.cell_width,
         .cell_height = pd.cell_height,
+        .logical_cell_width = cfr_px_logical(pd.cell_width, pd.content_scale),
+        .logical_cell_height = cfr_px_logical(pd.cell_height, pd.content_scale),
         .cols = cols,
         .rows = rows,
         .display_session = pd.display_session,

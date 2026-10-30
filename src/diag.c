@@ -366,6 +366,12 @@ char *diag_build_report(const DiagSources *s)
     kvf(&sb, "content scale", "%.2f", (double)s->content_scale);
     kvf(&sb, "window", "%d x %d px", s->pixel_width, s->pixel_height);
     kvf(&sb, "cell", "%d x %d px", s->cell_width, s->cell_height);
+    /* The figures a child measures — the winsize pixel report and the
+     * cell-size queries carry the logical cell. */
+    kvf(&sb, "child cell", "%d x %d px", s->logical_cell_width,
+        s->logical_cell_height);
+    kvf(&sb, "child grid", "%d x %d px", s->cols * s->logical_cell_width,
+        s->rows * s->logical_cell_height);
     kvf(&sb, "grid", "%d cols x %d rows", s->cols, s->rows);
 
     // Physical screen specs (all platforms, NULL if unavailable)

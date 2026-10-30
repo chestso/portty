@@ -32,6 +32,8 @@ static DiagSources sample(void)
         .pixel_height = 720,
         .cell_width = 10,
         .cell_height = 22,
+        .logical_cell_width = 5,
+        .logical_cell_height = 11,
         .cols = 128,
         .rows = 32,
         .config_path = "/tmp/test/portty.conf",
@@ -104,6 +106,10 @@ static void test_contains_values(void)
     ASSERT_TRUE(strstr(r, "/usr/share/fonts/test.ttf") != NULL);
     ASSERT_TRUE(strstr(r, "128 cols x 32 rows") != NULL);
     ASSERT_TRUE(strstr(r, "portty-vty-256color") != NULL);
+    // The cell and grid a child measures.
+    ASSERT_TRUE(strstr(r, "child cell") != NULL);
+    ASSERT_TRUE(strstr(r, "5 x 11 px") != NULL);
+    ASSERT_TRUE(strstr(r, "child grid") != NULL);
     free(r);
 }
 
