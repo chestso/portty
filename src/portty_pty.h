@@ -27,11 +27,14 @@ typedef struct PtyContext PtyContext;
  *
  * @param rows Initial terminal rows
  * @param cols Initial terminal columns
+ * @param grid_w_px Grid width in LOGICAL pixels, 0 when unknown
+ * @param grid_h_px Grid height in LOGICAL pixels, 0 when unknown
  * @param argv NULL-terminated argument array (argv[0] is program to execute).
  *             If NULL, spawns the default shell from $SHELL or /bin/sh.
  * @return PtyContext pointer on success, NULL on failure
  */
-PtyContext *pty_create(int rows, int cols, char *const argv[]);
+PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
+                       char *const argv[]);
 
 /**
  * Destroy PTY context and terminate child process.
@@ -79,6 +82,25 @@ ssize_t pty_read(PtyContext *ctx, char *buf, size_t bufsize);
  * @return 0 on success, -1 on error
  */
 int pty_resize(PtyContext *ctx, int rows, int cols);
+
+/**
+ * Report the pixel size of the character grid to the child (TIOCGWINSZ
+ * ws_xpixel/ws_ypixel).
+ *
+ * A child that sizes images — chafa, img2sixel, a file previewer — reads
+ * the cell's worth in pixels from the winsize, and a cell-count protocol
+ * (kitty c=/r=, iTerm2 width=/height=) is only as right as that figure.
+ * Both dimensions are LOGICAL pixels (physical / content scale): the
+ * content scale is the terminal's business, and every pixel figure a
+ * client measures is scaled by it once on the way back in, so reporting
+ * physical pixels would have the child pack twice the pixels per cell
+ * and the picture come out at twice its size.
+ *
+ * @param ctx PTY context
+ * @param width_px Grid width in logical pixels (0 = unreported)
+ * @param height_px Grid height in logical pixels (0 = unreported)
+ */
+void pty_set_pixel_size(PtyContext *ctx, int width_px, int height_px);
 
 /**
  * Check if the child process is still running.

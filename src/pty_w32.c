@@ -165,8 +165,14 @@ void pty_signal_drain(void)
 {
 }
 
-PtyContext *pty_create(int rows, int cols, char *const argv[])
+PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
+                       char *const argv[])
 {
+    /* ConPTY carries only the character grid, so the grid's pixel extent
+     * has nowhere to go: a child sizes its images from what it can
+     * query. */
+    (void)grid_w_px;
+    (void)grid_h_px;
     PtyContext *ctx = calloc(1, sizeof(PtyContext));
     if (!ctx) {
         fprintf(stderr, "ERROR: Failed to allocate PTY context\n");
@@ -637,6 +643,15 @@ int pty_resize(PtyContext *ctx, int rows, int cols)
     ctx->cols = cols;
     vlog("PTY resized to %dx%d\n", cols, rows);
     return 0;
+}
+
+void pty_set_pixel_size(PtyContext *ctx, int width_px, int height_px)
+{
+    /* ResizePseudoConsole takes cells, not pixels: ConPTY has no winsize
+     * pixel field to report. */
+    (void)ctx;
+    (void)width_px;
+    (void)height_px;
 }
 
 bool pty_is_running(PtyContext *ctx)

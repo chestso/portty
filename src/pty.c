@@ -30,6 +30,8 @@ struct PtyContext
     pid_t child_pid;
     int rows;
     int cols;
+    int win_w_px; /* grid size in LOGICAL pixels (0 = unreported) */
+    int win_h_px;
     int exit_status;              /* valid once exited is true */
     bool exited;                  /* sticky: child reaped (by anyone) */
     struct termios saved_termios; /* line discipline as portty set it up */
@@ -131,7 +133,35 @@ void pty_signal_drain(void)
     }
 }
 
-PtyContext *pty_create(int rows, int cols, char *const argv[])
+/* winsize pixel fields are unsigned short. */
+static unsigned short ws_px(int px)
+{
+    if (px < 0)
+        return 0;
+    if (px > 65535)
+        return 65535;
+    return (unsigned short)px;
+}
+
+/* Push a grid size and the grid's pixel extent to the child. */
+static int pty_push_winsize(PtyContext *ctx, int rows, int cols)
+{
+    struct winsize ws = {
+        .ws_row = (unsigned short)rows,
+        .ws_col = (unsigned short)cols,
+        .ws_xpixel = ws_px(ctx->win_w_px),
+        .ws_ypixel = ws_px(ctx->win_h_px)
+    };
+
+    if (ioctl(ctx->master_fd, TIOCSWINSZ, &ws) < 0) {
+        fprintf(stderr, "ERROR: ioctl TIOCSWINSZ failed: %s\n", strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
+                       char *const argv[])
 {
     PtyContext *ctx = calloc(1, sizeof(PtyContext));
     if (!ctx) {
@@ -141,15 +171,19 @@ PtyContext *pty_create(int rows, int cols, char *const argv[])
 
     ctx->rows = rows;
     ctx->cols = cols;
+    ctx->win_w_px = grid_w_px > 0 ? grid_w_px : 0;
+    ctx->win_h_px = grid_h_px > 0 ? grid_h_px : 0;
     ctx->master_fd = -1;
     ctx->child_pid = -1;
 
-    // Set up initial window size
+    // Set up initial window size — the child sees the grid's pixel
+    // extent from its first TIOCGWINSZ, so an image viewer started as
+    // `portty -- chafa picture.png` sizes its output correctly.
     struct winsize ws = {
         .ws_row = (unsigned short)rows,
         .ws_col = (unsigned short)cols,
-        .ws_xpixel = 0,
-        .ws_ypixel = 0
+        .ws_xpixel = ws_px(ctx->win_w_px),
+        .ws_ypixel = ws_px(ctx->win_h_px)
     };
 
     // Create PTY and fork
@@ -382,22 +416,29 @@ int pty_resize(PtyContext *ctx, int rows, int cols)
     if (!ctx || ctx->master_fd < 0)
         return -1;
 
-    struct winsize ws = {
-        .ws_row = (unsigned short)rows,
-        .ws_col = (unsigned short)cols,
-        .ws_xpixel = 0,
-        .ws_ypixel = 0
-    };
-
-    if (ioctl(ctx->master_fd, TIOCSWINSZ, &ws) < 0) {
-        fprintf(stderr, "ERROR: ioctl TIOCSWINSZ failed: %s\n", strerror(errno));
+    if (pty_push_winsize(ctx, rows, cols) < 0)
         return -1;
-    }
-
     ctx->rows = rows;
     ctx->cols = cols;
     vlog("PTY resized to %dx%d\n", cols, rows);
     return 0;
+}
+
+void pty_set_pixel_size(PtyContext *ctx, int width_px, int height_px)
+{
+    if (!ctx || ctx->master_fd < 0)
+        return;
+
+    if (width_px < 0)
+        width_px = 0;
+    if (height_px < 0)
+        height_px = 0;
+    if (width_px == ctx->win_w_px && height_px == ctx->win_h_px)
+        return; /* nothing moved — no ioctl, no SIGWINCH for the child */
+
+    ctx->win_w_px = width_px;
+    ctx->win_h_px = height_px;
+    pty_push_winsize(ctx, ctx->rows, ctx->cols);
 }
 
 bool pty_is_running(PtyContext *ctx)

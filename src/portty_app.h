@@ -130,4 +130,9 @@ void portty_app_set_autoscroll(PorttyApp *app, bool enabled);
 // Content scale calculation (unified for all backends).
 float portty_compute_content_scale(float system_scale, float user_scale);
 
+// The cell's size in LOGICAL (unscaled) pixels — the unit a child measures
+// in: TIOCGWINSZ ws_xpixel/ws_ypixel and the cell-size queries carry it,
+// and everything a client sends back is scaled by the content scale once.
+int portty_logical_cell_px(int cell_px, float content_scale);
+
 #endif // PORTTY_APP_H

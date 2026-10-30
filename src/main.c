@@ -467,8 +467,10 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     free(desktop_font);
 
     int cell_w, cell_h;
+    bool have_cell = false;
     int win_w = 800, win_h = 600;
     if (backend.get_cell_size(&backend, &cell_w, &cell_h)) {
+        have_cell = true;
         terminal_set_cell_px(term, cell_w, cell_h);
         terminal_set_content_scale(term, display_scale);
         win_w = args->init_cols * cell_w;
@@ -504,7 +506,17 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     if (args->demo_text) {
         terminal_process_input(term, args->demo_text, strlen(args->demo_text));
     } else {
-        pty = pty_create(args->init_rows, args->init_cols, args->exec_argv);
+        // The grid's extent in the unit the child measures in: the winsize
+        // pixel fields and the cell-size queries carry logical pixels.
+        int grid_w_px = 0, grid_h_px = 0;
+        if (have_cell) {
+            grid_w_px = args->init_cols *
+                        portty_logical_cell_px(cell_w, display_scale);
+            grid_h_px = args->init_rows *
+                        portty_logical_cell_px(cell_h, display_scale);
+        }
+        pty = pty_create(args->init_rows, args->init_cols, grid_w_px,
+                         grid_h_px, args->exec_argv);
         if (!pty) {
             fprintf(stderr, "ERROR: Failed to create PTY\n");
             backend.destroy(&backend);
