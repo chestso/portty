@@ -13,7 +13,7 @@
  *
  *   screendump, renderdump, dumpstate, record-start, record-stop,
  *   panel, panel_hide, mousemove, mousedown, mouseup, winsize,
- *   display-scale, assert-hover, assert-no-hover
+ *   display-scale, assert-hover, assert-no-hover, diag
  */
 
 #ifndef PORTTY_SCRIPT_H
@@ -86,6 +86,10 @@ typedef struct
     /* Terminal-state dump (dumpstate PATH; NULL path = default). */
     bool (*dump_fn)(void *ud, const char *path);
     void *dump_ud;
+
+    /* Diagnostics report in the internal pager (diag). */
+    void (*diag_fn)(void *ud);
+    void *diag_ud;
 } ScriptUIExt;
 
 typedef struct PorttyScript PorttyScript;

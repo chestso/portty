@@ -1919,6 +1919,18 @@ static bool sdl3_script_dumpstate(void *user_data, const char *path)
     return false;
 }
 
+static void sdl3_script_diag(void *user_data)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return;
+    portty_app_show_diagnostics(d->app);
+    // The overlay replaced the view; make this pass draw it so a following
+    // screendump captures the report.
+    if (d->term)
+        terminal_mark_dirty(d->term);
+}
+
 static void sdl3_record_start(void *user_data, int fps)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
@@ -2007,6 +2019,8 @@ static void sdl3_run(PorttyBackend *self)
             .record_ud = d,
             .dump_fn = sdl3_script_dumpstate,
             .dump_ud = d,
+            .diag_fn = sdl3_script_diag,
+            .diag_ud = d,
         };
 
         char err[512];

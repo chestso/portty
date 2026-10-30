@@ -93,6 +93,11 @@ typedef struct
 // Build the formatted, ANSI-styled UTF-8 diagnostics document (truecolor,
 // box-drawing, bold/underline). Returns a malloc'd NUL-terminated string the
 // caller must free, or NULL on allocation failure.
+//
+// The document opens with the portty logo as a kitty graphics placement, so it
+// is complete only in a terminal that implements the protocol — portty's own
+// pager. Anywhere else the placement is ignored and the header shows the text
+// with a blank margin.
 char *diag_build_report(const DiagSources *src);
 
 #endif // DIAG_H

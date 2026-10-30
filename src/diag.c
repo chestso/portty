@@ -6,11 +6,13 @@
  */
 
 // Diagnostics report builder. Produces a styled, self-contained UTF-8 document
-// (ANSI-palette SGR, box-drawing, bold/underline) for bug reporting — shown
-// through the system pager by the Ctrl+Shift+F6 binding in main.c. See diag.h.
+// (ANSI-palette SGR, box-drawing, bold/underline) for bug reporting — shown in
+// portty's own pager by the Ctrl+Shift+F6 binding. See diag.h.
 //
 // Kept free of SDL / terminal / renderer dependencies: all runtime values arrive
-// via DiagSources. Only the static build/version block reads config.h macros.
+// via DiagSources, and the image at the top of the document is a plain byte
+// stream (a kitty graphics APC) that the pager's VT places. Only the static
+// build/version block reads config.h macros.
 
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -18,6 +20,9 @@
 #include "portty_version.h"
 
 #include "diag.h"
+
+#include "base64.h"
+#include "portty_logo_png.h"
 
 #include <stdarg.h>
 #include <stdio.h>
@@ -31,6 +36,12 @@
 #endif
 
 #define DW 64 // content width for rules
+
+// Header badge: the portty logo as a kitty graphics placement in the frame's
+// left margin. It spans the four banner rows (rule, wordmark, version, rule).
+#define LOGO_ROWS   4    // cells tall
+#define LOGO_CHUNK  4096 // payload bytes per APC (the protocol's per-chunk ceiling)
+#define LOGO_IMG_ID 1    // kitty image id; the pager's VT lives for one session
 
 // ---- styling ---------------------------------------------------------------
 // Attributes plus 3/4-bit ANSI colour SGR. Colours resolve against the host
@@ -88,6 +99,18 @@ static void sb_puts(SB *sb, const char *s)
     if (!s)
         return;
     size_t n = strlen(s);
+    sb_reserve(sb, n);
+    if (sb->oom)
+        return;
+    memcpy(sb->buf + sb->len, s, n);
+    sb->len += n;
+    sb->buf[sb->len] = '\0';
+}
+
+// Length-counted append (the escape stream carries payload slices, not C
+// strings).
+static void sb_putn(SB *sb, const char *s, size_t n)
+{
     sb_reserve(sb, n);
     if (sb->oom)
         return;
@@ -197,6 +220,89 @@ static const char *or_unset(const char *s)
     return (s && *s) ? s : NULL;
 }
 
+// `n` single-column blanks — used to hold the header badge's cells clear.
+static void spaces(SB *sb, int n)
+{
+    for (int i = 0; i < n; i++)
+        sb_puts(sb, " ");
+}
+
+// Badge width in columns: a square box, so the column count follows the row
+// count through the real cell aspect. 0 means no badge — the report is built
+// for grids too narrow to give up the margin.
+static int logo_cols(const DiagSources *s)
+{
+    if (s->cols > 0 && s->cols < 40)
+        return 0;
+    if (s->cell_width <= 0 || s->cell_height <= 0)
+        return 8;
+
+    int cols = (LOGO_ROWS * s->cell_height + s->cell_width - 1) / s->cell_width;
+    if (cols < 4)
+        cols = 4;
+    if (cols > 12)
+        cols = 12;
+    return cols;
+}
+
+// Place the badge at the cursor as a kitty graphics placement:
+//   a=T     transmit the PNG and place it in one sequence
+//   f=100   the payload is a PNG, decoded by the VT engine
+//   c=,r=   the display box in cells (see logo_cols())
+//   C=1     the cursor stays put — the banner keeps emitting text after it
+//   q=2     no OK/ERR reply to feed back
+// The payload is split into LOGO_CHUNK slices; the first carries the whole
+// placement's metadata, which the engine carries across the continuations.
+static void logo_apc(SB *sb, int cols)
+{
+    char *b64 = base64_encode(portty_logo_png, portty_logo_png_len);
+    if (!b64)
+        return;
+
+    size_t len = strlen(b64);
+    for (size_t off = 0; off < len; off += LOGO_CHUNK) {
+        size_t n = len - off < LOGO_CHUNK ? len - off : LOGO_CHUNK;
+        bool more = (off + n) < len;
+        if (off == 0)
+            sb_printf(sb, "\x1b_Ga=T,f=100,q=2,i=%d,c=%d,r=%d,C=1,m=%d;",
+                      LOGO_IMG_ID, cols, LOGO_ROWS, more ? 1 : 0);
+        else
+            sb_printf(sb, "\x1b_Gm=%d;", more ? 1 : 0);
+        sb_putn(sb, b64 + off, n);
+        sb_puts(sb, "\x1b\\");
+    }
+    free(b64);
+}
+
+// Banner: the portty badge in the frame's left margin, bold wordmark and
+// version to its right. The badge spans the four header rows (top rule,
+// wordmark, version, bottom rule) and both rules begin at its right edge, so
+// the frame keeps its width whether or not a badge is drawn.
+static void banner(SB *sb, const DiagSources *s)
+{
+    int lc = logo_cols(s);
+    int rw = DW - lc;
+
+    sb_puts(sb, "\n  ");
+    if (lc > 0)
+        logo_apc(sb, lc);
+    // The badge's cells stay blank: its pixels are transparent at the edges,
+    // so glyphs underneath would show through — and a copy of the report
+    // selects spaces there instead of debris.
+    spaces(sb, lc);
+    rule(sb, "━", rw);
+
+    sb_puts(sb, "\n");
+    spaces(sb, lc + 4);
+    sb_puts(sb, BOLD "portty" RST DIM "  ·  diagnostics" RST "\n");
+    spaces(sb, lc + 4);
+    sb_printf(sb, FG_ACCENT "%s" RST "\n", PORTTY_VERSION);
+
+    sb_puts(sb, "  ");
+    spaces(sb, lc);
+    rule(sb, "━", rw);
+}
+
 // ---- report ----------------------------------------------------------------
 
 char *diag_build_report(const DiagSources *s)
@@ -206,15 +312,8 @@ char *diag_build_report(const DiagSources *s)
 
     SB sb = { 0 };
 
-    // Banner: emoji + bold wordmark + version, framed by heavy rules.
-    sb_puts(&sb, "\n  ");
-    rule(&sb, "━", DW);
-    sb_puts(&sb, "  \U0001f338  "); // 🌸
-    sb_puts(&sb, BOLD "portty" RST);
-    sb_puts(&sb, DIM "  ·  diagnostics" RST "\n");
-    sb_printf(&sb, FG_ACCENT "  %s" RST "\n", PORTTY_VERSION);
-    sb_puts(&sb, "  ");
-    rule(&sb, "━", DW);
+    // Banner: badge + bold wordmark + version, framed by heavy rules.
+    banner(&sb, s);
 
     // Version & build
     section(&sb, "VERSION & BUILD");

@@ -21,7 +21,7 @@ test_conf_SOURCES = test_conf.c $(TEST_COMMON) ../src/portty_conf.c
 test_conf_CFLAGS = $(TEST_CFLAGS)
 
 # diag.c includes the generated portty_version.h (builddir/src), so add that path.
-test_diag_SOURCES = test_diag.c $(TEST_COMMON) ../src/diag.c
+test_diag_SOURCES = test_diag.c $(TEST_COMMON) ../src/diag.c ../src/base64.c
 test_diag_CFLAGS = $(TEST_CFLAGS) -I$(top_builddir)/src
 
 # Deferred-clipboard-free linked list logic. Pure C, no SDL/coffer

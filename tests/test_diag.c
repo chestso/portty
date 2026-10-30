@@ -5,12 +5,17 @@
  * Copyright (c) 2026 Thomas Christensen
  */
 
+#include "base64.h"
 #include "diag.h"
+#include "portty_logo_png.h"
 #include "portty_version.h"
 #include "test_helpers.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* DW in diag.c: the banner's content width in columns. */
+#define HEADER_DW 64
 
 // A fully-populated sample so the report exercises every section.
 static DiagSources sample(void)
@@ -304,6 +309,126 @@ static void test_lottie_rasterizer_off(void)
     free(r);
 }
 
+/* ── header badge ──────────────────────────────────────────────────── */
+
+/* Non-overlapping occurrences of `needle` in `hay`. */
+static int count_occurrences(const char *hay, const char *needle)
+{
+    int n = 0;
+    size_t step = strlen(needle);
+    for (const char *p = hay; (p = strstr(p, needle)) != NULL; p += step)
+        n++;
+    return n;
+}
+
+/* Largest kitty APC payload in the document, in bytes. */
+static size_t longest_apc_payload(const char *doc)
+{
+    size_t worst = 0;
+    const char *p = doc;
+    while ((p = strstr(p, "\x1b_G")) != NULL) {
+        p += 3;
+        const char *end = strstr(p, "\x1b\\");
+        if (!end)
+            break;
+        const char *semi = memchr(p, ';', (size_t)(end - p));
+        if (semi && (size_t)(end - semi - 1) > worst)
+            worst = (size_t)(end - semi - 1);
+        p = end + 2;
+    }
+    return worst;
+}
+
+/* Every kitty APC's payload, concatenated with its control prefix stripped —
+ * what the terminal decodes as one image. */
+static char *apc_payload(const char *doc)
+{
+    size_t cap = strlen(doc) + 1, len = 0;
+    char *out = malloc(cap);
+    if (!out)
+        return NULL;
+    const char *p = doc;
+    while ((p = strstr(p, "\x1b_G")) != NULL) {
+        p += 3;
+        const char *end = strstr(p, "\x1b\\");
+        if (!end)
+            break;
+        const char *semi = memchr(p, ';', (size_t)(end - p));
+        if (semi) {
+            size_t n = (size_t)(end - semi - 1);
+            memcpy(out + len, semi + 1, n);
+            len += n;
+        }
+        p = end + 2;
+    }
+    out[len] = '\0';
+    return out;
+}
+
+static void test_header_badge(void)
+{
+    // sample() is a 128-column grid with 10x22 px cells: the badge is a
+    // square box 4 rows tall, so it is ceil(4 * 22 / 10) = 9 columns wide.
+    DiagSources s = sample();
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+
+    // The badge opens the document, on the banner's first row.
+    ASSERT_TRUE(strncmp(r, "\n  \x1b_G", 6) == 0);
+    // Transmit-and-place, PNG payload, cursor held still, quiet, 9x4 cells.
+    ASSERT_TRUE(strstr(r, "\x1b_Ga=T,f=100,q=2,i=1,c=9,r=4,C=1,m=1;") != NULL);
+    // The emoji the badge replaced is gone.
+    ASSERT_TRUE(strstr(r, "\xf0\x9f\x8c\xb8") == NULL);
+    // Both rules give up exactly the badge's columns.
+    ASSERT_EQ(count_occurrences(r, "━"), 2 * (HEADER_DW - 9));
+    // The wordmark sits on the banner's second row, two columns right of
+    // where the rules begin.
+    ASSERT_TRUE(strstr(r, "\n             \x1b[1mportty") != NULL);
+    // Chunks stay inside the protocol's per-APC payload ceiling.
+    ASSERT_TRUE(longest_apc_payload(r) > 0);
+    ASSERT_TRUE(longest_apc_payload(r) <= 4096);
+
+    // The payload decodes to the embedded logo, byte for byte.
+    char *payload = apc_payload(r);
+    ASSERT_NOT_NULL(payload);
+    size_t png_len = 0;
+    uint8_t *png = base64_decode(payload, strlen(payload), &png_len);
+    ASSERT_NOT_NULL(png);
+    ASSERT_EQ(png_len, (size_t)portty_logo_png_len);
+    ASSERT_TRUE(memcmp(png, portty_logo_png, portty_logo_png_len) == 0);
+    free(png);
+    free(payload);
+    free(r);
+}
+
+static void test_header_badge_narrow(void)
+{
+    // A grid too narrow to give up the margin: no badge, full-width rules,
+    // and the frame's own two-column inset for the wordmark.
+    DiagSources s = sample();
+    s.cols = 32;
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "\x1b_G") == NULL);
+    ASSERT_EQ(count_occurrences(r, "━"), 2 * HEADER_DW);
+    ASSERT_TRUE(strstr(r, "\n    \x1b[1mportty") != NULL);
+    free(r);
+}
+
+static void test_header_badge_missing_cell_metrics(void)
+{
+    // Without cell metrics the badge keeps a fixed 8-column box rather than
+    // guessing from a zero aspect.
+    DiagSources s = sample();
+    s.cell_width = 0;
+    s.cell_height = 0;
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "\x1b_Ga=T,f=100,q=2,i=1,c=8,r=4,C=1,m=1;") != NULL);
+    ASSERT_EQ(count_occurrences(r, "━"), 2 * (HEADER_DW - 8));
+    free(r);
+}
+
 static void test_display_info(void)
 {
     // Display subsection appears when display_session is set.
@@ -346,6 +471,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_vt_features_section);
     RUN_TEST(test_vt_features_enabled);
     RUN_TEST(test_lottie_rasterizer_off);
+    RUN_TEST(test_header_badge);
+    RUN_TEST(test_header_badge_narrow);
+    RUN_TEST(test_header_badge_missing_cell_metrics);
     RUN_TEST(test_display_info);
 
     TEST_SUMMARY();

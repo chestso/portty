@@ -28,7 +28,7 @@ static const char *const EXT_NAMES[] = {
     "screendump", "renderdump", "dumpstate", "record-start",
     "record-stop", "panel", "panel_hide", "mousemove",
     "mousedown", "mouseup", "winsize", "display-scale",
-    "assert-hover", "assert-no-hover", NULL
+    "assert-hover", "assert-no-hover", "diag", NULL
 };
 
 /* ── Engine host hooks (adapt ScriptUIExt to CfrScriptHost) ── */
@@ -220,6 +220,15 @@ static bool exec_ext(void *ud, const char *name, const char *args,
             *fatal = true;
             return false;
         }
+        return true;
+    }
+
+    if (strcmp(name, "diag") == 0) {
+        if (!ext->diag_fn) {
+            fprintf(stderr, "[%d] diag: not supported\n", line);
+            return true;
+        }
+        ext->diag_fn(ext->diag_ud);
         return true;
     }
 

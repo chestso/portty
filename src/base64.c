@@ -199,3 +199,33 @@ uint8_t *base64_decode(const char *src, size_t len, size_t *out_len)
         *out_len = out_pos;
     return out;
 }
+
+char *base64_encode(const uint8_t *src, size_t len)
+{
+    static const char tbl[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                              "abcdefghijklmnopqrstuvwxyz"
+                              "0123456789+/";
+    if (!src && len)
+        return NULL;
+
+    size_t out_len = (len + 2) / 3 * 4;
+    char *out = malloc(out_len + 1);
+    if (!out)
+        return NULL;
+
+    size_t o = 0;
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = (uint32_t)src[i] << 16;
+        if (i + 1 < len)
+            v |= (uint32_t)src[i + 1] << 8;
+        if (i + 2 < len)
+            v |= (uint32_t)src[i + 2];
+        out[o++] = tbl[(v >> 18) & 0x3F];
+        out[o++] = tbl[(v >> 12) & 0x3F];
+        out[o++] = (i + 1 < len) ? tbl[(v >> 6) & 0x3F] : '=';
+        out[o++] = (i + 2 < len) ? tbl[v & 0x3F] : '=';
+    }
+
+    out[o] = '\0';
+    return out;
+}

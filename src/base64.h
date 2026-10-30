@@ -18,4 +18,10 @@
  * `*out_len` receives the decoded byte count. */
 uint8_t *base64_decode(const char *src, size_t len, size_t *out_len);
 
+/* Encode `len` bytes of `src` as standard base64 (RFC 4648 alphabet, '='
+ * padding emitted). Returns a freshly malloc'd, NUL-terminated string the
+ * caller must free(), or NULL on allocation failure. A zero-length input
+ * encodes to the empty string. */
+char *base64_encode(const uint8_t *src, size_t len);
+
 #endif /* PORTTY_BASE64_H */

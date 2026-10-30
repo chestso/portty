@@ -122,7 +122,7 @@ endif
 # After editing the .glsl, run `make regen-shaders` (needs glslangValidator) to
 # refresh the committed header, then commit it.
 EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h \
-    portty.rc portty_icon_png.h porttyw.c \
+    portty.rc portty_icon_png.h portty_logo_png.h porttyw.c \
     backend_sdl3.h base64.h common.h diag.h display_info.h \
     dump.h \
     embedded_term.h \
@@ -148,10 +148,12 @@ regen-shaders:
 CLEANFILES += shaders/glyph_coverage.frag.spv
 endif
 
-# Embedded window icon (256x256 PNG compiled into the binary as a C header
-# via build-aux/bin2c.sh). After changing the source SVG, run `make regen-icon`
-# (needs rsvg-convert) to refresh the committed header, then commit it. The
-# rasterized PNG is an intermediate and stays in the build tree.
+# Embedded PNGs compiled into the binary as C headers via build-aux/bin2c.sh:
+# the 256x256 window icon, and the 128x128 diagnostics header badge (displayed
+# at roughly 90 px, so the smaller source keeps the report's escape payload
+# down). After changing the source SVG, run `make regen-icon` (needs
+# rsvg-convert) to refresh the committed headers, then commit them. The
+# rasterized PNGs are intermediates and stay in the build tree.
 regen-icon:
 	rsvg-convert -w 256 -h 256 -f png \
 	    $(top_srcdir)/data/icons/hicolor/scalable/apps/portty.svg \
@@ -159,8 +161,14 @@ regen-icon:
 	$(SHELL) $(top_srcdir)/build-aux/bin2c.sh \
 	    portty_icon_256.png portty_icon_png \
 	    > $(srcdir)/portty_icon_png.h
-	@echo "  GEN      portty_icon_png.h"
-CLEANFILES += portty_icon_256.png
+	rsvg-convert -w 128 -h 128 -f png \
+	    $(top_srcdir)/data/icons/hicolor/scalable/apps/portty.svg \
+	    -o portty_logo_128.png
+	$(SHELL) $(top_srcdir)/build-aux/bin2c.sh \
+	    portty_logo_128.png portty_logo_png \
+	    > $(srcdir)/portty_logo_png.h
+	@echo "  GEN      portty_icon_png.h portty_logo_png.h"
+CLEANFILES += portty_icon_256.png portty_logo_128.png
 
 if HAVE_RC
 # Compile the Windows resource file (portty.rc) with windres to embed the app

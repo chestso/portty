@@ -118,6 +118,68 @@ static void test_base64_invalid_char_rejected(void)
 }
 
 /* ------------------------------------------------------------------ */
+/* base64 encoder                                                      */
+/* ------------------------------------------------------------------ */
+
+static void test_base64_encode_rfc4648_vectors(void)
+{
+    struct
+    {
+        const char *in;
+        const char *out;
+    } cases[] = {
+        { "", "" },
+        { "f", "Zg==" },
+        { "fo", "Zm8=" },
+        { "foo", "Zm9v" },
+        { "foob", "Zm9vYg==" },
+        { "fooba", "Zm9vYmE=" },
+        { "foobar", "Zm9vYmFy" },
+    };
+    for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); ++i) {
+        char *out = base64_encode((const uint8_t *)cases[i].in,
+                                  strlen(cases[i].in));
+        ASSERT_NOT_NULL(out);
+        ASSERT_STR_EQ(out, cases[i].out);
+        free(out);
+    }
+}
+
+static void test_base64_encode_round_trip(void)
+{
+    /* Every byte value, every length modulo 3: encode then decode must
+     * reproduce the input exactly. */
+    uint8_t src[256];
+    for (int i = 0; i < 256; ++i)
+        src[i] = (uint8_t)i;
+    for (size_t len = 0; len <= sizeof(src); ++len) {
+        char *enc = base64_encode(src, len);
+        ASSERT_NOT_NULL(enc);
+        ASSERT_EQ(strlen(enc), (len + 2) / 3 * 4);
+
+        size_t back_len = 0;
+        uint8_t *back = base64_decode(enc, strlen(enc), &back_len);
+        ASSERT_NOT_NULL(back);
+        ASSERT_EQ(back_len, len);
+        ASSERT_TRUE(len == 0 || memcmp(back, src, len) == 0);
+
+        free(back);
+        free(enc);
+    }
+}
+
+static void test_base64_encode_null_input(void)
+{
+    /* A NULL pointer with a non-zero length is a caller bug, not a crash. */
+    ASSERT_NULL(base64_encode(NULL, 4));
+
+    char *empty = base64_encode(NULL, 0);
+    ASSERT_NOT_NULL(empty);
+    ASSERT_STR_EQ(empty, "");
+    free(empty);
+}
+
+/* ------------------------------------------------------------------ */
 /* OSC 52 dispatch                                                     */
 /* ------------------------------------------------------------------ */
 
@@ -576,6 +638,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_base64_missing_padding);
     RUN_TEST(test_base64_whitespace_tolerated);
     RUN_TEST(test_base64_invalid_char_rejected);
+    RUN_TEST(test_base64_encode_rfc4648_vectors);
+    RUN_TEST(test_base64_encode_round_trip);
+    RUN_TEST(test_base64_encode_null_input);
 
     RUN_TEST(test_osc52_set_clipboard_bel);
     RUN_TEST(test_osc52_set_clipboard_st);
