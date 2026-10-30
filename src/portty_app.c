@@ -35,18 +35,6 @@ float portty_compute_content_scale(float system_scale, float user_scale)
     return scale > 0.0f ? scale : 1.0f;
 }
 
-// Cell size in LOGICAL pixels: the renderer's cell is physical (it divides
-// window pixels into the grid), while a child — and the engine — work in
-// unscaled pixels. Keep the two in one place so the winsize report and the
-// engine's own conversion cannot drift apart.
-int portty_logical_cell_px(int cell_px, float content_scale)
-{
-    if (content_scale <= 0.0f)
-        content_scale = 1.0f;
-    int lpx = (int)lroundf((float)cell_px / content_scale);
-    return lpx > 0 ? lpx : 1;
-}
-
 // Terminal callback implementations (registered with coffer).
 
 void portty_app_term_output_to_pty(const char *data, size_t len, void *user_data)
@@ -771,8 +759,8 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
             if (app->pty) {
                 // The child measures the cell in logical pixels; the
                 // winsize report and the engine's scaling then agree.
-                int lcw = portty_logical_cell_px(cell_w, content_scale);
-                int lch = portty_logical_cell_px(cell_h, content_scale);
+                int lcw = cfr_px_logical(cell_w, content_scale);
+                int lch = cfr_px_logical(cell_h, content_scale);
                 pty_set_pixel_size(app->pty, cols * lcw, rows * lch);
                 pty_resize(app->pty, rows, cols);
             }

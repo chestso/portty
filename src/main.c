@@ -510,10 +510,10 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         // pixel fields and the cell-size queries carry logical pixels.
         int grid_w_px = 0, grid_h_px = 0;
         if (have_cell) {
-            grid_w_px = args->init_cols *
-                        portty_logical_cell_px(cell_w, display_scale);
-            grid_h_px = args->init_rows *
-                        portty_logical_cell_px(cell_h, display_scale);
+            grid_w_px =
+                args->init_cols * cfr_px_logical(cell_w, display_scale);
+            grid_h_px =
+                args->init_rows * cfr_px_logical(cell_h, display_scale);
         }
         pty = pty_create(args->init_rows, args->init_cols, grid_w_px,
                          grid_h_px, args->exec_argv);
