@@ -292,7 +292,6 @@ static void banner(SB *sb, const DiagSources *s)
     spaces(sb, lc);
     rule(sb, "━", rw);
 
-    sb_puts(sb, "\n");
     spaces(sb, lc + 4);
     sb_puts(sb, BOLD "portty" RST DIM "  ·  diagnostics" RST "\n");
     spaces(sb, lc + 4);

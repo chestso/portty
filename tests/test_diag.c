@@ -390,6 +390,10 @@ static void test_header_badge(void)
     // The wordmark sits on the banner's second row, two columns right of
     // where the rules begin.
     ASSERT_TRUE(strstr(r, "\n             \x1b[1mportty") != NULL);
+    // The banner is four rows — top rule, wordmark, version, bottom rule —
+    // the same four the badge spans, so the wordmark follows the top rule
+    // directly and the text stands centred beside the badge.
+    ASSERT_TRUE(strstr(r, "━\x1b[0m\n             \x1b[1mportty") != NULL);
     // Chunks stay inside the protocol's per-APC payload ceiling.
     ASSERT_TRUE(longest_apc_payload(r) > 0);
     ASSERT_TRUE(longest_apc_payload(r) <= 4096);
@@ -418,6 +422,9 @@ static void test_header_badge_narrow(void)
     ASSERT_TRUE(strstr(r, "\x1b_G") == NULL);
     ASSERT_EQ(count_occurrences(r, "━"), 2 * HEADER_DW);
     ASSERT_TRUE(strstr(r, "\n    \x1b[1mportty") != NULL);
+    // The banner keeps its four rows without a badge: the wordmark follows
+    // the top rule directly.
+    ASSERT_TRUE(strstr(r, "━\x1b[0m\n    \x1b[1mportty") != NULL);
     free(r);
 }
 
