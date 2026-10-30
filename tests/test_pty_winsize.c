@@ -68,32 +68,13 @@ static void test_create_without_pixels_reports_zero(void)
     pty_destroy(ctx);
 }
 
-static void test_set_pixel_size_reaches_the_child(void)
+/* A resize pushes the grid and its pixel extent as one winsize. */
+static void test_resize_sets_grid_and_pixels(void)
 {
     PtyContext *ctx = spawn_child(24, 80, 800, 480);
     ASSERT_NOT_NULL(ctx);
 
-    pty_set_pixel_size(ctx, 640, 384);
-
-    struct winsize ws = { 0 };
-    ASSERT_TRUE(read_winsize(ctx, &ws));
-    ASSERT_EQ(ws.ws_xpixel, 640);
-    ASSERT_EQ(ws.ws_ypixel, 384);
-    /* The grid did not move. */
-    ASSERT_EQ(ws.ws_row, 24);
-    ASSERT_EQ(ws.ws_col, 80);
-
-    pty_destroy(ctx);
-}
-
-/* A grid resize pushes the pixel size along: the two are one winsize. */
-static void test_grid_resize_keeps_pixel_size(void)
-{
-    PtyContext *ctx = spawn_child(24, 80, 800, 480);
-    ASSERT_NOT_NULL(ctx);
-
-    pty_set_pixel_size(ctx, 640, 384);
-    ASSERT_EQ(pty_resize(ctx, 30, 100), 0);
+    ASSERT_EQ(pty_resize(ctx, 30, 100, 640, 384), 0);
 
     struct winsize ws = { 0 };
     ASSERT_TRUE(read_winsize(ctx, &ws));
@@ -101,6 +82,22 @@ static void test_grid_resize_keeps_pixel_size(void)
     ASSERT_EQ(ws.ws_col, 100);
     ASSERT_EQ(ws.ws_xpixel, 640);
     ASSERT_EQ(ws.ws_ypixel, 384);
+
+    pty_destroy(ctx);
+}
+
+/* 0 means "unreported": a resize with no pixels clears the fields. */
+static void test_resize_without_pixels_reports_zero(void)
+{
+    PtyContext *ctx = spawn_child(24, 80, 800, 480);
+    ASSERT_NOT_NULL(ctx);
+
+    ASSERT_EQ(pty_resize(ctx, 24, 80, 0, 0), 0);
+
+    struct winsize ws = { 0 };
+    ASSERT_TRUE(read_winsize(ctx, &ws));
+    ASSERT_EQ(ws.ws_xpixel, 0);
+    ASSERT_EQ(ws.ws_ypixel, 0);
 
     pty_destroy(ctx);
 }
@@ -117,8 +114,8 @@ int main(int argc, char *argv[])
     printf("test_pty_winsize\n");
     RUN_TEST(test_create_reports_grid_pixels);
     RUN_TEST(test_create_without_pixels_reports_zero);
-    RUN_TEST(test_set_pixel_size_reaches_the_child);
-    RUN_TEST(test_grid_resize_keeps_pixel_size);
+    RUN_TEST(test_resize_sets_grid_and_pixels);
+    RUN_TEST(test_resize_without_pixels_reports_zero);
 
     pty_signal_cleanup();
     TEST_SUMMARY();

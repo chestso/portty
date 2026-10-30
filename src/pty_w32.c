@@ -620,8 +620,13 @@ void pty_cancel_read(PtyContext *ctx)
     CancelIoEx(ctx->output_read, NULL);
 }
 
-int pty_resize(PtyContext *ctx, int rows, int cols)
+int pty_resize(PtyContext *ctx, int rows, int cols, int width_px,
+               int height_px)
 {
+    /* ResizePseudoConsole takes cells, not pixels: ConPTY has no winsize
+     * pixel field to report. */
+    (void)width_px;
+    (void)height_px;
     if (!ctx || ctx->hpc == INVALID_HANDLE_VALUE)
         return -1;
 
@@ -643,15 +648,6 @@ int pty_resize(PtyContext *ctx, int rows, int cols)
     ctx->cols = cols;
     vlog("PTY resized to %dx%d\n", cols, rows);
     return 0;
-}
-
-void pty_set_pixel_size(PtyContext *ctx, int width_px, int height_px)
-{
-    /* ResizePseudoConsole takes cells, not pixels: ConPTY has no winsize
-     * pixel field to report. */
-    (void)ctx;
-    (void)width_px;
-    (void)height_px;
 }
 
 bool pty_is_running(PtyContext *ctx)

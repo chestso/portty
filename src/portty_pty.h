@@ -76,31 +76,29 @@ ssize_t pty_read(PtyContext *ctx, char *buf, size_t bufsize);
 /**
  * Resize the PTY window size.
  *
+ * The grid and its pixel extent travel to the child in ONE winsize:
+ * width_px/height_px are the grid in LOGICAL pixels (0 = unreported),
+ * the unit a child measures in. A child that sizes images — chafa,
+ * img2sixel, a file previewer — reads the cell's worth in pixels from
+ * the winsize, and a cell-count protocol (kitty c=/r=, iTerm2
+ * width=/height=) is only as right as that figure. The content scale is
+ * the terminal's business, and every pixel figure a client measures is
+ * scaled by it once on the way back in, so reporting physical pixels
+ * would have the child pack twice the pixels per cell and the picture
+ * come out at twice its size.
+ *
+ * One push, one SIGWINCH: when neither the grid nor the extent moved,
+ * no ioctl happens at all.
+ *
  * @param ctx PTY context
  * @param rows New number of rows
  * @param cols New number of columns
- * @return 0 on success, -1 on error
- */
-int pty_resize(PtyContext *ctx, int rows, int cols);
-
-/**
- * Report the pixel size of the character grid to the child (TIOCGWINSZ
- * ws_xpixel/ws_ypixel).
- *
- * A child that sizes images — chafa, img2sixel, a file previewer — reads
- * the cell's worth in pixels from the winsize, and a cell-count protocol
- * (kitty c=/r=, iTerm2 width=/height=) is only as right as that figure.
- * Both dimensions are LOGICAL pixels (physical / content scale): the
- * content scale is the terminal's business, and every pixel figure a
- * client measures is scaled by it once on the way back in, so reporting
- * physical pixels would have the child pack twice the pixels per cell
- * and the picture come out at twice its size.
- *
- * @param ctx PTY context
  * @param width_px Grid width in logical pixels (0 = unreported)
  * @param height_px Grid height in logical pixels (0 = unreported)
+ * @return 0 on success, -1 on error
  */
-void pty_set_pixel_size(PtyContext *ctx, int width_px, int height_px);
+int pty_resize(PtyContext *ctx, int rows, int cols, int width_px,
+               int height_px);
 
 /**
  * Check if the child process is still running.

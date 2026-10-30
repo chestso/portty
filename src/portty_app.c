@@ -761,8 +761,7 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
                 // winsize report and the engine's scaling then agree.
                 int lcw = cfr_px_logical(cell_w, content_scale);
                 int lch = cfr_px_logical(cell_h, content_scale);
-                pty_set_pixel_size(app->pty, cols * lcw, rows * lch);
-                pty_resize(app->pty, rows, cols);
+                pty_resize(app->pty, rows, cols, cols * lcw, rows * lch);
             }
             if (pager_active(app->pager))
                 pager_resize(app->pager, cols, rows);

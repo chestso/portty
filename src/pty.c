@@ -411,34 +411,27 @@ ssize_t pty_read(PtyContext *ctx, char *buf, size_t bufsize)
     return read(ctx->master_fd, buf, bufsize);
 }
 
-int pty_resize(PtyContext *ctx, int rows, int cols)
+int pty_resize(PtyContext *ctx, int rows, int cols, int width_px,
+               int height_px)
 {
     if (!ctx || ctx->master_fd < 0)
         return -1;
-
-    if (pty_push_winsize(ctx, rows, cols) < 0)
-        return -1;
-    ctx->rows = rows;
-    ctx->cols = cols;
-    vlog("PTY resized to %dx%d\n", cols, rows);
-    return 0;
-}
-
-void pty_set_pixel_size(PtyContext *ctx, int width_px, int height_px)
-{
-    if (!ctx || ctx->master_fd < 0)
-        return;
-
     if (width_px < 0)
         width_px = 0;
     if (height_px < 0)
         height_px = 0;
-    if (width_px == ctx->win_w_px && height_px == ctx->win_h_px)
-        return; /* nothing moved — no ioctl, no SIGWINCH for the child */
+    if (rows == ctx->rows && cols == ctx->cols &&
+        width_px == ctx->win_w_px && height_px == ctx->win_h_px)
+        return 0; /* nothing moved — no ioctl, no SIGWINCH for the child */
 
+    ctx->rows = rows;
+    ctx->cols = cols;
     ctx->win_w_px = width_px;
     ctx->win_h_px = height_px;
-    pty_push_winsize(ctx, ctx->rows, ctx->cols);
+    if (pty_push_winsize(ctx, rows, cols) < 0)
+        return -1;
+    vlog("PTY resized to %dx%d (%dx%d px)\n", cols, rows, width_px, height_px);
+    return 0;
 }
 
 bool pty_is_running(PtyContext *ctx)
