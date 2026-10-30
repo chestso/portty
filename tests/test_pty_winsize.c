@@ -24,6 +24,9 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+#if !defined(_WIN32)
+#include <paths.h>
+#endif
 
 static bool read_winsize(PtyContext *ctx, struct winsize *ws)
 {
@@ -35,7 +38,11 @@ static bool read_winsize(PtyContext *ctx, struct winsize *ws)
 /* A child that stays alive so the winsize can be read and changed. */
 static PtyContext *spawn_child(int rows, int cols, int w_px, int h_px)
 {
+#ifdef _PATH_BSHELL
+    char *argv[] = { _PATH_BSHELL, "-c", "sleep 5", NULL };
+#else
     char *argv[] = { "/bin/sh", "-c", "sleep 5", NULL };
+#endif
     return pty_create(rows, cols, w_px, h_px, argv);
 }
 
