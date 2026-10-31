@@ -91,7 +91,7 @@ test_lottie_LDADD = $(COFFER_LIBS)
 
 # test_pty_pause depends on POSIX PTY APIs.
 if !HOST_WINDOWS
-check_PROGRAMS += test_pty_pause test_pty_winsize
+check_PROGRAMS += test_pty_pause test_pty_winsize test_pty_reap
 test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) \
     ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
 test_pty_pause_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
@@ -100,6 +100,10 @@ test_pty_pause_LDADD = $(COFFER_LIBS)
 # The PTY's winsize pixel report (logical pixels) — needs a real PTY.
 test_pty_winsize_SOURCES = test_pty_winsize.c $(TEST_COMMON) ../src/pty.c
 test_pty_winsize_CFLAGS = $(TEST_CFLAGS)
+
+# SIGCHLD reaping of the non-PTY children os_compat forks — needs real forks.
+test_pty_reap_SOURCES = test_pty_reap.c $(TEST_COMMON) ../src/pty.c
+test_pty_reap_CFLAGS = $(TEST_CFLAGS)
 endif
 
 # Lottie cache logic (pure C, no GPU dependency). Tests cache lookup,

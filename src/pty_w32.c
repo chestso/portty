@@ -161,8 +161,9 @@ int pty_signal_get_fd(void)
     return -1;
 }
 
-void pty_signal_drain(void)
+void pty_signal_drain(PtyContext *ctx)
 {
+    (void)ctx;
 }
 
 PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,

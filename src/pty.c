@@ -121,7 +121,7 @@ int pty_signal_get_fd(void)
     return sigchld_pipe[0];
 }
 
-void pty_signal_drain(void)
+void pty_signal_drain(PtyContext *ctx)
 {
     if (sigchld_pipe[0] < 0)
         return;
@@ -130,6 +130,30 @@ void pty_signal_drain(void)
     char buf[64];
     while (read(sigchld_pipe[0], buf, sizeof(buf)) > 0) {
         // Keep draining
+    }
+
+    if (!ctx)
+        return;
+
+    /* Reap every child that has exited. The PTY's own child carries a status
+     * the rest of the app reads (pty_poll_exit, the debug script's
+     * await-exit/assert-exit), so record it on the context. The short-lived
+     * helpers os_compat forks for open_url/spawn_process are nobody's to
+     * wait for — without this they stay zombies for the life of the process,
+     * one per link opened or new window spawned. */
+    for (;;) {
+        int status = 0;
+        pid_t pid = waitpid(-1, &status, WNOHANG);
+        if (pid <= 0)
+            break;
+        if (pid != ctx->child_pid)
+            continue;
+
+        vlog("PTY child exited: pid=%d, status=%d\n", pid, status);
+        ctx->exit_status =
+            WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+        ctx->exited = true;
+        ctx->child_pid = -1;
     }
 }
 

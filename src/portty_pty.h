@@ -178,11 +178,18 @@ void pty_signal_cleanup(void);
 int pty_signal_get_fd(void);
 
 /**
- * Drain the signal pipe after it becomes readable.
+ * Drain the signal pipe after it becomes readable, reaping exited children.
  *
- * Call this after poll/select indicates the signal pipe is readable.
+ * Call this after poll/select indicates the signal pipe is readable. The
+ * PTY child's exit status is recorded on `ctx` (pty_poll_exit() reports it
+ * afterwards). Any other child — the helpers os_compat forks for open_url()
+ * and spawn_process() — is reaped and discarded; those children must not be
+ * waited on anywhere else.
+ *
+ * @param ctx PTY context whose child is tracked, or NULL to only drain the
+ *            pipe
  */
-void pty_signal_drain(void);
+void pty_signal_drain(PtyContext *ctx);
 
 #ifndef _WIN32
 /**

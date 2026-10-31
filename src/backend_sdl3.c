@@ -588,7 +588,7 @@ static int pty_reader_thread_func(void *data)
         }
 
         if (signal_idx >= 0 && (pfds[signal_idx].revents & POLLIN)) {
-            pty_signal_drain();
+            pty_signal_drain(d->pty);
             vlog("PTY reader thread: SIGCHLD received\n");
 
             if (!pty_is_running(d->pty)) {
