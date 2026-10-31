@@ -258,6 +258,31 @@ static void test_selection_change_pauses_and_resumes(void)
     ASSERT_TRUE(g_state.resume_called);
 }
 
+// A duplicate active edge must not take a second pause: the backend pause is
+// a refcount, so the single `false` on clear would leave the PTY paused with
+// no owner and the reader would never drain it again.
+static void test_selection_change_ignores_duplicate_active(void)
+{
+    reset_state();
+    PorttyApp app = { 0 };
+    app.backend = &g_stub_backend;
+
+    portty_app_selection_change(true, &app);
+    ASSERT_TRUE(g_state.pause_called);
+
+    g_state.pause_called = false;
+    portty_app_selection_change(true, &app);
+    ASSERT_FALSE(g_state.pause_called);
+
+    portty_app_selection_change(false, &app);
+    ASSERT_TRUE(g_state.resume_called);
+
+    // Balanced again: a new selection pauses once more.
+    g_state.pause_called = false;
+    portty_app_selection_change(true, &app);
+    ASSERT_TRUE(g_state.pause_called);
+}
+
 static void test_clipboard_set_forwards_text(void)
 {
     reset_state();
@@ -496,8 +521,7 @@ static void test_keypress_resumes_pty_during_selection(void)
 
     // Start selection → callback would pause PTY
     terminal_selection_start(term, 5, 10, TERM_SELECT_CHAR);
-    // Simulate the pause
-    g_stub_backend.pause_pty(&g_stub_backend);
+    portty_app_selection_change(true, &app);
     ASSERT_TRUE(g_state.pause_called);
     ASSERT_FALSE(g_state.resume_called);
 
@@ -928,6 +952,7 @@ int main(int argc, char *argv[])
     test_parse_args(argc, argv);
 
     RUN_TEST(test_selection_change_pauses_and_resumes);
+    RUN_TEST(test_selection_change_ignores_duplicate_active);
     RUN_TEST(test_clipboard_set_forwards_text);
     RUN_TEST(test_cwd_change_forwards_dir);
     RUN_TEST(test_bell_notifies_panel);

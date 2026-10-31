@@ -1264,8 +1264,12 @@ static void sdl3_resume_pty(PorttyBackend *self)
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
         return;
-    if (d->pty_pause_count == 0)
+    if (d->pty_pause_count == 0) {
+        /* A resume with no matching pause is harmless here but always a
+         * symptom: the pause flag is then left exactly as it was. */
+        vlog("PTY resume without a held pause — ignoring\n");
         return;
+    }
     if (--d->pty_pause_count > 0)
         return;
     SDL_SetAtomicInt(&d->pty_paused, 0);

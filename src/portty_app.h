@@ -64,6 +64,13 @@ typedef struct PorttyApp
     const char *script_path; // -S FILE, NULL if none
     float dpi_scale;         // --dpi-scale multiplier (default 1.0f)
     bool borderless;         // --borderless or borderless=true in config
+
+    // Whether the app holds the backend's PTY pause on behalf of the
+    // selection. The backend pause is a refcount and selection_changed is an
+    // edge, so the app tracks its own edge: a key press releases the pause
+    // while the selection stays up, and a duplicate `true` must not take a
+    // second pause that no `false` will ever release.
+    bool selection_paused;
 } PorttyApp;
 
 // Terminal output callbacks (registered with coffer).

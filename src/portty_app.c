@@ -49,10 +49,28 @@ void portty_app_selection_change(bool active, void *user_data)
     PorttyApp *app = (PorttyApp *)user_data;
     if (!app || !app->backend)
         return;
+    /* Edge, not level: a repeated `true` would take a second pause that the
+     * single `false` on clear never releases, wedging the PTY reader for the
+     * rest of the session. */
+    if (active == app->selection_paused)
+        return;
+    app->selection_paused = active;
     if (active)
         app->backend->pause_pty(app->backend);
     else
         app->backend->resume_pty(app->backend);
+}
+
+/* Release the selection's PTY pause without ending the selection. Used when
+ * a key or pasted text has to reach the shell while a selection is up: the
+ * backend refcount has to lose the pause the app took, or the app's record of
+ * it (selection_paused) would keep a later `false` from being a no-op. */
+static void app_release_selection_pause(PorttyApp *app)
+{
+    if (!app->selection_paused)
+        return;
+    app->selection_paused = false;
+    app->backend->resume_pty(app->backend);
 }
 
 void portty_app_clipboard_set(const char *text, size_t len, void *user_data)
@@ -611,9 +629,8 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
     // overlap check handles clearing if output overwrites selected
     // content, and scroll adjustment keeps selection coordinates
     // valid as content shifts.
-    if (terminal_selection_active(app->term)) {
-        app->backend->resume_pty(app->backend);
-    }
+    if (terminal_selection_active(app->term))
+        app_release_selection_pause(app);
 
     // Ctrl+Shift+V → paste
     if (term_key == TERM_KEY_NONE && codepoint == 'V' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
@@ -730,7 +747,7 @@ KeyboardResult portty_app_handle_text(PorttyApp *app, const char *text)
     }
 
     if (terminal_selection_active(app->term))
-        app->backend->resume_pty(app->backend);
+        app_release_selection_pause(app);
 
     size_t text_len = strlen(text);
     if (text_len > 0 && text_len < sizeof(result.data)) {
