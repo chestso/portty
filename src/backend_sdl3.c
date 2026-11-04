@@ -171,8 +171,8 @@ typedef struct
      * pty_kb_check_ready(). */
     SDL_AtomicInt pty_bytes_read;
     SDL_AtomicInt pty_bytes_parsed;
-    Uint64 last_present_ns;   /* SDL ticks (ns) of the last presented frame */
-    Uint64 flood_hold_until;  /* SDL ticks deadline of a coalesced frame (0 = none) */
+    Uint64 last_present_ns;  /* SDL ticks (ns) of the last presented frame */
+    Uint64 flood_hold_until; /* SDL ticks deadline of a coalesced frame (0 = none) */
 
 #ifdef _WIN32
     HANDLE wakeup_event;
@@ -534,10 +534,9 @@ done:
 #else
 /* Optional PTY wire journal — PORTTY_PTY_LOG=path appends every chunk
  * the reader thread pulls off the PTY, verbatim, before it is queued
- * for the parser. Part of the nevermore keyboard-cleanup investigation
- * (Nov 2026): with the abort trap in portty_app_check_kb_protocol_owner
- * this journal decides, from one repro, WHICH side lost the cleanup
- * pop — nevermore never wrote it, the reader dropped it, or the parser
+ * for the parser. Recording the wire lets one repro of a missing
+ * escape sequence (a program's cleanup pop, say) show which side lost
+ * it: the child never wrote it, the reader dropped it, or the parser
  * ate it. Off unless the env var is set: one getenv per thread start,
  * nothing in the per-chunk path when unset. */
 static FILE *s_pty_journal;
