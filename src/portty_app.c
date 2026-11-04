@@ -15,6 +15,7 @@
 #include "dump.h"
 #include "pager.h"
 #include "portty_backend.h"
+#include "portty_bug.h"
 #include "portty_panel.h"
 #include "portty_pty.h"
 #include "rend_common.h"
@@ -576,6 +577,20 @@ void portty_app_check_kb_protocol_owner(PorttyApp *app)
     vlog("Foreground program %d died holding the kitty keyboard flags "
          "(0x%x) — popping them\n",
          app->kb_flags_owner_pgrp, flags);
+
+    /* EVIDENCE TRAP — the nevermore keyboard-cleanup investigation
+     * (Nov 2026). This branch is the moment a program died WITHOUT
+     * popping the kitty flags it pushed; the reset below (and the
+     * "Keyboard protocol reset" panel) would paper over the bug. Abort
+     * BEFORE the reset so the core dump keeps the pre-fix state: the
+     * engine's flag stack (depth + every level), the parser state, and
+     * app->kb_flags_seen / kb_flags_owner_pgrp. The stack depth in the
+     * dump discriminates the hypotheses: 1 = a pop went missing
+     * (never emitted, or emitted and not parsed), >1 = extra pushes.
+     * Remove this trap once the push/pop imbalance is found. */
+    PORTTY_BUG_ABORT("program %d died holding the kitty keyboard flags "
+                     "(0x%x, fg now %d)",
+                     app->kb_flags_owner_pgrp, flags, fg);
 
     terminal_reset_input_state(app->term);
     app->kb_flags_seen = 0;

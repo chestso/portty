@@ -164,6 +164,13 @@ typedef struct
     SDL_AtomicInt pty_paused;
     unsigned pty_pause_count; /* owners of the shared reader pause */
     bool flood_paused;        /* pause held by the output-flood guard */
+    /* PTY byte watermark: the reader thread bumps pty_bytes_read for
+     * every chunk it pulls off the PTY; the event loop bumps
+     * pty_bytes_parsed for every chunk it feeds the engine. The kitty
+     * keyboard ownership check may only run while the two agree — see
+     * pty_kb_check_ready(). */
+    SDL_AtomicInt pty_bytes_read;
+    SDL_AtomicInt pty_bytes_parsed;
     Uint64 last_present_ns;   /* SDL ticks (ns) of the last presented frame */
     Uint64 flood_hold_until;  /* SDL ticks deadline of a coalesced frame (0 = none) */
 
@@ -426,6 +433,7 @@ static int pty_reader_thread_func(void *data)
             ssize_t n = pty_read_overlapped(d->pty, buf, sizeof(buf), &ovl);
             if (n > 0) {
                 /* Data available immediately. */
+                SDL_AddAtomicInt(&d->pty_bytes_read, (int)n);
                 PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
                 if (payload) {
                     payload->len = n;
@@ -468,6 +476,7 @@ static int pty_reader_thread_func(void *data)
             /* Read completed — get the result. */
             ssize_t n = 0;
             if (pty_get_overlapped_result(d->pty, &ovl, &n) && n > 0) {
+                SDL_AddAtomicInt(&d->pty_bytes_read, (int)n);
                 PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
                 if (payload) {
                     payload->len = n;
@@ -523,12 +532,41 @@ done:
     return 0;
 }
 #else
+/* Optional PTY wire journal — PORTTY_PTY_LOG=path appends every chunk
+ * the reader thread pulls off the PTY, verbatim, before it is queued
+ * for the parser. Part of the nevermore keyboard-cleanup investigation
+ * (Nov 2026): with the abort trap in portty_app_check_kb_protocol_owner
+ * this journal decides, from one repro, WHICH side lost the cleanup
+ * pop — nevermore never wrote it, the reader dropped it, or the parser
+ * ate it. Off unless the env var is set: one getenv per thread start,
+ * nothing in the per-chunk path when unset. */
+static FILE *s_pty_journal;
+
+static void pty_journal_open(void)
+{
+    const char *path = getenv("PORTTY_PTY_LOG");
+    if (path && *path) {
+        s_pty_journal = fopen(path, "ab");
+        if (s_pty_journal)
+            vlog("PTY journal: appending every chunk to %s\n", path);
+    }
+}
+
+static void pty_journal_write(const char *buf, ssize_t n)
+{
+    if (s_pty_journal && n > 0) {
+        fwrite(buf, 1, (size_t)n, s_pty_journal);
+        fflush(s_pty_journal);
+    }
+}
+
 static int pty_reader_thread_func(void *data)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)data;
     char buf[4096];
 
     vlog("PTY reader thread started\n");
+    pty_journal_open();
 
     int pty_fd = pty_get_master_fd(d->pty);
     int signal_fd = pty_signal_get_fd();
@@ -610,6 +648,8 @@ static int pty_reader_thread_func(void *data)
         if (pty_idx >= 0 && (pfds[pty_idx].revents & POLLIN)) {
             ssize_t n = pty_read(d->pty, buf, sizeof(buf));
             if (n > 0) {
+                pty_journal_write(buf, n);
+                SDL_AddAtomicInt(&d->pty_bytes_read, (int)n);
                 PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
                 if (payload) {
                     payload->len = n;
@@ -638,10 +678,43 @@ static int pty_reader_thread_func(void *data)
     event.user.code = EVENT_PTY_CLOSED;
     SDL_PushEvent(&event);
 
+    if (s_pty_journal) {
+        fclose(s_pty_journal);
+        s_pty_journal = NULL;
+    }
+
     vlog("PTY reader thread exiting\n");
     return 0;
 }
 #endif
+
+/* May the kitty keyboard ownership check run now? The check compares
+ * LIVE process state (fg pgrp, owner liveness) against the engine's
+ * flag stack — and the engine lags the wire by whatever chunks are
+ * still queued for the event loop (or waiting in the kernel buffer).
+ * Deciding while behind produces a false "program died holding the
+ * flags" verdict while that program's own cleanup pop is still in
+ * flight: measured (Nov 2026), nevermore's exit pop had been read off
+ * the PTY but sat un-parsed in the event queue when the check fired.
+ * Caught up = every byte the reader read has been parsed AND nothing
+ * is readable on the master right now. The 32-bit counters wrap
+ * together (the queued backlog is bounded far below 2^31 bytes), and
+ * a wrap can only make this say "not ready" — the safe direction. */
+static bool pty_kb_check_ready(Sdl3BackendData *d)
+{
+    if (SDL_GetAtomicInt(&d->pty_bytes_read) !=
+        SDL_GetAtomicInt(&d->pty_bytes_parsed))
+        return false;
+#ifndef _WIN32
+    int fd = pty_get_master_fd(d->pty);
+    if (fd >= 0) {
+        struct pollfd p = { fd, POLLIN, 0 };
+        if (poll(&p, 1, 0) == 1 && (p.revents & POLLIN))
+            return false; /* the reader has not pulled these bytes yet */
+    }
+#endif
+    return true;
+}
 
 // ── Wakeup helper ────────────────────────────────────────────────────────
 
@@ -863,6 +936,8 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     SDL_SetAtomicInt(&d->running, 0);
     SDL_SetAtomicInt(&d->quit_requested, 0);
     SDL_SetAtomicInt(&d->pty_paused, 0);
+    SDL_SetAtomicInt(&d->pty_bytes_read, 0);
+    SDL_SetAtomicInt(&d->pty_bytes_parsed, 0);
 
     // Create wakeup mechanism for reader thread
 #ifdef _WIN32
@@ -2088,10 +2163,17 @@ static void sdl3_run(PorttyBackend *self)
                         int pushed = rend_sdl3_process_pty_data(rend, term, payload->data, payload->len);
                         if (pushed > 0)
                             pty_scrolled = true;
+                        SDL_AddAtomicInt(&d->pty_bytes_parsed, (int)payload->len);
                         /* A program that pushed the kitty keyboard flags
                          * and died leaves them set; the shell then gets
-                         * CSI-u encodings it cannot read. */
-                        portty_app_check_kb_protocol_owner(d->app);
+                         * CSI-u encodings it cannot read. Only decide
+                         * when the engine has caught up with the wire —
+                         * the flag stack lags the PTY by the queued
+                         * backlog, and a verdict behind the backlog
+                         * indicts a program whose cleanup pop is still
+                         * in flight (see pty_kb_check_ready). */
+                        if (pty_kb_check_ready(d))
+                            portty_app_check_kb_protocol_owner(d->app);
                         self->set_window_title(self, terminal_get_title(term));
                         free(payload);
                         pty_processed = true;
