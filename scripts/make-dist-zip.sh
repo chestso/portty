@@ -108,15 +108,59 @@ if [ "$IS_MACOS" -eq 1 ]; then
 			}'
 	}
 
+	# Resolve a relative install name the way dyld would: next to the
+	# referrer (a shared formula installs its libraries side by side), then
+	# through the referrer's LC_RPATHs, then the usual Homebrew prefixes.
+	# Only absolute paths used to be understood here, so a library built with
+	# @rpath install names — Homebrew's brotli bottle is one, and newer
+	# freetype depends on it — aborted the packaging instead of being
+	# bundled. Prints the resolved path, or nothing when it stays unresolved.
+	resolve_dependency() {
+		local dep="$1" referrer="$2" name dir candidate
+		name="${dep##*/}"
+
+		{
+			if [ -n "$referrer" ]; then
+				dirname "$referrer"
+			fi
+			if [ -n "$referrer" ] && [ -f "$referrer" ]; then
+				otool -l "$referrer" | awk '
+					$1 == "cmd" { rpath = ($2 == "LC_RPATH") }
+					rpath && $1 == "path" {
+						sub(/^[[:space:]]*path /, "")
+						sub(/ \(offset [0-9]+\)$/, "")
+						print
+						rpath = 0
+					}'
+			fi
+			printf '%s\n' "${HOMEBREW_PREFIX:-}/lib" /opt/homebrew/lib /usr/local/lib
+		} | while IFS= read -r dir; do
+			[ -n "$dir" ] || continue
+			case "$dir" in
+			"@loader_path"*) dir="$(dirname "$referrer")/${dir#@loader_path}" ;;
+			esac
+			candidate="$dir/$name"
+			if [ -f "$candidate" ]; then
+				printf '%s\n' "$candidate"
+				break
+			fi
+		done
+	}
+
 	bundle_dylib() {
-		local lib_path="$1"
-		local base deps dep
+		local lib_path="$1" referrer="${2:-}"
+		local base deps dep resolved
 		case "$lib_path" in
 		/usr/lib/* | /System/Library/*) return ;;
 		/*) ;;
 		*)
-			echo "ERROR: Cannot bundle unresolved dependency: $lib_path" >&2
-			exit 1
+			resolved="$(resolve_dependency "$lib_path" "$referrer")"
+			if [ -z "$resolved" ]; then
+				echo "ERROR: Cannot bundle unresolved dependency: $lib_path" >&2
+				exit 1
+			fi
+			echo "  resolving: $lib_path -> $resolved"
+			lib_path="$resolved"
 			;;
 		esac
 		if [ ! -f "$lib_path" ]; then
@@ -142,7 +186,7 @@ if [ "$IS_MACOS" -eq 1 ]; then
 		deps=$(macho_dependencies "$lib_path")
 		while IFS= read -r dep; do
 			[ -n "$dep" ] || continue
-			bundle_dylib "$dep"
+			bundle_dylib "$dep" "$lib_path"
 		done <<EOF
 $deps
 EOF
@@ -152,7 +196,7 @@ EOF
 	MAIN_DEPS=$(macho_dependencies "$REAL_EXE")
 	while IFS= read -r dep; do
 		[ -n "$dep" ] || continue
-		bundle_dylib "$dep"
+		bundle_dylib "$dep" "$REAL_EXE"
 	done <<EOF
 $MAIN_DEPS
 EOF
