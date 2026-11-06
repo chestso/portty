@@ -13,7 +13,11 @@ permissions:
 jobs:
   build-and-test:
     name: Build & Test (arm64)
-    runs-on: macos-14
+    # macos-latest, not a pinned image: GitHub retired every macOS 14 image on
+    # 2026-11-02, and a pinned label then cancels the job at 0s ("The
+    # configuration 'macos-14-arm64-us-default' is not supported") before any
+    # compiler runs.
+    runs-on: macos-latest
 
     steps:
       - name: Checkout portty
