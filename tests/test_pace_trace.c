@@ -10,7 +10,32 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <windows.h>
+#else
 #include <unistd.h>
+#endif
+
+/* A fresh temp path (caller frees); the file may or may not exist. */
+static char *make_temp_path(void)
+{
+#ifdef _WIN32
+    char tmpdir[MAX_PATH];
+    if (GetTempPathA(MAX_PATH, tmpdir) == 0)
+        return NULL;
+    char path[MAX_PATH];
+    if (GetTempFileNameA(tmpdir, "portty-pace-", 0, path) == 0)
+        return NULL;
+    return strdup(path);
+#else
+    char path[] = "/tmp/portty-pace-trace-XXXXXX";
+    int fd = mkstemp(path);
+    if (fd < 0)
+        return NULL;
+    close(fd);
+    return strdup(path);
+#endif
+}
 
 static void test_format_fields(void)
 {
@@ -50,10 +75,8 @@ static void test_format_small_buffer(void)
 
 static void test_file_roundtrip(void)
 {
-    char path[] = "/tmp/portty-pace-trace-XXXXXX";
-    int fd = mkstemp(path);
-    ASSERT_TRUE(fd >= 0);
-    close(fd);
+    char *path = make_temp_path();
+    ASSERT_NOT_NULL(path);
 
     ASSERT_FALSE(pace_trace_active());
     ASSERT_TRUE(pace_trace_open(path));
@@ -80,7 +103,8 @@ static void test_file_roundtrip(void)
         ok = strcmp(line, "P 10 20 0 0 0 0 1 3\n") == 0;
     }
     fclose(f);
-    unlink(path);
+    remove(path);
+    free(path);
     ASSERT_EQ(data_lines, 1);
     ASSERT_TRUE(ok);
 }
