@@ -85,6 +85,14 @@ typedef struct RendererSdl3Data
     int linear_w, linear_h;
     bool linear_ok;
     bool linear_selfcheck_done;
+    /* The window's linear_target still holds the last scene drawn by
+     * rend_sdl3_draw_terminal(), at scene_w x scene_h. Anything that draws
+     * into linear_target (a panel build, a PNG export), changes the scene's
+     * inputs (resize, overlay, scroll, panels, fonts) or reallocates the
+     * target clears it; rend_sdl3_present_held() re-presents the target only
+     * while it is set. */
+    bool scene_valid;
+    int scene_w, scene_h;
 
     RendShaderState *glyph_shader;
 
@@ -124,6 +132,12 @@ int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *fo
 bool rend_sdl3_reload_fonts(RendererSdl3Data *data, float content_scale);
 void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term, bool cursor_visible);
 void rend_sdl3_present(RendererSdl3Data *data);
+
+/* Re-draw the window from the scene the last rend_sdl3_draw_terminal() left in
+ * the linear target (one blit, no scene pass), ready for SDL_RenderPresent().
+ * Returns false when nothing valid is cached (anything changed since, or no
+ * linear target); the caller then runs a full draw. */
+bool rend_sdl3_present_held(RendererSdl3Data *data);
 void rend_sdl3_resize(RendererSdl3Data *data, int width, int height);
 void rend_sdl3_log_stats(RendererSdl3Data *data);
 bool rend_sdl3_get_cell_size(RendererSdl3Data *data, int *cell_width, int *cell_height);

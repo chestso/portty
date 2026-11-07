@@ -5,9 +5,9 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
-EXTRA_DIST = test_helpers.h font_stubs.c
+EXTRA_DIST = test_helpers.h font_stubs.c test-pace-report.sh
 
-check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_kitty test_lottie test_lottie_cache test_diag test_dump test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_selection_scroll test_vs15_routing test_dpi_scale test_content_scale test_mouse_scale test_panel test_link_hint test_version
+check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_kitty test_lottie test_lottie_cache test_diag test_dump test_clipboard_deferred test_paste_normalize test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_selection_scroll test_vs15_routing test_dpi_scale test_content_scale test_mouse_scale test_panel test_link_hint test_version test_pace_trace test_frame_pacer
 
 # test_atlas — SDL3 GPU atlas packing. Requires SDL3 backend.
 check_PROGRAMS += test_atlas
@@ -203,6 +203,12 @@ test_vs15_routing_SOURCES = test_vs15_routing.c $(TEST_COMMON) $(TERM_STUBS) \
 test_vs15_routing_CFLAGS = $(TEST_CFLAGS)
 test_vs15_routing_LDADD = -lm
 
+test_frame_pacer_SOURCES = test_frame_pacer.c $(TEST_COMMON) ../src/frame_pacer.c
+test_frame_pacer_CFLAGS = $(TEST_CFLAGS)
+
+test_pace_trace_SOURCES = test_pace_trace.c $(TEST_COMMON) ../src/portty_pace_trace.c
+test_pace_trace_CFLAGS = $(TEST_CFLAGS)
+
 # Link hint panel geometry tests. Pulls in portty_panel.c; no SDL/coffer link dependency.
 test_link_hint_SOURCES = test_link_hint.c $(TEST_COMMON) ../src/portty_panel.c
 test_link_hint_CFLAGS = $(TEST_CFLAGS)
@@ -223,6 +229,12 @@ $(top_builddir)/src/portty_version.h:
 	$(MAKE) -C $(top_builddir)/src portty_version.h
 
 TESTS = $(check_PROGRAMS)
+
+# The pace-report.sh awk script has no C counterpart; it runs from the source
+# tree (srcdir) and is skipped on Windows, where there is no awk by default.
+if !HOST_WINDOWS
+TESTS += test-pace-report.sh
+endif
 
 # Build the test binaries WITHOUT running them. CI uses this in the
 # parallel Build step (make -j ... check-programs) so the timed Run

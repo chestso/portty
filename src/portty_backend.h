@@ -64,6 +64,10 @@ typedef struct
     const char *display_dpi;      // "physical 96.1, Xft.dpi 192" or NULL
     const char *display_scale;    // "content 2.00, window 2.00" or NULL
     const char *display_physical; // "1920x1080, 309x174 mm (eDP-1)" or NULL
+
+    // How animation frames are paced: "idle", "vsync-locked 60.000 Hz, 2 misses",
+    // "free-running 60.000 Hz" (a backend without a pacer leaves it NULL).
+    const char *lottie_pacing;
 } PorttyDiag;
 
 struct PorttyBackend;

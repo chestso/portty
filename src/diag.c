@@ -420,6 +420,8 @@ char *diag_build_report(const DiagSources *s)
         kvf(&sb, "conpty DCS", "\x1b[31mstripped\x1b[0m (sixel images blocked)");
 #endif
     kv_bool(&sb, "lottie rasterizer", s->lottie_rasterizer, "ThorVG", "unavailable (blank frames)");
+    if (s->lottie_pacing)
+        kv(&sb, "lottie pacing", s->lottie_pacing);
     kv_bool(&sb, "OSC 52 (clipboard)", s->osc52, "wired", "not wired");
     // Neutral state — not enabled isn't an error, so use DIM rather than red.
     sb_printf(&sb, DIM "  %-20s" RST, "hardened heap");

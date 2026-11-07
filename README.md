@@ -9,6 +9,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 ## Documentation
 
 - [<img src="https://img.shields.io/badge/Ask%20DeepWiki-blueviolet" alt="Ask DeepWiki" height="20" align="absmiddle">](https://deepwiki.com/chestso/portty) — AI-generated wiki and searchable code index for this repository
+- [ARCHITECTURE.md](ARCHITECTURE.md) — how portty is put together: threads and the event loop, event-driven timers, the render pipeline, and animation frame pacing
 - [inline-image-architecture.md](docs/inline-image-architecture.md) — how sixel, iTerm2 inline, and kitty graphics are decoded and composited
 - [embedded-terminals-linear-light.md](docs/embedded-terminals-linear-light.md) — gamma-correct linear-light rendering for embedded terminals
 - [windows-stdio-proposal.md](docs/windows-stdio-proposal.md) — the Windows split-binary design that makes portty pipeable
@@ -45,7 +46,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
 - Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering
-- Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_tick()`), foreground/background layer compositing
+- Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_present()`), foreground/background layer compositing
 - Procedural box drawing and block element rendering (U+2500–U+257F), with float stroke thickness and proportional margins for seamless diagonal tiling
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard

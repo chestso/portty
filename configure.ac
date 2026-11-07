@@ -169,6 +169,27 @@ if test "x$portty_cv_coffer_image_handle" = "xyes"; then
             [Define if coffer exposes CfrImage.handle (the image identity).])
 fi
 
+dnl coffer samples Lottie animations by presentation time
+dnl (cfr_lottie_present: the frame on screen is a pure function of the time it
+dnl reaches the screen, and cfr_lottie_playing_count says whether any animation
+dnl runs). Older releases only have the point-sample cfr_lottie_tick; the host
+dnl then passes no refresh period and counts playing animations itself.
+AC_CACHE_CHECK([whether coffer samples Lottie by presentation time],
+               [portty_cv_coffer_lottie_present], [
+  save_CPPFLAGS="$CPPFLAGS"
+  CPPFLAGS="$CPPFLAGS $COFFER_CFLAGS"
+  AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([[#include <coffer/coffer.h>]],
+                     [[(void)cfr_lottie_present; (void)cfr_lottie_playing_count;]])],
+    [portty_cv_coffer_lottie_present=yes],
+    [portty_cv_coffer_lottie_present=no])
+  CPPFLAGS="$save_CPPFLAGS"
+])
+if test "x$portty_cv_coffer_lottie_present" = "xyes"; then
+  AC_DEFINE([HAVE_COFFER_LOTTIE_PRESENT], [1],
+            [Define if coffer has cfr_lottie_present and cfr_lottie_playing_count.])
+fi
+
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
 

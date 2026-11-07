@@ -253,7 +253,10 @@ struct TerminalBackend
     const CfrLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
                                                        uint64_t id, int *count);
     bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
+    bool (*lottie_present)(TerminalBackend *term, uint64_t present_us,
+                           uint64_t hold_us);
     int (*lottie_count)(TerminalBackend *term);
+    int (*lottie_playing_count)(TerminalBackend *term);
 
     // Query a coffer mode (CfrMode). Returns false if the backend or mode
     // is unavailable.
@@ -485,7 +488,15 @@ const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count);
 const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
                                                          uint64_t id, int *count);
 bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
+// Advance playing animations to the frame that is on screen from present_us
+// for hold_us (the display refresh period; 0 = point sample). The frame is a
+// pure function of presentation time, so call it once per presented frame.
+// Returns true when a frame changed.
+bool terminal_lottie_present(TerminalBackend *term, uint64_t present_us,
+                             uint64_t hold_us);
+// Registered animations (playing or not) / animations currently playing.
 int terminal_lottie_count(TerminalBackend *term);
+int terminal_lottie_playing_count(TerminalBackend *term);
 
 // Query a coffer mode (CfrMode). Returns false if the backend or mode
 // is unavailable.

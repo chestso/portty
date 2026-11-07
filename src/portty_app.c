@@ -1123,6 +1123,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .mouse_mode = terminal_get_mouse_mode(app->term),
         .vt_backend = app->term->name,
         .lottie_rasterizer = cfr_have_lottie(),
+        .lottie_pacing = pd.lottie_pacing,
         .osc52 = app->term->clipboard_set_cb != NULL,
         .bracketed_paste = terminal_get_mode(app->term, CFR_MODE_BRACKETED_PASTE),
         .sync_output = terminal_get_mode(app->term, CFR_MODE_SYNC_OUTPUT),

@@ -551,6 +551,8 @@ int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *fo
 
 bool rend_sdl3_reload_fonts(RendererSdl3Data *data, float content_scale)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data || !data->font)
         return false;
 
@@ -1982,6 +1984,21 @@ static void linear_blend_selfcheck(RendererSdl3Data *data)
     SDL_DestroyTexture(srgb);
 }
 
+// Encode linear_target onto `out` (a texture, or NULL for the window).
+// The linear target is grow-only and may be larger than the destination: copy
+// only the used region 1:1 (same size + NEAREST scale = exact copy, so the
+// linear->sRGB re-encode is byte-identical). A NULL/NULL blit would scale the
+// whole oversized target into the destination.
+static void blit_linear_to_output(RendererSdl3Data *data, SDL_Texture *out,
+                                  float used_w, float used_h)
+{
+    SDL_FlushRenderer(data->renderer);
+    SDL_SetRenderTarget(data->renderer, out);
+    SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
+    SDL_FRect used = { 0.0f, 0.0f, used_w, used_h };
+    SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
+}
+
 // Draw the already-populated scene into the linear-light target, plus the
 // panel chrome layer, and encode the result onto the sRGB destination: `dst`
 // (a texture target) or, when dst == NULL, whatever render target is
@@ -2017,6 +2034,9 @@ static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
     SDL_Texture *prev = SDL_GetRenderTarget(data->renderer);
     SDL_Texture *out = dst ? dst : prev; // sRGB destination being encoded onto
     int out_w = 0, out_h = 0;
+    // Every scene pass overwrites linear_target; whoever drew the window
+    // scene sets the flag again afterwards.
+    data->scene_valid = false;
     bool linear = ensure_linear_target(data, &out_w, &out_h);
 
     // Texture destinations must fit inside the window-sized linear target.
@@ -2062,23 +2082,12 @@ static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
         render_panels_into_linear(data);
 
     if (linear) {
-        SDL_FlushRenderer(data->renderer);
-        SDL_SetRenderTarget(data->renderer, out);
-        SDL_SetTextureBlendMode(data->linear_target, SDL_BLENDMODE_NONE);
-        // The linear target is grow-only and may be larger than the
-        // destination: copy only the used region 1:1 (same size + NEAREST
-        // scale = exact copy, so the linear->sRGB re-encode is
-        // byte-identical). A NULL/NULL blit would scale the whole oversized
-        // target into the destination.
-        SDL_FRect used = { 0.0f, 0.0f, (float)out_w, (float)out_h };
+        float used_w = (float)out_w, used_h = (float)out_h;
         if (dst) {
             // Texture destination: the region is the destination's own size.
-            float dw, dh;
-            SDL_GetTextureSize(dst, &dw, &dh);
-            used.w = dw;
-            used.h = dh;
+            SDL_GetTextureSize(dst, &used_w, &used_h);
         }
-        SDL_RenderTexture(data->renderer, data->linear_target, &used, &used);
+        blit_linear_to_output(data, out, used_w, used_h);
         // Texture destination: restore the caller's target binding so the
         // next render pass draws where the caller expects (a stale texture
         // binding here silently swallows every subsequent frame).
@@ -2437,6 +2446,31 @@ void rend_sdl3_draw_terminal(RendererSdl3Data *data, TerminalBackend *term,
     SDL_Color bg = { data->colors.bg_r, data->colors.bg_g, data->colors.bg_b, data->colors.bg_a };
     render_scene(data, term, display_rows, display_cols, cursor_visible, true,
                  data->scroll.scroll_offset, true, bg, NULL);
+
+    // linear_target now holds this frame, unless the legacy sRGB path drew
+    // straight to the window.
+    int out_w = 0, out_h = 0;
+    if (data->linear_ok && data->linear_target && !SDL_GetRenderTarget(data->renderer) &&
+        SDL_GetCurrentRenderOutputSize(data->renderer, &out_w, &out_h)) {
+        data->scene_valid = true;
+        data->scene_w = out_w;
+        data->scene_h = out_h;
+    }
+}
+
+bool rend_sdl3_present_held(RendererSdl3Data *data)
+{
+    if (!data || !data->scene_valid || !data->linear_target ||
+        SDL_GetRenderTarget(data->renderer))
+        return false;
+    int w = 0, h = 0;
+    if (!SDL_GetCurrentRenderOutputSize(data->renderer, &w, &h) ||
+        w != data->scene_w || h != data->scene_h) {
+        data->scene_valid = false;
+        return false;
+    }
+    blit_linear_to_output(data, NULL, (float)w, (float)h);
+    return true;
 }
 
 void rend_sdl3_present(RendererSdl3Data *data)
@@ -2457,6 +2491,8 @@ void rend_sdl3_log_stats(RendererSdl3Data *data)
 
 void rend_sdl3_resize(RendererSdl3Data *data, int width, int height)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
 
@@ -2507,6 +2543,8 @@ bool rend_sdl3_get_diag(RendererSdl3Data *data, PorttyDiag *out)
 
 void rend_sdl3_scroll(RendererSdl3Data *data, TerminalBackend *term, int delta)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
     rend_scroll(&data->scroll, term, delta);
@@ -2514,6 +2552,8 @@ void rend_sdl3_scroll(RendererSdl3Data *data, TerminalBackend *term, int delta)
 
 void rend_sdl3_reset_scroll(RendererSdl3Data *data)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
     rend_reset_scroll(&data->scroll);
@@ -2528,6 +2568,8 @@ int rend_sdl3_get_scroll_offset(RendererSdl3Data *data)
 
 void rend_sdl3_set_overlay(RendererSdl3Data *data, TerminalBackend *overlay)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data || !overlay)
         return;
     rend_set_overlay(&data->scroll, overlay);
@@ -2535,6 +2577,8 @@ void rend_sdl3_set_overlay(RendererSdl3Data *data, TerminalBackend *overlay)
 
 void rend_sdl3_clear_overlay(RendererSdl3Data *data)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
     rend_clear_overlay(&data->scroll);
@@ -2558,6 +2602,8 @@ void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int 
                           const char *title, const char *body, PorttyNotifyLevel level,
                           unsigned int flags)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
 
@@ -2595,6 +2641,8 @@ void rend_sdl3_panel_show(RendererSdl3Data *data, int id, int col, int row, int 
 
 void rend_sdl3_panel_hide(RendererSdl3Data *data, int id)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
 
@@ -2626,6 +2674,8 @@ int rend_sdl3_panel_hit_test(RendererSdl3Data *data, int px, int py, bool *close
 
 void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
     panel_mgr_set_hover(&data->panels, id, hovered);
@@ -2782,6 +2832,8 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
 
 void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
     if (scale > 0.0f) {
@@ -2792,6 +2844,8 @@ void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale)
 
 void rend_sdl3_set_display_scale(RendererSdl3Data *data, float scale)
 {
+    if (data)
+        data->scene_valid = false;
     if (!data)
         return;
     if (scale > 0.0f)

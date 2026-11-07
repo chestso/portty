@@ -14,6 +14,7 @@
 #include "backend_sdl3.h"
 #include "common.h"
 #include "display_info.h"
+#include "frame_pacer.h"
 #include "os_compat.h"
 #include "pager.h"
 #include "path_compat.h"
@@ -23,6 +24,7 @@
 #include "portty_app.h"
 #include "portty_appmodel.h"
 #include "portty_frame_rec.h"
+#include "portty_pace_trace.h"
 #include "portty_panel.h"
 #include "portty_pty.h"
 #include "portty_script.h"
@@ -61,12 +63,23 @@ enum PorttyEventCode
     EVENT_PTY_DATA = 1,
     EVENT_PTY_CLOSED,
     EVENT_PTY_CHILD_EXIT,
-    EVENT_CURSOR_BLINK,
-    EVENT_AUTOSCROLL_TICK,
-    EVENT_LOTTIE_TICK,
     EVENT_NOTIFY_SHOW,
-    EVENT_RECORD_TICK,
-    EVENT_TIMER_WAKE,
+    EVENT_WAKE,       // no-op: ends the blocking wait so the loop re-checks its state
+    EVENT_TIMER_FIRE, // a timer's deadline passed; data1 = slot, data2 = epoch
+};
+
+// What a timer does when it fires (TimerEvent.code). A timer is an SDL timer
+// that posts EVENT_TIMER_FIRE; the event loop turns it back into one of these.
+enum PorttyTimerCode
+{
+    TCODE_CURSOR_BLINK = 1,
+    TCODE_AUTOSCROLL,
+    TCODE_FRAME, // free-running animation frame tick (no display clock)
+    TCODE_RECORD,
+    TCODE_OVERLAY_HIDE, // hide the resize geometry overlay
+    TCODE_NOTIFY_HIDE,  // hide the transient status message
+    TCODE_FLOOD_HOLD,   // a coalesced frame may present now
+    TCODE_SCRIPT_WAKE,  // a script wait deadline passed
 };
 
 // Output-flood guard (see the EVENT_PTY_DATA handler): how much wall time
@@ -147,7 +160,20 @@ static const struct
     { SDLK_KP_EQUALS, TERM_KEY_KP_EQUAL },
 };
 
+// One armed SDL timer: what its callback needs, and nothing the main thread
+// changes after SDL_AddTimerNS returns (except next_ns, which only the
+// callback touches).
+typedef struct Sdl3BackendData Sdl3BackendData;
 typedef struct
+{
+    Sdl3BackendData *d;
+    Uint64 period_ns; // 0 = one-shot
+    Uint64 next_ns;   // SDL ticks (ns) of the deadline now pending
+    Uint32 slot;
+    Uint32 epoch;
+} SdlTimerArm;
+
+struct Sdl3BackendData
 {
     PorttyApp *app;
     PtyContext *pty;
@@ -171,8 +197,8 @@ typedef struct
      * pty_kb_check_ready(). */
     SDL_AtomicInt pty_bytes_read;
     SDL_AtomicInt pty_bytes_parsed;
-    Uint64 last_present_ns;  /* SDL ticks (ns) of the last presented frame */
-    Uint64 flood_hold_until; /* SDL ticks deadline of a coalesced frame (0 = none) */
+    Uint64 last_present_ns;   /* SDL ticks (ns) of the last presented frame */
+    TimerId flood_hold_timer; /* releases a coalesced frame (TIMER_INVALID = none) */
 
 #ifdef _WIN32
     HANDLE wakeup_event;
@@ -181,13 +207,30 @@ typedef struct
 #endif
 
     TimerManager *timers;
+    // Arm records for SDL timers. A callback may still be running on SDL's
+    // timer thread when its timer is cancelled, so records are handed out
+    // round-robin and never reused within that window. timer_pending[slot]
+    // holds the epoch of the event queued for the slot (0 = none).
+    SdlTimerArm timer_arms[TIMER_MAX * 4];
+    unsigned timer_arm_next;
+    SDL_AtomicInt timer_pending[TIMER_MAX];
     TimerId cursor_blink_timer;
     TimerId autoscroll_timer;
-    TimerId lottie_timer;
-    Uint64 resize_overlay_hide_at; // SDL ticks deadline for hiding the resize overlay (0 = hidden)
-    Uint64 notify_hide_at;         // SDL ticks deadline for hiding the status message (0 = hidden)
-    Uint64 run_start_ticks;        // SDL ticks when the event loop started (primes the resize overlay)
-    SDL_TimerID wake_timer;
+    // Animation pacing (see sdl3_pace_update). While an animation plays and
+    // the window is visible the loop presents once per display refresh and
+    // the animation is sampled for the refresh each present occupies.
+    FramePacer pacer;
+    char pace_last[96];  // how the last paced run ended, for the diagnostics report
+    bool pacing;         // paced mode is on
+    bool window_visible; // shown, not minimized, not occluded
+    bool vsync_on;       // SDL_SetRenderVSync(1) was applied
+    TimerId frame_timer; // PACER_FREE: one tick per refresh period
+    Uint64 last_sample_ns;
+    TimerId resize_overlay_timer; // hides the resize overlay (TIMER_INVALID = hidden)
+    TimerId notify_timer;         // hides the status message (TIMER_INVALID = hidden)
+    TimerId script_wake_timer;    // a script wait's deadline
+    Uint64 script_wake_ns;        // SDL ticks (ns) that timer expires at
+    Uint64 run_start_ticks;       // SDL ticks when the event loop started (primes the resize overlay)
     bool cursor_blink_visible;
     bool has_focus;
 
@@ -226,7 +269,7 @@ typedef struct
     bool pending_record_frame;
     // Synthetic left button held by a debug script (mousedown without mouseup)
     bool script_button_down;
-} Sdl3BackendData;
+};
 
 static Sdl3BackendData *sdl3_data(PorttyBackend *self)
 {
@@ -730,73 +773,104 @@ static void sdl3_wakeup_reader(Sdl3BackendData *d)
 #endif
 }
 
-// ── Blocking-wake timer ──────────────────────────────────────────────────
+// ── Timers ───────────────────────────────────────────────────────────────
+//
+// Every deadline is an SDL timer that posts EVENT_TIMER_FIRE. The callback
+// runs on SDL's timer thread and touches nothing but its own arm record, the
+// pending slot and the event queue. Periodic timers keep an absolute
+// deadline (timer_next_deadline) so a late wake does not push later ticks
+// back, and post nothing while their previous event is still queued.
 
-static uint32_t sdl3_timer_wake_cb(void *userdata, SDL_TimerID id,
-                                   uint32_t interval)
+// Post a no-op event so a loop blocked in SDL_WaitEvent runs another pass.
+// Safe from any thread.
+static void sdl3_post_wake(void)
 {
-    (void)id;
-    (void)interval;
-    Sdl3BackendData *d = (Sdl3BackendData *)userdata;
-    if (!d)
-        return 0;
-    SDL_Event ev = { 0 };
+    SDL_Event ev;
+    SDL_zero(ev);
     ev.type = SDL_EVENT_USER;
-    ev.user.code = EVENT_TIMER_WAKE;
+    ev.user.code = EVENT_WAKE;
     SDL_PushEvent(&ev);
-    return 0; // one-shot; the loop re-arms
 }
 
-/* Arm a single SDL timer for the earliest pending deadline so the blocking
- * SDL_WaitEvent wakes just in time to service it. Must be called on the
- * main thread. It factors in the TimerManager, a pending script wait, the
- * resize-overlay hide deadline, and the status-message hide deadline. */
-static void sdl3_arm_timer_wakeup(Sdl3BackendData *d)
+static Uint64 sdl3_timer_cb(void *userdata, SDL_TimerID id, Uint64 interval_ns)
 {
-    if (d->wake_timer) {
-        SDL_RemoveTimer(d->wake_timer);
-        d->wake_timer = 0;
+    (void)id;
+    (void)interval_ns;
+    SdlTimerArm *a = (SdlTimerArm *)userdata;
+    Sdl3BackendData *d = a->d;
+
+    if (SDL_GetAtomicInt(&d->timer_pending[a->slot]) != (int)a->epoch) {
+        SDL_SetAtomicInt(&d->timer_pending[a->slot], (int)a->epoch);
+        SDL_Event ev;
+        SDL_zero(ev);
+        ev.type = SDL_EVENT_USER;
+        ev.user.code = EVENT_TIMER_FIRE;
+        ev.user.data1 = (void *)(uintptr_t)a->slot;
+        ev.user.data2 = (void *)(uintptr_t)a->epoch;
+        if (!SDL_PushEvent(&ev))
+            SDL_SetAtomicInt(&d->timer_pending[a->slot], 0);
     }
 
-    uint32_t delay = timer_manager_next_delay_ms(d->timers);
+    if (a->period_ns == 0)
+        return 0;
+    Uint64 now = SDL_GetTicksNS();
+    a->next_ns = timer_next_deadline(a->next_ns, a->period_ns, now);
+    return a->next_ns - now;
+}
 
-    if (d->script && !d->script_done) {
-        uint32_t wait_ms = portty_script_wait_ms(d->script);
-        if (wait_ms < delay)
-            delay = wait_ms;
+static uintptr_t sdl3_timer_arm(void *ctx, uint64_t delay_ns, uint64_t period_ns,
+                                uint32_t slot, uint32_t epoch)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)ctx;
+    SdlTimerArm *a = &d->timer_arms[d->timer_arm_next++ % (TIMER_MAX * 4)];
+    a->d = d;
+    a->period_ns = period_ns;
+    a->next_ns = SDL_GetTicksNS() + delay_ns;
+    a->slot = slot;
+    a->epoch = epoch;
+    return (uintptr_t)SDL_AddTimerNS(delay_ns, sdl3_timer_cb, a);
+}
+
+static void sdl3_timer_cancel(void *ctx, uintptr_t handle)
+{
+    (void)ctx;
+    SDL_RemoveTimer((SDL_TimerID)handle);
+}
+
+// Start (or restart with a new delay) the one-shot timer held in *id.
+static void sdl3_arm_once(Sdl3BackendData *d, TimerId *id, uint32_t delay_ms,
+                          uint32_t code)
+{
+    if (*id != TIMER_INVALID)
+        timer_remove(d->timers, *id);
+    *id = timer_add_once(d->timers, delay_ms ? delay_ms : 1, code, NULL);
+}
+
+static void sdl3_cancel_timer(Sdl3BackendData *d, TimerId *id)
+{
+    if (*id != TIMER_INVALID) {
+        timer_remove(d->timers, *id);
+        *id = TIMER_INVALID;
     }
+}
 
-    if (d->resize_overlay_hide_at != 0) {
-        Uint64 now = SDL_GetTicks();
-        uint32_t overlay_ms = (d->resize_overlay_hide_at > now)
-                                  ? (uint32_t)(d->resize_overlay_hide_at - now)
-                                  : 0;
-        if (overlay_ms < delay)
-            delay = overlay_ms;
-    }
-
-    if (d->notify_hide_at != 0) {
-        Uint64 now = SDL_GetTicks();
-        uint32_t notify_ms = (d->notify_hide_at > now)
-                                 ? (uint32_t)(d->notify_hide_at - now)
-                                 : 0;
-        if (notify_ms < delay)
-            delay = notify_ms;
-    }
-
-    if (d->flood_hold_until != 0) {
-        Uint64 now = SDL_GetTicks();
-        uint32_t hold_ms = (d->flood_hold_until > now)
-                               ? (uint32_t)(d->flood_hold_until - now)
-                               : 0;
-        if (hold_ms < delay)
-            delay = hold_ms;
-    }
-
-    if (delay == UINT32_MAX)
+// Keep a one-shot timer aimed at a script wait that ends in `ms`. The step
+// recomputes the remaining time on every pass, so an unchanged deadline must
+// not re-arm.
+static void sdl3_script_wake_update(Sdl3BackendData *d, uint32_t ms)
+{
+    if (ms == UINT32_MAX) {
+        sdl3_cancel_timer(d, &d->script_wake_timer);
         return;
-
-    d->wake_timer = SDL_AddTimer(delay, sdl3_timer_wake_cb, d);
+    }
+    Uint64 deadline = SDL_GetTicksNS() + (Uint64)ms * 1000000ULL;
+    const Uint64 slack_ns = 2000000ULL; // the remaining time is rounded up to whole ms
+    if (timer_active(d->timers, d->script_wake_timer) &&
+        deadline <= d->script_wake_ns + slack_ns &&
+        deadline + slack_ns >= d->script_wake_ns)
+        return;
+    sdl3_arm_once(d, &d->script_wake_timer, ms, TCODE_SCRIPT_WAKE);
+    d->script_wake_ns = deadline;
 }
 
 // ── Lifecycle ────────────────────────────────────────────────────────────
@@ -896,11 +970,17 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     d->app = app;
     d->term = app->term;
     d->pty = app->pty;
-    d->timers = timer_manager_create();
+    TimerScheduler sched = { sdl3_timer_arm, sdl3_timer_cancel, d };
+    d->timers = timer_manager_create(&sched);
     d->cursor_blink_timer = TIMER_INVALID;
-    d->lottie_timer = TIMER_INVALID;
+    d->frame_timer = TIMER_INVALID;
+    d->window_visible = true;
     d->autoscroll_timer = TIMER_INVALID;
-    d->wake_timer = 0;
+    d->resize_overlay_timer = TIMER_INVALID;
+    d->notify_timer = TIMER_INVALID;
+    d->script_wake_timer = TIMER_INVALID;
+    d->flood_hold_timer = TIMER_INVALID;
+    d->record_timer = TIMER_INVALID;
     d->cursor_blink_visible = true;
     d->has_focus = true;
 
@@ -1395,7 +1475,7 @@ static void sdl3_set_autoscroll(PorttyBackend *self, bool enabled)
     if (enabled) {
         if (d->autoscroll_timer == TIMER_INVALID && d->timers) {
             d->autoscroll_timer = timer_add(d->timers, AUTOSCROLL_INTERVAL_MS,
-                                            EVENT_AUTOSCROLL_TICK, NULL);
+                                            TCODE_AUTOSCROLL, NULL);
         }
     } else {
         if (d->autoscroll_timer != TIMER_INVALID) {
@@ -1556,11 +1636,8 @@ static void sdl3_panel_set_hover(PorttyBackend *self, int id, bool hovered)
 
 // ── Transient status messages ────────────────────────────────────────────
 // A notification is a two-row box (title, detail) that the backend places at
-// the top of the grid and hides again once its lifetime is over. The
-// deadline is absolute rather than a timer-manager interval, matching the
-// resize overlay: the loop's elapsed-time accounting is frame-relative, so
-// a freshly armed interval would fire immediately when a frame happened to
-// carry more elapsed time than that.
+// the top of the grid and hides again once its lifetime is over, on a
+// one-shot timer (TCODE_NOTIFY_HIDE) that a newer message restarts.
 #define NOTIFY_DEFAULT_TTL_MS 4000
 
 // Display width of a UTF-8 string in terminal cells.
@@ -1576,7 +1653,7 @@ static void sdl3_notify_hide(Sdl3BackendData *d)
 {
     if (!d)
         return;
-    d->notify_hide_at = 0;
+    sdl3_cancel_timer(d, &d->notify_timer);
     if (d->app && d->app->backend)
         d->app->backend->panel_hide(d->app->backend, PANEL_ID_NOTIFY);
 }
@@ -1617,7 +1694,8 @@ static void sdl3_notify(PorttyBackend *self, const char *title, const char *body
     d->notify_level = level;
 
     sdl3_notify_place(d);
-    d->notify_hide_at = SDL_GetTicks() + (ttl_ms ? ttl_ms : NOTIFY_DEFAULT_TTL_MS);
+    sdl3_arm_once(d, &d->notify_timer, ttl_ms ? ttl_ms : NOTIFY_DEFAULT_TTL_MS,
+                  TCODE_NOTIFY_HIDE);
 
     // The panel lives in the chrome layer above the grid, so nothing else
     // may have marked the terminal dirty — a notification that arrives on
@@ -1629,7 +1707,7 @@ static void sdl3_notify(PorttyBackend *self, const char *title, const char *body
 static bool sdl3_notify_active(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
-    return d && d->notify_hide_at != 0;
+    return d && timer_active(d->timers, d->notify_timer);
 }
 
 // ── Rendering ────────────────────────────────────────────────────────────
@@ -1718,6 +1796,8 @@ static void sdl3_log_stats(PorttyBackend *self)
     rend_sdl3_log_stats(&sdl3_data(self)->rend);
 }
 
+static void sdl3_pace_describe(const Sdl3BackendData *d, char *buf, size_t len);
+
 static bool sdl3_get_diag(PorttyBackend *self, PorttyDiag *out)
 {
     if (!self || !self->data || !out)
@@ -1726,6 +1806,20 @@ static bool sdl3_get_diag(PorttyBackend *self, PorttyDiag *out)
     if (!rend_sdl3_get_diag(&d->rend, out))
         return false;
     out->platform_name = self->name;
+
+    {
+        static char pacing_str[160];
+        if (d->pacing) {
+            char now[96];
+            sdl3_pace_describe(d, now, sizeof(now));
+            snprintf(pacing_str, sizeof(pacing_str), "%s", now);
+        } else if (d->pace_last[0]) {
+            snprintf(pacing_str, sizeof(pacing_str), "idle (last run: %s)", d->pace_last);
+        } else {
+            snprintf(pacing_str, sizeof(pacing_str), "idle");
+        }
+        out->lottie_pacing = pacing_str;
+    }
 
     // Display diagnostics — windowing/compositor info, not renderer
     out->display_physical = display_info_get_physical();
@@ -1795,6 +1889,8 @@ static void sdl3_request_quit(PorttyBackend *self)
     if (!d)
         return;
     SDL_SetAtomicInt(&d->quit_requested, 1);
+    // The loop may be blocked in SDL_WaitEvent; wake it to see the flag.
+    sdl3_post_wake();
 }
 
 static void sdl3_debug_screendump(Sdl3BackendData *d, const char *path)
@@ -1831,10 +1927,7 @@ static void sdl3_record_frame(Sdl3BackendData *d, const char *path)
 // grid geometry (cols x rows) and the cell size, centered over the terminal.
 // Each resize event pushes the hide deadline out, so the steady stream of
 // configure events a drag produces keeps the panel up and it disappears once
-// resizing stops. The deadline is absolute rather than a timer-manager
-// interval: the loop's elapsed-time accounting is frame-relative, so a
-// freshly armed 600 ms timer would fire immediately when a frame happened to
-// carry more elapsed time than that.
+// resizing stops (a one-shot TCODE_OVERLAY_HIDE timer, restarted per event).
 #define RESIZE_OVERLAY_HIDE_MS 600
 // Startup applies the window size before the event loop runs; those queued
 // resize events must not flash the overlay. Ignore overlay updates for this
@@ -1846,7 +1939,7 @@ static void sdl3_resize_overlay_hide(Sdl3BackendData *d)
 {
     if (!d)
         return;
-    d->resize_overlay_hide_at = 0;
+    sdl3_cancel_timer(d, &d->resize_overlay_timer);
     if (d->app && d->app->backend)
         d->app->backend->panel_hide(d->app->backend, PANEL_ID_RESIZE_OVERLAY);
 }
@@ -1895,7 +1988,8 @@ static void sdl3_resize_overlay_update(Sdl3BackendData *d)
                                 title, body, PORTTY_NOTIFY_INFO,
                                 PANEL_FLAG_NO_ACCENT | PANEL_FLAG_NO_CLOSE);
 
-    d->resize_overlay_hide_at = SDL_GetTicks() + RESIZE_OVERLAY_HIDE_MS;
+    sdl3_arm_once(d, &d->resize_overlay_timer, RESIZE_OVERLAY_HIDE_MS,
+                  TCODE_OVERLAY_HIDE);
 }
 
 // ── Event loop ───────────────────────────────────────────────────────────
@@ -1913,7 +2007,7 @@ static void sdl3_script_resize(void *user_data, int cols, int rows)
     portty_app_handle_resize(d->app, pixel_w, pixel_h);
     sdl3_resize_overlay_update(d);
     // The status message was placed for the old geometry.
-    if (d->notify_hide_at != 0)
+    if (timer_active(d->timers, d->notify_timer))
         sdl3_notify_place(d);
     vlog("resize: %d cols x %d rows\n", cols, rows);
 }
@@ -1950,7 +2044,7 @@ static void sdl3_script_display_scale(void *user_data, float scale)
     if (portty_app_handle_display_scale_changed(d->app, pix_w, pix_h)) {
         sdl3_resize_overlay_update(d);
         // The status message was placed for the old geometry.
-        if (d->notify_hide_at != 0)
+        if (timer_active(d->timers, d->notify_timer))
             sdl3_notify_place(d);
     }
     terminal_mark_dirty(d->term);
@@ -2009,13 +2103,24 @@ static void sdl3_script_diag(void *user_data)
         terminal_mark_dirty(d->term);
 }
 
+// Script `present-held`: put the cached scene on screen again without a scene
+// pass, so a screendump can be compared with the frame it re-presents.
+static bool sdl3_script_present_held(void *user_data)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !rend_sdl3_present_held(&d->rend))
+        return false;
+    SDL_RenderPresent(d->sdl_renderer);
+    return true;
+}
+
 static void sdl3_record_start(void *user_data, int fps)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
     if (!d)
         return;
     int interval_ms = 1000 / fps;
-    d->record_timer = timer_add(d->timers, interval_ms, EVENT_RECORD_TICK, NULL);
+    d->record_timer = timer_add(d->timers, interval_ms, TCODE_RECORD, NULL);
 }
 
 static void sdl3_record_stop(void *user_data)
@@ -2026,6 +2131,216 @@ static void sdl3_record_stop(void *user_data)
     if (d->record_timer != TIMER_INVALID) {
         timer_remove(d->timers, d->record_timer);
         d->record_timer = TIMER_INVALID;
+    }
+}
+
+// ── Animation pacing ─────────────────────────────────────────────────────
+//
+// An animation's frame is a pure function of the time it reaches the screen
+// (terminal_lottie_present). While one plays in a visible window the loop runs
+// in paced mode: vsync on, one present per display refresh, and each present
+// blocks until the next refresh. A FramePacer turns that into the refresh the
+// next present occupies, which is the time to sample the animation for. A
+// present that does not block (no vsync, a compositor without frame callbacks)
+// leaves the pacer in PACER_FREE: a periodic event timer then stands in for
+// the display clock and the loop goes back to waiting on events.
+
+// The display's refresh period, from its current mode (59.94 Hz is not 60).
+static Uint64 sdl3_refresh_period_ns(Sdl3BackendData *d)
+{
+    const SDL_DisplayMode *m = NULL;
+    if (d->window) {
+        SDL_DisplayID display = SDL_GetDisplayForWindow(d->window);
+        if (display)
+            m = SDL_GetCurrentDisplayMode(display);
+    }
+    if (m && m->refresh_rate_numerator > 0 && m->refresh_rate_denominator > 0)
+        return 1000000000ULL * (Uint64)m->refresh_rate_denominator /
+               (Uint64)m->refresh_rate_numerator;
+    if (m && m->refresh_rate > 1.0f)
+        return (Uint64)(1e9 / (double)m->refresh_rate);
+    return 16666667ULL;
+}
+
+// Append one line to the pace trace ($PORTTY_PACE_TRACE) for a presented
+// frame: when it was presented and which frame each animation showed.
+static void sdl3_pace_trace(Sdl3BackendData *d, TerminalBackend *term,
+                            Uint64 t_before_ns, Uint64 t_after_ns, bool held)
+{
+    PaceTraceRec rec = { 0 };
+    rec.t_before_ns = t_before_ns;
+    rec.t_after_ns = t_after_ns;
+    if (d->pacing) {
+        rec.sample_ns = d->last_sample_ns;
+        rec.locked = pacer_mode(&d->pacer) == PACER_LOCKED;
+        rec.misses = d->pacer.misses;
+    }
+    rec.held = held;
+    int count = 0;
+    const CfrLottie *anims = terminal_get_lotties(term, &count);
+    for (int i = 0; i < count && rec.nframes < PACE_TRACE_MAX_FRAMES; i++) {
+        if (anims[i].playing)
+            rec.frames[rec.nframes++] = anims[i].current_frame;
+    }
+    pace_trace_record(&rec);
+}
+
+// One-line description of the pacing state for the diagnostics report.
+static void sdl3_pace_describe(const Sdl3BackendData *d, char *buf, size_t len)
+{
+    const FramePacer *p = &d->pacer;
+    double hz = p->period_ns ? 1e9 / (double)p->period_ns : 0.0;
+    const char *mode = "probing";
+    if (pacer_mode(p) == PACER_LOCKED)
+        mode = "vsync-locked";
+    else if (pacer_mode(p) == PACER_FREE)
+        mode = "free-running";
+    snprintf(buf, len, "%s %.3f Hz, %u miss%s", mode, hz, p->misses,
+             p->misses == 1 ? "" : "es");
+}
+
+static void sdl3_pace_stop(Sdl3BackendData *d)
+{
+    if (!d->pacing)
+        return;
+    sdl3_pace_describe(d, d->pace_last, sizeof(d->pace_last));
+    d->pacing = false;
+    sdl3_cancel_timer(d, &d->frame_timer);
+    if (d->vsync_on) {
+        SDL_SetRenderVSync(d->sdl_renderer, 0);
+        d->vsync_on = false;
+    }
+    pacer_reset(&d->pacer);
+    vlog("Animation pacing off\n");
+}
+
+// Enter, adjust or leave paced mode. Called once per loop pass, before the
+// loop decides whether to block.
+static void sdl3_pace_update(Sdl3BackendData *d, TerminalBackend *term)
+{
+    bool want = d->window_visible && terminal_lottie_playing_count(term) > 0;
+    if (!want) {
+        sdl3_pace_stop(d);
+        return;
+    }
+    if (!d->pacing) {
+        pacer_init(&d->pacer, sdl3_refresh_period_ns(d));
+        d->pacing = true;
+        // PORTTY_PACE_FREE=1 skips the display clock, to exercise the
+        // free-running path where presents do not block.
+        if (getenv("PORTTY_PACE_FREE"))
+            d->pacer.mode = PACER_FREE;
+        d->vsync_on = SDL_SetRenderVSync(d->sdl_renderer, 1);
+        vlog("Animation pacing on: refresh %.3f ms, vsync %s\n",
+             (double)pacer_period(&d->pacer) / 1e6, d->vsync_on ? "on" : "refused");
+    }
+    if (pacer_mode(&d->pacer) == PACER_FREE &&
+        !timer_active(d->timers, d->frame_timer)) {
+        // Presents do not block: no display clock. Free-run on a timer.
+        if (d->vsync_on) {
+            SDL_SetRenderVSync(d->sdl_renderer, 0);
+            d->vsync_on = false;
+        }
+        d->frame_timer = timer_add_ns(d->timers, pacer_period(&d->pacer),
+                                      TCODE_FRAME, NULL);
+        vlog("Animation pacing free-running at %.3f ms\n",
+             (double)pacer_period(&d->pacer) / 1e6);
+    }
+}
+
+// PACER_FREE: one frame tick. Samples the animation for the next slot of the
+// synthetic grid and marks the screen dirty when its frame changed; the normal
+// render step presents it.
+static void sdl3_free_running_frame(Sdl3BackendData *d, TerminalBackend *term)
+{
+    if (!d->pacing)
+        return;
+    Uint64 v = pacer_begin(&d->pacer, SDL_GetTicksNS());
+    d->last_sample_ns = v;
+    if (terminal_lottie_present(term, v / 1000, pacer_hold_ns(&d->pacer) / 1000))
+        terminal_mark_dirty(term);
+}
+
+// Paced mode, PACER_PROBING and PACER_LOCKED: sample the animation for the
+// refresh this present will occupy, draw (or re-present the cached scene when
+// nothing changed), and present. The present blocks until the next refresh.
+static void sdl3_render_paced(Sdl3BackendData *d, TerminalBackend *term)
+{
+    RendererSdl3Data *rend = &d->rend;
+    Uint64 start_ns = SDL_GetTicksNS();
+    Uint64 v = pacer_begin(&d->pacer, start_ns);
+    d->last_sample_ns = v;
+    if (terminal_lottie_present(term, v / 1000, pacer_hold_ns(&d->pacer) / 1000)) {
+        // The engine damaged the animation's placements: take that damage
+        // into this frame, or the next pass would redraw for it again.
+        terminal_flush_damage(term);
+        terminal_mark_dirty(term);
+    }
+
+    bool held = false;
+    if (!terminal_needs_redraw(term))
+        held = rend_sdl3_present_held(rend);
+    if (!held) {
+        bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) ||
+                          d->cursor_blink_visible;
+        rend_sdl3_draw_terminal(rend, term, cursor_vis);
+    }
+
+    Uint64 before_ns = SDL_GetTicksNS();
+    SDL_RenderPresent(d->sdl_renderer);
+    Uint64 after_ns = SDL_GetTicksNS();
+    d->last_present_ns = after_ns;
+    pacer_cost(&d->pacer, before_ns - start_ns);
+    pacer_end(&d->pacer, before_ns, after_ns);
+    if (pace_trace_active())
+        sdl3_pace_trace(d, term, before_ns, after_ns, held);
+    if (!held)
+        terminal_clear_redraw(term);
+}
+
+// Act on a timer that fired (the main thread, from EVENT_TIMER_FIRE).
+static void sdl3_handle_timer(PorttyBackend *self, Sdl3BackendData *d,
+                              TerminalBackend *term, uint32_t code)
+{
+    (void)self;
+    switch (code) {
+    case TCODE_CURSOR_BLINK:
+        if (terminal_get_cursor_blink(term)) {
+            d->cursor_blink_visible = !d->cursor_blink_visible;
+            terminal_mark_dirty(term);
+        }
+        break;
+    case TCODE_AUTOSCROLL:
+        portty_app_handle_autoscroll_tick(d->app);
+        terminal_mark_dirty(term);
+        break;
+    case TCODE_FRAME:
+        sdl3_free_running_frame(d, term);
+        break;
+    case TCODE_RECORD:
+        if (d->frame_recorder && d->frame_recorder->recording) {
+            d->pending_record_frame = true;
+            terminal_mark_dirty(term);
+        }
+        break;
+    case TCODE_OVERLAY_HIDE:
+        // Resize activity has settled.
+        sdl3_resize_overlay_hide(d);
+        terminal_mark_dirty(term);
+        break;
+    case TCODE_NOTIFY_HIDE:
+        // The status message's lifetime is over.
+        sdl3_notify_hide(d);
+        terminal_mark_dirty(term);
+        break;
+    case TCODE_FLOOD_HOLD:
+        d->flood_hold_timer = TIMER_INVALID; // the render step presents now
+        break;
+    case TCODE_SCRIPT_WAKE:
+        d->script_wake_timer = TIMER_INVALID; // the script steps at the top of the loop
+        break;
+    default:
+        break;
     }
 }
 
@@ -2042,7 +2357,7 @@ static void sdl3_run(PorttyBackend *self)
     d->cursor_blink_visible = true;
     d->has_focus = true;
     d->cursor_blink_timer = timer_add(d->timers, CURSOR_BLINK_INTERVAL_MS,
-                                      EVENT_CURSOR_BLINK, NULL);
+                                      TCODE_CURSOR_BLINK, NULL);
 
     // Start PTY reader thread
     SDL_SetAtomicInt(&d->running, 1);
@@ -2099,6 +2414,8 @@ static void sdl3_run(PorttyBackend *self)
             .dump_ud = d,
             .diag_fn = sdl3_script_diag,
             .diag_ud = d,
+            .present_held_fn = sdl3_script_present_held,
+            .present_held_ud = d,
         };
 
         char err[512];
@@ -2110,16 +2427,16 @@ static void sdl3_run(PorttyBackend *self)
         }
     }
 
+    pace_trace_open_from_env();
     vlog("Event loop starting (event-driven)\n");
     terminal_mark_dirty(term);
 
     SDL_Event event;
-    Uint64 last_tick = SDL_GetTicks();
-    d->run_start_ticks = last_tick;
+    d->run_start_ticks = SDL_GetTicks();
     while (!SDL_GetAtomicInt(&d->quit_requested)) {
         // === Debug script: pre-render commands ===
         // Run before we block so a script that does not emit events (e.g. a
-        // bare "wait") can still register its own wake deadline below.
+        // bare "wait") can still register its own wake deadline right after.
         // While a flood backlog is draining, the step's own buffer scan
         // (wait-for walks every scrollback row per poll) would run once per
         // multi-millisecond pass and eat the parse budget; it resumes when
@@ -2135,21 +2452,33 @@ static void sdl3_run(PorttyBackend *self)
                     self->request_quit(self);
             }
         }
+        if (d->script) {
+            uint32_t wait_ms = d->script_done ? UINT32_MAX
+                                              : portty_script_wait_ms(d->script);
+            sdl3_script_wake_update(d, wait_ms);
+            // A step runs one command: unless the script is now waiting, the
+            // next command is ready and needs another pass without waiting
+            // for an unrelated event.
+            if (!d->script_done && (wait_ms == UINT32_MAX || wait_ms == 0))
+                sdl3_post_wake();
+        }
 
         bool pty_processed = false;
         bool pty_scrolled = false;
         bool flood_break = false;
         Uint64 parse_start_ns = 0; /* first PTY chunk processed this pass */
 
-        // === 0. Arm the wake timer, then block until real work arrives ===
-        sdl3_arm_timer_wakeup(d);
-        // SDL_WaitEvent (infinite) blocks until a real event is posted (PTY
-        // data, input, or our wake timer). Passing NULL blocks without
+        // === 0. Block until real work arrives ===
+        sdl3_pace_update(d, term);
+        // Paced mode does not wait here: the blocking present below is the
+        // wait. Otherwise SDL_WaitEvent (infinite) blocks until an event is
+        // posted (PTY data, input, or a timer firing). Passing NULL blocks without
         // removing the event, so the drain loop below consumes everything.
         // SDL_PollEvent on Wayland doesn't dispatch the display queue, so
         // resize configure events never arrive; SDL_PumpEvents after the wake
         // forces the Wayland event queue to be dispatched before polling.
-        SDL_WaitEvent(NULL);
+        if (!(d->pacing && pacer_mode(&d->pacer) != PACER_FREE))
+            SDL_WaitEvent(NULL);
         SDL_PumpEvents();
         while (SDL_PollEvent(&event)) {
             switch (event.type) {
@@ -2176,12 +2505,6 @@ static void sdl3_run(PorttyBackend *self)
                         self->set_window_title(self, terminal_get_title(term));
                         free(payload);
                         pty_processed = true;
-                        if (d->lottie_timer == TIMER_INVALID &&
-                            terminal_lottie_count(term) > 0) {
-                            d->lottie_timer = timer_add(d->timers, 16,
-                                                        EVENT_LOTTIE_TICK, NULL);
-                        }
-
                         /* Output-flood guard: stop draining once the pass
                          * has spent its parse budget. The budget counts
                          * parsing alone — an event loop pass that blocked
@@ -2214,35 +2537,27 @@ static void sdl3_run(PorttyBackend *self)
                     SDL_SetAtomicInt(&d->quit_requested, 1);
                     break;
 
-                case EVENT_CURSOR_BLINK:
-                    if (terminal_get_cursor_blink(term)) {
-                        d->cursor_blink_visible = !d->cursor_blink_visible;
-                        terminal_mark_dirty(term);
-                    }
-                    break;
-
-                case EVENT_AUTOSCROLL_TICK:
-                    portty_app_handle_autoscroll_tick(d->app);
-                    terminal_mark_dirty(term);
-                    break;
-
-                case EVENT_LOTTIE_TICK:
-                    if (terminal_lottie_tick(term, SDL_GetTicksNS() / 1000))
-                        terminal_mark_dirty(term);
-                    if (terminal_lottie_count(term) == 0) {
-                        timer_remove(d->timers, d->lottie_timer);
-                        d->lottie_timer = TIMER_INVALID;
-                    }
-                    break;
-
                 case EVENT_NOTIFY_SHOW:
                     terminal_mark_dirty(term);
                     break;
 
-                case EVENT_TIMER_WAKE:
-                    // Timer callback posted this; the deadline is serviced
-                    // below by advancing timer_poll by measured elapsed time.
+                case EVENT_WAKE:
                     break;
+
+                case EVENT_TIMER_FIRE:
+                {
+                    uint32_t slot = (uint32_t)(uintptr_t)event.user.data1;
+                    uint32_t epoch = (uint32_t)(uintptr_t)event.user.data2;
+                    // The callback queues one event per slot at a time; this
+                    // one is being handled, so the next may post.
+                    if (slot < TIMER_MAX)
+                        SDL_CompareAndSwapAtomicInt(&d->timer_pending[slot],
+                                                    (int)epoch, 0);
+                    TimerEvent te;
+                    if (timer_dispatch(d->timers, slot, epoch, &te))
+                        sdl3_handle_timer(self, d, term, te.code);
+                    break;
+                }
                 }
                 break;
 
@@ -2327,7 +2642,7 @@ static void sdl3_run(PorttyBackend *self)
                 portty_app_handle_resize(d->app, pix_w, pix_h);
                 sdl3_resize_overlay_update(d);
                 // The status message was placed for the old geometry.
-                if (d->notify_hide_at != 0)
+                if (timer_active(d->timers, d->notify_timer))
                     sdl3_notify_place(d);
                 terminal_mark_dirty(term);
                 break;
@@ -2348,7 +2663,7 @@ static void sdl3_run(PorttyBackend *self)
                     if (portty_app_handle_display_scale_changed(d->app, pix_w, pix_h)) {
                         sdl3_resize_overlay_update(d);
                         // The status message was placed for the old geometry.
-                        if (d->notify_hide_at != 0)
+                        if (timer_active(d->timers, d->notify_timer))
                             sdl3_notify_place(d);
                     }
                 }
@@ -2360,7 +2675,28 @@ static void sdl3_run(PorttyBackend *self)
                 SDL_SetAtomicInt(&d->quit_requested, 1);
                 break;
 
+            case SDL_EVENT_WINDOW_OCCLUDED:
+            case SDL_EVENT_WINDOW_MINIMIZED:
+            case SDL_EVENT_WINDOW_HIDDEN:
+                // Nothing is visible: animations stop being presented (a
+                // vsynced present on a hidden surface may be throttled).
+                // Media time keeps running by the clock.
+                d->window_visible = false;
+                break;
+
+            case SDL_EVENT_WINDOW_SHOWN:
+            case SDL_EVENT_WINDOW_RESTORED:
+                d->window_visible = true;
+                terminal_mark_dirty(term);
+                break;
+
+            case SDL_EVENT_WINDOW_DISPLAY_CHANGED:
+                // The refresh period may differ: pacing starts over with it.
+                sdl3_pace_stop(d);
+                break;
+
             case SDL_EVENT_WINDOW_EXPOSED:
+                d->window_visible = true;
                 // libdecor decoration subsurfaces are synchronized: their
                 // commits (hover highlights, focus title-bar redraws) are
                 // cached by the compositor until the parent content surface
@@ -2510,45 +2846,6 @@ static void sdl3_run(PorttyBackend *self)
                 break;
         }
 
-        // === 2. Timers ===
-        Uint64 now = SDL_GetTicks();
-        uint32_t elapsed = (uint32_t)(now - last_tick);
-        last_tick = now;
-        if (elapsed > 0) {
-            TimerEvent tevents[8];
-            size_t n = timer_poll(d->timers, elapsed, tevents, 8);
-            for (size_t i = 0; i < n; i++) {
-                switch (tevents[i].code) {
-                case EVENT_CURSOR_BLINK:
-                    if (terminal_get_cursor_blink(term)) {
-                        d->cursor_blink_visible = !d->cursor_blink_visible;
-                        terminal_mark_dirty(term);
-                    }
-                    break;
-                case EVENT_AUTOSCROLL_TICK:
-                    portty_app_handle_autoscroll_tick(d->app);
-                    terminal_mark_dirty(term);
-                    break;
-                case EVENT_LOTTIE_TICK:
-                    if (terminal_lottie_tick(term, SDL_GetTicksNS() / 1000))
-                        terminal_mark_dirty(term);
-                    if (terminal_lottie_count(term) == 0) {
-                        timer_remove(d->timers, d->lottie_timer);
-                        d->lottie_timer = TIMER_INVALID;
-                    }
-                    break;
-                case EVENT_RECORD_TICK:
-                    if (d->frame_recorder && d->frame_recorder->recording) {
-                        d->pending_record_frame = true;
-                        terminal_mark_dirty(term);
-                    }
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-
         // The drain pass ended because the queue emptied: release the flood
         // guard's reader pause so the child can push the next slice. A pass
         // that stopped early on the parse budget leaves the pause held. If
@@ -2557,20 +2854,6 @@ static void sdl3_run(PorttyBackend *self)
         if (!flood_break && d->flood_paused) {
             self->resume_pty(self);
             d->flood_paused = false;
-        }
-
-        // Hide the resize geometry overlay once resize activity has settled.
-        if (d->resize_overlay_hide_at != 0 &&
-            SDL_GetTicks() >= d->resize_overlay_hide_at) {
-            sdl3_resize_overlay_hide(d);
-            terminal_mark_dirty(term);
-        }
-
-        // Hide the transient status message once its lifetime is over.
-        if (d->notify_hide_at != 0 &&
-            SDL_GetTicks() >= d->notify_hide_at) {
-            sdl3_notify_hide(d);
-            terminal_mark_dirty(term);
         }
 
         // Flush buffered button-up if no more events pending
@@ -2600,7 +2883,9 @@ static void sdl3_run(PorttyBackend *self)
 
         // === 3. Render (only blocking call during active rendering) ===
         terminal_flush_damage(term);
-        if (terminal_needs_redraw(term)) {
+        if (d->pacing && pacer_mode(&d->pacer) != PACER_FREE) {
+            sdl3_render_paced(d, term);
+        } else if (terminal_needs_redraw(term)) {
             // While a parse-backlog is still queued (flood), presenting is
             // coalesced to a minimum frame interval. Skipping the draw
             // leaves the redraw flag and the accumulated damage rect
@@ -2615,18 +2900,24 @@ static void sdl3_run(PorttyBackend *self)
             if (flood_hold) {
                 // The hold must not outlive the backlog: a pass can end
                 // with the queue drained and the reader paused (no
-                // further wakeups), so arm the deadline that forces the
-                // final frame out.
-                Uint64 now = SDL_GetTicks();
-                if (d->flood_hold_until == 0)
-                    d->flood_hold_until =
-                        now + (FLOOD_RENDER_MIN_NS / 1000000ULL) + 1;
+                // further wakeups), so arm the timer that forces the
+                // final frame out when the minimum interval is over.
+                if (!timer_active(d->timers, d->flood_hold_timer)) {
+                    Uint64 since = SDL_GetTicksNS() - d->last_present_ns;
+                    Uint64 wait_ns = FLOOD_RENDER_MIN_NS - since + 100000ULL;
+                    d->flood_hold_timer = timer_add_once_ns(
+                        d->timers, wait_ns, TCODE_FLOOD_HOLD, NULL);
+                }
             } else {
-                d->flood_hold_until = 0;
+                sdl3_cancel_timer(d, &d->flood_hold_timer);
                 bool cursor_vis = !d->has_focus || !terminal_get_cursor_blink(term) || d->cursor_blink_visible;
                 rend_sdl3_draw_terminal(rend, term, cursor_vis);
+                Uint64 present_start_ns = SDL_GetTicksNS();
                 SDL_RenderPresent(d->sdl_renderer);
                 d->last_present_ns = SDL_GetTicksNS();
+                if (pace_trace_active())
+                    sdl3_pace_trace(d, term, present_start_ns, d->last_present_ns,
+                                    false);
                 terminal_clear_redraw(term);
             }
         }
@@ -2663,13 +2954,9 @@ static void sdl3_run(PorttyBackend *self)
     }
 
     vlog("Event loop exiting\n");
+    pace_trace_close();
 
     SDL_StopTextInput(d->window);
-
-    if (d->wake_timer) {
-        SDL_RemoveTimer(d->wake_timer);
-        d->wake_timer = 0;
-    }
 
     // Free debug script
     portty_script_free(d->script);
@@ -2691,14 +2978,15 @@ static void sdl3_run(PorttyBackend *self)
         timer_remove(d->timers, d->cursor_blink_timer);
         d->cursor_blink_timer = TIMER_INVALID;
     }
-    if (d->lottie_timer != TIMER_INVALID) {
-        timer_remove(d->timers, d->lottie_timer);
-        d->lottie_timer = TIMER_INVALID;
-    }
+    sdl3_pace_stop(d);
     if (d->autoscroll_timer != TIMER_INVALID) {
         timer_remove(d->timers, d->autoscroll_timer);
         d->autoscroll_timer = TIMER_INVALID;
     }
+    sdl3_cancel_timer(d, &d->resize_overlay_timer);
+    sdl3_cancel_timer(d, &d->notify_timer);
+    sdl3_cancel_timer(d, &d->script_wake_timer);
+    sdl3_cancel_timer(d, &d->flood_hold_timer);
 
     // Stop reader thread
     SDL_SetAtomicInt(&d->running, 0);

@@ -44,6 +44,8 @@ Use `--enable-release` for an optimized build or `--enable-debug` for unsanitize
 
 ## Architecture
 
+The event loop, timers, rendering pipeline and animation pacing are explained in [ARCHITECTURE.md](ARCHITECTURE.md); this section is the short list of components.
+
 portty uses a modular backend abstraction design:
 
 - **PorttyBackend**: Unified platform + rendering backend — handles windowing, input events, clipboard, PTY lifecycle, the main event loop, and graphics output.

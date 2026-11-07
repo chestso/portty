@@ -673,6 +673,33 @@ static bool cfr_back_lottie_tick(TerminalBackend *term, uint64_t now_us)
     CfrBackendData *d = term->backend_data;
     return cfr_lottie_tick(d->vt, now_us);
 }
+static bool cfr_back_lottie_present(TerminalBackend *term, uint64_t present_us,
+                                    uint64_t hold_us)
+{
+    CfrBackendData *d = term->backend_data;
+#ifdef HAVE_COFFER_LOTTIE_PRESENT
+    return cfr_lottie_present(d->vt, present_us, hold_us);
+#else
+    (void)hold_us;
+    return cfr_lottie_tick(d->vt, present_us);
+#endif
+}
+
+static int cfr_back_lottie_playing_count(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+#ifdef HAVE_COFFER_LOTTIE_PRESENT
+    return cfr_lottie_playing_count(d->vt);
+#else
+    int n = 0;
+    const CfrLottie *l = cfr_get_lotties(d->vt, &n);
+    int playing = 0;
+    for (int i = 0; l && i < n; i++)
+        playing += l[i].playing ? 1 : 0;
+    return playing;
+#endif
+}
+
 static int cfr_back_lottie_count(TerminalBackend *term)
 {
     CfrBackendData *d = term->backend_data;
@@ -1128,7 +1155,9 @@ TerminalBackend terminal_backend_cfr = {
     .get_lotties = cfr_back_get_lotties,
     .get_lottie_placements = cfr_back_get_lottie_placements,
     .lottie_tick = cfr_back_lottie_tick,
+    .lottie_present = cfr_back_lottie_present,
     .lottie_count = cfr_back_lottie_count,
+    .lottie_playing_count = cfr_back_lottie_playing_count,
     .get_mode = cfr_back_get_mode,
     .get_selection = cfr_back_get_selection,
 };

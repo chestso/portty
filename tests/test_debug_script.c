@@ -94,6 +94,8 @@ typedef struct
     char dump_path[512];
     int dump_calls;
     bool dump_ret;
+    int held_calls;
+    bool held_ret;
     char emitted[1024];
     size_t emitted_len;
 } FakeExt;
@@ -184,10 +186,18 @@ static void fake_emit(void *app, const char *data, size_t len)
     f->emitted[f->emitted_len] = '\0';
 }
 
+static bool fake_present_held(void *ud)
+{
+    FakeExt *f = ud;
+    f->held_calls++;
+    return f->held_ret;
+}
+
 static void fake_ext_init(FakeExt *f)
 {
     memset(f, 0, sizeof(*f));
     f->dump_ret = true;
+    f->held_ret = true;
     f->ext = (ScriptUIExt){
         .pending_screendump = &f->screendump_pending,
         .screendump_path_buf = f->screendump_path,
@@ -209,6 +219,8 @@ static void fake_ext_init(FakeExt *f)
         .display_scale_ud = f,
         .dump_fn = fake_dump,
         .dump_ud = f,
+        .present_held_fn = fake_present_held,
+        .present_held_ud = f,
         .emit_fn = fake_emit,
         .app = f,
     };
@@ -466,6 +478,20 @@ static void test_display_scale(void)
     ASSERT_FLOAT_NEAR(f.display_scale_value, 2.0f, 0.001f);
 }
 
+/* present-held re-presents the cached scene; no cached scene fails the run. */
+static void test_present_held(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    ASSERT_EQ(run_to_end(&f, "present-held\n"), CFR_SCRIPT_DONE);
+    ASSERT_EQ(f.held_calls, 1);
+
+    fake_ext_init(&f);
+    f.held_ret = false;
+    ASSERT_EQ(run_to_end(&f, "present-held\n"), CFR_SCRIPT_FAILED);
+    ASSERT_EQ(f.held_calls, 1);
+}
+
 /* A scale that is not a positive number is a script error. */
 static void test_display_scale_rejects_bad_value(void)
 {
@@ -645,6 +671,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_dumpstate_failure_fails_run);
     RUN_TEST(test_mousemove);
     RUN_TEST(test_display_scale);
+    RUN_TEST(test_present_held);
     RUN_TEST(test_display_scale_rejects_bad_value);
     RUN_TEST(test_mouse_buttons);
     RUN_TEST(test_mouse_button_defaults);

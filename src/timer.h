@@ -1,5 +1,5 @@
 /*
- * portty — Poll-based event timer manager interface
+ * portty — Event-driven timer manager interface
  *
  * SPDX-License-Identifier: MIT
  * Copyright (c) 2026 Thomas Christensen
@@ -9,19 +9,33 @@
 #define TIMER_H
 
 #include <stdbool.h>
-#include <stdint.h>
 #include <stddef.h>
+#include <stdint.h>
+
+/*
+ * A timer is an OS/SDL timer that posts an event when its deadline passes.
+ * Nothing here counts time down and nothing polls a clock to decide whether a
+ * timer is due: the manager is a slot table owned by the main thread, and a
+ * TimerScheduler supplied by the backend arms and cancels the real timers.
+ *
+ * Threading: every function in this header runs on the main (event loop)
+ * thread. The scheduler's timers fire on whatever thread the backend uses and
+ * only post an event carrying (slot, epoch); the main thread hands that pair
+ * to timer_dispatch(), which drops the event when the timer has been removed,
+ * reset or replaced since it was armed.
+ */
 
 typedef uint32_t TimerId;
 #define TIMER_INVALID 0
 
+/* Upper bound on concurrently live timers. */
+#define TIMER_MAX 32
+
 typedef struct TimerManager TimerManager;
 
 /**
- * Event fired by a timer. Backends poll these out of the manager and
- * dispatch them however they like (SDL_EVENT_USER, direct handler call,
- * etc.). The event_data pointer is owned by the timer creator and must
- * remain valid for the lifetime of the timer.
+ * Event fired by a timer. The event_data pointer is owned by the timer
+ * creator and must remain valid for the lifetime of the timer.
  */
 typedef struct
 {
@@ -30,95 +44,93 @@ typedef struct
 } TimerEvent;
 
 /**
- * Create a new timer manager.
+ * How the backend arms real timers.
+ *
+ * arm() starts a timer that fires after `delay_ns` and then every
+ * `period_ns` (0 = once), and for each firing posts an event that the main
+ * thread passes to timer_dispatch() as (slot, epoch). It returns an opaque
+ * non-zero handle, or 0 on failure. cancel() stops a timer by handle; an
+ * event it already posted is rejected later by the epoch check.
+ */
+typedef struct
+{
+    uintptr_t (*arm)(void *ctx, uint64_t delay_ns, uint64_t period_ns,
+                     uint32_t slot, uint32_t epoch);
+    void (*cancel)(void *ctx, uintptr_t handle);
+    void *ctx;
+} TimerScheduler;
+
+/**
+ * Create a timer manager that arms its timers through `sched`.
+ * The scheduler is copied.
  *
  * @return TimerManager pointer on success, NULL on failure
  */
-TimerManager *timer_manager_create(void);
+TimerManager *timer_manager_create(const TimerScheduler *sched);
 
 /**
- * Destroy a timer manager and all its timers.
- *
- * @param mgr Timer manager to destroy
+ * Destroy a timer manager, cancelling every timer still armed.
  */
 void timer_manager_destroy(TimerManager *mgr);
 
 /**
- * Add a new repeating timer.
+ * Add a repeating timer: fires every `interval_ns`, the first time one
+ * interval from now. A zero interval fails.
  *
- * The timer fires every `interval_ms` milliseconds. Each time it fires,
- * `timer_poll()` reports an event with the given `event_code` and the
- * optional `event_data` pointer.
- *
- * @param mgr Timer manager
- * @param interval_ms Timer interval in milliseconds
- * @param event_code Event code returned by timer_poll()
- * @param event_data Optional data pointer returned by timer_poll()
- * @return Timer ID on success, TIMER_INVALID on failure
+ * @return Timer ID on success, TIMER_INVALID on failure (no free slot, the
+ *         scheduler refused, or a zero interval)
  */
+TimerId timer_add_ns(TimerManager *mgr, uint64_t interval_ns,
+                     uint32_t event_code, void *event_data);
+
+/** Add a one-shot timer: fires once after `delay_ns`, then frees its slot. */
+TimerId timer_add_once_ns(TimerManager *mgr, uint64_t delay_ns,
+                          uint32_t event_code, void *event_data);
+
+/** Millisecond conveniences for the _ns calls. */
 TimerId timer_add(TimerManager *mgr, uint32_t interval_ms,
                   uint32_t event_code, void *event_data);
-
-/**
- * Add a one-shot timer.
- *
- * Fires exactly once after `delay_ms`, then removes itself. Identical to
- * timer_add() except the timer is not repeating.
- *
- * @param mgr Timer manager
- * @param delay_ms Delay in milliseconds before firing
- * @param event_code Event code returned by timer_poll()
- * @param event_data Optional data pointer returned by timer_poll()
- * @return Timer ID on success, TIMER_INVALID on failure
- */
 TimerId timer_add_once(TimerManager *mgr, uint32_t delay_ms,
                        uint32_t event_code, void *event_data);
 
 /**
- * Remove a timer.
- *
- * @param mgr Timer manager
- * @param id Timer ID to remove
+ * Remove a timer and cancel its real timer. An event it already posted is
+ * dropped by timer_dispatch(). Unknown and stale ids are ignored.
  */
 void timer_remove(TimerManager *mgr, TimerId id);
 
 /**
- * Reset a timer, restarting its interval from now.
- *
- * @param mgr Timer manager
- * @param id Timer ID to reset
+ * Restart a timer's interval (or one-shot delay) from now. The pending event
+ * of the previous arming, if any, is dropped.
  */
 void timer_reset(TimerManager *mgr, TimerId id);
 
 /**
- * Milliseconds until the next active timer fires.
- *
- * Returns UINT32_MAX when no timers are active. Backends use this to arm
- * a blocking wait (SDL_AddTimer, poll timeout, etc.) so the event loop
- * can sleep instead of busy-polling. Does not modify timer state.
- *
- * @param mgr Timer manager
- * @return Delay to the earliest deadline in milliseconds, or UINT32_MAX
+ * Whether `id` names a live timer. A one-shot is live until its event has
+ * been dispatched.
  */
-uint32_t timer_manager_next_delay_ms(TimerManager *mgr);
+bool timer_active(const TimerManager *mgr, TimerId id);
 
 /**
- * Advance time by `elapsed_ms` and fill `events` with timers that fired.
+ * Handle an event posted by the scheduler's timer for (slot, epoch).
  *
- * Call this once per frame/event-loop iteration. `events` must be large
- * enough to hold all firing timers; in practice a small fixed-size array
- * (e.g. 8-16 entries) is sufficient. Events are emitted in the order the
- * timers fire; timers with the same deadline are ordered by stable timer
- * slot order.
- *
- * @param mgr Timer manager
- * @param elapsed_ms Milliseconds since the last call
- * @param events Output array of fired timer events
- * @param max_events Maximum number of events to write
- * @return Number of events written (may be more than max_events if
- *         timers overflowed; compare return to max to detect overflow)
+ * @return true and fill `out` when the timer is still live and the epoch is
+ *         current; false for a stale event, which the caller drops. A
+ *         one-shot's slot is freed.
  */
-size_t timer_poll(TimerManager *mgr, uint32_t elapsed_ms,
-                  TimerEvent *events, size_t max_events);
+bool timer_dispatch(TimerManager *mgr, uint32_t slot, uint32_t epoch,
+                    TimerEvent *out);
+
+/**
+ * Next deadline of a repeating timer given the one that just fired.
+ *
+ * `prev_deadline` is the deadline that fired, `now` the current time, both on
+ * the same clock. The result is `prev_deadline + period`, a fixed grid so a
+ * late wake never pushes later ticks back. When more than a period behind it
+ * skips to the first grid point after `now` instead of firing a burst. The
+ * result is always greater than `now`.
+ */
+uint64_t timer_next_deadline(uint64_t prev_deadline, uint64_t period,
+                             uint64_t now);
 
 #endif /* TIMER_H */

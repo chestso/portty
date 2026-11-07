@@ -13,7 +13,7 @@
  *
  *   screendump, renderdump, dumpstate, record-start, record-stop,
  *   panel, panel_hide, mousemove, mousedown, mouseup, winsize,
- *   display-scale, assert-hover, assert-no-hover, diag
+ *   display-scale, assert-hover, assert-no-hover, diag, present-held
  */
 
 #ifndef PORTTY_SCRIPT_H
@@ -90,6 +90,11 @@ typedef struct
     /* Diagnostics report in the internal pager (diag). */
     void (*diag_fn)(void *ud);
     void *diag_ud;
+
+    /* Present the cached scene again without redrawing it (present-held).
+     * Returns false when no valid scene is cached. */
+    bool (*present_held_fn)(void *ud);
+    void *present_held_ud;
 } ScriptUIExt;
 
 typedef struct PorttyScript PorttyScript;

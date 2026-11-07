@@ -83,7 +83,7 @@ PORTTY_COMMON_SRC = \
     embedded_term.c embedded_term.h \
     portty_bug.c heap_harden.c \
     rend_common.c rend_boxdraw.c \
-    portty_script.c portty_frame_rec.c
+    portty_script.c portty_frame_rec.c portty_pace_trace.c frame_pacer.c
 
 PORTTY_COMMON_CFLAGS = $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
     $(LIBPNG_CFLAGS) $(COFFER_CFLAGS) -I$(top_srcdir)/third_party/qoi
@@ -130,7 +130,7 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     font_resolve.h font_resolve_w32.h heap_harden.h os_compat.h pager.h \
     path_compat.h png_reader.h png_writer.h qoi_writer.h portty_app.h \
     portty_appmodel.h portty_backend.h \
-    portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pty.h \
+    portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pace_trace.h frame_pacer.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
     term_cfr.h term.h term_colors.h timer.h \
     portty_panel.h

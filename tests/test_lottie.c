@@ -386,6 +386,65 @@ static void test_tick_advance(void)
     destroy_term(t);
 }
 
+/* Present samples by presentation time: 30 fps content on a 60 Hz display
+ * shows every frame for exactly two refreshes. */
+static void test_present_holds_two_refreshes(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+
+    apc(t, "{\"cmd\":\"load\",\"id\":1,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":300,"
+           "\"w\":20,\"h\":20,\"layers\":[]},"
+           "\"play\":{\"autostart\":true}}");
+
+    const uint64_t period = 16667;
+    int prev = -1, run = 0, bad = 0, runs = 0;
+    for (int k = 0; k < 120; k++) {
+        terminal_lottie_present(t, 1000000 + (uint64_t)k * period, period);
+        int n;
+        const CfrLottie *l = terminal_get_lotties(t, &n);
+        int f = l[0].current_frame;
+        if (f == prev) {
+            run++;
+        } else {
+            if (prev >= 0) {
+                runs++;
+                bad += (run != 2);
+            }
+            prev = f;
+            run = 1;
+        }
+    }
+    ASSERT_TRUE(runs > 50);
+    ASSERT_EQ(bad, 0);
+
+    destroy_term(t);
+}
+
+/* playing_count counts only animations that are running. */
+static void test_playing_count(void)
+{
+    TerminalBackend *t = make_term(80, 24);
+    ASSERT_TRUE(t != NULL);
+    ASSERT_EQ(terminal_lottie_playing_count(t), 0);
+
+    apc(t, "{\"cmd\":\"load\",\"id\":1,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":90,"
+           "\"w\":20,\"h\":20,\"layers\":[]}}");
+    apc(t, "{\"cmd\":\"load\",\"id\":2,"
+           "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":90,"
+           "\"w\":20,\"h\":20,\"layers\":[]},"
+           "\"play\":{\"autostart\":false}}");
+    ASSERT_EQ(terminal_lottie_count(t), 2);
+    ASSERT_EQ(terminal_lottie_playing_count(t), 1);
+
+    apc(t, "{\"cmd\":\"pause\",\"id\":1}");
+    ASSERT_EQ(terminal_lottie_playing_count(t), 0);
+
+    destroy_term(t);
+}
+
 /* Tick on paused animation does nothing. */
 static void test_tick_paused(void)
 {
@@ -653,6 +712,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_load_replace);
     RUN_TEST(test_tick_advance);
     RUN_TEST(test_tick_paused);
+    RUN_TEST(test_present_holds_two_refreshes);
+    RUN_TEST(test_playing_count);
     RUN_TEST(test_no_animations);
     RUN_TEST(test_clear);
     RUN_TEST(test_load_default_placement);

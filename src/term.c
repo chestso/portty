@@ -574,6 +574,21 @@ bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us)
     return term->lottie_tick(term, now_us);
 }
 
+bool terminal_lottie_present(TerminalBackend *term, uint64_t present_us,
+                             uint64_t hold_us)
+{
+    if (!term || !term->lottie_present)
+        return false;
+    return term->lottie_present(term, present_us, hold_us);
+}
+
+int terminal_lottie_playing_count(TerminalBackend *term)
+{
+    if (!term || !term->lottie_playing_count)
+        return 0;
+    return term->lottie_playing_count(term);
+}
+
 int terminal_lottie_count(TerminalBackend *term)
 {
     if (!term || !term->lottie_count)

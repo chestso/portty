@@ -315,6 +315,24 @@ static void test_lottie_rasterizer_off(void)
     free(r);
 }
 
+static void test_lottie_pacing_row(void)
+{
+    DiagSources s = sample();
+    s.lottie_pacing = "vsync-locked 60.000 Hz, 2 misses";
+    char *r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "lottie pacing") != NULL);
+    ASSERT_TRUE(strstr(r, "vsync-locked 60.000 Hz, 2 misses") != NULL);
+    free(r);
+
+    /* A backend with no pacer reports nothing: no row. */
+    s.lottie_pacing = NULL;
+    r = diag_build_report(&s);
+    ASSERT_NOT_NULL(r);
+    ASSERT_TRUE(strstr(r, "lottie pacing") == NULL);
+    free(r);
+}
+
 /* ── header badge ──────────────────────────────────────────────────── */
 
 /* Non-overlapping occurrences of `needle` in `hay`. */
@@ -484,6 +502,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_vt_features_section);
     RUN_TEST(test_vt_features_enabled);
     RUN_TEST(test_lottie_rasterizer_off);
+    RUN_TEST(test_lottie_pacing_row);
     RUN_TEST(test_header_badge);
     RUN_TEST(test_header_badge_narrow);
     RUN_TEST(test_header_badge_missing_cell_metrics);
