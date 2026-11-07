@@ -87,7 +87,14 @@ static void test_file_roundtrip(void)
 
 static void test_unset_env_is_off(void)
 {
+#ifdef _WIN32
+    /* MinGW does not declare unsetenv; _putenv with an empty value leaves
+     * getenv returning "" (or NULL), and pace_trace_open treats both as
+     * off, which is all this check needs. */
+    _putenv("PORTTY_PACE_TRACE=");
+#else
     unsetenv("PORTTY_PACE_TRACE");
+#endif
     ASSERT_FALSE(pace_trace_open_from_env());
     ASSERT_FALSE(pace_trace_active());
 }
