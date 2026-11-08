@@ -42,7 +42,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Bold, italic, and bold-italic font styles (variable font axes, platform-native resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
-- Dynamic font fallback (up to 16 runtime fallback fonts; the covering font and its glyph id are resolved once per codepoint and memoised for the renderer's lifetime; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
+- Dynamic font fallback (up to 24 runtime fallback fonts; multi-codepoint clusters resolve through one memoised route and fall back per cluster, with bold/italic honoured on fallback faces; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
 - Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
 - Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering
