@@ -910,64 +910,132 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     // Shaped rendering path (multiple codepoints)
     if (cp_count > 1 && data->font->render_shaped) {
-        ShapedGlyphs *shaped = font_render_shaped_text(data->font, style, cps, cp_count,
-                                                       render_r, render_g, render_b);
+        // Candidate chain: styled face, then NORMAL, then the fontconfig
+        // faces covering the cluster's codepoints. A candidate is
+        // accepted when its run has no .notdef glyph; if none is
+        // accepted, the candidate with the most drawable glyphs wins
+        // (earliest wins ties), so a partially covered cluster still
+        // draws what it can instead of dropping its marks.
+        typedef struct
+        {
+            FontStyle style;
+            void *font_data;
+            bool color_baked;
+            uint8_t render_r, render_g, render_b;
+            uint32_t color_key;
+        } ClusterCandidate;
 
-        // If shaped returned all .notdef glyphs, treat as failure so the
-        // single-glyph fallback (with fontconfig) gets a chance to run.
-        if (rend_shaped_drawable_count(shaped) == 0) {
-            font_free_shaped(shaped);
-            shaped = NULL;
+        ClusterCandidate candidates[6];
+        int num_candidates = 0;
+
+        candidates[num_candidates++] = (ClusterCandidate){ style, font_data,
+                                                           color_baked,
+                                                           render_r, render_g,
+                                                           render_b, color_key };
+        if (style != FONT_STYLE_NORMAL) {
+            bool normal_baked = rend_is_color_font(data->font, FONT_STYLE_NORMAL);
+            candidates[num_candidates++] = (ClusterCandidate){
+                FONT_STYLE_NORMAL, data->font->font_data[FONT_STYLE_NORMAL],
+                normal_baked, normal_baked ? r : 255, normal_baked ? g : 255,
+                normal_baked ? b : 255,
+                normal_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                             : 0xFFFFFF
+            };
         }
 
-        // Fallback: if shaped rendering fails with selected style, try NORMAL
-        if (!shaped && style != FONT_STYLE_NORMAL) {
-            style = FONT_STYLE_NORMAL;
-            font_data = data->font->font_data[style];
-            color_baked = rend_is_color_font(data->font, style);
-            render_r = color_baked ? r : 255;
-            render_g = color_baked ? g : 255;
-            render_b = color_baked ? b : 255;
-            color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                    : 0xFFFFFF;
-            shaped = font_render_shaped_text(data->font, style, cps, cp_count,
-                                             render_r, render_g, render_b);
-            // Same .notdef check as above: without it an all-.notdef NORMAL
-            // retry is accepted as a successful shape, the fontconfig
-            // fallback below never runs, and the cell renders blank.
-            if (rend_shaped_drawable_count(shaped) == 0) {
-                font_free_shaped(shaped);
-                shaped = NULL;
-            }
-        }
+        int num_primary_candidates = num_candidates;
 
-        // Dynamic fallback: try fontconfig-resolved font for the first codepoint
-        if (!shaped && cp_count > 0) {
-            route = rend_route_get(&data->fallback, data->font, data->resolve,
-                                   cps[0], data->font_size,
-                                   &data->font_options, data->cell_width);
-            if (route.identity &&
-                rend_fallback_ensure(&data->fallback, data->font, route.identity,
-                                     data->font_size, &data->font_options,
-                                     data->cell_width)) {
-                style = FONT_STYLE_FALLBACK;
-                font_data = route.identity;
-                // Lazily loaded — set the cell budget now
-                font_set_presentation_box(data->font, style, avail_w, avail_h,
-                                          plan.height_only_fit);
-                color_baked = rend_is_color_font(data->font, style);
-                render_r = color_baked ? r : 255;
-                render_g = color_baked ? g : 255;
-                render_b = color_baked ? b : 255;
-                color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                        : 0xFFFFFF;
-                shaped = font_render_shaped_text(data->font, style, cps, cp_count,
-                                                 render_r, render_g, render_b);
-                if (rend_shaped_drawable_count(shaped) == 0) {
-                    font_free_shaped(shaped);
-                    shaped = NULL;
+        ShapedGlyphs *shaped = NULL;
+        int best_drawable = 0;
+        ClusterCandidate best_candidate = candidates[0];
+
+        for (int i = 0;; i++) {
+            if (i == num_primary_candidates) {
+                // No primary face fully covered the cluster: append the
+                // fontconfig candidates — distinct identities over the
+                // cluster's codepoints, capped at 4 in first-appearance
+                // order. Joiners, variation selectors and combining
+                // enclosures never decide the face choice.
+                RendFallbackIdentity *identities[4];
+                int num_identities = 0;
+                for (int j = 0; j < cp_count; j++) {
+                    uint32_t cp = cps[j];
+                    if (cp == 0x200D || (cp >= 0xFE00 && cp <= 0xFE0F) ||
+                        (cp >= 0x20D0 && cp <= 0x20FF))
+                        continue;
+                    route = rend_route_get(&data->fallback, data->font,
+                                           data->resolve, cp, data->font_size,
+                                           &data->font_options, data->cell_width);
+                    if (!route.identity)
+                        continue;
+                    bool seen = false;
+                    for (int k = 0; k < num_identities; k++) {
+                        if (identities[k] == route.identity) {
+                            seen = true;
+                            break;
+                        }
+                    }
+                    if (!seen && num_identities < 4)
+                        identities[num_identities++] = route.identity;
+                }
+                for (int j = 0; j < num_identities; j++) {
+                    if (rend_fallback_ensure(&data->fallback, data->font,
+                                             identities[j], data->font_size,
+                                             &data->font_options,
+                                             data->cell_width)) {
+                        bool baked = rend_is_color_font(data->font, FONT_STYLE_FALLBACK);
+                        candidates[num_candidates++] = (ClusterCandidate){
+                            FONT_STYLE_FALLBACK, identities[j], baked,
+                            baked ? r : 255, baked ? g : 255, baked ? b : 255,
+                            baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
+                                  : 0xFFFFFF
+                        };
+                    }
                 }
             }
+            if (i >= num_candidates)
+                break;
+            ClusterCandidate *cand = &candidates[i];
+            if (cand->style == FONT_STYLE_FALLBACK) {
+                // The fallback slot may hold another identity's face by
+                // now; reload this candidate's face for shaping.
+                rend_fallback_ensure(&data->fallback, data->font,
+                                     (RendFallbackIdentity *)cand->font_data,
+                                     data->font_size, &data->font_options,
+                                     data->cell_width);
+                font_set_presentation_box(data->font, cand->style, avail_w, avail_h,
+                                          plan.height_only_fit);
+            }
+            ShapedGlyphs *run = font_render_shaped_text(data->font, cand->style, cps,
+                                                        cp_count, cand->render_r,
+                                                        cand->render_g, cand->render_b);
+            if (!run)
+                continue;
+            int drawable = rend_shaped_drawable_count(run);
+            bool accepted = drawable > 0 && rend_shaped_notdef_count(run) == 0;
+            if (accepted || drawable > best_drawable) {
+                font_free_shaped(shaped);
+                shaped = run;
+                best_drawable = drawable;
+                best_candidate = *cand;
+            } else {
+                font_free_shaped(run);
+            }
+            if (accepted)
+                break;
+        }
+
+        if (shaped && best_drawable > 0) {
+            style = best_candidate.style;
+            font_data = best_candidate.font_data;
+            color_baked = best_candidate.color_baked;
+            render_r = best_candidate.render_r;
+            render_g = best_candidate.render_g;
+            render_b = best_candidate.render_b;
+            color_key = best_candidate.color_key;
+        } else {
+            font_free_shaped(shaped);
+            shaped = NULL;
         }
 
         if (shaped) {

@@ -177,6 +177,13 @@ int rend_shaped_notdef_count(const ShapedGlyphs *run);
 // Number of glyphs that would actually be drawn (glyph != 0).
 int rend_shaped_drawable_count(const ShapedGlyphs *run);
 
+// Cluster coverage rule: a candidate face is accepted when its run has
+// rend_shaped_notdef_count() == 0. If no candidate is accepted, the
+// candidate with the most drawable glyphs wins (earliest in the chain
+// wins ties) — a cluster is never blank when any face can draw part
+// of it. Only when every candidate draws nothing does the cell fall
+// back to the single-glyph path.
+
 // Decide whether a codepoint cluster should route to the color emoji font.
 // Returns true if the emoji font should be used. VS15 narrows the cell to
 // 1 column but does NOT block color emoji routing — if the emoji font
