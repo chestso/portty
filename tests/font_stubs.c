@@ -167,6 +167,39 @@ void test_font_set_face_glyph(void *face_tag, uint32_t cp, uint32_t gid)
 
 int test_shape_count(void) { return s_shape_count; }
 
+// Emphasis application record: call count plus whether color faces were
+// refused (never synthesised).
+static int s_emphasis_calls;
+static bool s_emphasis_applied;
+static void *s_color_faces[64];
+static int s_color_face_count;
+
+void test_font_set_face_color(void *face_tag, bool color)
+{
+    if (color && s_color_face_count < 64)
+        s_color_faces[s_color_face_count++] = face_tag;
+}
+
+int test_emphasis_call_count(void) { return s_emphasis_calls; }
+bool test_emphasis_applied(void) { return s_emphasis_applied; }
+
+static bool stub_set_style_emphasis(FontBackend *font, void *font_data,
+                                    bool bold, bool italic)
+{
+    (void)font;
+    (void)bold;
+    (void)italic;
+    s_emphasis_calls++;
+    for (int i = 0; i < s_color_face_count; i++) {
+        if (s_color_faces[i] == font_data) {
+            s_emphasis_applied = false;
+            return false;
+        }
+    }
+    s_emphasis_applied = true;
+    return true;
+}
+
 void test_font_set_loaded_styles(uint32_t mask) { s_test_loaded_styles = mask; }
 uint32_t test_font_get_loaded_styles(void) { return s_test_loaded_styles; }
 void test_font_reset(void)
@@ -180,6 +213,10 @@ void test_font_reset(void)
     memset(s_face_glyphs, 0, sizeof(s_face_glyphs));
     s_face_glyph_count = 0;
     s_shape_count = 0;
+    s_emphasis_calls = 0;
+    s_emphasis_applied = false;
+    memset(s_color_faces, 0, sizeof(s_color_faces));
+    s_color_face_count = 0;
 }
 
 // Read back the budget the helper pushed for `style`. Returns false when the
@@ -320,6 +357,7 @@ FontBackend make_test_font_backend(void)
     fb.loaded_styles = s_test_loaded_styles;
     fb.get_glyph_index = stub_get_glyph_index;
     fb.set_presentation_box = stub_set_presentation_box;
+    fb.set_style_emphasis = stub_set_style_emphasis;
     fb.render_shaped = stub_render_shaped;
     fb.init_font = stub_init_font;
     fb.destroy_font = stub_destroy_font;

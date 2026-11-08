@@ -477,8 +477,11 @@ void rend_make_close_x_bitmap(uint8_t *buf, int size);
 
 // Each loaded fallback is a whole face, but a screen full of text from many
 // scripts resolves to a handful; too small a pool evicts and reloads faces
-// (and re-rasterizes their glyphs) on every frame.
-#define REND_MAX_LOADED_FALLBACKS 16
+// (and re-rasterizes their glyphs) on every frame. Sized from a measurement
+// with ~15k codepoints across many scripts in regular and bold: 18 distinct
+// fallback files are resolved, so a pool of 16 thrashes (37 loads) while 24
+// loads each file once.
+#define REND_MAX_LOADED_FALLBACKS 24
 
 typedef struct
 {
@@ -498,6 +501,11 @@ typedef struct
     // loaded; the atlas-hit path needs the baked-color decision without
     // loading the face again. Stable for the life of the font file.
     bool color_font;
+    // The bold/italic variant this identity is for. A variable font serves
+    // each variant from one file, but the atlas keys the variants apart so
+    // a bold fallback raster never answers a regular lookup.
+    bool bold;
+    bool italic;
 } RendFallbackIdentity;
 
 // The route table: which font covers a codepoint, and which glyph id it has
@@ -520,6 +528,8 @@ typedef struct
     bool used;
     uint32_t codepoint;
     uint32_t glyph_id;
+    bool bold;
+    bool italic;
     RendFallbackIdentity *identity;
 } RendRouteEntry;
 
@@ -589,16 +599,17 @@ const RendClusterRoute *rend_cluster_route(
 
 void rend_fallback_init(RendFallbackState *st);
 void rend_fallback_destroy(RendFallbackState *st, FontBackend *font);
-// Resolve (and memoise) the rendering route for `codepoint`: the covering
-// font and the glyph id it maps to there. The resolver is consulted at most
-// once per codepoint for the life of the fallback state; identity == NULL
-// (also memoised) means no installed font covers it. The covering font is
-// loaded once to learn its glyph id; ids are per font file, so they stay
-// valid across face evictions and reloads.
+// Resolve (and memoise) the rendering route for `codepoint` in the
+// bold/italic variant: the covering font and the glyph id it maps to
+// there. The resolver is consulted at most once per (codepoint, variant)
+// for the life of the fallback state; identity == NULL (also memoised)
+// means no installed font covers it. The covering font is loaded once to
+// learn its glyph id; ids are per font file, so they stay valid across
+// face evictions and reloads.
 RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
                          FontResolveBackend *resolve, uint32_t codepoint,
-                         float font_size, const FontOptions *options,
-                         int cell_width);
+                         bool bold, bool italic, float font_size,
+                         const FontOptions *options, int cell_width);
 // Load the face behind `identity` as the FONT_STYLE_FALLBACK face, reusing
 // an already loaded one when possible. Loading a new face past
 // REND_MAX_LOADED_FALLBACKS drops the oldest; the glyphs it cached stay in
@@ -608,12 +619,13 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
                           RendFallbackIdentity *identity, float font_size,
                           const FontOptions *options, int cell_width);
 
-// Atlas key for the glyphs rasterized from `font_path`. The key depends only on
-// the path, never on the loaded face's address: a cached glyph survives the
-// eviction of its face, and a face loaded at an address a previous one used
-// cannot answer with the previous face's bitmaps. Returns NULL on allocation
-// failure.
-void *rend_fallback_key(RendFallbackState *st, const char *font_path);
+// Atlas key for the glyphs rasterized from `font_path` in the bold/italic
+// variant. The key depends only on the path and variant, never on the
+// loaded face's address: a cached glyph survives the eviction of its face,
+// and a face loaded at an address a previous one used cannot answer with
+// the previous face's bitmaps. Returns NULL on allocation failure.
+void *rend_fallback_key(RendFallbackState *st, const char *font_path,
+                        bool bold, bool italic);
 
 // =============================================================================
 // Scroll offset management — GPU-agnostic

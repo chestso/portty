@@ -39,6 +39,7 @@ SDL_VIDEODRIVER=dummy "$bin" -S "$tmp/quit.sh" >/dev/null 2>&1 || exit 77
 # the whole cell's ink instead of only a mark's.
 thai='วัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวัวั'
 base_ink=""
+bold_ink=""
 fail=0
 
 for sgr in 0 1 3 1\;3 7 1\;7; do
@@ -125,7 +126,18 @@ PY
 			fail=1
 		fi
 	fi
+	if [ "$sgr" = "1" ]; then
+		bold_ink=$ink
+	fi
 done
+
+# A bold fallback face renders heavier than the regular one:
+# ink(bold) >= 1.05 * ink(normal).
+if [ -n "$bold_ink" ] && [ -n "$base_ink" ] &&
+	[ $((bold_ink * 100)) -lt $((base_ink * 105)) ]; then
+	echo "FAIL: bold fallback ink=$bold_ink < 1.05 * ink(0)=$base_ink" >&2
+	fail=1
+fi
 
 [ $fail -eq 0 ] && echo "PASS"
 exit $fail

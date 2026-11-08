@@ -1562,13 +1562,16 @@ void rend_fallback_destroy(RendFallbackState *st, FontBackend *font)
     memset(st, 0, sizeof(*st));
 }
 
-void *rend_fallback_key(RendFallbackState *st, const char *font_path)
+void *rend_fallback_key(RendFallbackState *st, const char *font_path,
+                        bool bold, bool italic)
 {
     if (!st || !font_path)
         return NULL;
 
     for (int i = 0; i < st->identity_count; i++) {
-        if (strcmp(st->identities[i]->font_path, font_path) == 0)
+        if (strcmp(st->identities[i]->font_path, font_path) == 0 &&
+            st->identities[i]->bold == bold &&
+            st->identities[i]->italic == italic)
             return st->identities[i]->key;
     }
 
@@ -1593,11 +1596,13 @@ void *rend_fallback_key(RendFallbackState *st, const char *font_path)
         return NULL;
     }
     identity->key = identity;
+    identity->bold = bold;
+    identity->italic = italic;
     st->identities[st->identity_count++] = identity;
     return identity->key;
 }
 
-static uint32_t route_slot(uint32_t codepoint)
+static uint32_t route_slot(uint32_t codepoint, bool bold, bool italic)
 {
     // FNV-1a over the codepoint's bytes, folded into the table.
     uint32_t h = 2166136261u;
@@ -1605,15 +1610,17 @@ static uint32_t route_slot(uint32_t codepoint)
         h ^= (codepoint >> (8 * i)) & 0xffu;
         h *= 16777619u;
     }
+    h ^= (bold ? 1u : 0u) | (italic ? 2u : 0u);
+    h *= 16777619u;
     return h & (REND_ROUTE_TABLE_SIZE - 1);
 }
 
 RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
                          FontResolveBackend *resolve, uint32_t codepoint,
-                         float font_size, const FontOptions *options,
-                         int cell_width)
+                         bool bold, bool italic, float font_size,
+                         const FontOptions *options, int cell_width)
 {
-    uint32_t slot = route_slot(codepoint);
+    uint32_t slot = route_slot(codepoint, bold, italic);
     RendRouteEntry *store = NULL;
     for (;;) {
         RendRouteEntry *e = &st->routes[slot];
@@ -1621,7 +1628,7 @@ RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
             store = e; // first free slot along the probe chain
             break;
         }
-        if (e->codepoint == codepoint)
+        if (e->codepoint == codepoint && e->bold == bold && e->italic == italic)
             return (RendRoute){ .identity = e->identity, .glyph_id = e->glyph_id };
         slot = (slot + 1) & (REND_ROUTE_TABLE_SIZE - 1);
     }
@@ -1640,7 +1647,7 @@ RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
         // rend_fallback_key() returns the identity record's own address and
         // owns the path copy; the record never moves.
         RendFallbackIdentity *identity =
-            (RendFallbackIdentity *)rend_fallback_key(st, path);
+            (RendFallbackIdentity *)rend_fallback_key(st, path, bold, italic);
         free(path);
         if (identity &&
             rend_fallback_ensure(st, font, identity, font_size, options,
@@ -1656,6 +1663,8 @@ RendRoute rend_route_get(RendFallbackState *st, FontBackend *font,
         store->used = true;
         store->codepoint = codepoint;
         store->glyph_id = route.glyph_id;
+        store->bold = bold;
+        store->italic = italic;
         store->identity = route.identity;
         st->route_count++;
     }
@@ -1676,6 +1685,11 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
         if (strcmp(st->loaded[i].font_path, font_path) == 0) {
             font->font_data[FONT_STYLE_FALLBACK] = st->loaded[i].font_data;
             font->loaded_styles |= (1u << FONT_STYLE_FALLBACK);
+            // The fallback slot is shared between identities, so the
+            // emphasis must be re-applied for this identity's variant on
+            // every use of the face, not just when it was first loaded.
+            font_set_style_emphasis(font, FONT_STYLE_FALLBACK, identity->bold,
+                                    identity->italic);
             return true;
         }
     }
@@ -1726,6 +1740,10 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
 
     font_set_target_cell_width(font, cell_width);
     font_set_variation_axis(font, FONT_STYLE_FALLBACK, "wght", 400);
+    // Apply this identity's bold/italic variant; the shared slot may
+    // currently carry another variant's emphasis from a previous load.
+    font_set_style_emphasis(font, FONT_STYLE_FALLBACK, identity->bold,
+                            identity->italic);
 
     vlog("Fallback font loaded and cached (%d/%d): %s\n",
          st->loaded_count, REND_MAX_LOADED_FALLBACKS, font_path);
@@ -1830,6 +1848,11 @@ static void cluster_resolve(RendFallbackState *st, FontBackend *font,
 {
     memset(out, 0, sizeof(*out));
 
+    bool variant_bold = cell_style.style == FONT_STYLE_BOLD ||
+                        cell_style.style == FONT_STYLE_BOLD_ITALIC;
+    bool variant_italic = cell_style.style == FONT_STYLE_ITALIC ||
+                          cell_style.style == FONT_STYLE_BOLD_ITALIC;
+
     if (cp_count == 1) {
         FontStyle style = cell_style.style;
         uint32_t gid = font_get_glyph_index(font, style, cps[0]);
@@ -1840,6 +1863,7 @@ static void cluster_resolve(RendFallbackState *st, FontBackend *font,
         RendFallbackIdentity *identity = NULL;
         if (gid == 0) {
             RendRoute route = rend_route_get(st, font, resolve, cps[0],
+                                             variant_bold, variant_italic,
                                              font_size, options, cell_width);
             if (route.identity && route.glyph_id != 0) {
                 style = FONT_STYLE_FALLBACK;
@@ -1895,8 +1919,9 @@ static void cluster_resolve(RendFallbackState *st, FontBackend *font,
             if (cp == 0x200D || (cp >= 0xFE00 && cp <= 0xFE0F) ||
                 (cp >= 0x20D0 && cp <= 0x20FF))
                 continue;
-            RendRoute route = rend_route_get(st, font, resolve, cp, font_size,
-                                             options, cell_width);
+            RendRoute route = rend_route_get(st, font, resolve, cp,
+                                             variant_bold, variant_italic,
+                                             font_size, options, cell_width);
             if (!route.identity)
                 continue;
             bool seen = false;

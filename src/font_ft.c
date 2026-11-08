@@ -1262,6 +1262,57 @@ static bool ft_set_variation_axis(FontBackend *font, void *font_data, const char
 }
 
 // Set multiple variation axis coordinates
+// Make a loaded face render bold/italic: the variable wght/ital axes when
+// the face has them, synthetic emboldening/obliquing otherwise. Color
+// faces are never synthesised.
+static bool ft_set_style_emphasis(FontBackend *font, void *font_data,
+                                  bool bold, bool italic)
+{
+    FtFontData *ft_data = (FtFontData *)font_data;
+    if (!ft_data || !ft_data->ft_face)
+        return false;
+    if (ft_data->has_colr || FT_HAS_COLOR(ft_data->ft_face))
+        return false;
+
+    bool applied = false;
+    bool has_wght = false, has_ital = false;
+    cache_mm_var(ft_data);
+    if (ft_data->mm_var) {
+        for (FT_UInt i = 0; i < ft_data->mm_var->num_axis; i++) {
+            FT_ULong tag = ft_data->mm_var->axis[i].tag;
+            if (tag == FT_MAKE_TAG('w', 'g', 'h', 't')) {
+                float min = (float)ft_data->mm_var->axis[i].minimum / 65536.0f;
+                float max = (float)ft_data->mm_var->axis[i].maximum / 65536.0f;
+                float weight = bold ? 700.0f : 400.0f;
+                if (weight < min)
+                    weight = min;
+                if (weight > max)
+                    weight = max;
+                applied = ft_set_variation_axis(font, font_data, "wght",
+                                                weight) ||
+                          applied;
+                has_wght = true;
+            }
+            if (tag == FT_MAKE_TAG('i', 't', 'a', 'l') ||
+                tag == FT_MAKE_TAG('s', 'l', 'n', 't')) {
+                applied = ft_set_variation_axis(font, font_data,
+                                                tag == FT_MAKE_TAG('i', 't', 'a', 'l') ? "ital" : "slnt",
+                                                italic ? 1.0f : 0.0f) ||
+                          applied;
+                has_ital = true;
+            }
+        }
+    }
+    if (!has_wght)
+        ft_data->synthetic_bold = bold;
+    if (!has_ital)
+        ft_data->synthetic_italic = italic;
+    if ((bold && (has_wght || ft_data->synthetic_bold)) ||
+        (italic && (has_ital || ft_data->synthetic_italic)))
+        applied = true;
+    return applied;
+}
+
 static bool ft_set_variation_axes(FontBackend *font, void *font_data, float *coords_in, int num_coords)
 {
     (void)font;
@@ -1390,5 +1441,6 @@ FontBackend font_backend_ft = {
     .style_has_colr = ft_style_has_colr,
     .get_glyph_index = ft_get_glyph_index,
     .set_target_cell_width = ft_set_target_cell_width,
+    .set_style_emphasis = ft_set_style_emphasis,
     .set_presentation_box = ft_set_presentation_box
 };

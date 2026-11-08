@@ -150,6 +150,13 @@ struct FontBackend
     // Set target cell width for oversized glyph scaling (backend-specific)
     void (*set_target_cell_width)(void *font_data, int cell_width);
 
+    // Make a loaded face render bold/italic: sets the wght axis (and
+    // ital/slnt if present) when the face is variable, otherwise enables
+    // synthetic emboldening/obliquing at rasterization. Returns whether
+    // either applied. Color faces are never synthesised.
+    bool (*set_style_emphasis)(FontBackend *font, void *font_data,
+                               bool bold, bool italic);
+
     // Set the per-render pixel budget for the glyph about to be rasterized.
     // width is the actual available space (columns_to_consume * cell_width),
     // height the cell height. height_only_fit asks the backend to leave
@@ -201,5 +208,10 @@ void font_set_target_cell_width(FontBackend *font, int cell_width);
 // Set the per-render pixel budget on a single font style
 void font_set_presentation_box(FontBackend *font, FontStyle style,
                                int width, int height, bool height_only_fit);
+
+// Make a loaded font style render bold/italic (variable axis first,
+// synthetic emboldening/obliquing second). Returns whether either applied.
+bool font_set_style_emphasis(FontBackend *font, FontStyle style,
+                             bool bold, bool italic);
 
 #endif // FONT_H

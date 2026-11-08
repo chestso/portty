@@ -224,3 +224,14 @@ void font_set_presentation_box(FontBackend *font, FontStyle style,
         font->set_presentation_box(font->font_data[style], width, height,
                                    height_only_fit);
 }
+
+// Make a loaded font style render bold/italic
+bool font_set_style_emphasis(FontBackend *font, FontStyle style,
+                             bool bold, bool italic)
+{
+    if (!font || style >= FONT_STYLE_COUNT ||
+        !(font->loaded_styles & (1u << style)) || !font->set_style_emphasis)
+        return false;
+    return font->set_style_emphasis(font, font->font_data[style], bold,
+                                    italic);
+}
