@@ -523,6 +523,41 @@ typedef struct
     RendFallbackIdentity *identity;
 } RendRouteEntry;
 
+// What to draw for a cell, and from which face. Pure data: no face pointers.
+typedef struct
+{
+    FontStyle style;                // slot the glyph ids belong to: a primary
+                                    // style, EMOJI, or FALLBACK
+    RendFallbackIdentity *identity; // FALLBACK only; NULL otherwise
+    void *atlas_font_key;           // primary face data or identity (atlas key)
+    bool color_baked;
+    int num_glyphs;      // 0 = nothing drawable; render the codepoint-0
+                         // .notdef from the primary face
+    uint32_t *glyph_ids; // owned by the route cache
+    int *x_positions;    // owned by the route cache
+    int *x_advances;     // owned by the route cache
+} RendClusterRoute;
+
+// The cluster route cache: one shaped run per distinct (cps, style). A
+// shaped cluster is shaped at most once per (cps, style) for the lifetime
+// of the fallback state, so an atlas hit performs no shaping, no
+// fontconfig query and no face load. Keyed open-addressing; longer
+// clusters and a filled table resolve uncached into a scratch ring.
+#define REND_CLUSTER_TABLE_SIZE  8192 // power of two
+#define REND_CLUSTER_STORE_LIMIT (REND_CLUSTER_TABLE_SIZE / 4 * 3)
+#define REND_CLUSTER_KEY_MAX     32
+#define REND_CLUSTER_SCRATCH     8
+
+typedef struct
+{
+    bool used;
+    FontStyle style;
+    bool use_emoji;
+    int cp_count;
+    uint32_t cps[REND_CLUSTER_KEY_MAX];
+    RendClusterRoute route;
+} RendClusterEntry;
+
 typedef struct
 {
     RendRouteEntry routes[REND_ROUTE_TABLE_SIZE];
@@ -534,7 +569,23 @@ typedef struct
     RendFallbackIdentity **identities;
     int identity_count;
     int identity_cap;
+    RendClusterEntry clusters[REND_CLUSTER_TABLE_SIZE];
+    int cluster_count;
+    RendClusterRoute cluster_scratch[REND_CLUSTER_SCRATCH];
+    int cluster_scratch_next;
 } RendFallbackState;
+
+// Resolve what to draw for a cell through the memoised cluster route.
+// Single codepoints resolve by cmap through styled, NORMAL, then the
+// fontconfig route for the codepoint; multi-codepoint clusters are shaped
+// with the coverage rule above (accepted on no .notdef, best effort
+// otherwise). The returned route is owned by the fallback state and stays
+// valid until the state is destroyed or (for uncached resolves) the
+// scratch ring cycles.
+const RendClusterRoute *rend_cluster_route(
+    RendFallbackState *st, FontBackend *font, FontResolveBackend *resolve,
+    const uint32_t *cps, int cp_count, RendCellStyle cell_style,
+    float font_size, const FontOptions *options, int cell_width);
 
 void rend_fallback_init(RendFallbackState *st);
 void rend_fallback_destroy(RendFallbackState *st, FontBackend *font);

@@ -46,6 +46,18 @@ static void test_notdef_count_mixed(void);
 static void test_notdef_count_none(void);
 static void test_notdef_count_null(void);
 static void test_drawable_count(void);
+static void test_cluster_styled_covers(void);
+static void test_cluster_falls_to_normal(void);
+static void test_cluster_falls_to_fontconfig(void);
+static void test_cluster_partial_prefers_full_cover(void);
+static void test_cluster_best_effort(void);
+static void test_cluster_nothing_drawable(void);
+static void test_cluster_memoised(void);
+static void test_cluster_key_includes_style(void);
+static void test_cluster_over_capacity(void);
+static void test_cluster_survives_face_eviction(void);
+static void test_cluster_dies_with_state(void);
+static void test_cluster_zwj_not_notdef(void);
 
 /* Helpers exported by font_stubs.c for testing the policy functions in
  * rend_common.c that consult the FontBackend for style/emoji decisions. */
@@ -55,6 +67,8 @@ void test_font_reset(void);
 bool test_font_get_box(FontStyle style, int *width, int *height,
                        bool *height_only_fit);
 void test_font_set_glyph(uint32_t cp, uint32_t glyph_id);
+void test_font_set_face_glyph(void *face_tag, uint32_t cp, uint32_t gid);
+int test_shape_count(void);
 void test_resolve_add_route(uint32_t cp, const char *path);
 int test_resolve_query_count(void);
 void test_resolve_reset(void);
@@ -722,6 +736,410 @@ static void test_drawable_count(void)
     ASSERT_EQ(rend_shaped_drawable_count(&empty), 0);
 }
 
+/* Cluster route tests. Thai base+mark fixtures: U+0E27 (ว) + U+0E31 (ั). */
+#define THAI_BASE ((uint32_t)0x0E27)
+#define THAI_MARK ((uint32_t)0x0E31)
+
+static void cluster_setup(FontBackend *fb, RendFallbackState *st,
+                          FontResolveBackend *resolve)
+{
+    test_resolve_reset();
+    test_font_reset();
+    test_font_set_loaded_styles((1u << FONT_STYLE_NORMAL) |
+                                (1u << FONT_STYLE_BOLD) |
+                                (1u << FONT_STYLE_ITALIC) |
+                                (1u << FONT_STYLE_BOLD_ITALIC));
+    *fb = make_test_font_backend();
+    memset(resolve, 0, sizeof(*resolve));
+    rend_fallback_init(st);
+}
+
+static void test_cluster_styled_covers(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
+    ASSERT_NULL(route->identity);
+    ASSERT_EQ(route->num_glyphs, 2);
+    ASSERT_EQ(route->glyph_ids[0], 10);
+    ASSERT_EQ(route->glyph_ids[1], 11);
+    ASSERT_EQ(test_shape_count(), 1);
+    ASSERT_EQ(test_resolve_query_count(), 0);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_falls_to_normal(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    // The bold face covers nothing; the NORMAL face covers the cluster.
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_BOLD, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
+    ASSERT_NULL(route->identity);
+    ASSERT_EQ(route->num_glyphs, 2);
+    ASSERT_EQ(route->glyph_ids[0], 10);
+    ASSERT_EQ(test_shape_count(), 2);
+    ASSERT_EQ(test_resolve_query_count(), 0);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_falls_to_fontconfig(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    // Styled and NORMAL are all-.notdef; only the fontconfig face covers.
+    test_resolve_add_route(THAI_BASE, "/fonts/thai.ttf");
+    test_resolve_add_route(THAI_MARK, "/fonts/thai.ttf");
+
+    FontOptions opts = { 0 };
+    RendRoute pre = rend_route_get(&st, &fb, &resolve, THAI_BASE, 12.0f,
+                                   &opts, 10);
+    ASSERT_NOT_NULL(pre.identity);
+    void *fallback_face = fb.font_data[FONT_STYLE_FALLBACK];
+    ASSERT_NOT_NULL(fallback_face);
+    test_font_set_face_glyph(fallback_face, THAI_BASE, 21);
+    test_font_set_face_glyph(fallback_face, THAI_MARK, 22);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_BOLD, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->style, FONT_STYLE_FALLBACK);
+    ASSERT_NOT_NULL(route->identity);
+    ASSERT_TRUE(route->identity == pre.identity);
+    ASSERT_EQ(route->num_glyphs, 2);
+    ASSERT_EQ(route->glyph_ids[0], 21);
+    ASSERT_EQ(route->glyph_ids[1], 22);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_partial_prefers_full_cover(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    // NORMAL covers the base only; the fallback covers the whole cluster.
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_resolve_add_route(THAI_BASE, "/fonts/thai.ttf");
+    test_resolve_add_route(THAI_MARK, "/fonts/thai.ttf");
+
+    FontOptions opts = { 0 };
+    rend_route_get(&st, &fb, &resolve, THAI_BASE, 12.0f, &opts, 10);
+    void *fallback_face = fb.font_data[FONT_STYLE_FALLBACK];
+    test_font_set_face_glyph(fallback_face, THAI_BASE, 21);
+    test_font_set_face_glyph(fallback_face, THAI_MARK, 22);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->style, FONT_STYLE_FALLBACK);
+    ASSERT_EQ(route->num_glyphs, 2);
+    ASSERT_EQ(route->glyph_ids[0], 21);
+    ASSERT_EQ(route->glyph_ids[1], 22);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_best_effort(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    // No face covers both: NORMAL draws the base, the fallback the mark.
+    // Both draw one glyph; the earliest in the chain (NORMAL) wins.
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_resolve_add_route(THAI_BASE, "/fonts/thai.ttf");
+    test_resolve_add_route(THAI_MARK, "/fonts/thai.ttf");
+
+    FontOptions opts = { 0 };
+    rend_route_get(&st, &fb, &resolve, THAI_MARK, 12.0f, &opts, 10);
+    void *fallback_face = fb.font_data[FONT_STYLE_FALLBACK];
+    test_font_set_face_glyph(fallback_face, THAI_MARK, 22);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
+    ASSERT_EQ(route->num_glyphs, 2);
+    ASSERT_EQ(route->glyph_ids[0], 10);
+    ASSERT_EQ(route->glyph_ids[1], 0);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_nothing_drawable(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->num_glyphs, 0);
+    ASSERT_NULL(route->identity);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_memoised(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *r1 =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+    int shapes = test_shape_count();
+    int queries = test_resolve_query_count();
+    const RendClusterRoute *r2 =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+
+    ASSERT_TRUE(r1 == r2);
+    ASSERT_EQ(test_shape_count(), shapes);
+    ASSERT_EQ(test_resolve_query_count(), queries);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_key_includes_style(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_BOLD], THAI_BASE, 30);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_BOLD], THAI_MARK, 31);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle normal = { FONT_STYLE_NORMAL, false };
+    RendCellStyle bold = { FONT_STYLE_BOLD, false };
+    const RendClusterRoute *r1 =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, normal, 12.0f, NULL, 10);
+    const RendClusterRoute *r2 =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, bold, 12.0f, NULL, 10);
+
+    ASSERT_TRUE(r1 != r2);
+    ASSERT_EQ(r1->glyph_ids[0], 10);
+    ASSERT_EQ(r2->glyph_ids[0], 30);
+    ASSERT_EQ(r2->glyph_ids[1], 31);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_over_capacity(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    void *normal_face = fb.font_data[FONT_STYLE_NORMAL];
+    int total = REND_CLUSTER_STORE_LIMIT + 100;
+    for (int i = 0; i < total; i++) {
+        uint32_t base = 0x10000 + (uint32_t)i;
+        test_font_set_face_glyph(normal_face, base, 10);
+        test_font_set_face_glyph(normal_face, THAI_MARK, 11);
+        uint32_t cps[] = { base, THAI_MARK };
+        RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+        const RendClusterRoute *route =
+            rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        ASSERT_NOT_NULL(route);
+        ASSERT_EQ(route->num_glyphs, 2);
+        ASSERT_EQ(route->glyph_ids[0], 10);
+    }
+    ASSERT_EQ(st.cluster_count, REND_CLUSTER_STORE_LIMIT);
+
+    // Past the limit, resolve still works (via the scratch ring) without
+    // growing the table.
+    uint32_t extra[] = { 0x1FFFF, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    test_font_set_face_glyph(normal_face, 0x1FFFF, 10);
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, extra, 2, cs, 12.0f, NULL, 10);
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->num_glyphs, 2);
+    ASSERT_EQ(route->glyph_ids[0], 10);
+    ASSERT_EQ(st.cluster_count, REND_CLUSTER_STORE_LIMIT);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_survives_face_eviction(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    // More distinct fallback paths than the pool holds, so faces are
+    // evicted while the cluster routes live on.
+    const int n = REND_MAX_LOADED_FALLBACKS + 1;
+    RendFallbackIdentity *identities[REND_MAX_LOADED_FALLBACKS + 1];
+    void *faces[REND_MAX_LOADED_FALLBACKS + 1];
+    uint32_t bases[REND_MAX_LOADED_FALLBACKS + 1];
+    FontOptions opts = { 0 };
+    for (int i = 0; i < n; i++) {
+        bases[i] = 0x3000 + (uint32_t)i;
+        char path[64];
+        snprintf(path, sizeof(path), "/fonts/f%d.ttf", i);
+        test_resolve_add_route(bases[i], path);
+        RendRoute pre = rend_route_get(&st, &fb, &resolve, bases[i], 12.0f,
+                                       &opts, 10);
+        ASSERT_NOT_NULL(pre.identity);
+        identities[i] = pre.identity;
+        faces[i] = fb.font_data[FONT_STYLE_FALLBACK];
+        test_font_set_face_glyph(faces[i], bases[i], (uint32_t)(100 + i));
+    }
+
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    for (int i = 0; i < n; i++) {
+        uint32_t cps[] = { bases[i], bases[i] };
+        const RendClusterRoute *route =
+            rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        ASSERT_NOT_NULL(route);
+        ASSERT_EQ(route->style, FONT_STYLE_FALLBACK);
+        ASSERT_TRUE(route->identity == identities[i]);
+        ASSERT_EQ(route->num_glyphs, 2);
+        ASSERT_EQ(route->glyph_ids[0], (uint32_t)(100 + i));
+        ASSERT_EQ(route->glyph_ids[1], (uint32_t)(100 + i));
+    }
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_dies_with_state(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
+
+    uint32_t cps[] = { THAI_BASE, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *r1 =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+    ASSERT_NOT_NULL(r1);
+    int shapes = test_shape_count();
+
+    rend_fallback_destroy(&st, &fb);
+    rend_fallback_init(&st);
+    const RendClusterRoute *r2 =
+        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+    ASSERT_NOT_NULL(r2);
+    ASSERT_TRUE(test_shape_count() > shapes);
+    ASSERT_EQ(r2->glyph_ids[0], 10);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
+static void test_cluster_zwj_not_notdef(void)
+{
+    FontBackend fb;
+    RendFallbackState st;
+    FontResolveBackend resolve;
+    cluster_setup(&fb, &st, &resolve);
+
+    // A joiner between base and mark: the stub shapes it to a non-zero
+    // invisible glyph, so the cluster still counts as covered by NORMAL.
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
+    test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
+
+    uint32_t cps[] = { THAI_BASE, 0x200D, THAI_MARK };
+    RendCellStyle cs = { FONT_STYLE_NORMAL, false };
+    const RendClusterRoute *route =
+        rend_cluster_route(&st, &fb, &resolve, cps, 3, cs, 12.0f, NULL, 10);
+
+    ASSERT_NOT_NULL(route);
+    ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
+    ASSERT_EQ(route->num_glyphs, 3);
+    ASSERT_TRUE(route->glyph_ids[1] != 0);
+    ASSERT_EQ(test_resolve_query_count(), 0);
+
+    rend_fallback_destroy(&st, &fb);
+    test_font_reset();
+    test_resolve_reset();
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -771,6 +1189,18 @@ int main(int argc, char *argv[])
     RUN_TEST(test_notdef_count_none);
     RUN_TEST(test_notdef_count_null);
     RUN_TEST(test_drawable_count);
+    RUN_TEST(test_cluster_styled_covers);
+    RUN_TEST(test_cluster_falls_to_normal);
+    RUN_TEST(test_cluster_falls_to_fontconfig);
+    RUN_TEST(test_cluster_partial_prefers_full_cover);
+    RUN_TEST(test_cluster_best_effort);
+    RUN_TEST(test_cluster_nothing_drawable);
+    RUN_TEST(test_cluster_memoised);
+    RUN_TEST(test_cluster_key_includes_style);
+    RUN_TEST(test_cluster_over_capacity);
+    RUN_TEST(test_cluster_survives_face_eviction);
+    RUN_TEST(test_cluster_dies_with_state);
+    RUN_TEST(test_cluster_zwj_not_notdef);
 
     TEST_SUMMARY();
 }

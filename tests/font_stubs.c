@@ -136,6 +136,37 @@ typedef struct
 static TestFontBox s_boxes[FONT_STYLE_COUNT];
 static bool s_box_set[FONT_STYLE_COUNT];
 
+// Per-face shaped-run map (cp -> gid) and the shaping counter, so tests
+// can pin exactly which faces cover which cluster codepoints.
+typedef struct
+{
+    void *face;
+    uint32_t cp;
+    uint32_t gid;
+} TestFaceGlyph;
+
+static TestFaceGlyph s_face_glyphs[16384];
+static int s_face_glyph_count;
+static int s_shape_count;
+
+void test_font_set_face_glyph(void *face_tag, uint32_t cp, uint32_t gid)
+{
+    for (int i = 0; i < s_face_glyph_count; i++) {
+        if (s_face_glyphs[i].face == face_tag && s_face_glyphs[i].cp == cp) {
+            s_face_glyphs[i].gid = gid;
+            return;
+        }
+    }
+    if (s_face_glyph_count < 16384) {
+        s_face_glyphs[s_face_glyph_count].face = face_tag;
+        s_face_glyphs[s_face_glyph_count].cp = cp;
+        s_face_glyphs[s_face_glyph_count].gid = gid;
+        s_face_glyph_count++;
+    }
+}
+
+int test_shape_count(void) { return s_shape_count; }
+
 void test_font_set_loaded_styles(uint32_t mask) { s_test_loaded_styles = mask; }
 uint32_t test_font_get_loaded_styles(void) { return s_test_loaded_styles; }
 void test_font_reset(void)
@@ -146,6 +177,9 @@ void test_font_reset(void)
     memset(s_glyph_map, 0, sizeof(s_glyph_map));
     memset(s_glyph_cps, 0, sizeof(s_glyph_cps));
     s_glyph_map_count = 0;
+    memset(s_face_glyphs, 0, sizeof(s_face_glyphs));
+    s_face_glyph_count = 0;
+    s_shape_count = 0;
 }
 
 // Read back the budget the helper pushed for `style`. Returns false when the
@@ -196,11 +230,21 @@ static void *stub_init_font(FontBackend *font, const char *font_path,
                             const FontOptions *options)
 {
     (void)font;
-    (void)font_path;
     (void)font_size;
     (void)style;
     (void)options;
-    // Unique non-NULL handle per load; the state machine compares them.
+    // Deterministic handle per path, so a face reloaded after eviction
+    // keeps the glyph map the test pinned for that file.
+    static char *paths[256];
+    static int path_count = 0;
+    for (int i = 0; i < path_count; i++) {
+        if (strcmp(paths[i], font_path) == 0)
+            return (void *)(intptr_t)(2000 + i);
+    }
+    if (path_count < 256) {
+        paths[path_count] = strdup(font_path);
+        return (void *)(intptr_t)(2000 + path_count++);
+    }
     static int seq = 0;
     return (void *)(intptr_t)(++seq + 1000);
 }
@@ -220,6 +264,55 @@ static bool stub_get_metrics(FontBackend *font, void *font_data,
     return true;
 }
 
+// One glyph per codepoint, advance 6. Unmapped codepoints shape to
+// .notdef (gid 0); joiners and variation selectors shape to a non-zero
+// invisible glyph, like HarfBuzz's default-ignorable handling.
+static ShapedGlyphs *stub_render_shaped(FontBackend *font, void *font_data,
+                                        uint32_t *codepoints, int count,
+                                        uint8_t fg_r, uint8_t fg_g, uint8_t fg_b)
+{
+    (void)font;
+    (void)fg_r;
+    (void)fg_g;
+    (void)fg_b;
+    s_shape_count++;
+    ShapedGlyphs *run = calloc(1, sizeof(ShapedGlyphs));
+    if (!run)
+        return NULL;
+    run->num_glyphs = count;
+    run->glyph_ids = calloc((size_t)count, sizeof(uint32_t));
+    run->x_positions = calloc((size_t)count, sizeof(int));
+    run->y_positions = calloc((size_t)count, sizeof(int));
+    run->x_advances = calloc((size_t)count, sizeof(int));
+    if (!run->glyph_ids || !run->x_positions || !run->y_positions ||
+        !run->x_advances) {
+        free(run->glyph_ids);
+        free(run->x_positions);
+        free(run->y_positions);
+        free(run->x_advances);
+        free(run);
+        return NULL;
+    }
+    for (int i = 0; i < count; i++) {
+        uint32_t gid = 0;
+        for (int j = 0; j < s_face_glyph_count; j++) {
+            if (s_face_glyphs[j].face == font_data &&
+                s_face_glyphs[j].cp == codepoints[i]) {
+                gid = s_face_glyphs[j].gid;
+                break;
+            }
+        }
+        if (gid == 0 && (codepoints[i] == 0x200D ||
+                         (codepoints[i] >= 0xFE00 && codepoints[i] <= 0xFE0F)))
+            gid = 4242;
+        run->glyph_ids[i] = gid;
+        run->x_positions[i] = i * 6;
+        run->x_advances[i] = 6;
+        run->total_advance += 6;
+    }
+    return run;
+}
+
 FontBackend make_test_font_backend(void)
 {
     FontBackend fb = { 0 };
@@ -227,6 +320,7 @@ FontBackend make_test_font_backend(void)
     fb.loaded_styles = s_test_loaded_styles;
     fb.get_glyph_index = stub_get_glyph_index;
     fb.set_presentation_box = stub_set_presentation_box;
+    fb.render_shaped = stub_render_shaped;
     fb.init_font = stub_init_font;
     fb.destroy_font = stub_destroy_font;
     fb.get_metrics = stub_get_metrics;

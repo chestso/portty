@@ -740,6 +740,116 @@ static void render_cell_selection(RendererSdl3Data *data, TerminalBackend *term,
     SDL_SetRenderDrawBlendMode(data->renderer, SDL_BLENDMODE_NONE);
 }
 
+// Look up (or, when inserts are allowed, rasterize and cache) one glyph of
+// a resolved cluster route. A fallback face is re-ensured only on a miss:
+// the routed face may have been evicted since the route was resolved.
+static RendSdl3AtlasEntry *draw_cluster_glyph(
+    RendererSdl3Data *data, const RendGlyphPlan *plan,
+    const RendClusterRoute *route, uint32_t glyph_id, uint32_t atlas_gid,
+    uint32_t color_key, uint8_t render_r, uint8_t render_g, uint8_t render_b,
+    int budget_w)
+{
+    RendSdl3AtlasEntry *entry = rend_sdl3_atlas_lookup(
+        &data->atlas, route->atlas_font_key, atlas_gid, color_key);
+    if (!entry && atlas_inserts_allowed()) {
+        if (route->style == FONT_STYLE_FALLBACK &&
+            route->identity &&
+            rend_fallback_ensure(&data->fallback, data->font, route->identity,
+                                 data->font_size, &data->font_options,
+                                 data->cell_width)) {
+            font_set_presentation_box(data->font, route->style, plan->avail_w,
+                                      plan->avail_h, plan->height_only_fit);
+        }
+        GlyphBitmap *gb = font_render_glyph_id(data->font, route->style,
+                                               glyph_id, render_r, render_g,
+                                               render_b);
+        if (gb) {
+            entry = cache_glyph(&data->atlas, route->atlas_font_key, atlas_gid,
+                                color_key, gb, plan->downscale_glyph, budget_w,
+                                plan->cache_h, plan->center_horizontally,
+                                route->color_baked);
+            data->font->free_glyph_bitmap(data->font, gb);
+        } else {
+            rend_sdl3_atlas_insert_empty(&data->atlas, route->atlas_font_key,
+                                         atlas_gid, color_key);
+        }
+    }
+    return entry;
+}
+
+// Draw one cell's glyphs from its resolved cluster route. The single place
+// render colors are derived from the route's baked-color flag.
+static void draw_cluster(RendererSdl3Data *data, const RendGlyphPlan *plan,
+                         const RendClusterRoute *route, int cell_x, int cell_y,
+                         int columns_to_consume, uint8_t r, uint8_t g,
+                         uint8_t b, float bg_luma, bool populate_only)
+{
+    if (!route || route->num_glyphs <= 0)
+        return;
+
+    uint8_t render_r = route->color_baked ? r : 255;
+    uint8_t render_g = route->color_baked ? g : 255;
+    uint8_t render_b = route->color_baked ? b : 255;
+    uint32_t color_key = route->color_baked
+                             ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | b
+                             : 0xFFFFFF;
+
+    ShapedGlyphs view = { 0 };
+    view.num_glyphs = route->num_glyphs;
+    view.glyph_ids = route->glyph_ids;
+    view.x_positions = route->x_positions;
+    view.x_advances = route->x_advances;
+
+    RendRunGlyphSlot slots[32];
+    int n_slots = 0;
+    if (route->num_glyphs > 1 &&
+        (plan->downscale_glyph || plan->center_horizontally))
+        n_slots = rend_layout_shaped_run(&view, plan->avail_w, data->cell_width,
+                                         columns_to_consume, slots,
+                                         (int)(sizeof(slots) / sizeof(slots[0])));
+
+    if (n_slots > 1) {
+        for (int si = 0; si < n_slots; si++) {
+            uint32_t gid = route->glyph_ids[slots[si].index];
+            uint32_t atlas_gid = gid | ATLAS_RUN_GLYPH_TAG |
+                                 ((uint32_t)slots[si].slot_cells << ATLAS_RUN_CELL_SHIFT);
+            int slot_w = slots[si].slot_cells * data->cell_width;
+            if (plan->downscale_glyph && slot_w > plan->avail_h)
+                slot_w = plan->avail_h;
+            RendSdl3AtlasEntry *entry =
+                draw_cluster_glyph(data, plan, route, gid, atlas_gid, color_key,
+                                   render_r, render_g, render_b, slot_w);
+            if (!populate_only)
+                blit_glyph(data->renderer, &data->atlas, entry,
+                           cell_x + slots[si].x, cell_y,
+                           entry ? entry->x_offset : 0,
+                           entry ? entry->y_offset : 0,
+                           slot_w, plan->avail_h, data->font_ascent,
+                           route->color_baked, r, g, b, data->glyph_shader,
+                           bg_luma);
+        }
+        return;
+    }
+
+    for (int gi = 0; gi < route->num_glyphs; gi++) {
+        uint32_t gid = route->glyph_ids[gi];
+        if (gid == 0)
+            continue;
+        uint32_t atlas_gid =
+            (columns_to_consume >= 2) ? (gid | ATLAS_WIDE_GLYPH_TAG) : gid;
+        RendSdl3AtlasEntry *entry =
+            draw_cluster_glyph(data, plan, route, gid, atlas_gid, color_key,
+                               render_r, render_g, render_b, plan->cache_w);
+        if (!populate_only) {
+            int x_off = route->x_positions[gi] + (entry ? entry->x_offset : 0);
+            blit_glyph(data->renderer, &data->atlas, entry, cell_x, cell_y,
+                       x_off, entry ? entry->y_offset : 0, plan->avail_w,
+                       plan->avail_h, data->font_ascent, route->color_baked,
+                       r, g, b, data->glyph_shader, bg_luma);
+        }
+    }
+}
+
 // Render a single cell (glyphs only; cursor is drawn separately).
 // Cell must be pre-fetched by the caller (typically via TerminalRowIter).
 // row:     display row (for draw position).
@@ -873,8 +983,6 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                                        cell.attrs.bold,
                                                        cell.attrs.italic,
                                                        cps, cp_count);
-    FontStyle style = cell_style.style;
-    bool emoji_render = cell_style.use_emoji;
 
     // Width is authoritative from cell.width (the term backend enforces the
     // "VS16 → 2 cells" rule in convert_vterm_screen_cell). No render-time
@@ -882,351 +990,23 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
     if (cps[0] > 0x7F)
         vlog("render_cell: U+%04X style=%d emoji=%d cols=%d cell.w=%d\n",
-             cps[0], style, emoji_render, columns_to_consume, cell.width);
+             cps[0], cell_style.style, cell_style.use_emoji,
+             columns_to_consume, cell.width);
 
     RendGlyphPlan plan;
-    rend_plan_glyph(data->font, style, emoji_render, cps, cp_count,
-                    data->cell_width, data->cell_height, columns_to_consume,
-                    r, g, b, &plan);
+    rend_plan_glyph(data->font, cell_style.style, cell_style.use_emoji, cps,
+                    cp_count, data->cell_width, data->cell_height,
+                    columns_to_consume, r, g, b, &plan);
 
     int cell_x = vis_col * data->cell_width;
     int cell_y = row * data->cell_height;
-    void *font_data = plan.font_data;
-    bool color_baked = plan.color_baked;
-    uint8_t render_r = plan.render_r;
-    uint8_t render_g = plan.render_g;
-    uint8_t render_b = plan.render_b;
-    uint32_t color_key = plan.color_key;
-    int avail_w = plan.avail_w;
-    int avail_h = plan.avail_h;
-    int cache_w = plan.cache_w;
-    int cache_h = plan.cache_h;
-    bool downscale_glyph = plan.downscale_glyph;
-    bool center_horizontally = plan.center_horizontally;
-    // The fallback route for this cell: the covering font and the glyph id
-    // it maps to there. Shared by the shaped and the single-glyph path, so
-    // the face selected by one is known to the other.
-    RendRoute route = { 0 };
 
-    // Shaped rendering path (multiple codepoints)
-    if (cp_count > 1 && data->font->render_shaped) {
-        // Candidate chain: styled face, then NORMAL, then the fontconfig
-        // faces covering the cluster's codepoints. A candidate is
-        // accepted when its run has no .notdef glyph; if none is
-        // accepted, the candidate with the most drawable glyphs wins
-        // (earliest wins ties), so a partially covered cluster still
-        // draws what it can instead of dropping its marks.
-        typedef struct
-        {
-            FontStyle style;
-            void *font_data;
-            bool color_baked;
-            uint8_t render_r, render_g, render_b;
-            uint32_t color_key;
-        } ClusterCandidate;
+    const RendClusterRoute *route = rend_cluster_route(
+        &data->fallback, data->font, data->resolve, cps, cp_count, cell_style,
+        data->font_size, &data->font_options, data->cell_width);
+    draw_cluster(data, &plan, route, cell_x, cell_y, columns_to_consume,
+                 r, g, b, bg_luma, populate_only);
 
-        ClusterCandidate candidates[6];
-        int num_candidates = 0;
-
-        candidates[num_candidates++] = (ClusterCandidate){ style, font_data,
-                                                           color_baked,
-                                                           render_r, render_g,
-                                                           render_b, color_key };
-        if (style != FONT_STYLE_NORMAL) {
-            bool normal_baked = rend_is_color_font(data->font, FONT_STYLE_NORMAL);
-            candidates[num_candidates++] = (ClusterCandidate){
-                FONT_STYLE_NORMAL, data->font->font_data[FONT_STYLE_NORMAL],
-                normal_baked, normal_baked ? r : 255, normal_baked ? g : 255,
-                normal_baked ? b : 255,
-                normal_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                             : 0xFFFFFF
-            };
-        }
-
-        int num_primary_candidates = num_candidates;
-
-        ShapedGlyphs *shaped = NULL;
-        int best_drawable = 0;
-        ClusterCandidate best_candidate = candidates[0];
-
-        for (int i = 0;; i++) {
-            if (i == num_primary_candidates) {
-                // No primary face fully covered the cluster: append the
-                // fontconfig candidates — distinct identities over the
-                // cluster's codepoints, capped at 4 in first-appearance
-                // order. Joiners, variation selectors and combining
-                // enclosures never decide the face choice.
-                RendFallbackIdentity *identities[4];
-                int num_identities = 0;
-                for (int j = 0; j < cp_count; j++) {
-                    uint32_t cp = cps[j];
-                    if (cp == 0x200D || (cp >= 0xFE00 && cp <= 0xFE0F) ||
-                        (cp >= 0x20D0 && cp <= 0x20FF))
-                        continue;
-                    route = rend_route_get(&data->fallback, data->font,
-                                           data->resolve, cp, data->font_size,
-                                           &data->font_options, data->cell_width);
-                    if (!route.identity)
-                        continue;
-                    bool seen = false;
-                    for (int k = 0; k < num_identities; k++) {
-                        if (identities[k] == route.identity) {
-                            seen = true;
-                            break;
-                        }
-                    }
-                    if (!seen && num_identities < 4)
-                        identities[num_identities++] = route.identity;
-                }
-                for (int j = 0; j < num_identities; j++) {
-                    if (rend_fallback_ensure(&data->fallback, data->font,
-                                             identities[j], data->font_size,
-                                             &data->font_options,
-                                             data->cell_width)) {
-                        bool baked = rend_is_color_font(data->font, FONT_STYLE_FALLBACK);
-                        candidates[num_candidates++] = (ClusterCandidate){
-                            FONT_STYLE_FALLBACK, identities[j], baked,
-                            baked ? r : 255, baked ? g : 255, baked ? b : 255,
-                            baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                  : 0xFFFFFF
-                        };
-                    }
-                }
-            }
-            if (i >= num_candidates)
-                break;
-            ClusterCandidate *cand = &candidates[i];
-            if (cand->style == FONT_STYLE_FALLBACK) {
-                // The fallback slot may hold another identity's face by
-                // now; reload this candidate's face for shaping.
-                rend_fallback_ensure(&data->fallback, data->font,
-                                     (RendFallbackIdentity *)cand->font_data,
-                                     data->font_size, &data->font_options,
-                                     data->cell_width);
-                font_set_presentation_box(data->font, cand->style, avail_w, avail_h,
-                                          plan.height_only_fit);
-            }
-            ShapedGlyphs *run = font_render_shaped_text(data->font, cand->style, cps,
-                                                        cp_count, cand->render_r,
-                                                        cand->render_g, cand->render_b);
-            if (!run)
-                continue;
-            int drawable = rend_shaped_drawable_count(run);
-            bool accepted = drawable > 0 && rend_shaped_notdef_count(run) == 0;
-            if (accepted || drawable > best_drawable) {
-                font_free_shaped(shaped);
-                shaped = run;
-                best_drawable = drawable;
-                best_candidate = *cand;
-            } else {
-                font_free_shaped(run);
-            }
-            if (accepted)
-                break;
-        }
-
-        if (shaped && best_drawable > 0) {
-            style = best_candidate.style;
-            font_data = best_candidate.font_data;
-            color_baked = best_candidate.color_baked;
-            render_r = best_candidate.render_r;
-            render_g = best_candidate.render_g;
-            render_b = best_candidate.render_b;
-            color_key = best_candidate.color_key;
-        } else {
-            font_free_shaped(shaped);
-            shaped = NULL;
-        }
-
-        if (shaped) {
-            // A run the font has no ligature for arrives as one glyph per
-            // component. When those glyphs are placed by cell-centering
-            // (downscaled color emoji, symbol-class glyphs) HarfBuzz's own x
-            // positions are dropped, so lay the components out across the
-            // cluster's box — otherwise every one of them lands on the same
-            // spot and only the last is visible.
-            RendRunGlyphSlot slots[32];
-            int n_slots = 0;
-            if (shaped->num_glyphs > 1 && (downscale_glyph || center_horizontally))
-                n_slots = rend_layout_shaped_run(shaped, avail_w, data->cell_width,
-                                                 columns_to_consume, slots,
-                                                 (int)(sizeof(slots) / sizeof(slots[0])));
-
-            if (n_slots > 1) {
-                for (int si = 0; si < n_slots; si++) {
-                    uint32_t gid = shaped->glyph_ids[slots[si].index];
-                    // Run slots get their own atlas key namespace with the
-                    // slot's cell budget above it: a component rasterized for
-                    // a 1-cell slot must not alias the single-glyph entry for
-                    // the same font glyph, which used a different budget.
-                    uint32_t atlas_gid = gid | ATLAS_RUN_GLYPH_TAG |
-                                         ((uint32_t)slots[si].slot_cells << ATLAS_RUN_CELL_SHIFT);
-                    int slot_w = slots[si].slot_cells * data->cell_width;
-                    // Keep the single-glyph path's square clamp for color
-                    // emoji so a wide slot doesn't stretch the glyph.
-                    if (downscale_glyph && slot_w > avail_h)
-                        slot_w = avail_h;
-
-                    RendSdl3AtlasEntry *entry =
-                        rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
-                    if (!entry && atlas_inserts_allowed()) {
-                        GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
-                                                               render_r, render_g, render_b);
-                        if (gb) {
-                            entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
-                                                gb, downscale_glyph,
-                                                slot_w, cache_h, center_horizontally, color_baked);
-                            data->font->free_glyph_bitmap(data->font, gb);
-                        } else {
-                            rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
-                        }
-                    }
-                    if (!populate_only) {
-                        // Centered entries ignore the offsets and center inside
-                        // slot_w; baseline-anchored ones carry the centering in
-                        // entry->x_offset (computed against slot_w above).
-                        blit_glyph(data->renderer, &data->atlas, entry,
-                                   cell_x + slots[si].x, cell_y,
-                                   entry ? entry->x_offset : 0,
-                                   entry ? entry->y_offset : 0,
-                                   slot_w, avail_h, data->font_ascent,
-                                   color_baked, r, g, b, data->glyph_shader, bg_luma);
-                    }
-                }
-            } else {
-                for (int gi = 0; gi < shaped->num_glyphs; gi++) {
-                    uint32_t gid = shaped->glyph_ids[gi];
-                    if (gid == 0)
-                        continue;
-                    // Tag the gid so 1-cell and 2-cell rasters of the same glyph
-                    // get separate atlas entries (matches single-glyph path bit 29).
-                    uint32_t atlas_gid = (columns_to_consume >= 2)
-                                             ? (gid | ATLAS_WIDE_GLYPH_TAG)
-                                             : gid;
-                    RendSdl3AtlasEntry *entry =
-                        rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_gid, color_key);
-                    if (!entry && atlas_inserts_allowed()) {
-                        GlyphBitmap *gb = font_render_glyph_id(data->font, style, gid,
-                                                               render_r, render_g, render_b);
-                        if (gb) {
-                            entry = cache_glyph(&data->atlas, font_data, atlas_gid, color_key,
-                                                gb, downscale_glyph,
-                                                cache_w, cache_h, center_horizontally, color_baked);
-                            data->font->free_glyph_bitmap(data->font, gb);
-                        } else {
-                            rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_gid, color_key);
-                        }
-                    }
-                    if (!populate_only) {
-                        int x_off = shaped->x_positions[gi] + (entry ? entry->x_offset : 0);
-                        int y_off = entry ? entry->y_offset : 0;
-                        blit_glyph(data->renderer, &data->atlas, entry,
-                                   cell_x, cell_y, x_off,
-                                   y_off, avail_w, avail_h, data->font_ascent,
-                                   color_baked, r, g, b, data->glyph_shader, bg_luma);
-                    }
-                }
-            }
-            font_free_shaped(shaped);
-            render_cell_selection(data, term, row, vt_col, vis_col,
-                                  columns_to_consume, populate_only);
-            return;
-        }
-    }
-
-    // Single glyph fallback
-    {
-        uint32_t codepoint = cps[0];
-        uint32_t glyph_index = font_get_glyph_index(data->font, style, codepoint);
-        RendSdl3AtlasEntry *entry = NULL;
-
-        // Fallback: if glyph not found in selected style, try NORMAL
-        if (glyph_index == 0 && style != FONT_STYLE_NORMAL) {
-            style = FONT_STYLE_NORMAL;
-            font_data = data->font->font_data[style];
-            color_baked = rend_is_color_font(data->font, style);
-            render_r = color_baked ? r : 255;
-            render_g = color_baked ? g : 255;
-            render_b = color_baked ? b : 255;
-            color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                    : 0xFFFFFF;
-            glyph_index = font_get_glyph_index(data->font, style, codepoint);
-        }
-
-        // Dynamic fallback: if still missing, query fontconfig for a covering font
-        if (glyph_index == 0) {
-            route = rend_route_get(&data->fallback, data->font, data->resolve,
-                                   codepoint, data->font_size,
-                                   &data->font_options, data->cell_width);
-            if (route.identity && route.glyph_id != 0) {
-                style = FONT_STYLE_FALLBACK;
-                font_data = route.identity;
-                color_baked = route.identity->color_font;
-                render_r = color_baked ? r : 255;
-                render_g = color_baked ? g : 255;
-                render_b = color_baked ? b : 255;
-                color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                        : 0xFFFFFF;
-                glyph_index = route.glyph_id;
-            }
-        }
-
-        // Tag glyph_index so glyphs at different presentation widths
-        // get separate atlas entries (different rasterization sizes).
-        uint32_t atlas_glyph_id = glyph_index;
-        if (columns_to_consume >= 2 && atlas_glyph_id != 0)
-            atlas_glyph_id |= ATLAS_WIDE_GLYPH_TAG;
-
-        if (atlas_glyph_id != 0)
-            entry = rend_sdl3_atlas_lookup(&data->atlas, font_data, atlas_glyph_id, color_key);
-        if (!entry && atlas_inserts_allowed()) {
-            if (style == FONT_STYLE_FALLBACK) {
-                if (!rend_fallback_ensure(&data->fallback, data->font, route.identity,
-                                          data->font_size, &data->font_options,
-                                          data->cell_width)) {
-                    // The font file disappeared since it was resolved:
-                    // render like an uncovered codepoint, from the primary
-                    // face.
-                    style = FONT_STYLE_NORMAL;
-                    font_data = data->font->font_data[style];
-                    color_baked = rend_is_color_font(data->font, style);
-                    render_r = color_baked ? r : 255;
-                    render_g = color_baked ? g : 255;
-                    render_b = color_baked ? b : 255;
-                    color_key = color_baked ? ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)b
-                                            : 0xFFFFFF;
-                    glyph_index = font_get_glyph_index(data->font, style, codepoint);
-                    atlas_glyph_id = glyph_index;
-                    if (columns_to_consume >= 2 && atlas_glyph_id != 0)
-                        atlas_glyph_id |= ATLAS_WIDE_GLYPH_TAG;
-                } else {
-                    // Lazily loaded — set the cell budget before rasterizing.
-                    font_set_presentation_box(data->font, style, avail_w, avail_h,
-                                              plan.height_only_fit);
-                }
-            }
-            GlyphBitmap *glyph_bitmap = font_render_glyphs(data->font, style, &codepoint, 1,
-                                                           render_r, render_g, render_b);
-            if (glyph_bitmap) {
-                uint32_t insert_id = atlas_glyph_id ? atlas_glyph_id
-                                                    : (uint32_t)glyph_bitmap->glyph_id;
-                entry = cache_glyph(&data->atlas, font_data, insert_id, color_key,
-                                    glyph_bitmap, downscale_glyph,
-                                    cache_w, cache_h, center_horizontally, color_baked);
-                data->font->free_glyph_bitmap(data->font, glyph_bitmap);
-            } else if (atlas_glyph_id != 0) {
-                rend_sdl3_atlas_insert_empty(&data->atlas, font_data, atlas_glyph_id, color_key);
-            }
-        }
-        if (!populate_only)
-            blit_glyph(data->renderer, &data->atlas, entry,
-                       cell_x, cell_y,
-                       entry ? entry->x_offset : 0, entry ? entry->y_offset : 0,
-                       avail_w, avail_h, data->font_ascent,
-                       color_baked, r, g, b, data->glyph_shader, bg_luma);
-    }
-
-    // Selection highlight
     render_cell_selection(data, term, row, vt_col, vis_col,
                           columns_to_consume, populate_only);
 }

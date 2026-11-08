@@ -1547,6 +1547,18 @@ void rend_fallback_destroy(RendFallbackState *st, FontBackend *font)
         free(st->identities[i]);
     }
     free(st->identities);
+    for (int i = 0; i < REND_CLUSTER_TABLE_SIZE; i++) {
+        if (st->clusters[i].used) {
+            free(st->clusters[i].route.glyph_ids);
+            free(st->clusters[i].route.x_positions);
+            free(st->clusters[i].route.x_advances);
+        }
+    }
+    for (int i = 0; i < REND_CLUSTER_SCRATCH; i++) {
+        free(st->cluster_scratch[i].glyph_ids);
+        free(st->cluster_scratch[i].x_positions);
+        free(st->cluster_scratch[i].x_advances);
+    }
     memset(st, 0, sizeof(*st));
 }
 
@@ -1718,6 +1730,266 @@ bool rend_fallback_ensure(RendFallbackState *st, FontBackend *font,
     vlog("Fallback font loaded and cached (%d/%d): %s\n",
          st->loaded_count, REND_MAX_LOADED_FALLBACKS, font_path);
     return true;
+}
+
+// =============================================================================
+// Cluster route — one memoised resolver for shaped and single-glyph cells
+// =============================================================================
+
+static uint32_t cluster_hash(FontStyle style, bool use_emoji,
+                             const uint32_t *cps, int cp_count)
+{
+    uint32_t h = 2166136261u;
+    uint32_t words[3];
+    words[0] = (uint32_t)style;
+    words[1] = use_emoji ? 1u : 0u;
+    words[2] = (uint32_t)cp_count;
+    for (int i = 0; i < 3; i++) {
+        h ^= words[i];
+        h *= 16777619u;
+    }
+    for (int i = 0; i < cp_count; i++) {
+        h ^= cps[i];
+        h *= 16777619u;
+    }
+    return h & (REND_CLUSTER_TABLE_SIZE - 1);
+}
+
+static bool cluster_key_matches(const RendClusterEntry *e, FontStyle style,
+                                bool use_emoji, const uint32_t *cps,
+                                int cp_count)
+{
+    if (!e->used || e->style != style || e->use_emoji != use_emoji ||
+        e->cp_count != cp_count)
+        return false;
+    for (int i = 0; i < cp_count; i++) {
+        if (e->cps[i] != cps[i])
+            return false;
+    }
+    return true;
+}
+
+static void cluster_route_free_arrays(RendClusterRoute *route)
+{
+    free(route->glyph_ids);
+    free(route->x_positions);
+    free(route->x_advances);
+    route->glyph_ids = NULL;
+    route->x_positions = NULL;
+    route->x_advances = NULL;
+}
+
+// One candidate face for a multi-codepoint cluster.
+typedef struct
+{
+    FontStyle style;
+    RendFallbackIdentity *identity; // FALLBACK only
+    bool color_baked;
+    void *atlas_font_key;
+} ClusterCandidate;
+
+// Shape the cluster with one candidate and fold it into the best-so-far
+// tracking. Returns true when the candidate is accepted (no .notdef).
+static bool cluster_try_candidate(RendFallbackState *st, FontBackend *font,
+                                  const uint32_t *cps, int cp_count,
+                                  const ClusterCandidate *cand,
+                                  float font_size, const FontOptions *options,
+                                  int cell_width, ShapedGlyphs **best_run,
+                                  ClusterCandidate *best_cand, int *best_drawable)
+{
+    if (cand->style == FONT_STYLE_FALLBACK) {
+        if (!rend_fallback_ensure(st, font, cand->identity, font_size,
+                                  options, cell_width))
+            return false;
+    }
+    ShapedGlyphs *run = font_render_shaped_text(font, cand->style,
+                                                (uint32_t *)cps, cp_count,
+                                                255, 255, 255);
+    if (!run)
+        return false;
+    int drawable = rend_shaped_drawable_count(run);
+    bool accepted = drawable > 0 && rend_shaped_notdef_count(run) == 0;
+    if (accepted || drawable > *best_drawable) {
+        font_free_shaped(*best_run);
+        *best_run = run;
+        *best_cand = *cand;
+        *best_drawable = drawable;
+    } else {
+        font_free_shaped(run);
+    }
+    return accepted;
+}
+
+// Fill `out` (caller owns its arrays) with the resolved route.
+static void cluster_resolve(RendFallbackState *st, FontBackend *font,
+                            FontResolveBackend *resolve,
+                            const uint32_t *cps, int cp_count,
+                            RendCellStyle cell_style, float font_size,
+                            const FontOptions *options, int cell_width,
+                            RendClusterRoute *out)
+{
+    memset(out, 0, sizeof(*out));
+
+    if (cp_count == 1) {
+        FontStyle style = cell_style.style;
+        uint32_t gid = font_get_glyph_index(font, style, cps[0]);
+        if (gid == 0 && style != FONT_STYLE_NORMAL) {
+            style = FONT_STYLE_NORMAL;
+            gid = font_get_glyph_index(font, style, cps[0]);
+        }
+        RendFallbackIdentity *identity = NULL;
+        if (gid == 0) {
+            RendRoute route = rend_route_get(st, font, resolve, cps[0],
+                                             font_size, options, cell_width);
+            if (route.identity && route.glyph_id != 0) {
+                style = FONT_STYLE_FALLBACK;
+                identity = route.identity;
+                gid = route.glyph_id;
+            }
+        }
+        out->style = style;
+        out->identity = identity;
+        out->atlas_font_key = identity ? (void *)identity : font->font_data[style];
+        out->color_baked = identity ? identity->color_font
+                                    : rend_is_color_font(font, style);
+        if (gid != 0) {
+            out->num_glyphs = 1;
+            out->glyph_ids = calloc(1, sizeof(uint32_t));
+            out->x_positions = calloc(1, sizeof(int));
+            out->x_advances = calloc(1, sizeof(int));
+            if (out->glyph_ids)
+                out->glyph_ids[0] = gid;
+        }
+        return;
+    }
+
+    // Primary candidates first: styled, then NORMAL.
+    ClusterCandidate best_cand = { cell_style.style, NULL, false, NULL };
+    best_cand.color_baked = rend_is_color_font(font, best_cand.style);
+    best_cand.atlas_font_key = font->font_data[best_cand.style];
+    ShapedGlyphs *best_run = NULL;
+    int best_drawable = 0;
+    bool accepted = cluster_try_candidate(st, font, cps, cp_count,
+                                          &best_cand, font_size, options,
+                                          cell_width, &best_run, &best_cand,
+                                          &best_drawable);
+
+    if (!accepted && cell_style.style != FONT_STYLE_NORMAL) {
+        ClusterCandidate normal = { FONT_STYLE_NORMAL, NULL, false, NULL };
+        normal.color_baked = rend_is_color_font(font, FONT_STYLE_NORMAL);
+        normal.atlas_font_key = font->font_data[FONT_STYLE_NORMAL];
+        accepted = cluster_try_candidate(st, font, cps, cp_count,
+                                         &normal, font_size, options,
+                                         cell_width, &best_run, &best_cand,
+                                         &best_drawable);
+    }
+
+    if (!accepted) {
+        // Fontconfig candidates: distinct identities over the cluster's
+        // codepoints, capped at 4 in first-appearance order. Joiners,
+        // variation selectors and combining enclosures never decide.
+        RendFallbackIdentity *identities[4];
+        int num_identities = 0;
+        for (int i = 0; i < cp_count; i++) {
+            uint32_t cp = cps[i];
+            if (cp == 0x200D || (cp >= 0xFE00 && cp <= 0xFE0F) ||
+                (cp >= 0x20D0 && cp <= 0x20FF))
+                continue;
+            RendRoute route = rend_route_get(st, font, resolve, cp, font_size,
+                                             options, cell_width);
+            if (!route.identity)
+                continue;
+            bool seen = false;
+            for (int j = 0; j < num_identities; j++) {
+                if (identities[j] == route.identity) {
+                    seen = true;
+                    break;
+                }
+            }
+            if (!seen && num_identities < 4)
+                identities[num_identities++] = route.identity;
+        }
+        for (int i = 0; i < num_identities && !accepted; i++) {
+            ClusterCandidate cand = { FONT_STYLE_FALLBACK, identities[i],
+                                      false, (void *)identities[i] };
+            cand.color_baked = identities[i]->color_font;
+            accepted = cluster_try_candidate(st, font, cps, cp_count,
+                                             &cand, font_size, options,
+                                             cell_width, &best_run, &best_cand,
+                                             &best_drawable);
+        }
+    }
+
+    out->style = best_cand.style;
+    out->identity = best_cand.identity;
+    out->atlas_font_key = best_cand.atlas_font_key;
+    out->color_baked = best_cand.color_baked;
+    if (best_run && best_drawable > 0) {
+        out->num_glyphs = best_run->num_glyphs;
+        int n = best_run->num_glyphs;
+        out->glyph_ids = calloc((size_t)n, sizeof(uint32_t));
+        out->x_positions = calloc((size_t)n, sizeof(int));
+        out->x_advances = calloc((size_t)n, sizeof(int));
+        if (out->glyph_ids && out->x_positions && out->x_advances) {
+            memcpy(out->glyph_ids, best_run->glyph_ids, (size_t)n * sizeof(uint32_t));
+            memcpy(out->x_positions, best_run->x_positions, (size_t)n * sizeof(int));
+            memcpy(out->x_advances, best_run->x_advances, (size_t)n * sizeof(int));
+        } else {
+            cluster_route_free_arrays(out);
+            out->num_glyphs = 0;
+        }
+    }
+    font_free_shaped(best_run);
+}
+
+const RendClusterRoute *rend_cluster_route(
+    RendFallbackState *st, FontBackend *font, FontResolveBackend *resolve,
+    const uint32_t *cps, int cp_count, RendCellStyle cell_style,
+    float font_size, const FontOptions *options, int cell_width)
+{
+    if (!st || !font || !cps || cp_count <= 0)
+        return NULL;
+
+    bool cacheable = cp_count <= REND_CLUSTER_KEY_MAX;
+    uint32_t slot = 0;
+    if (cacheable) {
+        slot = cluster_hash(cell_style.style, cell_style.use_emoji, cps,
+                            cp_count);
+        for (;;) {
+            RendClusterEntry *e = &st->clusters[slot];
+            if (!e->used)
+                break;
+            if (cluster_key_matches(e, cell_style.style, cell_style.use_emoji,
+                                    cps, cp_count))
+                return &e->route;
+            slot = (slot + 1) & (REND_CLUSTER_TABLE_SIZE - 1);
+        }
+    }
+
+    RendClusterRoute resolved;
+    cluster_resolve(st, font, resolve, cps, cp_count, cell_style, font_size,
+                    options, cell_width, &resolved);
+
+    if (cacheable && st->cluster_count < REND_CLUSTER_STORE_LIMIT) {
+        RendClusterEntry *e = &st->clusters[slot];
+        e->used = true;
+        e->style = cell_style.style;
+        e->use_emoji = cell_style.use_emoji;
+        e->cp_count = cp_count;
+        memcpy(e->cps, cps, (size_t)cp_count * sizeof(uint32_t));
+        e->route = resolved;
+        st->cluster_count++;
+        return &e->route;
+    }
+
+    // Uncached: the route lives in the scratch ring.
+    RendClusterRoute *scratch =
+        &st->cluster_scratch[st->cluster_scratch_next];
+    cluster_route_free_arrays(scratch);
+    *scratch = resolved;
+    st->cluster_scratch_next =
+        (st->cluster_scratch_next + 1) % REND_CLUSTER_SCRATCH;
+    return scratch;
 }
 
 // =============================================================================
