@@ -206,6 +206,30 @@ bool rend_is_color_font(FontBackend *font, FontStyle style)
     return style == FONT_STYLE_EMOJI || font_style_has_colr(font, style);
 }
 
+int rend_shaped_notdef_count(const ShapedGlyphs *run)
+{
+    if (!run)
+        return 0;
+    int count = 0;
+    for (int i = 0; i < run->num_glyphs; i++) {
+        if (run->glyph_ids[i] == 0)
+            count++;
+    }
+    return count;
+}
+
+int rend_shaped_drawable_count(const ShapedGlyphs *run)
+{
+    if (!run)
+        return 0;
+    int count = 0;
+    for (int i = 0; i < run->num_glyphs; i++) {
+        if (run->glyph_ids[i] != 0)
+            count++;
+    }
+    return count;
+}
+
 bool rend_should_use_emoji(const uint32_t *cps, int cp_count,
                            bool emoji_font_available, bool emoji_has_glyph)
 {

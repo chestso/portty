@@ -169,6 +169,14 @@ bool rend_is_symbol_cell_cp(uint32_t cp);
 // Check if a font style produces color (COLR v1 or emoji) glyphs.
 bool rend_is_color_font(FontBackend *font, FontStyle style);
 
+// Number of .notdef (glyph 0) glyphs in the run. A face "covers" a cluster
+// only when this is 0: HarfBuzz replaces default-ignorables (ZWJ, VS15/16)
+// with an invisible glyph, never glyph 0, so a non-zero count means a real
+// codepoint the face cannot draw.
+int rend_shaped_notdef_count(const ShapedGlyphs *run);
+// Number of glyphs that would actually be drawn (glyph != 0).
+int rend_shaped_drawable_count(const ShapedGlyphs *run);
+
 // Decide whether a codepoint cluster should route to the color emoji font.
 // Returns true if the emoji font should be used. VS15 narrows the cell to
 // 1 column but does NOT block color emoji routing — if the emoji font

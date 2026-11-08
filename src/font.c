@@ -7,6 +7,7 @@
 
 #include "font.h"
 #include "common.h"
+#include <stdlib.h>
 #include <string.h>
 
 // Initialize the font font
@@ -118,6 +119,19 @@ ShapedGlyphs *font_render_shaped_text(FontBackend *font, FontStyle style,
         return NULL;
 
     return font->render_shaped(font, font->font_data[style], codepoints, count, r, g, b);
+}
+
+// Free a run returned by font_render_shaped_text(). NULL-safe.
+void font_free_shaped(ShapedGlyphs *run)
+{
+    if (!run)
+        return;
+    free(run->glyph_ids);
+    free(run->bitmaps);
+    free(run->x_positions);
+    free(run->y_positions);
+    free(run->x_advances);
+    free(run);
 }
 
 // Set variable font axis value

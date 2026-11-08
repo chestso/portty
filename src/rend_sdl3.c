@@ -915,22 +915,9 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
 
         // If shaped returned all .notdef glyphs, treat as failure so the
         // single-glyph fallback (with fontconfig) gets a chance to run.
-        if (shaped) {
-            bool all_notdef = true;
-            for (int i = 0; i < shaped->num_glyphs; i++) {
-                if (shaped->glyph_ids[i] != 0) {
-                    all_notdef = false;
-                    break;
-                }
-            }
-            if (all_notdef) {
-                free(shaped->glyph_ids);
-                free(shaped->x_positions);
-                free(shaped->y_positions);
-                free(shaped->x_advances);
-                free(shaped);
-                shaped = NULL;
-            }
+        if (rend_shaped_drawable_count(shaped) == 0) {
+            font_free_shaped(shaped);
+            shaped = NULL;
         }
 
         // Fallback: if shaped rendering fails with selected style, try NORMAL
@@ -945,6 +932,13 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                     : 0xFFFFFF;
             shaped = font_render_shaped_text(data->font, style, cps, cp_count,
                                              render_r, render_g, render_b);
+            // Same .notdef check as above: without it an all-.notdef NORMAL
+            // retry is accepted as a successful shape, the fontconfig
+            // fallback below never runs, and the cell renders blank.
+            if (rend_shaped_drawable_count(shaped) == 0) {
+                font_free_shaped(shaped);
+                shaped = NULL;
+            }
         }
 
         // Dynamic fallback: try fontconfig-resolved font for the first codepoint
@@ -969,6 +963,10 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                                         : 0xFFFFFF;
                 shaped = font_render_shaped_text(data->font, style, cps, cp_count,
                                                  render_r, render_g, render_b);
+                if (rend_shaped_drawable_count(shaped) == 0) {
+                    font_free_shaped(shaped);
+                    shaped = NULL;
+                }
             }
         }
 
@@ -1061,11 +1059,7 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                     }
                 }
             }
-            free(shaped->glyph_ids);
-            free(shaped->x_positions);
-            free(shaped->y_positions);
-            free(shaped->x_advances);
-            free(shaped);
+            font_free_shaped(shaped);
             render_cell_selection(data, term, row, vt_col, vis_col,
                                   columns_to_consume, populate_only);
             return;

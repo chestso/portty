@@ -41,6 +41,11 @@ static void test_route_resolved_once_per_codepoint(void);
 static void test_route_negative_entry_cached(void);
 static void test_route_survives_face_eviction(void);
 static void test_route_dies_with_state(void);
+static void test_notdef_count_all_zero(void);
+static void test_notdef_count_mixed(void);
+static void test_notdef_count_none(void);
+static void test_notdef_count_null(void);
+static void test_drawable_count(void);
 
 /* Helpers exported by font_stubs.c for testing the policy functions in
  * rend_common.c that consult the FontBackend for style/emoji decisions. */
@@ -680,6 +685,43 @@ static void test_route_dies_with_state(void)
     test_resolve_reset();
 }
 
+static void test_notdef_count_all_zero(void)
+{
+    uint32_t ids[3] = { 10, 20, 30 };
+    ShapedGlyphs run = make_run(ids, NULL, 3);
+    ASSERT_EQ(rend_shaped_notdef_count(&run), 0);
+}
+
+static void test_notdef_count_mixed(void)
+{
+    uint32_t ids[4] = { 10, 0, 0, 30 };
+    ShapedGlyphs run = make_run(ids, NULL, 4);
+    ASSERT_EQ(rend_shaped_notdef_count(&run), 2);
+}
+
+static void test_notdef_count_none(void)
+{
+    uint32_t ids[2] = { 0, 0 };
+    ShapedGlyphs run = make_run(ids, NULL, 2);
+    ASSERT_EQ(rend_shaped_notdef_count(&run), 2);
+}
+
+static void test_notdef_count_null(void)
+{
+    ASSERT_EQ(rend_shaped_notdef_count(NULL), 0);
+    ASSERT_EQ(rend_shaped_drawable_count(NULL), 0);
+}
+
+static void test_drawable_count(void)
+{
+    uint32_t ids[4] = { 10, 0, 20, 0 };
+    ShapedGlyphs run = make_run(ids, NULL, 4);
+    ASSERT_EQ(rend_shaped_drawable_count(&run), 2);
+    uint32_t zeros[2] = { 0, 0 };
+    ShapedGlyphs empty = make_run(zeros, NULL, 2);
+    ASSERT_EQ(rend_shaped_drawable_count(&empty), 0);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -724,6 +766,11 @@ int main(int argc, char *argv[])
     RUN_TEST(test_route_negative_entry_cached);
     RUN_TEST(test_route_survives_face_eviction);
     RUN_TEST(test_route_dies_with_state);
+    RUN_TEST(test_notdef_count_all_zero);
+    RUN_TEST(test_notdef_count_mixed);
+    RUN_TEST(test_notdef_count_none);
+    RUN_TEST(test_notdef_count_null);
+    RUN_TEST(test_drawable_count);
 
     TEST_SUMMARY();
 }

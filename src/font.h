@@ -175,6 +175,9 @@ ShapedGlyphs *font_render_shaped_text(FontBackend *font, FontStyle style,
                                       uint32_t *codepoints, int count,
                                       uint8_t r, uint8_t g, uint8_t b);
 
+// Free a run returned by font_render_shaped_text(). NULL-safe.
+void font_free_shaped(ShapedGlyphs *run);
+
 // NEW: Set variable font axis value
 bool font_set_variation_axis(FontBackend *font, FontStyle style,
                              const char *axis_tag, float value);
