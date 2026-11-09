@@ -350,29 +350,30 @@ static void test_post_eviction_staging_correct(void)
 // keeps its cached glyphs usable.
 static void test_fallback_key_is_stable_per_path(void)
 {
-    RendFallbackState st;
-    rend_fallback_init(&st);
+    RendFallbackState *st = calloc(1, sizeof(*st));
+    rend_fallback_init(st);
 
-    void *a = rend_fallback_key(&st, "/fonts/a.ttf", false, false);
-    void *b = rend_fallback_key(&st, "/fonts/b.ttf", false, false);
+    void *a = rend_fallback_key(st, "/fonts/a.ttf", false, false);
+    void *b = rend_fallback_key(st, "/fonts/b.ttf", false, false);
     ASSERT_NOT_NULL(a);
     ASSERT_NOT_NULL(b);
     ASSERT_TRUE(a != b);
-    ASSERT_TRUE(rend_fallback_key(&st, "/fonts/a.ttf", false, false) == a);
-    ASSERT_TRUE(rend_fallback_key(&st, "/fonts/b.ttf", false, false) == b);
+    ASSERT_TRUE(rend_fallback_key(st, "/fonts/a.ttf", false, false) == a);
+    ASSERT_TRUE(rend_fallback_key(st, "/fonts/b.ttf", false, false) == b);
 
     // Growing the registry must not move the records earlier keys point at.
     for (int i = 0; i < 100; i++) {
         char path[64];
         snprintf(path, sizeof(path), "/fonts/grow-%d.ttf", i);
-        ASSERT_NOT_NULL(rend_fallback_key(&st, path, false, false));
+        ASSERT_NOT_NULL(rend_fallback_key(st, path, false, false));
     }
-    ASSERT_TRUE(rend_fallback_key(&st, "/fonts/a.ttf", false, false) == a);
-    ASSERT_TRUE(rend_fallback_key(&st, "/fonts/b.ttf", false, false) == b);
+    ASSERT_TRUE(rend_fallback_key(st, "/fonts/a.ttf", false, false) == a);
+    ASSERT_TRUE(rend_fallback_key(st, "/fonts/b.ttf", false, false) == b);
 
     FontBackend font;
     memset(&font, 0, sizeof(font));
-    rend_fallback_destroy(&st, &font);
+    rend_fallback_destroy(st, &font);
+    free(st);
 }
 
 // --- Regression tests for past bugs ---

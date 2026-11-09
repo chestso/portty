@@ -568,6 +568,9 @@ typedef struct
     RendClusterRoute route;
 } RendClusterEntry;
 
+// The state is ~2.4 MB (the tables above): it lives in the heap-allocated
+// renderer and must never be placed on the stack — the default Windows
+// stack is 1 MB, and a stack instance crashes there.
 typedef struct
 {
     RendRouteEntry routes[REND_ROUTE_TABLE_SIZE];

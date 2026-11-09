@@ -578,11 +578,11 @@ static void test_route_resolved_once_per_codepoint(void)
     FontBackend fb = make_test_font_backend();
     FontResolveBackend resolve = { 0 };
     FontOptions opts = { 0 };
-    RendFallbackState st;
-    rend_fallback_init(&st);
+    RendFallbackState *st = calloc(1, sizeof(*st));
+    rend_fallback_init(st);
 
-    RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
-    RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
+    RendRoute r1 = rend_route_get(st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
+    RendRoute r2 = rend_route_get(st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
 
     // The resolver is consulted once; the second call is served from the
     // route table.
@@ -592,7 +592,8 @@ static void test_route_resolved_once_per_codepoint(void)
     ASSERT_EQ(r1.glyph_id, 77);
     ASSERT_EQ(r2.glyph_id, 77);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -605,12 +606,12 @@ static void test_route_negative_entry_cached(void)
     FontBackend fb = make_test_font_backend();
     FontResolveBackend resolve = { 0 };
     FontOptions opts = { 0 };
-    RendFallbackState st;
-    rend_fallback_init(&st);
+    RendFallbackState *st = calloc(1, sizeof(*st));
+    rend_fallback_init(st);
 
     // No font covers this codepoint — the negative answer is memoised too.
-    RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x9999, false, false, 12.0f, &opts, 10);
-    RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x9999, false, false, 12.0f, &opts, 10);
+    RendRoute r1 = rend_route_get(st, &fb, &resolve, 0x9999, false, false, 12.0f, &opts, 10);
+    RendRoute r2 = rend_route_get(st, &fb, &resolve, 0x9999, false, false, 12.0f, &opts, 10);
 
     ASSERT_EQ(test_resolve_query_count(), 1);
     ASSERT_NULL(r1.identity);
@@ -618,7 +619,8 @@ static void test_route_negative_entry_cached(void)
     ASSERT_NULL(r2.identity);
     ASSERT_EQ(r2.glyph_id, 0);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -643,16 +645,16 @@ static void test_route_survives_face_eviction(void)
     FontBackend fb = make_test_font_backend();
     FontResolveBackend resolve = { 0 };
     FontOptions opts = { 0 };
-    RendFallbackState st;
-    rend_fallback_init(&st);
+    RendFallbackState *st = calloc(1, sizeof(*st));
+    rend_fallback_init(st);
 
     RendRoute first[REND_MAX_LOADED_FALLBACKS + 1];
     for (int i = 0; i < n; i++)
-        first[i] = rend_route_get(&st, &fb, &resolve, cps[i], false, false, 12.0f, &opts, 10);
+        first[i] = rend_route_get(st, &fb, &resolve, cps[i], false, false, 12.0f, &opts, 10);
 
     for (int i = 0; i < n; i++) {
         RendRoute again =
-            rend_route_get(&st, &fb, &resolve, cps[i], false, false, 12.0f, &opts, 10);
+            rend_route_get(st, &fb, &resolve, cps[i], false, false, 12.0f, &opts, 10);
         ASSERT_EQ(test_resolve_query_count(), n);
         ASSERT_TRUE(first[i].identity != NULL);
         ASSERT_TRUE(first[i].identity == again.identity);
@@ -660,7 +662,8 @@ static void test_route_survives_face_eviction(void)
         ASSERT_EQ(again.glyph_id, (uint32_t)(100 + i));
     }
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -675,18 +678,18 @@ static void test_route_dies_with_state(void)
     FontBackend fb = make_test_font_backend();
     FontResolveBackend resolve = { 0 };
     FontOptions opts = { 0 };
-    RendFallbackState st;
-    rend_fallback_init(&st);
+    RendFallbackState *st = calloc(1, sizeof(*st));
+    rend_fallback_init(st);
 
-    RendRoute r1 = rend_route_get(&st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
+    RendRoute r1 = rend_route_get(st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
     ASSERT_NOT_NULL(r1.identity);
     ASSERT_EQ(r1.glyph_id, 77);
 
     // The route cache lives inside the fallback state, so a fresh state
     // asks the resolver again and resolves the codepoint from scratch.
-    rend_fallback_destroy(&st, &fb);
-    rend_fallback_init(&st);
-    RendRoute r2 = rend_route_get(&st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
+    rend_fallback_destroy(st, &fb);
+    rend_fallback_init(st);
+    RendRoute r2 = rend_route_get(st, &fb, &resolve, 0x1234, false, false, 12.0f, &opts, 10);
     ASSERT_EQ(test_resolve_query_count(), 2);
     ASSERT_NOT_NULL(r2.identity);
     ASSERT_EQ(r2.glyph_id, 77);
@@ -695,12 +698,13 @@ static void test_route_dies_with_state(void)
     // share an address.
     test_resolve_add_route(0x5678, "/fonts/b.ttf");
     test_font_set_glyph(0x5678, 88);
-    RendRoute r3 = rend_route_get(&st, &fb, &resolve, 0x5678, false, false, 12.0f, &opts, 10);
+    RendRoute r3 = rend_route_get(st, &fb, &resolve, 0x5678, false, false, 12.0f, &opts, 10);
     ASSERT_NOT_NULL(r3.identity);
     ASSERT_TRUE(r2.identity != r3.identity);
     ASSERT_EQ(r3.glyph_id, 88);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -763,9 +767,9 @@ static void cluster_setup(FontBackend *fb, RendFallbackState *st,
 static void test_cluster_styled_covers(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
@@ -773,7 +777,7 @@ static void test_cluster_styled_covers(void)
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
@@ -784,7 +788,8 @@ static void test_cluster_styled_covers(void)
     ASSERT_EQ(test_shape_count(), 1);
     ASSERT_EQ(test_resolve_query_count(), 0);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -792,9 +797,9 @@ static void test_cluster_styled_covers(void)
 static void test_cluster_falls_to_normal(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     // The bold face covers nothing; the NORMAL face covers the cluster.
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
@@ -803,7 +808,7 @@ static void test_cluster_falls_to_normal(void)
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_BOLD, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
@@ -813,7 +818,8 @@ static void test_cluster_falls_to_normal(void)
     ASSERT_EQ(test_shape_count(), 2);
     ASSERT_EQ(test_resolve_query_count(), 0);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -821,16 +827,16 @@ static void test_cluster_falls_to_normal(void)
 static void test_cluster_falls_to_fontconfig(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     // Styled and NORMAL are all-.notdef; only the fontconfig face covers.
     test_resolve_add_route(THAI_BASE, "/fonts/thai.ttf");
     test_resolve_add_route(THAI_MARK, "/fonts/thai.ttf");
 
     FontOptions opts = { 0 };
-    RendRoute pre = rend_route_get(&st, &fb, &resolve, THAI_BASE, true, false, 12.0f,
+    RendRoute pre = rend_route_get(st, &fb, &resolve, THAI_BASE, true, false, 12.0f,
                                    &opts, 10);
     ASSERT_NOT_NULL(pre.identity);
     ASSERT_TRUE(pre.identity->bold);
@@ -842,7 +848,7 @@ static void test_cluster_falls_to_fontconfig(void)
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_BOLD, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->style, FONT_STYLE_FALLBACK);
@@ -852,7 +858,8 @@ static void test_cluster_falls_to_fontconfig(void)
     ASSERT_EQ(route->glyph_ids[0], 21);
     ASSERT_EQ(route->glyph_ids[1], 22);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -860,9 +867,9 @@ static void test_cluster_falls_to_fontconfig(void)
 static void test_cluster_partial_prefers_full_cover(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     // NORMAL covers the base only; the fallback covers the whole cluster.
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
@@ -870,7 +877,7 @@ static void test_cluster_partial_prefers_full_cover(void)
     test_resolve_add_route(THAI_MARK, "/fonts/thai.ttf");
 
     FontOptions opts = { 0 };
-    rend_route_get(&st, &fb, &resolve, THAI_BASE, false, false, 12.0f, &opts, 10);
+    rend_route_get(st, &fb, &resolve, THAI_BASE, false, false, 12.0f, &opts, 10);
     void *fallback_face = fb.font_data[FONT_STYLE_FALLBACK];
     test_font_set_face_glyph(fallback_face, THAI_BASE, 21);
     test_font_set_face_glyph(fallback_face, THAI_MARK, 22);
@@ -878,7 +885,7 @@ static void test_cluster_partial_prefers_full_cover(void)
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->style, FONT_STYLE_FALLBACK);
@@ -886,7 +893,8 @@ static void test_cluster_partial_prefers_full_cover(void)
     ASSERT_EQ(route->glyph_ids[0], 21);
     ASSERT_EQ(route->glyph_ids[1], 22);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -894,9 +902,9 @@ static void test_cluster_partial_prefers_full_cover(void)
 static void test_cluster_best_effort(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     // No face covers both: NORMAL draws the base, the fallback the mark.
     // Both draw one glyph; the earliest in the chain (NORMAL) wins.
@@ -905,14 +913,14 @@ static void test_cluster_best_effort(void)
     test_resolve_add_route(THAI_MARK, "/fonts/thai.ttf");
 
     FontOptions opts = { 0 };
-    rend_route_get(&st, &fb, &resolve, THAI_MARK, false, false, 12.0f, &opts, 10);
+    rend_route_get(st, &fb, &resolve, THAI_MARK, false, false, 12.0f, &opts, 10);
     void *fallback_face = fb.font_data[FONT_STYLE_FALLBACK];
     test_font_set_face_glyph(fallback_face, THAI_MARK, 22);
 
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
@@ -920,7 +928,8 @@ static void test_cluster_best_effort(void)
     ASSERT_EQ(route->glyph_ids[0], 10);
     ASSERT_EQ(route->glyph_ids[1], 0);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -928,20 +937,21 @@ static void test_cluster_best_effort(void)
 static void test_cluster_nothing_drawable(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->num_glyphs, 0);
     ASSERT_NULL(route->identity);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -949,9 +959,9 @@ static void test_cluster_nothing_drawable(void)
 static void test_cluster_memoised(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
@@ -959,17 +969,18 @@ static void test_cluster_memoised(void)
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *r1 =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
     int shapes = test_shape_count();
     int queries = test_resolve_query_count();
     const RendClusterRoute *r2 =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
 
     ASSERT_TRUE(r1 == r2);
     ASSERT_EQ(test_shape_count(), shapes);
     ASSERT_EQ(test_resolve_query_count(), queries);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -977,9 +988,9 @@ static void test_cluster_memoised(void)
 static void test_cluster_key_includes_style(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
@@ -990,16 +1001,17 @@ static void test_cluster_key_includes_style(void)
     RendCellStyle normal = { FONT_STYLE_NORMAL, false };
     RendCellStyle bold = { FONT_STYLE_BOLD, false };
     const RendClusterRoute *r1 =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, normal, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, normal, 12.0f, NULL, 10);
     const RendClusterRoute *r2 =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, bold, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, bold, 12.0f, NULL, 10);
 
     ASSERT_TRUE(r1 != r2);
     ASSERT_EQ(r1->glyph_ids[0], 10);
     ASSERT_EQ(r2->glyph_ids[0], 30);
     ASSERT_EQ(r2->glyph_ids[1], 31);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -1007,9 +1019,9 @@ static void test_cluster_key_includes_style(void)
 static void test_cluster_over_capacity(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     void *normal_face = fb.font_data[FONT_STYLE_NORMAL];
     int total = REND_CLUSTER_STORE_LIMIT + 100;
@@ -1020,12 +1032,12 @@ static void test_cluster_over_capacity(void)
         uint32_t cps[] = { base, THAI_MARK };
         RendCellStyle cs = { FONT_STYLE_NORMAL, false };
         const RendClusterRoute *route =
-            rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+            rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
         ASSERT_NOT_NULL(route);
         ASSERT_EQ(route->num_glyphs, 2);
         ASSERT_EQ(route->glyph_ids[0], 10);
     }
-    ASSERT_EQ(st.cluster_count, REND_CLUSTER_STORE_LIMIT);
+    ASSERT_EQ(st->cluster_count, REND_CLUSTER_STORE_LIMIT);
 
     // Past the limit, resolve still works (via the scratch ring) without
     // growing the table.
@@ -1033,13 +1045,14 @@ static void test_cluster_over_capacity(void)
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     test_font_set_face_glyph(normal_face, 0x1FFFF, 10);
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, extra, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, extra, 2, cs, 12.0f, NULL, 10);
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->num_glyphs, 2);
     ASSERT_EQ(route->glyph_ids[0], 10);
-    ASSERT_EQ(st.cluster_count, REND_CLUSTER_STORE_LIMIT);
+    ASSERT_EQ(st->cluster_count, REND_CLUSTER_STORE_LIMIT);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -1047,9 +1060,9 @@ static void test_cluster_over_capacity(void)
 static void test_cluster_survives_face_eviction(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     // More distinct fallback paths than the pool holds, so faces are
     // evicted while the cluster routes live on.
@@ -1063,7 +1076,7 @@ static void test_cluster_survives_face_eviction(void)
         char path[64];
         snprintf(path, sizeof(path), "/fonts/f%d.ttf", i);
         test_resolve_add_route(bases[i], path);
-        RendRoute pre = rend_route_get(&st, &fb, &resolve, bases[i], false, false, 12.0f,
+        RendRoute pre = rend_route_get(st, &fb, &resolve, bases[i], false, false, 12.0f,
                                        &opts, 10);
         ASSERT_NOT_NULL(pre.identity);
         identities[i] = pre.identity;
@@ -1075,7 +1088,7 @@ static void test_cluster_survives_face_eviction(void)
     for (int i = 0; i < n; i++) {
         uint32_t cps[] = { bases[i], bases[i] };
         const RendClusterRoute *route =
-            rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+            rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
         ASSERT_NOT_NULL(route);
         ASSERT_EQ(route->style, FONT_STYLE_FALLBACK);
         ASSERT_TRUE(route->identity == identities[i]);
@@ -1084,7 +1097,8 @@ static void test_cluster_survives_face_eviction(void)
         ASSERT_EQ(route->glyph_ids[1], (uint32_t)(100 + i));
     }
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -1092,9 +1106,9 @@ static void test_cluster_survives_face_eviction(void)
 static void test_cluster_dies_with_state(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_BASE, 10);
     test_font_set_face_glyph(fb.font_data[FONT_STYLE_NORMAL], THAI_MARK, 11);
@@ -1102,19 +1116,20 @@ static void test_cluster_dies_with_state(void)
     uint32_t cps[] = { THAI_BASE, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *r1 =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
     ASSERT_NOT_NULL(r1);
     int shapes = test_shape_count();
 
-    rend_fallback_destroy(&st, &fb);
-    rend_fallback_init(&st);
+    rend_fallback_destroy(st, &fb);
+    rend_fallback_init(st);
     const RendClusterRoute *r2 =
-        rend_cluster_route(&st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 2, cs, 12.0f, NULL, 10);
     ASSERT_NOT_NULL(r2);
     ASSERT_TRUE(test_shape_count() > shapes);
     ASSERT_EQ(r2->glyph_ids[0], 10);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -1122,9 +1137,9 @@ static void test_cluster_dies_with_state(void)
 static void test_cluster_zwj_not_notdef(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     // A joiner between base and mark: the stub shapes it to a non-zero
     // invisible glyph, so the cluster still counts as covered by NORMAL.
@@ -1134,7 +1149,7 @@ static void test_cluster_zwj_not_notdef(void)
     uint32_t cps[] = { THAI_BASE, 0x200D, THAI_MARK };
     RendCellStyle cs = { FONT_STYLE_NORMAL, false };
     const RendClusterRoute *route =
-        rend_cluster_route(&st, &fb, &resolve, cps, 3, cs, 12.0f, NULL, 10);
+        rend_cluster_route(st, &fb, &resolve, cps, 3, cs, 12.0f, NULL, 10);
 
     ASSERT_NOT_NULL(route);
     ASSERT_EQ(route->style, FONT_STYLE_NORMAL);
@@ -1142,20 +1157,21 @@ static void test_cluster_zwj_not_notdef(void)
     ASSERT_TRUE(route->glyph_ids[1] != 0);
     ASSERT_EQ(test_resolve_query_count(), 0);
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
 
 static void test_fallback_variant_identities_distinct(void)
 {
-    RendFallbackState st;
-    rend_fallback_init(&st);
+    RendFallbackState *st = calloc(1, sizeof(*st));
+    rend_fallback_init(st);
 
-    void *regular = rend_fallback_key(&st, "/fonts/a.ttf", false, false);
-    void *bold = rend_fallback_key(&st, "/fonts/a.ttf", true, false);
-    void *italic = rend_fallback_key(&st, "/fonts/a.ttf", false, true);
-    void *bold_italic = rend_fallback_key(&st, "/fonts/a.ttf", true, true);
+    void *regular = rend_fallback_key(st, "/fonts/a.ttf", false, false);
+    void *bold = rend_fallback_key(st, "/fonts/a.ttf", true, false);
+    void *italic = rend_fallback_key(st, "/fonts/a.ttf", false, true);
+    void *bold_italic = rend_fallback_key(st, "/fonts/a.ttf", true, true);
     ASSERT_NOT_NULL(regular);
     ASSERT_NOT_NULL(bold);
     ASSERT_NOT_NULL(italic);
@@ -1163,24 +1179,25 @@ static void test_fallback_variant_identities_distinct(void)
     ASSERT_TRUE(regular != bold);
     ASSERT_TRUE(regular != italic);
     ASSERT_TRUE(bold != bold_italic);
-    ASSERT_TRUE(rend_fallback_key(&st, "/fonts/a.ttf", true, false) == bold);
-    ASSERT_TRUE(rend_fallback_key(&st, "/fonts/a.ttf", false, false) == regular);
+    ASSERT_TRUE(rend_fallback_key(st, "/fonts/a.ttf", true, false) == bold);
+    ASSERT_TRUE(rend_fallback_key(st, "/fonts/a.ttf", false, false) == regular);
 
     FontBackend font;
     memset(&font, 0, sizeof(font));
-    rend_fallback_destroy(&st, &font);
+    rend_fallback_destroy(st, &font);
+    free(st);
 }
 
 static void test_fallback_emphasis_applied_on_every_load(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     test_resolve_add_route(THAI_BASE, "/fonts/solo.ttf");
     FontOptions opts = { 0 };
-    RendRoute r = rend_route_get(&st, &fb, &resolve, THAI_BASE, true, false,
+    RendRoute r = rend_route_get(st, &fb, &resolve, THAI_BASE, true, false,
                                  12.0f, &opts, 10);
     ASSERT_NOT_NULL(r.identity);
     int calls = test_emphasis_call_count();
@@ -1192,18 +1209,19 @@ static void test_fallback_emphasis_applied_on_every_load(void)
     for (int i = 0; i < REND_MAX_LOADED_FALLBACKS + 2; i++) {
         char path[64];
         snprintf(path, sizeof(path), "/fonts/evict-%d.ttf", i);
-        void *key = rend_fallback_key(&st, path, false, false);
+        void *key = rend_fallback_key(st, path, false, false);
         ASSERT_NOT_NULL(key);
-        ASSERT_TRUE(rend_fallback_ensure(&st, &fb,
+        ASSERT_TRUE(rend_fallback_ensure(st, &fb,
                                          (RendFallbackIdentity *)key, 12.0f,
                                          &opts, 10));
     }
     int before_reload = test_emphasis_call_count();
-    ASSERT_TRUE(rend_fallback_ensure(&st, &fb, r.identity, 12.0f, &opts, 10));
+    ASSERT_TRUE(rend_fallback_ensure(st, &fb, r.identity, 12.0f, &opts, 10));
     ASSERT_TRUE(test_emphasis_call_count() > before_reload);
     ASSERT_TRUE(test_emphasis_applied());
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
@@ -1211,13 +1229,13 @@ static void test_fallback_emphasis_applied_on_every_load(void)
 static void test_color_fallback_not_synthesised(void)
 {
     FontBackend fb;
-    RendFallbackState st;
+    RendFallbackState *st = calloc(1, sizeof(*st));
     FontResolveBackend resolve;
-    cluster_setup(&fb, &st, &resolve);
+    cluster_setup(&fb, st, &resolve);
 
     test_resolve_add_route(THAI_BASE, "/fonts/color.ttf");
     FontOptions opts = { 0 };
-    RendRoute r = rend_route_get(&st, &fb, &resolve, THAI_BASE, true, false,
+    RendRoute r = rend_route_get(st, &fb, &resolve, THAI_BASE, true, false,
                                  12.0f, &opts, 10);
     ASSERT_NOT_NULL(r.identity);
 
@@ -1227,11 +1245,12 @@ static void test_color_fallback_not_synthesised(void)
     ASSERT_NOT_NULL(face);
     test_font_set_face_color(face, true);
     int before = test_emphasis_call_count();
-    ASSERT_TRUE(rend_fallback_ensure(&st, &fb, r.identity, 12.0f, &opts, 10));
+    ASSERT_TRUE(rend_fallback_ensure(st, &fb, r.identity, 12.0f, &opts, 10));
     ASSERT_TRUE(test_emphasis_call_count() > before);
     ASSERT_FALSE(test_emphasis_applied());
 
-    rend_fallback_destroy(&st, &fb);
+    rend_fallback_destroy(st, &fb);
+    free(st);
     test_font_reset();
     test_resolve_reset();
 }
