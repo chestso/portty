@@ -132,10 +132,12 @@ PY
 done
 
 # A bold fallback face renders heavier than the regular one:
-# ink(bold) >= 1.05 * ink(normal).
+# ink(bold) > ink(normal). The margin is font-dependent — the Linux
+# fallback adds ~11%, a macOS CoreText fallback ~4% — so the threshold
+# sits just above parity rather than at the Linux figure.
 if [ -n "$bold_ink" ] && [ -n "$base_ink" ] &&
-	[ $((bold_ink * 100)) -lt $((base_ink * 105)) ]; then
-	echo "FAIL: bold fallback ink=$bold_ink < 1.05 * ink(0)=$base_ink" >&2
+	[ $((bold_ink * 100)) -le $((base_ink * 100)) ]; then
+	echo "FAIL: bold fallback ink=$bold_ink <= ink(0)=$base_ink" >&2
 	fail=1
 fi
 
