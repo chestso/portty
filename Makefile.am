@@ -25,7 +25,7 @@ EXTRA_DIST = \
     contrib/demo-lottie.json \
     third_party/qoi/qoi.h
 
-# Format target — runs clang-format on C/C++, shfmt on shell, black on Python, prettier on Markdown.
+# Format target — runs clang-format on C/C++, shfmt on shell, black on Python, dprint on Markdown.
 .PHONY: format
 format:
 	@if command -v clang-format >/dev/null 2>&1; then \
@@ -52,12 +52,12 @@ format:
 	else \
 	    echo "black not found - skipping Python formatting." >&2; \
 	fi
-	@if command -v prettier >/dev/null 2>&1; then \
-	    echo "Formatting Markdown with prettier..."; \
-	    find $(top_srcdir) -maxdepth 2 -name '*.md' -print0 \
-	        | xargs -0 prettier --write; \
+	@if command -v dprint >/dev/null 2>&1; then \
+	    echo "Formatting Markdown with dprint..."; \
+	    find $(top_srcdir) -maxdepth 2 -name '*.md' -not -path '*/node_modules/*' -print0 \
+	        | xargs -0 -r dprint fmt; \
 	else \
-	    echo "prettier not found - skipping Markdown formatting." >&2; \
+	    echo "dprint not found - skipping Markdown formatting." >&2; \
 	fi
 
 # Portable ZIP target — on Windows, stages exe + DLLs + terminfo + launcher .cmd

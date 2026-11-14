@@ -1,0 +1,17 @@
+{
+  "markdown": {
+    "lineWidth": 80,
+    "newLineKind": "lf",
+    "textWrap": "maintain",
+    "wrapCodeSpans": false,
+    "table.cellPadding": "align",
+    "codeBlock.preserveIndentation": true,
+    "html.skipFormat": true
+  },
+  "plugins": [
+    "https://plugins.dprint.dev/markdown-0.29.0.wasm"
+  ],
+  "excludes": [
+    "**/node_modules/**"
+  ]
+}

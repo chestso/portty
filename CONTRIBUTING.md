@@ -22,7 +22,7 @@ Use `--enable-release` for an optimized build or `--enable-debug` for unsanitize
 - `make` — build everything
 - `make check` — run the test suite
 - `make install` — install to `$prefix` (default `$HOME/.local`); compiles terminfo via `tic`; on Windows, also creates a Start Menu shortcut
-- `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, black on `contrib/`, prettier on Markdown
+- `make format` — clang-format on `src/` and `tests/`, shfmt on `scripts/`, black on `contrib/`, dprint on Markdown
 - `make bear` — produce `compile_commands.json` for clangd
 - `make regen-shaders` — recompile the GPU glyph-coverage fragment shader (requires glslangValidator)
 - `make regen-icon` — regenerate the embedded window icon PNG header from the source SVG (requires rsvg-convert)
@@ -112,12 +112,12 @@ Run `make format` (from `build/`) to format all source files. This requires:
 - **clang-format** — C source and headers (`src/`, `tests/`)
 - **black** — Python files (`contrib/`)
 - **shfmt** — shell scripts (`scripts/`)
-- **prettier** — Markdown files
+- **dprint** — Markdown files
 
 ```bash
 # Fedora 41+
 sudo dnf install clang-tools-extra black shfmt
-npm install --prefix ~/.local prettier
+cargo install dprint   # or see https://dprint.dev/install/
 ```
 
 ## Platform-specific build notes

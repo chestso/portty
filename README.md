@@ -94,7 +94,6 @@ build/src/portty -- htop
 
 # Display text without spawning a shell (for testing)
 build/src/portty --demo "Hello, world!"
-
 ```
 
 ### CLI Flags
