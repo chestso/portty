@@ -50,6 +50,94 @@ static int parse_bool(const char *s)
     return -1;
 }
 
+static int hex_digit(char c)
+{
+    if (c >= '0' && c <= '9')
+        return c - '0';
+    if (c >= 'a' && c <= 'f')
+        return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F')
+        return c - 'A' + 10;
+    return -1;
+}
+
+/* Scale a `digits`-wide hex component (0..16^digits - 1) to 0..255,
+ * rounded to nearest — the XParseColor fixed-point rule. */
+static uint32_t scale_hex_component(uint32_t v, int digits)
+{
+    static const uint32_t max[5] = { 0, 0xfu, 0xffu, 0xfffu, 0xffffu };
+    return (v * 255u + max[digits] / 2u) / max[digits];
+}
+
+/* Parse a color value — the XParseColor RGB forms shared with the OSC
+ * 10/11/12 grammar: `#RGB`, `#RRGGBB`, `#RRRRRGGGGGGBBBBBB`, or
+ * `rgb:R[/G[/B]]` with 1-4 hex digits per component (missing
+ * components 0). X color names are not accepted. */
+static bool parse_color_value(const char *s, uint32_t *out_rgb)
+{
+    size_t len = strlen(s);
+    uint32_t comp[3] = { 0, 0, 0 };
+
+    if (len >= 4 && strncmp(s, "rgb:", 4) == 0) {
+        const char *p = s + 4;
+        size_t pos = 4;
+        int parsed = 0;
+        for (int i = 0; i < 3 && pos < len; i++) {
+            uint32_t v = 0;
+            int digits = 0;
+            while (pos < len && p[0] != '/') {
+                int h = hex_digit(p[0]);
+                if (h < 0 || digits == 4)
+                    return false;
+                v = v * 16u + (uint32_t)h;
+                digits++;
+                p++;
+                pos++;
+            }
+            if (digits == 0)
+                return false;
+            comp[i] = scale_hex_component(v, digits);
+            parsed++;
+            if (i < 2 && pos < len) {
+                p++;
+                pos++;
+            }
+        }
+        if (parsed == 0 || pos != len)
+            return false;
+    } else if (len >= 1 && s[0] == '#') {
+        int width = ((int)len - 1) / 3;
+        if (len != 4 && len != 7 && len != 13) /* #RGB, #RRGGBB, #RRRRRGGGGGGBBBBBB */
+            return false;
+        for (int i = 0; i < 3; i++) {
+            uint32_t v = 0;
+            for (int k = 0; k < width; k++) {
+                int h = hex_digit(s[1 + i * width + k]);
+                if (h < 0)
+                    return false;
+                v = v * 16u + (uint32_t)h;
+            }
+            comp[i] = scale_hex_component(v, width);
+        }
+    } else {
+        return false;
+    }
+
+    *out_rgb = (comp[0] << 16) | (comp[1] << 8) | comp[2];
+    return true;
+}
+
+/* "#rrggbb", or "(unset)". */
+static const char *fmt_color(char *buf, size_t cap, PorttyColor c)
+{
+    if (!c.set) {
+        snprintf(buf, cap, "(unset)");
+        return buf;
+    }
+    snprintf(buf, cap, "#%06x", c.rgb & 0xFFFFFFu);
+    return buf;
+}
+
 /* Find the config file path. Returns a malloc'd string or NULL. */
 static char *find_config_file(void)
 {
@@ -112,6 +200,12 @@ void portty_conf_init(PorttyConf *conf)
     conf->shell = NULL;
     conf->dump_dir = NULL;
     conf->source_path = NULL;
+    conf->fg_color = (PorttyColor){ false, 0 };
+    conf->bg_color = (PorttyColor){ false, 0 };
+    conf->cursor_color = (PorttyColor){ false, 0 };
+    conf->cursor_text_color = (PorttyColor){ false, 0 };
+    conf->cursor_shape = PORTTY_CURSOR_UNSET;
+    conf->cursor_blink = -1;
 }
 
 const char *portty_bell_mode_name(PorttyBellMode mode)
@@ -124,6 +218,19 @@ const char *portty_bell_mode_name(PorttyBellMode mode)
     case PORTTY_BELL_ALWAYS:
     default:
         return "always";
+    }
+}
+
+const char *portty_cursor_shape_name(PorttyCursorShape shape)
+{
+    switch (shape) {
+    case PORTTY_CURSOR_UNDERLINE:
+        return "underline";
+    case PORTTY_CURSOR_BAR:
+        return "bar";
+    case PORTTY_CURSOR_BLOCK:
+    default:
+        return "block";
     }
 }
 
@@ -296,6 +403,46 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
                         "unfocused, none)\n",
                         path, lineno, val);
             }
+        } else if (strcmp(key, "foreground") == 0 || strcmp(key, "background") == 0 ||
+                   strcmp(key, "cursor_color") == 0 || strcmp(key, "cursor_text_color") == 0) {
+            uint32_t rgb = 0;
+            if (!parse_color_value(val, &rgb)) {
+                fprintf(stderr,
+                        "WARNING: %s:%d: invalid %s '%s' (use #RGB, #RRGGBB, "
+                        "#RRRRRGGGGGGBBBBBB, or rgb:R/G/B)\n",
+                        path, lineno, key, val);
+            } else {
+                PorttyColor *slot = &conf->fg_color;
+                if (strcmp(key, "background") == 0)
+                    slot = &conf->bg_color;
+                else if (strcmp(key, "cursor_color") == 0)
+                    slot = &conf->cursor_color;
+                else if (strcmp(key, "cursor_text_color") == 0)
+                    slot = &conf->cursor_text_color;
+                slot->set = true;
+                slot->rgb = rgb;
+            }
+        } else if (strcmp(key, "cursor") == 0) {
+            if (strcmp(val, "block") == 0) {
+                conf->cursor_shape = PORTTY_CURSOR_BLOCK;
+            } else if (strcmp(val, "underline") == 0 || strcmp(val, "hbar") == 0) {
+                conf->cursor_shape = PORTTY_CURSOR_UNDERLINE;
+            } else if (strcmp(val, "bar") == 0 || strcmp(val, "vbar") == 0) {
+                conf->cursor_shape = PORTTY_CURSOR_BAR;
+            } else {
+                fprintf(stderr,
+                        "WARNING: %s:%d: invalid cursor '%s' (use block, "
+                        "underline, bar)\n",
+                        path, lineno, val);
+            }
+        } else if (strcmp(key, "cursor_blink") == 0) {
+            int b = parse_bool(val);
+            if (b < 0)
+                fprintf(stderr, "WARNING: %s:%d: invalid cursor_blink '%s' "
+                                "(expected true/false, yes/no, or 1/0)\n",
+                        path, lineno, val);
+            else
+                conf->cursor_blink = b;
         } else {
             fprintf(stderr, "WARNING: %s:%d: unknown key '%s'\n", path, lineno, key);
         }
@@ -313,6 +460,15 @@ bool portty_conf_load_path(PorttyConf *conf, const char *path)
          conf->shell ? conf->shell : "(unset)",
          conf->text_gamma, conf->text_contrast, conf->dim_opacity, conf->borderless,
          portty_bell_mode_name(conf->bell));
+
+    char fg[16], bg[16], cur[16], cur_text[16];
+    vlog("Config: fg=%s bg=%s cursor=%s cursor_blink=%d cursor_color=%s"
+         " cursor_text_color=%s\n",
+         fmt_color(fg, sizeof(fg), conf->fg_color),
+         fmt_color(bg, sizeof(bg), conf->bg_color),
+         portty_cursor_shape_name(conf->cursor_shape), conf->cursor_blink,
+         fmt_color(cur, sizeof(cur), conf->cursor_color),
+         fmt_color(cur_text, sizeof(cur_text), conf->cursor_text_color));
 
     return true;
 }

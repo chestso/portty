@@ -68,6 +68,12 @@ static void test_init_defaults(void)
     ASSERT_EQ(conf.scrollback, -1);
     ASSERT_EQ(conf.borderless, -1);
     ASSERT_TRUE(conf.dim_opacity < 0.0f);
+    ASSERT_FALSE(conf.fg_color.set);
+    ASSERT_FALSE(conf.bg_color.set);
+    ASSERT_FALSE(conf.cursor_color.set);
+    ASSERT_FALSE(conf.cursor_text_color.set);
+    ASSERT_EQ(conf.cursor_shape, PORTTY_CURSOR_UNSET);
+    ASSERT_EQ(conf.cursor_blink, -1);
 
     portty_conf_free(&conf);
 }
@@ -396,6 +402,179 @@ static void test_bell_modes(void)
     cleanup_tmp(path);
 }
 
+/* The four color keys land in their slots. */
+static void test_color_keys(void)
+{
+    char *path = write_tmp_conf(
+        "foreground = #f8f8f2\n"
+        "background = rgb:10/20/30\n"
+        "cursor_color = #bd93f9\n"
+        "cursor_text_color = #282a36\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.fg_color.set);
+    ASSERT_EQ(conf.fg_color.rgb, 0xF8F8F2u);
+    ASSERT_TRUE(conf.bg_color.set);
+    ASSERT_EQ(conf.bg_color.rgb, 0x102030u);
+    ASSERT_TRUE(conf.cursor_color.set);
+    ASSERT_EQ(conf.cursor_color.rgb, 0xBD93F9u);
+    ASSERT_TRUE(conf.cursor_text_color.set);
+    ASSERT_EQ(conf.cursor_text_color.rgb, 0x282A36u);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+/* All the XParseColor RGB forms land on the same value. */
+static void test_color_forms(void)
+{
+    const char *forms[] = {
+        "#f00",
+        "#ff0000",
+        "#ffff00000000",
+        "rgb:f/0/0",
+        "rgb:ff/0/0",
+    };
+    for (size_t i = 0; i < sizeof(forms) / sizeof(forms[0]); i++) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "foreground = %s\n", forms[i]);
+        char *path = write_tmp_conf(buf);
+        ASSERT_NOT_NULL(path);
+
+        PorttyConf conf;
+        portty_conf_init(&conf);
+        ASSERT_TRUE(portty_conf_load_path(&conf, path));
+        ASSERT_TRUE(conf.fg_color.set);
+        ASSERT_EQ(conf.fg_color.rgb, 0xFF0000u);
+
+        portty_conf_free(&conf);
+        cleanup_tmp(path);
+    }
+}
+
+/* XParseColor scaling: a 1-digit component covers 0..15 and scales up
+ * — rgb:8 is #88, not #08. */
+static void test_color_component_scaling(void)
+{
+    char *path = write_tmp_conf("background = rgb:8/8/8\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.bg_color.set);
+    ASSERT_EQ(conf.bg_color.rgb, 0x888888u);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+/* Invalid colors warn and leave the previous value alone. */
+static void test_color_invalid(void)
+{
+    char *path = write_tmp_conf(
+        "foreground = red\n"
+        "foreground = #12345\n"
+        "background = rgb:zz/0/0\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_FALSE(conf.fg_color.set);
+    ASSERT_FALSE(conf.bg_color.set);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    /* A bad value after a good one does not clobber it. */
+    path = write_tmp_conf(
+        "foreground = #123456\n"
+        "foreground = not-a-color\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_TRUE(conf.fg_color.set);
+    ASSERT_EQ(conf.fg_color.rgb, 0x123456u);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+/* Cursor shape: block/underline/bar with the hbar/vbar aliases. */
+static void test_cursor_shape(void)
+{
+    const char *values[] = { "block", "underline", "hbar", "bar", "vbar" };
+    PorttyCursorShape expected[] = {
+        PORTTY_CURSOR_BLOCK,
+        PORTTY_CURSOR_UNDERLINE,
+        PORTTY_CURSOR_UNDERLINE,
+        PORTTY_CURSOR_BAR,
+        PORTTY_CURSOR_BAR,
+    };
+    for (size_t i = 0; i < sizeof(values) / sizeof(values[0]); i++) {
+        char buf[64];
+        snprintf(buf, sizeof(buf), "cursor = %s\n", values[i]);
+        char *path = write_tmp_conf(buf);
+        ASSERT_NOT_NULL(path);
+
+        PorttyConf conf;
+        portty_conf_init(&conf);
+        ASSERT_TRUE(portty_conf_load_path(&conf, path));
+        ASSERT_EQ(conf.cursor_shape, expected[i]);
+
+        portty_conf_free(&conf);
+        cleanup_tmp(path);
+    }
+
+    /* Invalid: warn and leave the previous value alone. */
+    char *path = write_tmp_conf(
+        "cursor = bar\n"
+        "cursor = underline-me\n");
+    ASSERT_NOT_NULL(path);
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.cursor_shape, PORTTY_CURSOR_BAR);
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
+static void test_cursor_blink(void)
+{
+    char *path = write_tmp_conf("cursor_blink = false\n");
+    ASSERT_NOT_NULL(path);
+
+    PorttyConf conf;
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.cursor_blink, 0);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    path = write_tmp_conf("cursor_blink = true\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.cursor_blink, 1);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+
+    path = write_tmp_conf("cursor_blink = sometimes\n");
+    ASSERT_NOT_NULL(path);
+    portty_conf_init(&conf);
+    ASSERT_TRUE(portty_conf_load_path(&conf, path));
+    ASSERT_EQ(conf.cursor_blink, -1);
+
+    portty_conf_free(&conf);
+    cleanup_tmp(path);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -419,6 +598,12 @@ int main(int argc, char *argv[])
     RUN_TEST(test_nonexistent_file);
     RUN_TEST(test_all_hinting_modes);
     RUN_TEST(test_bell_modes);
+    RUN_TEST(test_color_keys);
+    RUN_TEST(test_color_forms);
+    RUN_TEST(test_color_component_scaling);
+    RUN_TEST(test_color_invalid);
+    RUN_TEST(test_cursor_shape);
+    RUN_TEST(test_cursor_blink);
 
     TEST_SUMMARY();
 }

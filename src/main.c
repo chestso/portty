@@ -31,6 +31,7 @@
 #endif
 #include "term.h"
 #include "term_cfr.h"
+#include "term_colors.h"
 #include <getopt.h>
 #include <limits.h>
 #include <stdio.h>
@@ -370,7 +371,21 @@ static void apply_conf_to_args(PorttyArgs *args, PorttyConf *conf)
         args->borderless = 0;
 }
 
-static TerminalBackend *create_terminal(PorttyArgs *args)
+static CfrCursorShape cursor_shape_to_cfr(PorttyCursorShape s)
+{
+    switch (s) {
+    case PORTTY_CURSOR_UNDERLINE:
+        return CFR_CURSOR_UNDERLINE;
+    case PORTTY_CURSOR_BAR:
+        return CFR_CURSOR_BAR;
+    case PORTTY_CURSOR_BLOCK:
+    case PORTTY_CURSOR_UNSET:
+    default:
+        return CFR_CURSOR_BLOCK;
+    }
+}
+
+static TerminalBackend *create_terminal(PorttyArgs *args, const PorttyConf *conf)
 {
     TerminalBackend *vt_backend = &terminal_backend_cfr;
     CfrConfig cfg = CFR_CONFIG_DEFAULTS;
@@ -381,6 +396,21 @@ static TerminalBackend *create_terminal(PorttyArgs *args)
     cfg.reflow = true;
     cfg.ambiguous_wide = (args->ambiguous_wide > 0);
     cfg.terminal_name = "portty";
+
+    /* Seeds for the cursor style and the dynamic colors (xterm OSC
+     * 10/11/12) — what DECSCUSR 7, OSC 110/111/112 and RIS restore to.
+     * The cursor color is always explicit: portty's default is Dracula
+     * purple, so `OSC 112` resets to purple, not to "unset". */
+    cfg.cursor_shape = cursor_shape_to_cfr(conf->cursor_shape);
+    cfg.cursor_blink = conf->cursor_blink;
+    if (conf->fg_color.set)
+        cfg.fg_color = (CfrColorValue){ true, conf->fg_color.rgb };
+    if (conf->bg_color.set)
+        cfg.bg_color = (CfrColorValue){ true, conf->bg_color.rgb };
+    cfg.cursor_color = (CfrColorValue){ true, term_cursor_default_rgb() };
+    if (conf->cursor_color.set)
+        cfg.cursor_color.rgb = conf->cursor_color.rgb;
+
     TerminalBackend *term = terminal_init(vt_backend, &cfg);
     if (!term) {
         fprintf(stderr, "Failed to initialize terminal\n");
@@ -400,7 +430,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     (void)SetCurrentProcessExplicitAppUserModelID(PORTTY_APP_USER_MODEL_ID);
 #endif
 
-    TerminalBackend *term = create_terminal(args);
+    TerminalBackend *term = create_terminal(args, conf);
     if (!term)
         return 1;
 
