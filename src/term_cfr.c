@@ -52,6 +52,14 @@ typedef struct
     bool altscreen;
     int mouse_mode;
 
+    /* Dynamic color cache (xterm OSC 10/11/12), filled at init and
+     * refreshed by the set_color callback. The renderer reads these
+     * through the get_default_colors / get_cursor_color hooks. */
+    uint32_t default_fg;
+    uint32_t default_bg;
+    uint32_t cursor_color;
+    bool cursor_color_set;
+
     TerminalOutputCallback output_cb;
     void *output_user;
 
@@ -210,6 +218,26 @@ static void cb_movecursor(CfrCursor cur, void *user)
     d->cursor_visible = cur.visible;
     d->cursor_blink = cur.blink;
     /* Cursor position is queried lazily via get_cursor_pos. */
+}
+
+static void cb_set_color(int code, uint32_t rgb, bool set, void *user)
+{
+    CfrBackendData *d = user;
+    switch (code) {
+    case 10:
+        d->default_fg = rgb;
+        break;
+    case 11:
+        d->default_bg = rgb;
+        break;
+    case 12:
+        d->cursor_color = rgb;
+        d->cursor_color_set = set;
+        break;
+    default:
+        return;
+    }
+    d->needs_redraw = true;
 }
 
 static void cb_set_title(const char *utf8, void *user)
@@ -489,6 +517,11 @@ static bool cfr_back_init(TerminalBackend *term, const CfrConfig *cfg)
     d->cursor_visible = true;
     d->cursor_blink = true;
 
+    /* Seed the dynamic color cache (config seeds, engine defaults). */
+    cfr_get_dynamic_color(d->vt, 10, &d->default_fg, NULL);
+    cfr_get_dynamic_color(d->vt, 11, &d->default_bg, NULL);
+    cfr_get_dynamic_color(d->vt, 12, &d->cursor_color, &d->cursor_color_set);
+
     int rows, cols;
     cfr_get_dimensions(d->vt, &rows, &cols);
     d->term_rows = rows;
@@ -500,6 +533,7 @@ static bool cfr_back_init(TerminalBackend *term, const CfrConfig *cfg)
         .bell = cb_bell,
         .set_title = cb_set_title,
         .set_mode = cb_set_mode,
+        .set_color = cb_set_color,
         .output = cb_output,
         .sb_pushline = cb_sb_push,
         .sb_popline = cb_sb_pop,
@@ -554,9 +588,9 @@ static int cfr_back_process_input(TerminalBackend *term, const char *input,
 /* Cell conversion                                                     */
 /* ------------------------------------------------------------------ */
 
-static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
+static void convert_cell(CfrBackendData *d, const CfrCell *src, TerminalCell *dst)
 {
-    (void)vt;
+    CfrTerm *vt = d->vt;
     memset(dst, 0, sizeof(*dst));
     if (!src)
         return;
@@ -574,9 +608,9 @@ static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
     /* Style. */
     const CfrStyle *st = cfr_cell_style(vt, src);
     if (!st) {
-        dst->fg = unpack_rgb(0, true, cfr_default_fg_rgb());
-        dst->bg = unpack_rgb(0, true, cfr_default_bg_rgb());
-        dst->ul_color = unpack_rgb(0, true, cfr_default_fg_rgb());
+        dst->fg = unpack_rgb(0, true, d->default_fg);
+        dst->bg = unpack_rgb(0, true, d->default_bg);
+        dst->ul_color = unpack_rgb(0, true, d->default_fg);
         return;
     }
     dst->attrs.bold = (st->attrs & CFR_ATTR_BOLD) ? 1 : 0;
@@ -597,13 +631,13 @@ static void convert_cell(CfrTerm *vt, const CfrCell *src, TerminalCell *dst)
 
     dst->fg = unpack_rgb(st->fg_rgb,
                          (st->color_flags & CFR_COLOR_DEFAULT_FG) != 0,
-                         cfr_default_fg_rgb());
+                         d->default_fg);
     dst->bg = unpack_rgb(st->bg_rgb,
                          (st->color_flags & CFR_COLOR_DEFAULT_BG) != 0,
-                         cfr_default_bg_rgb());
+                         d->default_bg);
     dst->ul_color = unpack_rgb(st->ul_rgb,
                                (st->color_flags & CFR_COLOR_DEFAULT_UL) != 0,
-                               cfr_default_fg_rgb());
+                               d->default_fg);
 
     /* Match libvterm backend: pre-swap fg/bg for reverse video so the
      * renderer sees visual colors. */
@@ -622,7 +656,7 @@ static int cfr_back_get_cell(TerminalBackend *term, int row, int col,
     if (!d || !cell)
         return -1;
     const CfrCell *src = cfr_get_cell(d->vt, row, col);
-    convert_cell(d->vt, src, cell);
+    convert_cell(d, src, cell);
     return 0;
 }
 
@@ -719,6 +753,35 @@ static bool cfr_back_get_cursor_blink(TerminalBackend *term)
 {
     CfrBackendData *d = term->backend_data;
     return cfr_get_cursor(d->vt).blink;
+}
+static TerminalCursorShape cfr_back_get_cursor_shape(TerminalBackend *term)
+{
+    CfrBackendData *d = term->backend_data;
+    switch (cfr_get_cursor(d->vt).shape) {
+    case CFR_CURSOR_UNDERLINE:
+        return TERMINAL_CURSOR_UNDERLINE;
+    case CFR_CURSOR_BAR:
+        return TERMINAL_CURSOR_BAR;
+    case CFR_CURSOR_BLOCK:
+    default:
+        return TERMINAL_CURSOR_BLOCK;
+    }
+}
+static bool cfr_back_get_cursor_color(TerminalBackend *term, uint32_t *out_rgb)
+{
+    CfrBackendData *d = term->backend_data;
+    if (out_rgb)
+        *out_rgb = d->cursor_color;
+    return d->cursor_color_set;
+}
+static void cfr_back_get_default_colors(TerminalBackend *term, uint32_t *out_fg,
+                                        uint32_t *out_bg)
+{
+    CfrBackendData *d = term->backend_data;
+    if (out_fg)
+        *out_fg = d->default_fg;
+    if (out_bg)
+        *out_bg = d->default_bg;
 }
 static const char *cfr_back_get_title(TerminalBackend *term)
 {
@@ -819,7 +882,7 @@ static int cfr_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
     if (!d || !cell)
         return -1;
     const CfrCell *src = cfr_get_scrollback_cell(d->vt, sb_row, col);
-    convert_cell(d->vt, src, cell);
+    convert_cell(d, src, cell);
     return 0;
 }
 
@@ -1121,6 +1184,9 @@ TerminalBackend terminal_backend_cfr = {
     .get_cursor_pos = cfr_back_get_cursor_pos,
     .get_cursor_visible = cfr_back_get_cursor_visible,
     .get_cursor_blink = cfr_back_get_cursor_blink,
+    .get_cursor_shape = cfr_back_get_cursor_shape,
+    .get_cursor_color = cfr_back_get_cursor_color,
+    .get_default_colors = cfr_back_get_default_colors,
     .get_title = cfr_back_get_title,
     .needs_redraw = cfr_back_needs_redraw,
     .clear_redraw = cfr_back_clear_redraw,

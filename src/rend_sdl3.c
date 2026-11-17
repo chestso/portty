@@ -333,7 +333,8 @@ static void capture_sdl_gpu_info(RendererSdl3Data *data)
 // glyphs on the path's identity record, so a face's glyphs survive the eviction
 // of the face itself and a reload at any address finds them again.
 
-bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Renderer *renderer_handle)
+bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle,
+                    SDL_Renderer *renderer_handle, const PorttyConf *conf)
 {
     data->window = window_handle;
     data->renderer = renderer_handle;
@@ -376,7 +377,7 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle, SDL_Rende
     const char *rname = SDL_GetRendererName(data->renderer);
     data->linear_ok = (rname && (strcmp(rname, "gpu") == 0 || strcmp(rname, "vulkan") == 0));
     data->linear_selfcheck_done = false;
-    term_colors_init(&data->colors);
+    term_colors_init(&data->colors, conf);
     vlog("Renderer '%s': linear-light compositing %s\n", rname ? rname : "(null)",
          data->linear_ok ? "enabled" : "disabled (sRGB blending)");
 
@@ -857,9 +858,12 @@ static void draw_cluster(RendererSdl3Data *data, const RendGlyphPlan *plan,
 // vis_col: visual column for draw position (may differ from vt_col on rows
 //          with VS16-widened emoji).
 // pres_w:  presentation width in cells (from iterator).
+// under_block_cursor: the glyph sits under a visible block cursor and may
+//          take the `cursor_text_color` override.
 static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
                         int row, int vt_col, int vis_col, int pres_w,
-                        const TerminalCell *cell_in, bool populate_only)
+                        const TerminalCell *cell_in, bool populate_only,
+                        bool under_block_cursor)
 {
     TerminalCell cell = *cell_in;
     Uint8 r = cell.fg.r, g = cell.fg.g, b = cell.fg.b;
@@ -882,6 +886,16 @@ static void render_cell(RendererSdl3Data *data, TerminalBackend *term,
         r = (Uint8)(r * op + bg_r * (1.0f - op));
         g = (Uint8)(g * op + bg_g * (1.0f - op));
         b = (Uint8)(b * op + bg_b * (1.0f - op));
+    }
+
+    // Block cursor: the glyph under it can be drawn in a dedicated color
+    // (`cursor_text_color`). Applied after the dim blend so the configured
+    // color wins outright; color-baked emoji glyphs carry their own colors
+    // and ignore it.
+    if (under_block_cursor && data->colors.cursor_text_set) {
+        r = data->colors.cursor_text_r;
+        g = data->colors.cursor_text_g;
+        b = data->colors.cursor_text_b;
     }
 
     // Background perceptual luma (0..1) for the glyph-coverage shader's fg/bg
@@ -1081,6 +1095,21 @@ static void flush_overline_run(RendererSdl3Data *data, int row, int vis_start,
     draw_overline(data->renderer, run_x, overline_y, run_w, pd);
 }
 
+/* TerminalCursorShape (term.h) → RendCursorShape (rend_common.h). The
+ * values match; the switch keeps the two vocabularies decoupled. */
+static RendCursorShape rend_cursor_shape_of(TerminalCursorShape s)
+{
+    switch (s) {
+    case TERMINAL_CURSOR_UNDERLINE:
+        return CURSOR_SHAPE_UNDERLINE;
+    case TERMINAL_CURSOR_BAR:
+        return CURSOR_SHAPE_BAR;
+    case TERMINAL_CURSOR_BLOCK:
+    default:
+        return CURSOR_SHAPE_BLOCK;
+    }
+}
+
 static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                                  int display_rows, int display_cols,
                                  bool cursor_visible, bool populate_only, int scroll_offset)
@@ -1099,6 +1128,8 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
     bool cursor_col_in_bounds = cursor_pos.col >= 0 && cursor_pos.col < display_cols;
     bool show_cursor = cursor_visible && cursor_row_visible && cursor_col_in_bounds &&
                        terminal_get_cursor_visible(term);
+    RendCursorShape cursor_shape =
+        rend_cursor_shape_of(terminal_get_cursor_shape(term));
 
     for (int row = 0; row < display_rows; row++) {
         int unified_row = row - scroll_offset;
@@ -1111,18 +1142,31 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
                 render_cell_bg(data, row, it.vis_col, it.pres_w, &it.cell);
             }
         }
-        // Pass 1.5: draw cursor (under glyphs)
+        // Pass 1.5: draw cursor (under glyphs). The shape comes from the
+        // engine's DECSCUSR state; the fill color from the OSC 12 state,
+        // falling back to the configured cursor color.
         if (!populate_only && show_cursor && cursor_row == row) {
             terminal_row_iter_init(&it, term, unified_row, display_cols);
             while (terminal_row_iter_next(&it)) {
                 if (it.vt_col == cursor_pos.col) {
                     float cx = (float)(it.vis_col * data->cell_width);
                     float cy = (float)(row * data->cell_height);
-                    float cw = (float)(it.pres_w * data->cell_width);
-                    float ch = (float)data->cell_height;
-                    SDL_SetRenderDrawColor(data->renderer, data->colors.cursor_r, data->colors.cursor_g,
-                                           data->colors.cursor_b, 255);
-                    draw_rounded_rect(data->renderer, cx, cy, cw, ch, 2.0f);
+                    int cw = it.pres_w * data->cell_width;
+                    int ch = data->cell_height;
+                    Uint8 cr = data->colors.cursor_r;
+                    Uint8 cg = data->colors.cursor_g;
+                    Uint8 cb = data->colors.cursor_b;
+                    uint32_t cur_rgb = 0;
+                    if (terminal_get_cursor_color(term, &cur_rgb)) {
+                        cr = (Uint8)((cur_rgb >> 16) & 0xff);
+                        cg = (Uint8)((cur_rgb >> 8) & 0xff);
+                        cb = (Uint8)(cur_rgb & 0xff);
+                    }
+                    RendCursorRect rr = rend_cursor_shape_rect(cursor_shape, cw, ch);
+                    SDL_SetRenderDrawColor(data->renderer, cr, cg, cb, 255);
+                    draw_rounded_rect(data->renderer, cx + (float)rr.x,
+                                      cy + (float)rr.y, (float)rr.w,
+                                      (float)rr.h, 2.0f);
                     break;
                 }
             }
@@ -1132,8 +1176,11 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
         while (terminal_row_iter_next(&it)) {
             // Skip foreground rendering for invisible text (SGR 8)
             if (!it.cell.attrs.invis) {
+                bool under_block_cursor = show_cursor && cursor_row == row &&
+                                          cursor_shape == CURSOR_SHAPE_BLOCK &&
+                                          it.vt_col == cursor_pos.col;
                 render_cell(data, term, row, it.vt_col, it.vis_col, it.pres_w,
-                            &it.cell, populate_only);
+                            &it.cell, populate_only, under_block_cursor);
             }
         }
         // Pass 3: draw underlines as continuous spans across consecutive cells

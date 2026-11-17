@@ -235,27 +235,10 @@ from the font resolver for font select.
 
 None of these is implemented. Some are inherited from `xterm-256color` as
 accepted-but-ignored SGR codes, the rest are absent from the terminfo entry
-entirely; all are commonly expected by modern TUIs.
-
-### OSC 10 / OSC 11 set (default foreground / background)
-
-The query form is answered: coffer's `osc_color_query()` replies to
-`OSC 10 ; ?` and `OSC 11 ; ?` with the defaults from its Dracula palette, which
-is what image viewers (chafa, viu, lsix) read before alpha-compositing. The set
-form (`OSC 10 ; rgb:R/G/B`) is parsed and dropped, so an application cannot
-recolor the terminal. portty reads its colors once at startup through
-`cfr_default_fg_rgb()` / `cfr_default_bg_rgb()` (`term_colors.c`); no
-configuration key overrides them.
-
-### OSC 12 (set cursor color)
-
-Not handled. The cursor color is fixed: `term_colors.c` uses palette entry 4
-(Dracula purple).
-
-### OSC 112 (reset cursor color)
-
-Not handled — the same reset as `Cr=\E]112\007` in xterm-256color. It is only
-observable once OSC 12 can set a cursor color, so the two go together.
+entirely; all are commonly expected by modern TUIs. (The dynamic colors —
+OSC 10/11/12 set/query/reset and DECSCUSR cursor style — used to live here;
+they are implemented now, see the README's config keys `foreground`,
+`background`, `cursor`, `cursor_blink`, `cursor_color`.)
 
 ### OSC 4 / OSC 104 (palette set / reset)
 

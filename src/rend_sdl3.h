@@ -123,7 +123,8 @@ typedef struct RendererSdl3Data
     TermColors colors;
 } RendererSdl3Data;
 
-bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window, SDL_Renderer *renderer);
+bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window, SDL_Renderer *renderer,
+                    const PorttyConf *conf);
 void rend_sdl3_destroy(RendererSdl3Data *data);
 int rend_sdl3_load_fonts(RendererSdl3Data *data, float font_size, const char *font_name, int ft_hint_target);
 // Re-rasterize the fonts for a new content scale. Returns true when the

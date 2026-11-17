@@ -426,11 +426,22 @@ dim_opacity = 0.6
 bell = always
 ambiguous_wide = false
 borderless = false
+foreground = #f8f8f2
+background = #282a36
+cursor = bar
+cursor_blink = true
+cursor_color = #bd93f9
+cursor_text_color = #282a36
 ```
 
 ### Available Keys
 
-All keys are optional. Keys appear directly at the top level.
+All keys are optional. Keys appear directly at the top level. Color values
+take the XParseColor RGB forms: `#RGB`, `#RRGGBB`, `#RRRRRGGGGGGBBBBBB`, or
+`rgb:R[/G[/B]]` (1–4 hex digits per component) — the same grammar the OSC
+10/11/12 sequences use. Configured colors are the _seeds_: an application
+can still recolor the terminal at runtime (OSC 10/11/12), and `OSC 110/111/112`/
+RIS return to the configured values.
 
 | Key                         | Values                                                | Default                        | Description                                                                                                                                          |
 | --------------------------- | ----------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -447,6 +458,12 @@ All keys are optional. Keys appear directly at the top level.
 | `ambiguous_wide`            | `true`/`false`                                        | `false`                        | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
 | `borderless`                | `true`/`false`                                        | `false`                        | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
 | `dump_dir`                  | Directory path                                        | `$XDG_STATE_HOME/portty/dumps` | Directory for `Ctrl+Shift+F7` terminal-state dumps (also `$PORTTY_DUMP_DIR`)                                                                         |
+| `foreground`                | Color                                                 | `#f8f8f2`                      | Default foreground color — what `SGR 39` text and `OSC 10;?` resolve to                                                                              |
+| `background`                | Color                                                 | `#000000`                      | Default background color — the window clear color, `SGR 49` text, `OSC 11;?`                                                                         |
+| `cursor`                    | `block`, `underline`, `bar` (aliases `hbar`, `vbar`)  | `block`                        | Cursor shape; also what DECSCUSR `CSI 7 SP q` and RIS restore to                                                                                     |
+| `cursor_blink`              | `true`/`false`                                        | `true`                         | Cursor blinking; apps can still change it at runtime (DECSCUSR, `CSI ?12`)                                                                           |
+| `cursor_color`              | Color                                                 | `#bd93f9`                      | Cursor fill color; also what `OSC 112` resets to                                                                                                     |
+| `cursor_text_color`         | Color                                                 | unset (drawn normally)         | Glyph color under a block cursor (portty-only — no OSC sequence changes it)                                                                          |
 
 Boolean values accept `true`/`false`, `yes`/`no`, or `1`/`0`. Lines starting with `#` or `;` are comments.
 

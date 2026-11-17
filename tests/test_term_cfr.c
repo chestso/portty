@@ -904,6 +904,118 @@ static void test_reset_clears_screen(void)
     terminal_destroy(&t);
 }
 
+/* With no seeds, the cursor style is the engine default (blinking
+ * block) and the cursor color getter reports "unset". */
+static void test_cursor_style_defaults(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 10;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    ASSERT_EQ(terminal_get_cursor_shape(&t), TERMINAL_CURSOR_BLOCK);
+    ASSERT_TRUE(terminal_get_cursor_blink(&t));
+    uint32_t rgb = 0;
+    ASSERT_FALSE(terminal_get_cursor_color(&t, &rgb));
+
+    terminal_destroy(&t);
+}
+
+/* Config seeds for the cursor style and the dynamic colors (xterm OSC
+ * 10/11/12), and what DECSCUSR 7 / RIS restore to. */
+static void test_style_and_color_seeds(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 10;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        cfg.cursor_shape = CFR_CURSOR_BAR;
+        cfg.cursor_blink = 0; /* steady */
+        cfg.fg_color = (CfrColorValue){ true, 0x112233 };
+        cfg.bg_color = (CfrColorValue){ true, 0x445566 };
+        cfg.cursor_color = (CfrColorValue){ true, 0x778899 };
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    ASSERT_EQ(terminal_get_cursor_shape(&t), TERMINAL_CURSOR_BAR);
+    ASSERT_FALSE(terminal_get_cursor_blink(&t));
+    uint32_t rgb = 0;
+    ASSERT_TRUE(terminal_get_cursor_color(&t, &rgb));
+    ASSERT_EQ(rgb, 0x778899u);
+    uint32_t fg = 0, bg = 0;
+    terminal_get_default_colors(&t, &fg, &bg);
+    ASSERT_EQ(fg, 0x112233u);
+    ASSERT_EQ(bg, 0x445566u);
+
+    /* Apps move away from the seeds... */
+    feed(&t, "\x1b[3 q");
+    feed(&t, "\x1b]10;#ffffff\x1b\\");
+    feed(&t, "\x1b]12;#00ff00\x1b\\");
+    ASSERT_EQ(terminal_get_cursor_shape(&t), TERMINAL_CURSOR_UNDERLINE);
+    terminal_get_default_colors(&t, &fg, &bg);
+    ASSERT_EQ(fg, 0xffffffu);
+    ASSERT_TRUE(terminal_get_cursor_color(&t, &rgb));
+    ASSERT_EQ(rgb, 0x00ff00u);
+
+    /* ... and RIS returns everything to the seeds. */
+    feed(&t, "\x1b"
+             "c");
+    ASSERT_EQ(terminal_get_cursor_shape(&t), TERMINAL_CURSOR_BAR);
+    ASSERT_FALSE(terminal_get_cursor_blink(&t));
+    terminal_get_default_colors(&t, &fg, &bg);
+    ASSERT_EQ(fg, 0x112233u);
+    ASSERT_EQ(bg, 0x445566u);
+    ASSERT_TRUE(terminal_get_cursor_color(&t, &rgb));
+    ASSERT_EQ(rgb, 0x778899u);
+
+    terminal_destroy(&t);
+}
+
+/* OSC 10/11 changes flow into the bridge's color cache: default-colored
+ * cells convert with the new value and the host is told to repaint. */
+static void test_dynamic_colors_follow_osc(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 10;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    feed(&t, "X");
+    TerminalCell cell;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &cell), 0);
+    uint32_t fg = 0, bg = 0;
+    terminal_get_default_colors(&t, &fg, &bg);
+    ASSERT_TRUE(cell.fg.is_default);
+    ASSERT_EQ(cell.fg.r, (fg >> 16) & 0xffu);
+    ASSERT_EQ(cell.bg.r, (bg >> 16) & 0xffu);
+
+    terminal_clear_redraw(&t);
+    feed(&t, "\x1b]11;#102030\x1b\\");
+    ASSERT_TRUE(terminal_needs_redraw(&t));
+    terminal_get_default_colors(&t, &fg, &bg);
+    ASSERT_EQ(bg, 0x102030u);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &cell), 0);
+    ASSERT_TRUE(cell.bg.is_default);
+    ASSERT_EQ(cell.bg.r, 0x10);
+    ASSERT_EQ(cell.bg.g, 0x20);
+    ASSERT_EQ(cell.bg.b, 0x30);
+
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -934,6 +1046,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_reset_input_state_restores_key_encoding);
     RUN_TEST(test_reset_input_state_keeps_screen);
     RUN_TEST(test_reset_clears_screen);
+    RUN_TEST(test_cursor_style_defaults);
+    RUN_TEST(test_style_and_color_seeds);
+    RUN_TEST(test_dynamic_colors_follow_osc);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

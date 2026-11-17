@@ -1135,7 +1135,7 @@ static bool sdl3_init(PorttyBackend *self, PorttyApp *app,
     SDL_SetRenderVSync(d->sdl_renderer, 0);
 
     // Initialize renderer backend
-    if (!rend_sdl3_init(&d->rend, d->window, d->sdl_renderer)) {
+    if (!rend_sdl3_init(&d->rend, d->window, d->sdl_renderer, app->conf)) {
         SDL_DestroyRenderer(d->sdl_renderer);
         d->sdl_renderer = NULL;
         SDL_DestroyWindow(d->window);

@@ -215,6 +215,21 @@ static void kv_colored(SB *sb, const char *key, const char *sgr, const char *val
     sb_puts(sb, RST "\n");
 }
 
+// TerminalCursorShape names (term.h) — kept decoupled from the header
+// here so the report builder stays string-only.
+static const char *cursor_shape_name(int shape)
+{
+    switch (shape) {
+    case 1:
+        return "underline";
+    case 2:
+        return "bar";
+    case 0:
+    default:
+        return "block";
+    }
+}
+
 static const char *or_unset(const char *s)
 {
     return (s && *s) ? s : NULL;
@@ -407,6 +422,16 @@ char *diag_build_report(const DiagSources *s)
     kvf(&sb, "dim opacity", "%.2f", (double)s->dim_opacity);
     kv(&sb, "bell", s->bell ? s->bell : "always");
     kv(&sb, "word chars", or_unset(s->word_chars));
+    kvf(&sb, "cursor", "%s, %s", cursor_shape_name(s->cursor_shape),
+        s->cursor_blink ? "blinking" : "steady");
+    if (s->cursor_color_set)
+        kvf(&sb, "cursor color", "#%06x", s->cursor_rgb & 0xFFFFFFu);
+    else
+        kv(&sb, "cursor color", "reverse video");
+    if (s->cursor_text_set)
+        kvf(&sb, "cursor text color", "#%06x", s->cursor_text_rgb & 0xFFFFFFu);
+    kvf(&sb, "colors", "fg #%06x, bg #%06x", s->fg_rgb & 0xFFFFFFu,
+        s->bg_rgb & 0xFFFFFFu);
 
     // VT engine features
     section(&sb, "VT FEATURES");

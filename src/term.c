@@ -88,6 +88,41 @@ bool terminal_get_cursor_blink(TerminalBackend *term)
     return term->get_cursor_blink(term);
 }
 
+TerminalCursorShape terminal_get_cursor_shape(TerminalBackend *term)
+{
+    if (!term || !term->get_cursor_shape)
+        return TERMINAL_CURSOR_BLOCK;
+    return term->get_cursor_shape(term);
+}
+
+bool terminal_get_cursor_color(TerminalBackend *term, uint32_t *out_rgb)
+{
+    if (!term || !term->get_cursor_color)
+        return false;
+    return term->get_cursor_color(term, out_rgb);
+}
+
+void terminal_get_default_colors(TerminalBackend *term, uint32_t *out_fg,
+                                 uint32_t *out_bg)
+{
+    if (!term || !term->get_default_colors)
+        return;
+    term->get_default_colors(term, out_fg, out_bg);
+}
+
+const char *terminal_cursor_shape_name(TerminalCursorShape shape)
+{
+    switch (shape) {
+    case TERMINAL_CURSOR_UNDERLINE:
+        return "underline";
+    case TERMINAL_CURSOR_BAR:
+        return "bar";
+    case TERMINAL_CURSOR_BLOCK:
+    default:
+        return "block";
+    }
+}
+
 const char *terminal_get_title(TerminalBackend *term)
 {
     if (!term || !term->get_title)

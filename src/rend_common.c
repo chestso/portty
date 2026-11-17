@@ -2225,3 +2225,37 @@ void rend_make_close_x_bitmap(uint8_t *buf, int size)
         }
     }
 }
+
+// Cursor shape geometry within the cursor's cell box — see the header.
+RendCursorRect rend_cursor_shape_rect(RendCursorShape shape, int cell_w,
+                                      int cell_h)
+{
+    RendCursorRect r = { 0, 0, cell_w, cell_h };
+    switch (shape) {
+    case CURSOR_SHAPE_UNDERLINE:
+    {
+        int band = cell_h / 8;
+        if (band < 2)
+            band = 2;
+        if (band > cell_h)
+            band = cell_h;
+        r.y = cell_h - band;
+        r.h = band;
+        break;
+    }
+    case CURSOR_SHAPE_BAR:
+    {
+        int band = cell_w / 8;
+        if (band < 2)
+            band = 2;
+        if (band > cell_w)
+            band = cell_w;
+        r.w = band;
+        break;
+    }
+    case CURSOR_SHAPE_BLOCK:
+    default:
+        break;
+    }
+    return r;
+}

@@ -58,6 +58,17 @@ typedef struct
     float dim_opacity; // SGR 2 dim foreground opacity (0..1)
     const char *bell;  // effective BEL presentation: "always", "unfocused", "none"
     const char *word_chars;
+
+    // Effective cursor style (DECSCUSR) and dynamic colors (xterm OSC
+    // 10/11/12). Colors are 0x00RRGGBB.
+    int cursor_shape; // TerminalCursorShape
+    bool cursor_blink;
+    bool cursor_color_set;
+    unsigned cursor_rgb;
+    unsigned fg_rgb;
+    unsigned bg_rgb;
+    bool cursor_text_set;
+    unsigned cursor_text_rgb;
     const char *platform_name; // "sdl3"
 
     // Session / environment

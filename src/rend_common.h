@@ -22,6 +22,28 @@ typedef enum
     UNDERLINE_DASHED = 5
 } UnderlineStyle;
 
+// Cursor shape values (matches TerminalCursorShape / xterm DECSCUSR)
+typedef enum
+{
+    CURSOR_SHAPE_BLOCK = 0,
+    CURSOR_SHAPE_UNDERLINE = 1,
+    CURSOR_SHAPE_BAR = 2
+} RendCursorShape;
+
+// Cursor shape geometry within the cursor's cell box, in pixels.
+typedef struct
+{
+    int x, y, w, h;
+} RendCursorRect;
+
+// Where the cursor shape sits inside its cell box (the box spans the
+// cursor's full cell width, so a wide cluster's bar/underline still
+// covers both cells). Block fills the box, underline is a band along
+// the bottom edge, bar is a column along the left edge; thin bands are
+// 1/8 of the cell dimension, minimum 2 px.
+RendCursorRect rend_cursor_shape_rect(RendCursorShape shape, int cell_w,
+                                      int cell_h);
+
 // Unicode codepoint constants used by emoji routing
 #define UNICODE_VARIATION_SELECTOR_15 0xFE0E
 #define UNICODE_VARIATION_SELECTOR_16 0xFE0F

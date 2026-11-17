@@ -45,6 +45,17 @@ typedef struct
     int col;
 } TerminalPos;
 
+// Cursor shape — the engine's DECSCUSR state (xterm vocabulary).
+typedef enum
+{
+    TERMINAL_CURSOR_BLOCK = 0,
+    TERMINAL_CURSOR_UNDERLINE, // a bar along the cell bottom
+    TERMINAL_CURSOR_BAR,       // a vertical bar on the cell's left edge
+} TerminalCursorShape;
+
+// "block", "underline", "bar".
+const char *terminal_cursor_shape_name(TerminalCursorShape shape);
+
 typedef struct
 {
     int start_row, start_col;
@@ -159,6 +170,15 @@ struct TerminalBackend
     TerminalPos (*get_cursor_pos)(TerminalBackend *term);
     bool (*get_cursor_visible)(TerminalBackend *term);
     bool (*get_cursor_blink)(TerminalBackend *term);
+    TerminalCursorShape (*get_cursor_shape)(TerminalBackend *term);
+    /* Effective cursor color (the OSC 12 state, or the configured
+     * default). False means no explicit color is in effect — the
+     * renderer then draws its own default treatment. */
+    bool (*get_cursor_color)(TerminalBackend *term, uint32_t *out_rgb);
+    /* Effective default colors (the OSC 10/11 state, or the configured
+     * defaults) as 0x00RRGGBB. Either out pointer may be NULL. */
+    void (*get_default_colors)(TerminalBackend *term, uint32_t *out_fg,
+                               uint32_t *out_bg);
     const char *(*get_title)(TerminalBackend *term);
     bool (*needs_redraw)(TerminalBackend *term);
     void (*clear_redraw)(TerminalBackend *term);
@@ -277,6 +297,13 @@ int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols);
 TerminalPos terminal_get_cursor_pos(TerminalBackend *term);
 bool terminal_get_cursor_visible(TerminalBackend *term);
 bool terminal_get_cursor_blink(TerminalBackend *term);
+TerminalCursorShape terminal_get_cursor_shape(TerminalBackend *term);
+/* Effective cursor color as 0x00RRGGBB. False means no explicit color
+ * is in effect. */
+bool terminal_get_cursor_color(TerminalBackend *term, uint32_t *out_rgb);
+/* Effective default foreground/background as 0x00RRGGBB. */
+void terminal_get_default_colors(TerminalBackend *term, uint32_t *out_fg,
+                                 uint32_t *out_bg);
 const char *terminal_get_title(TerminalBackend *term);
 bool terminal_needs_redraw(TerminalBackend *term);
 void terminal_clear_redraw(TerminalBackend *term);

@@ -1080,6 +1080,10 @@ void portty_app_show_diagnostics(PorttyApp *app)
     int rows = 0, cols = 0;
     terminal_get_dimensions(app->term, &rows, &cols);
 
+    uint32_t fg_rgb = 0, bg_rgb = 0, cursor_rgb = 0;
+    terminal_get_default_colors(app->term, &fg_rgb, &bg_rgb);
+    bool cursor_color_set = terminal_get_cursor_color(app->term, &cursor_rgb);
+
     DiagSources src = {
         .renderer_name = pd.backend_name,
         .platform_name = pd.platform_name,
@@ -1115,6 +1119,14 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .dim_opacity = portty_dim_opacity,
         .bell = c ? portty_bell_mode_name(c->bell) : "always",
         .word_chars = c ? c->word_chars : NULL,
+        .cursor_shape = terminal_get_cursor_shape(app->term),
+        .cursor_blink = terminal_get_cursor_blink(app->term),
+        .cursor_color_set = cursor_color_set,
+        .cursor_rgb = cursor_rgb,
+        .fg_rgb = fg_rgb,
+        .bg_rgb = bg_rgb,
+        .cursor_text_set = c ? c->cursor_text_color.set : false,
+        .cursor_text_rgb = c ? c->cursor_text_color.rgb : 0,
         .term_env = "portty-vty-256color",
         .colorterm_env = "truecolor",
         .lang_env = getenv("LANG"),

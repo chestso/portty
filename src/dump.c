@@ -494,6 +494,8 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
         jk_int(out, &first, "col", cur.col);
         jk_bool(out, &first, "visible", terminal_get_cursor_visible(term));
         jk_bool(out, &first, "blink", terminal_get_cursor_blink(term));
+        jk_str(out, &first, "shape",
+               terminal_cursor_shape_name(terminal_get_cursor_shape(term)));
         jclose(out, first, true);
     }
 
@@ -536,11 +538,18 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
         }
     }
 
-    /* Palette. */
+    /* Palette + effective dynamic colors (xterm OSC 10/11/12). */
     {
+        uint32_t fg = 0, bg = 0, cursor_rgb = 0;
+        terminal_get_default_colors(term, &fg, &bg);
+        bool cursor_set = terminal_get_cursor_color(term, &cursor_rgb);
         fputs("  \"palette\": {\n", out);
-        fprintf(out, "    \"default_fg\": \"#%06x\",\n", cfr_default_fg_rgb() & 0xFFFFFFu);
-        fprintf(out, "    \"default_bg\": \"#%06x\",\n", cfr_default_bg_rgb() & 0xFFFFFFu);
+        fprintf(out, "    \"default_fg\": \"#%06x\",\n", fg & 0xFFFFFFu);
+        fprintf(out, "    \"default_bg\": \"#%06x\",\n", bg & 0xFFFFFFu);
+        if (cursor_set)
+            fprintf(out, "    \"cursor_color\": \"#%06x\",\n", cursor_rgb & 0xFFFFFFu);
+        else
+            fputs("    \"cursor_color\": null,\n", out);
         fputs("    \"colors\": [", out);
         for (int i = 0; i < 256; i++) {
             if (i)

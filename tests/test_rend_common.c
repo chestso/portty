@@ -35,6 +35,9 @@ static void test_plan_glyph_box_math_operator_keeps_width_fit(void);
 static void test_content_scale_changed(void);
 static void test_content_scale_unchanged(void);
 
+/* Cursor shape geometry inside the cursor's cell box. */
+static void test_cursor_shape_rect(void);
+
 /* Fallback route cache — the covering font and its glyph id are resolved
  * once per codepoint. */
 static void test_route_resolved_once_per_codepoint(void);
@@ -1255,6 +1258,37 @@ static void test_color_fallback_not_synthesised(void)
     test_resolve_reset();
 }
 
+/* Block fills the cell box; underline is a bottom band and bar a left
+ * column, each 1/8 of the cell dimension with a 2 px floor. */
+static void test_cursor_shape_rect(void)
+{
+    RendCursorRect r = rend_cursor_shape_rect(CURSOR_SHAPE_BLOCK, 20, 40);
+    ASSERT_EQ(r.x, 0);
+    ASSERT_EQ(r.y, 0);
+    ASSERT_EQ(r.w, 20);
+    ASSERT_EQ(r.h, 40);
+
+    r = rend_cursor_shape_rect(CURSOR_SHAPE_UNDERLINE, 20, 40);
+    ASSERT_EQ(r.x, 0);
+    ASSERT_EQ(r.h, 5); /* 40/8 */
+    ASSERT_EQ(r.y, 35);
+    ASSERT_EQ(r.w, 20);
+
+    /* Small cells keep the 2 px floor. */
+    r = rend_cursor_shape_rect(CURSOR_SHAPE_UNDERLINE, 10, 12);
+    ASSERT_EQ(r.h, 2);
+    ASSERT_EQ(r.y, 10);
+
+    r = rend_cursor_shape_rect(CURSOR_SHAPE_BAR, 20, 40);
+    ASSERT_EQ(r.x, 0);
+    ASSERT_EQ(r.y, 0);
+    ASSERT_EQ(r.w, 2); /* 20/8, floor */
+    ASSERT_EQ(r.h, 40);
+
+    r = rend_cursor_shape_rect(CURSOR_SHAPE_BAR, 30, 40);
+    ASSERT_EQ(r.w, 3); /* 30/8 */
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -1294,6 +1328,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_plan_glyph_box_dingbat_is_symbol_class);
     RUN_TEST(test_plan_glyph_box_math_operator_keeps_width_fit);
     RUN_TEST(test_content_scale_changed);
+    RUN_TEST(test_cursor_shape_rect);
     RUN_TEST(test_content_scale_unchanged);
     RUN_TEST(test_route_resolved_once_per_codepoint);
     RUN_TEST(test_route_negative_entry_cached);
