@@ -272,16 +272,12 @@ static uint16_t hyperlink_id_at(PorttyApp *app, int pixel_x, int pixel_y,
         return 0;
     int unified_row = portty_app_display_row_to_unified(app, display_row);
     int vt_col = terminal_vis_col_to_vt_col(app->term, unified_row, display_col);
-    if (vt_col < 0)
-        vt_col = 0;
-    if (vt_col >= term_cols)
-        vt_col = term_cols - 1;
+    int row_cols = terminal_get_row_width(app->term, unified_row);
+    if (vt_col < 0 || vt_col >= row_cols)
+        return 0;
 
     TerminalCell cell;
-    int rc = (unified_row >= 0)
-                 ? terminal_get_cell(app->term, unified_row, vt_col, &cell)
-                 : terminal_get_scrollback_cell(app->term, -(unified_row + 1),
-                                                vt_col, &cell);
+    int rc = terminal_get_cell(app->term, unified_row, vt_col, &cell);
     if (rc < 0)
         return 0;
     if (out_unified_row)
@@ -298,8 +294,10 @@ static bool resolve_link_hover(PorttyApp *app, int px, int py)
 {
     int link_row = 0, link_col = 0;
     uint16_t hid = (px < 0) ? 0 : hyperlink_id_at(app, px, py, &link_row, &link_col);
-    if (hid == terminal_hovered_hyperlink(app->term))
+    if (hid == terminal_hovered_hyperlink(app->term) &&
+        (hid == 0 || link_row == app->hovered_link_row))
         return false;
+    app->hovered_link_row = link_row;
     terminal_set_hovered_hyperlink(app->term, hid);
     app->backend->set_cursor(app->backend,
                              hid != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
@@ -955,6 +953,9 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
     display_col = terminal_vis_col_to_vt_col(app->term, unified_row, display_col);
     if (display_col >= term_cols)
         display_col = term_cols - 1;
+    int row_cols = terminal_get_row_width(app->term, unified_row);
+    if (row_cols > 0 && display_col >= row_cols)
+        display_col = row_cols - 1;
     if (display_col < 0)
         display_col = 0;
 

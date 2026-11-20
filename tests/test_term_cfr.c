@@ -780,7 +780,7 @@ static void test_altscreen_resize_narrower_reflows(void)
         int sb = terminal_get_scrollback_lines(&t);
         for (int s = 0; s < sb && !found_k; s++) {
             for (int cc = 0; cc < cols && !found_k; cc++) {
-                if (terminal_get_scrollback_cell(&t, s, cc, &c) == 0 &&
+                if (terminal_get_cell(&t, -(s + 1), cc, &c) == 0 &&
                     c.cp == (uint32_t)'K')
                     found_k = true;
             }
@@ -1016,6 +1016,185 @@ static void test_dynamic_colors_follow_osc(void)
     terminal_destroy(&t);
 }
 
+/* Unified row accessors resolve a scrollback cell against the page that
+ * owns its style, grapheme and hyperlink ids. */
+static void test_scrollback_cell_accessors(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = 40;
+    cfg.rows = 2;
+    cfg.scrollback = 16;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+
+    feed(&t,
+         "\x1b]8;;https://scroll.example\x1b\\"
+         "\x1b[1;31m"
+         "\xf0\x9f\x91\xa8\xe2\x80\x8d"
+         "\xf0\x9f\x91\xa9\xe2\x80\x8d"
+         "\xf0\x9f\x91\xa7\xe2\x80\x8d"
+         "\xf0\x9f\x91\xa6"
+         "\x1b[0m\x1b]8;;\x1b\\"
+         "\r\none\r\ntwo\r\nthree");
+
+    int sb = terminal_get_scrollback_lines(&t);
+    ASSERT_TRUE(sb > 0);
+    int row = -sb;
+    TerminalCell cell;
+    ASSERT_EQ(terminal_get_cell(&t, row, 0, &cell), 0);
+    ASSERT_EQ(cell.cp, (uint32_t)0x1F468);
+    ASSERT_EQ(cell.attrs.bold, 1u);
+    ASSERT_EQ(cell.fg.r, 0xffu);
+    ASSERT_TRUE(cell.hyperlink_id != 0);
+
+    uint32_t cps[16];
+    ASSERT_EQ(terminal_cell_get_grapheme(&t, row, 0, cps, 16), (size_t)7);
+    ASSERT_EQ(cps[6], (uint32_t)0x1F466);
+    char uri[64];
+    ASSERT_EQ(terminal_cell_get_hyperlink(&t, row, 0, uri, sizeof(uri)),
+              strlen("https://scroll.example"));
+    ASSERT_STR_EQ(uri, "https://scroll.example");
+
+    terminal_destroy(&t);
+}
+
+/* Every row walks at its own width, independently of the current grid and
+ * of the caller's viewport limit. */
+static void test_row_width_and_text_capacity(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = 20;
+    cfg.rows = 3;
+    cfg.scrollback = 16;
+    cfg.reflow = true;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    feed(&t, "0123456789ABCDEFGHIJ\r\nx\r\ny\r\nz\r\nw");
+    terminal_resize(&t, 10, 3);
+
+    int sb = terminal_get_scrollback_lines(&t);
+    ASSERT_TRUE(sb > 0);
+    int row = -sb;
+    ASSERT_EQ(terminal_get_row_width(&t, row), 20);
+    ASSERT_EQ(terminal_get_row_width(&t, 0), 10);
+
+    TerminalCell cell;
+    ASSERT_EQ(terminal_get_cell(&t, row, 19, &cell), 0);
+    ASSERT_EQ(cell.cp, (uint32_t)'J');
+
+    TerminalRowIter it;
+    terminal_row_iter_init(&it, &t, row, 64);
+    int cells = 0;
+    int last_col = -1;
+    while (terminal_row_iter_next(&it)) {
+        cells++;
+        last_col = it.vt_col;
+    }
+    ASSERT_EQ(cells, 20);
+    ASSERT_EQ(last_col, 19);
+
+    CfrTerm *vt = term_cfr_get_cfr_term(&t);
+    size_t cap = cfr_row_text_size(vt, row);
+    ASSERT_TRUE(cap > 20);
+    char *text = malloc(cap);
+    ASSERT_NOT_NULL(text);
+    ASSERT_EQ(cfr_row_text(vt, row, text, cap), (size_t)20);
+    ASSERT_STR_EQ(text, "0123456789ABCDEFGHIJ");
+    free(text);
+    terminal_destroy(&t);
+
+    /* History written at ten columns keeps that width when the grid grows. */
+    t = terminal_backend_cfr;
+    cfg.cols = 10;
+    cfg.rows = 2;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    feed(&t, "abc\r\ndef\r\nghi");
+    sb = terminal_get_scrollback_lines(&t);
+    ASSERT_TRUE(sb > 0);
+    row = -sb;
+    terminal_resize(&t, 20, 2);
+    ASSERT_EQ(terminal_get_row_width(&t, row), 10);
+    terminal_row_iter_init(&it, &t, row, 20);
+    cells = 0;
+    while (terminal_row_iter_next(&it))
+        cells++;
+    ASSERT_EQ(cells, 10);
+    terminal_destroy(&t);
+}
+
+/* The host's push count follows output scrolling, including with history
+ * disabled, and stays silent while a synchronous resize rewrites history. */
+static void test_push_count_tracks_output_only(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = 5;
+    cfg.rows = 2;
+    cfg.scrollback = 16;
+    cfg.reflow = true;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    feed(&t, "abcdef\r\nx");
+    ASSERT_EQ(terminal_consume_pushed_rows(&t), 1);
+    terminal_resize(&t, 10, 2);
+    ASSERT_EQ(terminal_consume_pushed_rows(&t), 0);
+    terminal_destroy(&t);
+
+    t = terminal_backend_cfr;
+    cfg.scrollback = 0;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    feed(&t, "a\r\nb\r\nc");
+    ASSERT_EQ(terminal_consume_pushed_rows(&t), 1);
+    terminal_destroy(&t);
+}
+
+/* Double-click selection uses coffer's bounded word scan through the host
+ * wrapper, including across thousands of soft-wrapped rows. */
+static void test_double_click_word_limit(void)
+{
+    enum
+    {
+        word_cols = 10,
+        word_rows = 2000,
+        word_limit = 4096
+    };
+    TerminalBackend t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = word_cols;
+    cfg.rows = 4;
+    cfg.scrollback = word_rows;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+
+    size_t len = (size_t)word_cols * word_rows;
+    char *line = malloc(len + 1);
+    ASSERT_NOT_NULL(line);
+    for (size_t i = 0; i < len; i++)
+        line[i] = (char)('a' + i % 26);
+    line[len] = '\0';
+    feed(&t, line);
+    free(line);
+
+    int sb = terminal_get_scrollback_lines(&t);
+    ASSERT_TRUE(sb > 2 * (word_limit / word_cols));
+    TerminalPos click = { .row = -(sb / 2), .col = 3 };
+    terminal_selection_start(&t, click.row, click.col, TERM_SELECT_WORD);
+    TerminalSelection sel;
+    ASSERT_TRUE(terminal_get_selection(&t, &sel));
+    long at = (long)(click.row + sb) * word_cols + click.col;
+    long start = (long)(sel.start.row + sb) * word_cols + sel.start.col;
+    long end = (long)(sel.end.row + sb) * word_cols + sel.end.col;
+    ASSERT_EQ(at - start, (long)word_limit);
+    ASSERT_EQ(end - at, (long)word_limit);
+    terminal_destroy(&t);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -1049,6 +1228,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_cursor_style_defaults);
     RUN_TEST(test_style_and_color_seeds);
     RUN_TEST(test_dynamic_colors_follow_osc);
+    RUN_TEST(test_scrollback_cell_accessors);
+    RUN_TEST(test_row_width_and_text_capacity);
+    RUN_TEST(test_push_count_tracks_output_only);
+    RUN_TEST(test_double_click_word_limit);
     TEST_SUMMARY();
     return test_fail_count == 0 ? 0 : 1;
 }

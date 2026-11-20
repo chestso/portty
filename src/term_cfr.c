@@ -69,10 +69,6 @@ typedef struct
      * before/after diff once the ring is full. */
     int pushed_rows;
 
-    /* Rows popped back from scrollback during scroll-down. Used to
-     * adjust selection coordinates upward (positive delta). */
-    int popped_rows;
-
     /* Set by cb_damage when a damage rect overlaps the active selection.
      * The caller (rend_sdl3_process_pty_data) checks this after processing
      * and clears the selection if set. Scroll damage (from cfr_scroll_up/
@@ -330,20 +326,12 @@ static void cb_bell(void *user)
         d->term->bell_cb(d->term->bell_cb_data);
 }
 
-static void cb_sb_push(const CfrCell *c, int n, uint32_t lineage, void *u)
+static void cb_sb_push(int row, uint32_t lineage, void *u)
 {
-    (void)c;
-    (void)n;
+    (void)row;
     (void)lineage;
     CfrBackendData *d = u;
     d->pushed_rows++;
-}
-static void cb_sb_pop(CfrCell *o, int n, void *u)
-{
-    (void)o;
-    (void)n;
-    CfrBackendData *d = u;
-    d->popped_rows++;
 }
 static void cb_selection_changed(bool active, void *user)
 {
@@ -536,7 +524,6 @@ static bool cfr_back_init(TerminalBackend *term, const CfrConfig *cfg)
         .set_color = cb_set_color,
         .output = cb_output,
         .sb_pushline = cb_sb_push,
-        .sb_popline = cb_sb_pop,
         .osc = cb_osc,
         .log = cb_log,
         .selection_changed = cb_selection_changed,
@@ -588,7 +575,8 @@ static int cfr_back_process_input(TerminalBackend *term, const char *input,
 /* Cell conversion                                                     */
 /* ------------------------------------------------------------------ */
 
-static void convert_cell(CfrBackendData *d, const CfrCell *src, TerminalCell *dst)
+static void convert_cell(CfrBackendData *d, int row, int col,
+                         const CfrCell *src, TerminalCell *dst)
 {
     CfrTerm *vt = d->vt;
     memset(dst, 0, sizeof(*dst));
@@ -606,7 +594,7 @@ static void convert_cell(CfrBackendData *d, const CfrCell *src, TerminalCell *ds
     dst->hyperlink_id = src->hyperlink_id;
 
     /* Style. */
-    const CfrStyle *st = cfr_cell_style(vt, src);
+    const CfrStyle *st = cfr_cell_style(vt, row, col);
     if (!st) {
         dst->fg = unpack_rgb(0, true, d->default_fg);
         dst->bg = unpack_rgb(0, true, d->default_bg);
@@ -656,8 +644,17 @@ static int cfr_back_get_cell(TerminalBackend *term, int row, int col,
     if (!d || !cell)
         return -1;
     const CfrCell *src = cfr_get_cell(d->vt, row, col);
-    convert_cell(d, src, cell);
+    convert_cell(d, row, col, src, cell);
     return 0;
+}
+
+static int cfr_back_get_row_width(TerminalBackend *term, int row)
+{
+    CfrBackendData *d = term->backend_data;
+    if (!d)
+        return 0;
+    int cols = 0;
+    return cfr_get_row(d->vt, row, &cols) ? cols : 0;
 }
 
 static int cfr_back_get_dimensions(TerminalBackend *term, int *rows, int *cols)
@@ -857,15 +854,6 @@ static int cfr_back_consume_pushed_rows(TerminalBackend *term)
     d->pushed_rows = 0;
     return n;
 }
-static int cfr_back_consume_popped_rows(TerminalBackend *term)
-{
-    CfrBackendData *d = term->backend_data;
-    if (!d)
-        return 0;
-    int n = d->popped_rows;
-    d->popped_rows = 0;
-    return n;
-}
 static bool cfr_back_consume_selection_damaged(TerminalBackend *term)
 {
     CfrBackendData *d = term->backend_data;
@@ -875,29 +863,13 @@ static bool cfr_back_consume_selection_damaged(TerminalBackend *term)
     d->selection_damaged = false;
     return v;
 }
-static int cfr_back_get_scrollback_cell(TerminalBackend *term, int sb_row,
-                                        int col, TerminalCell *cell)
-{
-    CfrBackendData *d = term->backend_data;
-    if (!d || !cell)
-        return -1;
-    const CfrCell *src = cfr_get_scrollback_cell(d->vt, sb_row, col);
-    convert_cell(d, src, cell);
-    return 0;
-}
-
 static size_t cfr_back_get_grapheme(TerminalBackend *term, int unified_row,
                                     int col, uint32_t *out, size_t cap)
 {
     CfrBackendData *d = term->backend_data;
     if (!d || !out || cap == 0)
         return 0;
-    const CfrCell *src = (unified_row >= 0)
-                             ? cfr_get_cell(d->vt, unified_row, col)
-                             : cfr_get_scrollback_cell(d->vt, -(unified_row + 1), col);
-    if (!src)
-        return 0;
-    return cfr_cell_get_grapheme(d->vt, src, out, cap);
+    return cfr_cell_get_grapheme(d->vt, unified_row, col, out, cap);
 }
 
 static size_t cfr_back_get_hyperlink(TerminalBackend *term, int unified_row,
@@ -906,14 +878,10 @@ static size_t cfr_back_get_hyperlink(TerminalBackend *term, int unified_row,
     CfrBackendData *d = term->backend_data;
     if (!d || !out || cap == 0)
         return 0;
-    const CfrCell *src = (unified_row >= 0)
-                             ? cfr_get_cell(d->vt, unified_row, col)
-                             : cfr_get_scrollback_cell(d->vt, -(unified_row + 1), col);
-    if (!src || src->hyperlink_id == 0)
-        return 0;
-    /* Reserve one byte for the trailing NUL. bvt returns raw bytes, so
+    /* Reserve one byte for the trailing NUL. coffer returns raw bytes, so
      * we cap the write at cap-1 and add the terminator ourselves. */
-    size_t n = cfr_cell_get_hyperlink(d->vt, src, (uint8_t *)out, cap - 1);
+    size_t n = cfr_cell_get_hyperlink(d->vt, unified_row, col,
+                                      (uint8_t *)out, cap - 1);
     if (n >= cap)
         n = cap - 1;
     out[n] = '\0';
@@ -1180,6 +1148,7 @@ TerminalBackend terminal_backend_cfr = {
     .resize = cfr_back_resize,
     .process_input = cfr_back_process_input,
     .get_cell = cfr_back_get_cell,
+    .get_row_width = cfr_back_get_row_width,
     .get_dimensions = cfr_back_get_dimensions,
     .get_cursor_pos = cfr_back_get_cursor_pos,
     .get_cursor_visible = cfr_back_get_cursor_visible,
@@ -1196,9 +1165,7 @@ TerminalBackend terminal_backend_cfr = {
     .get_scrollback_lines = cfr_back_get_scrollback_lines,
     .get_scrollback_capacity = cfr_back_get_scrollback_capacity,
     .consume_pushed_rows = cfr_back_consume_pushed_rows,
-    .consume_popped_rows = cfr_back_consume_popped_rows,
     .consume_selection_damaged = cfr_back_consume_selection_damaged,
-    .get_scrollback_cell = cfr_back_get_scrollback_cell,
     .get_grapheme = cfr_back_get_grapheme,
     .get_hyperlink = cfr_back_get_hyperlink,
     .is_altscreen = cfr_back_is_altscreen,

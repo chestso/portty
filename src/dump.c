@@ -188,7 +188,7 @@ static void attrs_token(char *buf, size_t n, const TerminalCellAttr *a)
 
 typedef struct
 {
-    uint16_t id;
+    unsigned int id;
     char *uri;
 } LinkEntry;
 
@@ -198,23 +198,29 @@ typedef struct
     int n, cap;
 } LinkTable;
 
-static void link_add(LinkTable *t, uint16_t id, const char *uri)
+/* Engine hyperlink ids are page-scoped. Give each distinct URI a dump-local
+ * id so cells and the link table share an unambiguous identity. */
+static unsigned int link_add(LinkTable *t, const char *uri)
 {
     for (int i = 0; i < t->n; i++)
-        if (t->v[i].id == id)
-            return; /* first URI seen for an id wins */
+        if (strcmp(t->v[i].uri, uri) == 0)
+            return t->v[i].id;
     if (t->n == t->cap) {
         int ncap = t->cap ? t->cap * 2 : 8;
         LinkEntry *nv = realloc(t->v, (size_t)ncap * sizeof(*nv));
         if (!nv)
-            return;
+            return 0;
         t->v = nv;
         t->cap = ncap;
     }
+    char *copy = strdup(uri);
+    if (!copy)
+        return 0;
+    unsigned int id = (unsigned int)t->n + 1;
     t->v[t->n].id = id;
-    t->v[t->n].uri = strdup(uri);
-    if (t->v[t->n].uri)
-        t->n++;
+    t->v[t->n].uri = copy;
+    t->n++;
+    return id;
 }
 
 static void link_free(LinkTable *t)
@@ -319,14 +325,19 @@ static void emit_cell(FILE *out, TerminalBackend *term, int unified_row, int col
                       LinkTable *links)
 {
     TerminalCell cell;
-    int rc = (unified_row < 0)
-                 ? terminal_get_scrollback_cell(term, -unified_row - 1, col, &cell)
-                 : terminal_get_cell(term, unified_row, col, &cell);
+    int rc = terminal_get_cell(term, unified_row, col, &cell);
     if (rc != 0) {
         memset(&cell, 0, sizeof(cell));
         cell.fg.is_default = true;
         cell.bg.is_default = true;
         cell.ul_color.is_default = true;
+    }
+
+    unsigned int link_id = 0;
+    if (cell.hyperlink_id != 0) {
+        char uri[1024];
+        if (terminal_cell_get_hyperlink(term, unified_row, col, uri, sizeof(uri)) > 0)
+            link_id = link_add(links, uri);
     }
 
     fprintf(out, "[%u,", (unsigned)cell.cp);
@@ -357,13 +368,7 @@ static void emit_cell(FILE *out, TerminalBackend *term, int unified_row, int col
     color_json(out, &cell.bg);
     fputc(',', out);
     color_json(out, &cell.ul_color);
-    fprintf(out, ",%u]", (unsigned)cell.hyperlink_id);
-
-    if (cell.hyperlink_id != 0) {
-        char uri[1024];
-        if (terminal_cell_get_hyperlink(term, unified_row, col, uri, sizeof(uri)) > 0)
-            link_add(links, cell.hyperlink_id, uri);
-    }
+    fprintf(out, ",%u]", link_id);
 }
 
 /* ── Public API ── */
@@ -653,9 +658,10 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
                 row_min, row_max);
 
         for (int u = row_min; u <= row_max; u++) {
+            int row_cols = terminal_get_row_width(term, u);
             fprintf(out, "    { \"row\": %d, \"wrap\": %s, \"cells\": [", u,
                     terminal_get_line_continuation(term, u) ? "true" : "false");
-            for (int col = 0; col < cols; col++) {
+            for (int col = 0; col < row_cols; col++) {
                 if (col)
                     fputc(',', out);
                 emit_cell(out, term, u, col, &links);

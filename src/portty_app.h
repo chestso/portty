@@ -71,6 +71,9 @@ typedef struct PorttyApp
     // while the selection stays up, and a duplicate `true` must not take a
     // second pause that no `false` will ever release.
     bool selection_paused;
+
+    // Unified row of the hovered link; ids alone are only page-scoped.
+    int hovered_link_row;
 } PorttyApp;
 
 // Terminal output callbacks (registered with coffer).

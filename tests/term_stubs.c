@@ -48,17 +48,6 @@ int terminal_get_cell(TerminalBackend *term, int row, int col, TerminalCell *cel
     return -1;
 }
 
-int terminal_get_scrollback_cell(TerminalBackend *term, int sb_row, int col,
-                                 TerminalCell *cell)
-{
-    (void)term;
-    (void)sb_row;
-    (void)col;
-    if (cell)
-        memset(cell, 0, sizeof(*cell));
-    return -1;
-}
-
 int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols)
 {
     (void)term;

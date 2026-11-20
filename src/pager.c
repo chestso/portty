@@ -33,6 +33,7 @@ struct Pager
     char *text;             // retained source document (for rebuild on resize)
     int cols, rows;
     uint16_t hovered; // last hovered hyperlink id (debounces cursor changes)
+    int hovered_row;  // unified row; hyperlink ids are only page-scoped
     // Char-selection drag: a left press defers selection until first motion so
     // a plain click doesn't start one (mirrors the main view).
     bool drag_pending;
@@ -283,6 +284,9 @@ static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
         vt_col = 0;
     if (vt_col >= cols)
         vt_col = cols - 1;
+    int row_cols = terminal_get_row_width(p->et.term, unified_row);
+    if (row_cols > 0 && vt_col >= row_cols)
+        vt_col = row_cols - 1;
 
     *out_row = unified_row;
     *out_col = vt_col;
@@ -293,9 +297,7 @@ static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
 static uint16_t link_at(Pager *p, int unified_row, int vt_col)
 {
     TerminalCell cell;
-    int rc = (unified_row >= 0)
-                 ? terminal_get_cell(p->et.term, unified_row, vt_col, &cell)
-                 : terminal_get_scrollback_cell(p->et.term, -(unified_row + 1), vt_col, &cell);
+    int rc = terminal_get_cell(p->et.term, unified_row, vt_col, &cell);
     if (rc < 0)
         return 0;
     return cell.hyperlink_id;
@@ -334,7 +336,8 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
 
     // Hover feedback (link pointer vs text cursor) + the real-URI hint pill,
     // positioned via the pixel-Y anchor like the main terminal.
-    if (hid != p->hovered) {
+    if (hid != p->hovered || (hid != 0 && row != p->hovered_row)) {
+        p->hovered_row = row;
         terminal_set_hovered_hyperlink(p->et.term, hid);
         p->backend->set_cursor(p->backend,
                                hid != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);

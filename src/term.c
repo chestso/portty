@@ -60,6 +60,13 @@ int terminal_get_cell(TerminalBackend *term, int row, int col, TerminalCell *cel
     return term->get_cell(term, row, col, cell);
 }
 
+int terminal_get_row_width(TerminalBackend *term, int row)
+{
+    if (!term || !term->get_row_width)
+        return 0;
+    return term->get_row_width(term, row);
+}
+
 int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols)
 {
     if (!term || !term->get_dimensions)
@@ -186,26 +193,11 @@ int terminal_consume_pushed_rows(TerminalBackend *term)
     return term->consume_pushed_rows(term);
 }
 
-int terminal_consume_popped_rows(TerminalBackend *term)
-{
-    if (!term || !term->consume_popped_rows)
-        return 0;
-    return term->consume_popped_rows(term);
-}
-
 bool terminal_consume_selection_damaged(TerminalBackend *term)
 {
     if (!term || !term->consume_selection_damaged)
         return false;
     return term->consume_selection_damaged(term);
-}
-
-int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
-                                 TerminalCell *cell)
-{
-    if (!term || !term->get_scrollback_cell || !cell)
-        return -1;
-    return term->get_scrollback_cell(term, scrollback_row, col, cell);
 }
 
 size_t terminal_cell_get_grapheme(TerminalBackend *term, int unified_row, int col,
@@ -647,7 +639,8 @@ void terminal_row_iter_init(TerminalRowIter *it, TerminalBackend *term,
         return;
     it->term = term;
     it->unified_row = unified_row;
-    it->max_vt_cols = max_vt_cols;
+    int row_width = terminal_get_row_width(term, unified_row);
+    it->max_vt_cols = row_width < max_vt_cols ? row_width : max_vt_cols;
     it->next_vt_col = 0;
     it->next_vis_col = 0;
     it->vt_col = 0;
@@ -664,14 +657,7 @@ bool terminal_row_iter_next(TerminalRowIter *it)
     it->vt_col = it->next_vt_col;
     it->vis_col = it->next_vis_col;
 
-    // Read cell from visible area or scrollback
-    int rc;
-    if (it->unified_row >= 0) {
-        rc = terminal_get_cell(it->term, it->unified_row, it->vt_col, &it->cell);
-    } else {
-        int scrollback_index = -(it->unified_row + 1);
-        rc = terminal_get_scrollback_cell(it->term, scrollback_index, it->vt_col, &it->cell);
-    }
+    int rc = terminal_get_cell(it->term, it->unified_row, it->vt_col, &it->cell);
 
     if (rc < 0) {
         memset(&it->cell, 0, sizeof(it->cell));

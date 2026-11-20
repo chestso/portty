@@ -117,9 +117,9 @@ typedef struct
     TerminalColor fg;
     TerminalColor bg;
     TerminalColor ul_color; // per-cell underline color (is_default=true → use theme default)
-    // OSC-8 hyperlink id (interned per-page in coffer). 0 = no link.
-    // Adjacent cells of the same link share an id, enabling run coalescing.
-    // Fetch the URI bytes with terminal_cell_get_hyperlink().
+    // OSC-8 hyperlink id (page-scoped in coffer). 0 = no link. The value
+    // distinguishes linked from unlinked cells, but is not a cross-row
+    // identity. Fetch the URI with terminal_cell_get_hyperlink(row, col).
     uint16_t hyperlink_id;
 } TerminalCell;
 
@@ -165,7 +165,10 @@ struct TerminalBackend
     void (*destroy)(TerminalBackend *term);
     void (*resize)(TerminalBackend *term, int width, int height);
     int (*process_input)(TerminalBackend *term, const char *input, size_t len);
+    /* Unified rows: visible >= 0, scrollback < 0 (-1 = most recent). */
     int (*get_cell)(TerminalBackend *term, int row, int col, TerminalCell *cell);
+    /* Width of one unified row; 0 when the row does not exist. */
+    int (*get_row_width)(TerminalBackend *term, int row);
     int (*get_dimensions)(TerminalBackend *term, int *rows, int *cols);
     TerminalPos (*get_cursor_pos)(TerminalBackend *term);
     bool (*get_cursor_visible)(TerminalBackend *term);
@@ -199,15 +202,10 @@ struct TerminalBackend
      * scrollback ring's capacity, so a before/after diff under-counts
      * once the ring is full. */
     int (*consume_pushed_rows)(TerminalBackend *term);
-    /* Read-and-reset count of rows popped back from scrollback since
-     * last call. Used to adjust selection coordinates upward. */
-    int (*consume_popped_rows)(TerminalBackend *term);
     /* Read-and-reset the selection_damaged flag. Set by the damage
      * callback when a damage rect overlaps the active selection. The
      * caller clears the selection if this returns true. */
     bool (*consume_selection_damaged)(TerminalBackend *term);
-    int (*get_scrollback_cell)(TerminalBackend *term, int scrollback_row, int col,
-                               TerminalCell *cell);
     /* Read the full codepoint sequence for a multi-codepoint cluster.
      * `unified_row` follows the same convention as the renderer: visible
      * rows >= 0, scrollback rows < 0 (-1 = most recent). For
@@ -292,7 +290,11 @@ void terminal_destroy(TerminalBackend *term);
 void terminal_resize(TerminalBackend *term, int width, int height);
 void terminal_set_scrollback_size(TerminalBackend *term, int lines);
 int terminal_process_input(TerminalBackend *term, const char *input, size_t len);
+/* Unified rows: visible >= 0, scrollback < 0 (-1 = most recent). */
 int terminal_get_cell(TerminalBackend *term, int row, int col, TerminalCell *cell);
+/* Width of one unified row; 0 when the row does not exist. Scrollback rows
+ * keep their own width, which can differ from the current grid width. */
+int terminal_get_row_width(TerminalBackend *term, int row);
 int terminal_get_dimensions(TerminalBackend *term, int *rows, int *cols);
 TerminalPos terminal_get_cursor_pos(TerminalBackend *term);
 bool terminal_get_cursor_visible(TerminalBackend *term);
@@ -318,10 +320,7 @@ bool terminal_get_damage_rect(TerminalBackend *term, TerminalDamageRect *rect);
 int terminal_get_scrollback_lines(TerminalBackend *term);
 int terminal_get_scrollback_capacity(TerminalBackend *term);
 int terminal_consume_pushed_rows(TerminalBackend *term);
-int terminal_consume_popped_rows(TerminalBackend *term);
 bool terminal_consume_selection_damaged(TerminalBackend *term);
-int terminal_get_scrollback_cell(TerminalBackend *term, int scrollback_row, int col,
-                                 TerminalCell *cell);
 /* Fill `out` with the full codepoint sequence at unified row `unified_row`
  * (visible >= 0, scrollback < 0; -1 == most recent). Returns the count
  * written (clamped to `cap`). For single-codepoint cells, prefer

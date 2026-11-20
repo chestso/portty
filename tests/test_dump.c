@@ -169,6 +169,27 @@ static void test_hyperlink_interned_once(void)
     terminal_destroy(&t);
 }
 
+static void test_hyperlink_ids_are_not_global_across_pages(void)
+{
+    TerminalBackend t;
+    make_term(&t, 80, 2);
+    enum
+    {
+        link_rows = 70
+    }; /* crosses coffer's 64-row scrollback pages */
+    for (int i = 0; i < link_rows; i++) {
+        char seq[160];
+        snprintf(seq, sizeof(seq),
+                 "\x1b]8;;https://example.com/%d\x1b\\X\x1b]8;;\x1b\\\r\n", i);
+        feed(&t, seq);
+    }
+    char *j = dump_to_string(&t, NULL);
+    ASSERT_NOT_NULL(j);
+    ASSERT_EQ(count_substr(j, "https://example.com/"), link_rows);
+    free(j);
+    terminal_destroy(&t);
+}
+
 static void test_scrollback_captured(void)
 {
     TerminalBackend t;
@@ -179,6 +200,20 @@ static void test_scrollback_captured(void)
     /* Rows scrolled off ⇒ a negative unified row range is present. */
     ASSERT_TRUE(strstr(j, "\"unified_row_min\": -") != NULL);
     ASSERT_TRUE(strstr(j, "\"row\": -1") != NULL);
+    free(j);
+    terminal_destroy(&t);
+}
+
+static void test_scrollback_rows_keep_their_width(void)
+{
+    TerminalBackend t;
+    make_term(&t, 20, 3);
+    feed(&t, "0123456789ABCDEFGHIJ\r\nx\r\ny\r\nz\r\nw");
+    terminal_resize(&t, 10, 3);
+    char *j = dump_to_string(&t, NULL);
+    ASSERT_NOT_NULL(j);
+    /* The final cell is outside the new ten-column grid. */
+    ASSERT_TRUE(strstr(j, "[74,0,1,") != NULL);
     free(j);
     terminal_destroy(&t);
 }
@@ -250,7 +285,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_wide_cell);
     RUN_TEST(test_mode_flags);
     RUN_TEST(test_hyperlink_interned_once);
+    RUN_TEST(test_hyperlink_ids_are_not_global_across_pages);
     RUN_TEST(test_scrollback_captured);
+    RUN_TEST(test_scrollback_rows_keep_their_width);
     RUN_TEST(test_selection_serialized);
     RUN_TEST(test_dump_write_reports_outcome);
     TEST_SUMMARY();
