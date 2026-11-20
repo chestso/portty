@@ -15,10 +15,6 @@
 #include <wchar.h>
 #include <windows.h>
 
-#ifndef PSEUDOCONSOLE_PASSTHROUGH_MODE
-#define PSEUDOCONSOLE_PASSTHROUGH_MODE 0x8
-#endif
-
 struct PtyContext
 {
     HPCON hpc;
@@ -29,9 +25,10 @@ struct PtyContext
     HANDLE waiter_thread;
     int rows;
     int cols;
-    bool use_bundled_conpty; /* true if hpc was created via conpty.dll */
-    int exit_status;         /* valid once exited is true */
-    bool exited;             /* sticky: child exit observed */
+    bool use_bundled_conpty;   /* true if hpc was created via conpty.dll */
+    int exit_status;           /* valid once exited is true */
+    bool exited;               /* sticky: child exit observed */
+    CRITICAL_SECTION hpc_lock; /* one-shot close of hpc */
 };
 
 /* ── conpty.dll sideloading ───────────────────────────────────────────
@@ -44,9 +41,9 @@ struct PtyContext
  *
  * When conpty.dll is bundled alongside portty.exe, it automatically
  * finds OpenConsole.exe in the same directory and uses it instead of
- * the system conhost.exe.  We load CreatePseudoConsole etc. from
- * conpty.dll at runtime, falling back to kernel32.dll if the DLL
- * is not present. */
+ * the system conhost.exe.  We load the package's Conpty* entry points
+ * (falling back to the legacy names) at runtime, and fall back to
+ * kernel32.dll when the DLL or OpenConsole.exe is absent. */
 
 typedef HRESULT(WINAPI *CreatePseudoConsole_t)(COORD, HANDLE, HANDLE,
                                                DWORD, HPCON *);
@@ -82,18 +79,43 @@ static void init_conpty(void)
     if (!slash)
         return;
     slash[1] = L'\0';
+
+    /* conpty.dll silently falls back to system conhost.exe when
+     * OpenConsole.exe is missing, so check for the host binary before
+     * claiming the bundle is active. */
+    wchar_t host_path[MAX_PATH];
+    wcscpy(host_path, exe_path);
+    wcscat(host_path, L"OpenConsole.exe");
+    if (GetFileAttributesW(host_path) == INVALID_FILE_ATTRIBUTES) {
+        vlog("ConPTY: conpty.dll present but OpenConsole.exe missing\n");
+        return;
+    }
+
     wcscat(exe_path, L"conpty.dll");
 
-    g_conpty_dll = LoadLibraryW(exe_path);
+    g_conpty_dll = LoadLibraryExW(exe_path, NULL,
+                                  LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR |
+                                      LOAD_LIBRARY_SEARCH_SYSTEM32);
     if (!g_conpty_dll)
         return;
 
+    /* Prefer the package's Conpty* names; the legacy exports are kept for
+     * older consumers but may disappear. */
     fn_CreatePseudoConsole = (CreatePseudoConsole_t)
-        conpty_load(g_conpty_dll, "CreatePseudoConsole");
+        conpty_load(g_conpty_dll, "ConptyCreatePseudoConsole");
     fn_ResizePseudoConsole = (ResizePseudoConsole_t)
-        conpty_load(g_conpty_dll, "ResizePseudoConsole");
+        conpty_load(g_conpty_dll, "ConptyResizePseudoConsole");
     fn_ClosePseudoConsole = (ClosePseudoConsole_t)
-        conpty_load(g_conpty_dll, "ClosePseudoConsole");
+        conpty_load(g_conpty_dll, "ConptyClosePseudoConsole");
+    if (!fn_CreatePseudoConsole || !fn_ResizePseudoConsole ||
+        !fn_ClosePseudoConsole) {
+        fn_CreatePseudoConsole = (CreatePseudoConsole_t)
+            conpty_load(g_conpty_dll, "CreatePseudoConsole");
+        fn_ResizePseudoConsole = (ResizePseudoConsole_t)
+            conpty_load(g_conpty_dll, "ResizePseudoConsole");
+        fn_ClosePseudoConsole = (ClosePseudoConsole_t)
+            conpty_load(g_conpty_dll, "ClosePseudoConsole");
+    }
 
     if (!fn_CreatePseudoConsole || !fn_ResizePseudoConsole ||
         !fn_ClosePseudoConsole) {
@@ -115,16 +137,23 @@ static bool has_bundled_conpty(void)
     return g_conpty_dll != NULL;
 }
 
-/* Dispatch close to the correct implementation (conpty.dll or system). */
+/* Dispatch close to the correct implementation (conpty.dll or system).
+ * The waiter thread and pty_destroy() can race here; ClosePseudoConsole
+ * on an already-closed handle raises 0xc0000008.  Clear the handle under
+ * the lock, then close outside it. */
 static void pty_close_hpc(PtyContext *ctx)
 {
-    if (ctx->hpc == INVALID_HANDLE_VALUE)
+    EnterCriticalSection(&ctx->hpc_lock);
+    HPCON hpc = ctx->hpc;
+    ctx->hpc = INVALID_HANDLE_VALUE;
+    LeaveCriticalSection(&ctx->hpc_lock);
+
+    if (hpc == INVALID_HANDLE_VALUE)
         return;
     if (ctx->use_bundled_conpty && fn_ClosePseudoConsole)
-        fn_ClosePseudoConsole(ctx->hpc);
+        fn_ClosePseudoConsole(hpc);
     else
-        ClosePseudoConsole(ctx->hpc);
-    ctx->hpc = INVALID_HANDLE_VALUE;
+        ClosePseudoConsole(hpc);
 }
 
 /* Dispatch resize to the correct implementation (conpty.dll or system). */
@@ -186,6 +215,7 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     ctx->output_read = INVALID_HANDLE_VALUE;
     ctx->process = INVALID_HANDLE_VALUE;
     ctx->thread = INVALID_HANDLE_VALUE;
+    InitializeCriticalSection(&ctx->hpc_lock);
 
     /* Create pipes for ConPTY I/O */
     HANDLE input_read = INVALID_HANDLE_VALUE;
@@ -210,7 +240,10 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     COORD size;
     size.X = (SHORT)cols;
     size.Y = (SHORT)rows;
-    DWORD pty_flags = PSEUDOCONSOLE_PASSTHROUGH_MODE;
+    /* Flags are deliberately 0.  The bundled 1.25 OpenConsole passes DCS,
+     * APC and unknown OSC through by default.  0x8 used to be the system
+     * passthrough flag but is now PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES. */
+    const DWORD pty_flags = 0;
 
     init_conpty();
     if (fn_CreatePseudoConsole) {
@@ -219,7 +252,7 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
                                             &ctx->hpc);
         if (SUCCEEDED(hr)) {
             ctx->use_bundled_conpty = true;
-            vlog("ConPTY: conpty.dll pseudoconsole created (passthrough)\n");
+            vlog("ConPTY: conpty.dll pseudoconsole created (OpenConsole)\n");
         } else {
             vlog("ConPTY: conpty.dll failed (0x%lx), falling back\n",
                  (unsigned long)hr);
@@ -227,23 +260,14 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     }
 
     if (!ctx->use_bundled_conpty) {
-        vlog("ConPTY: requesting passthrough mode (flags=0x%lx)\n",
-             (unsigned long)pty_flags);
         HRESULT hr = CreatePseudoConsole(size, input_read, output_write,
                                          pty_flags, &ctx->hpc);
-        if (FAILED(hr)) {
-            vlog("ConPTY: passthrough failed (0x%lx), retrying without\n",
-                 (unsigned long)hr);
-            hr = CreatePseudoConsole(size, input_read, output_write,
-                                     0, &ctx->hpc);
-        } else {
-            vlog("ConPTY: passthrough mode accepted\n");
-        }
         if (FAILED(hr)) {
             fprintf(stderr, "ERROR: CreatePseudoConsole failed: 0x%lx\n",
                     (unsigned long)hr);
             goto fail;
         }
+        vlog("ConPTY: using system conhost.exe\n");
     }
 
     /* ConPTY now owns these pipe ends — close our copies */
@@ -501,6 +525,7 @@ fail:
     if (ctx->output_read != INVALID_HANDLE_VALUE)
         CloseHandle(ctx->output_read);
     pty_close_hpc(ctx);
+    DeleteCriticalSection(&ctx->hpc_lock);
     free(ctx);
     return NULL;
 }
@@ -536,6 +561,7 @@ void pty_destroy(PtyContext *ctx)
     if (ctx->output_read != INVALID_HANDLE_VALUE)
         CloseHandle(ctx->output_read);
 
+    DeleteCriticalSection(&ctx->hpc_lock);
     free(ctx);
 }
 
@@ -732,14 +758,13 @@ void pty_close_console(PtyContext *ctx)
 
 /* Check whether the ConPTY host passes DCS (Device Control String)
  * sequences through unmodified.  The system conhost.exe strips DCS
- * (used for sixel graphics) even with PSEUDOCONSOLE_PASSTHROUGH_MODE.
- * The ConPTY rewrite (PR #17510) that fixes this is in the bundled
- * conpty.dll + OpenConsole.exe from the Microsoft.Windows.Console.ConPTY
- * NuGet package.
+ * (used for sixel graphics); the bundled OpenConsole's VtEngine passes
+ * it (and APC/unknown OSC) through by default.  This is not controlled
+ * by PSEUDOCONSOLE_PASSTHROUGH_MODE any more: in the 1.25 package 0x8
+ * is PSEUDOCONSOLE_GLYPH_WIDTH_GRAPHEMES.
  *
- * Returns true if a bundled conpty.dll is loaded (which uses
- * OpenConsole.exe with the fix), false if only the system conhost.exe
- * is used. */
+ * Returns true only when conpty.dll and OpenConsole.exe are both present
+ * and selected; conpty.dll silently uses system conhost.exe otherwise. */
 bool pty_conpty_dcs_passthrough(void)
 {
     return has_bundled_conpty();

@@ -1,0 +1,7 @@
+package=Microsoft.Windows.Console.ConPTY
+version=1.25.261109001
+arch=x64
+url=https://api.nuget.org/v3-flatcontainer/microsoft.windows.console.conpty/1.25.261109001/microsoft.windows.console.conpty.1.25.261109001.nupkg
+nupkg_sha256=3d77f535df848e44225c2a8912ac844fecb23f3057732b639f3034b587496f09
+source=https://github.com/microsoft/terminal
+license=MIT

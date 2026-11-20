@@ -60,6 +60,11 @@ format:
 	    echo "dprint not found - skipping Markdown formatting." >&2; \
 	fi
 
+# Refresh the tracked ConPTY binaries from the pinned NuGet package.
+.PHONY: fetch-conpty
+fetch-conpty:
+	"$(top_srcdir)/scripts/fetch-conpty.sh"
+
 # Portable ZIP target — on Windows, stages exe + DLLs + terminfo + launcher .cmd
 # into a self-contained ZIP. On macOS, stages a .app bundle with bundled dylibs,
 # terminfo, resources, and Info.plist into a ZIP.
