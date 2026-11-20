@@ -318,7 +318,7 @@ static void test_clear_hover_when_active(void)
 {
     reset_state();
     TerminalBackend term = { 0 };
-    term.hovered_hyperlink_id = 42;
+    term.hovered_hyperlink_key = 42;
     PorttyApp app = { .term = &term, .backend = &g_stub_backend };
 
     portty_app_clear_hover(&app);
@@ -357,7 +357,7 @@ static void test_clear_then_revalidate_no_link(void)
     // The revalidation should NOT re-show the panel or set the pointer cursor.
     reset_state();
     TerminalBackend term = { 0 };
-    term.hovered_hyperlink_id = 42;
+    term.hovered_hyperlink_key = 42;
     PorttyApp app = { .term = &term, .backend = &g_stub_backend };
 
     // Step 1: clear hover (simulates scroll-induced clear)

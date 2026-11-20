@@ -169,7 +169,7 @@ static void test_hyperlink_interned_once(void)
     terminal_destroy(&t);
 }
 
-static void test_hyperlink_ids_are_not_global_across_pages(void)
+static void test_distinct_hyperlinks_across_pages(void)
 {
     TerminalBackend t;
     make_term(&t, 80, 2);
@@ -285,7 +285,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_wide_cell);
     RUN_TEST(test_mode_flags);
     RUN_TEST(test_hyperlink_interned_once);
-    RUN_TEST(test_hyperlink_ids_are_not_global_across_pages);
+    RUN_TEST(test_distinct_hyperlinks_across_pages);
     RUN_TEST(test_scrollback_captured);
     RUN_TEST(test_scrollback_rows_keep_their_width);
     RUN_TEST(test_selection_serialized);

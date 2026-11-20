@@ -256,11 +256,11 @@ void portty_app_handle_mouse_enter(PorttyApp *app)
     portty_app_set_autoscroll(app, false);
 }
 
-// Resolve the OSC-8 hyperlink id at a pixel position. Returns 0 if no link
+// Resolve the OSC-8 hyperlink key at a pixel position. Returns 0 if no link
 // or out-of-bounds. Also returns the resolved (unified_row, vt_col) for
 // callers that want to fetch the URI without redoing the math.
-static uint16_t hyperlink_id_at(PorttyApp *app, int pixel_x, int pixel_y,
-                                int *out_unified_row, int *out_vt_col)
+static uint64_t hyperlink_key_at(PorttyApp *app, int pixel_x, int pixel_y,
+                                 int *out_unified_row, int *out_vt_col)
 {
     int display_row, display_col;
     if (!portty_app_pixel_to_cell(app, pixel_x, pixel_y, &display_row, &display_col))
@@ -284,24 +284,22 @@ static uint16_t hyperlink_id_at(PorttyApp *app, int pixel_x, int pixel_y,
         *out_unified_row = unified_row;
     if (out_vt_col)
         *out_vt_col = vt_col;
-    return cell.hyperlink_id;
+    return cell.hyperlink_key;
 }
 
 // Resolve the OSC-8 hyperlink under a pixel position and update hover state +
 // cursor shape. px<0 (or out-of-bounds) resolves to "no link". Returns true if
-// the hovered id changed (caller should trigger a redraw).
+// the hovered key changed (caller should trigger a redraw).
 static bool resolve_link_hover(PorttyApp *app, int px, int py)
 {
     int link_row = 0, link_col = 0;
-    uint16_t hid = (px < 0) ? 0 : hyperlink_id_at(app, px, py, &link_row, &link_col);
-    if (hid == terminal_hovered_hyperlink(app->term) &&
-        (hid == 0 || link_row == app->hovered_link_row))
+    uint64_t key = (px < 0) ? 0 : hyperlink_key_at(app, px, py, &link_row, &link_col);
+    if (key == terminal_hovered_hyperlink(app->term))
         return false;
-    app->hovered_link_row = link_row;
-    terminal_set_hovered_hyperlink(app->term, hid);
+    terminal_set_hovered_hyperlink(app->term, key);
     app->backend->set_cursor(app->backend,
-                             hid != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
-    if (hid != 0) {
+                             key != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
+    if (key != 0) {
         char url[4096];
         size_t n = terminal_cell_get_hyperlink(app->term, link_row, link_col, url,
                                                sizeof(url));
@@ -859,8 +857,8 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
 
         if (button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
             int link_row, link_col;
-            uint16_t hid = hyperlink_id_at(app, pixel_x, pixel_y, &link_row, &link_col);
-            if (hid != 0) {
+            uint64_t key = hyperlink_key_at(app, pixel_x, pixel_y, &link_row, &link_col);
+            if (key != 0) {
                 char url[4096];
                 size_t n = terminal_cell_get_hyperlink(app->term, link_row,
                                                        link_col, url, sizeof(url));

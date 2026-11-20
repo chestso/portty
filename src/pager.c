@@ -32,8 +32,7 @@ struct Pager
     EmbeddedTerm et;        // overlay terminal; torn down when closed
     char *text;             // retained source document (for rebuild on resize)
     int cols, rows;
-    uint16_t hovered; // last hovered hyperlink id (debounces cursor changes)
-    int hovered_row;  // unified row; hyperlink ids are only page-scoped
+    uint64_t hovered; // last hovered hyperlink key (debounces cursor changes)
     // Char-selection drag: a left press defers selection until first motion so
     // a plain click doesn't start one (mirrors the main view).
     bool drag_pending;
@@ -293,14 +292,14 @@ static bool cell_at(Pager *p, int px, int py, int *out_row, int *out_col)
     return true;
 }
 
-// OSC 8 hyperlink id at an already-resolved overlay cell (0 = none).
-static uint16_t link_at(Pager *p, int unified_row, int vt_col)
+// OSC 8 hyperlink key at an already-resolved overlay cell (0 = none).
+static uint64_t link_at(Pager *p, int unified_row, int vt_col)
 {
     TerminalCell cell;
     int rc = terminal_get_cell(p->et.term, unified_row, vt_col, &cell);
     if (rc < 0)
         return 0;
-    return cell.hyperlink_id;
+    return cell.hyperlink_key;
 }
 
 static void copy_selection(Pager *p)
@@ -332,16 +331,15 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
 
     int row = 0, col = 0;
     bool in_grid = cell_at(p, pixel_x, pixel_y, &row, &col);
-    uint16_t hid = in_grid ? link_at(p, row, col) : 0;
+    uint64_t key = in_grid ? link_at(p, row, col) : 0;
 
     // Hover feedback (link pointer vs text cursor) + the real-URI hint pill,
     // positioned via the pixel-Y anchor like the main terminal.
-    if (hid != p->hovered || (hid != 0 && row != p->hovered_row)) {
-        p->hovered_row = row;
-        terminal_set_hovered_hyperlink(p->et.term, hid);
+    if (key != p->hovered) {
+        terminal_set_hovered_hyperlink(p->et.term, key);
         p->backend->set_cursor(p->backend,
-                               hid != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
-        if (hid != 0) {
+                               key != 0 ? PORTTY_CURSOR_POINTER : PORTTY_CURSOR_TEXT);
+        if (key != 0) {
             char url[4096];
             size_t n = terminal_cell_get_hyperlink(p->et.term, row, col, url, sizeof(url));
             if (n > 0 && n < sizeof(url)) {
@@ -356,11 +354,11 @@ bool pager_mouse(Pager *p, int pixel_x, int pixel_y, int button, bool pressed, i
         } else {
             p->backend->panel_hide(p->backend, PANEL_ID_LINK_HINT);
         }
-        p->hovered = hid;
+        p->hovered = key;
     }
 
     // Ctrl + left-click on a link opens the URL (takes precedence over selection).
-    if (hid != 0 && button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
+    if (key != 0 && button == 1 && pressed && (mod & TERM_MOD_CTRL)) {
         char url[4096];
         size_t n = terminal_cell_get_hyperlink(p->et.term, row, col, url, sizeof(url));
         if (n > 0 && terminal_hyperlink_is_safe(url)) {

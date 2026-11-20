@@ -461,7 +461,7 @@ static void test_selection_after_cursor_movement(void)
 }
 
 /* OSC-8 hyperlink: cells written between an opening OSC-8 and its empty
- * close share a non-zero hyperlink_id; cells outside the link have id 0;
+ * close share a non-zero hyperlink key; cells outside the link have key 0;
  * the URI bytes round-trip through terminal_cell_get_hyperlink. */
 static void test_hyperlink_basic(void)
 {
@@ -487,9 +487,9 @@ static void test_hyperlink_basic(void)
     ASSERT_EQ(terminal_get_cell(&t, 0, 5, &c5), 0); /* ' ' (outside link) */
     ASSERT_EQ(c0.cp, (uint32_t)'C');
     ASSERT_EQ(c4.cp, (uint32_t)'m');
-    ASSERT_TRUE(c0.hyperlink_id != 0);
-    ASSERT_EQ(c0.hyperlink_id, c4.hyperlink_id); /* dedup: same id */
-    ASSERT_EQ((unsigned)c5.hyperlink_id, 0u);
+    ASSERT_TRUE(c0.hyperlink_key != 0);
+    ASSERT_EQ(c0.hyperlink_key, c4.hyperlink_key); /* same URI: same key */
+    ASSERT_EQ(c5.hyperlink_key, UINT64_C(0));
 
     char uri[256];
     size_t n = terminal_cell_get_hyperlink(&t, 0, 0, uri, sizeof(uri));
@@ -501,6 +501,107 @@ static void test_hyperlink_basic(void)
     ASSERT_EQ(n, (size_t)0);
 
     terminal_destroy(&t);
+}
+
+/* Hyperlink identity comes from the URI, not from the page that stores the
+ * cell. Different links on different pages must not compare equal, and the
+ * same URI must keep its identity when it appears on another page. */
+static void test_hyperlink_keys_are_content_based_across_pages(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = 80;
+    cfg.rows = 2;
+    cfg.scrollback = 128;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+
+    enum
+    {
+        link_rows = 70
+    }; /* crosses coffer's 64-row scrollback pages */
+    for (int i = 0; i <= link_rows; i++) {
+        int link = i == link_rows ? 0 : i;
+        char seq[160];
+        snprintf(seq, sizeof(seq),
+                 "\x1b]8;;https://example.com/%d\x1b\\X\x1b]8;;\x1b\\\r\n",
+                 link);
+        feed(&t, seq);
+    }
+
+    int sb = terminal_get_scrollback_lines(&t);
+    uint64_t keys[link_rows + 1] = { 0 };
+    int count = 0;
+    bool distinct = true;
+    for (int row = -sb; row < 2; row++) {
+        TerminalCell cell;
+        if (terminal_get_cell(&t, row, 0, &cell) != 0 ||
+            cell.cp != (uint32_t)'X' || cell.hyperlink_key == 0)
+            continue;
+        if (count <= link_rows) {
+            for (int i = 0; i < count; i++)
+                if (keys[i] == (uint64_t)cell.hyperlink_key &&
+                    !(count == link_rows && i == 0))
+                    distinct = false;
+            keys[count++] = cell.hyperlink_key;
+        }
+    }
+    bool same_uri_matches = count == link_rows + 1 &&
+                            keys[0] == keys[link_rows];
+    terminal_destroy(&t);
+
+    ASSERT_EQ(count, link_rows + 1);
+    /* The repeated URI is the sole repeated key. */
+    ASSERT_TRUE(distinct);
+    ASSERT_TRUE(same_uri_matches);
+}
+
+/* A live-grid intern-table rebuild may assign fresh page-local ids. The
+ * identity exposed by the host stays stable, and the URI stays readable. */
+static void test_hyperlink_key_survives_grid_rebuild(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+    cfg.cols = 20;
+    cfg.rows = 2;
+    cfg.scrollback = 0;
+    cfg.cell_w_px = 10;
+    cfg.cell_h_px = 20;
+    ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+
+    for (int i = 0; i < 10; i++) {
+        char seq[160];
+        snprintf(seq, sizeof(seq),
+                 "\x1b]8;;https://temporary.example/%d\x1b\\x", i);
+        feed(&t, seq);
+    }
+    feed(&t, "\x1b]8;;https://persistent.example\x1b\\P\x1b]8;;\x1b\\");
+
+    TerminalCell cell;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 10, &cell), 0);
+    uint64_t before = cell.hyperlink_key;
+
+    /* Leave only the persistent link, then force coffer to collect the live
+     * page's style table with more than 4096 distinct pens. */
+    feed(&t, "\x1b[0m\x1b[1;1H          ");
+    for (int i = 0; i < 5000; i++) {
+        char seq[96];
+        snprintf(seq, sizeof(seq), "\x1b[2;1H\x1b[38;2;%d;%d;1mX",
+                 i & 255, (i >> 8) & 255);
+        feed(&t, seq);
+    }
+
+    ASSERT_EQ(terminal_get_cell(&t, 0, 10, &cell), 0);
+    uint64_t after = cell.hyperlink_key;
+    char uri[64];
+    size_t n = terminal_cell_get_hyperlink(&t, 0, 10, uri, sizeof(uri));
+    terminal_destroy(&t);
+
+    ASSERT_TRUE(before != 0);
+    ASSERT_EQ(after, before);
+    ASSERT_EQ(n, strlen("https://persistent.example"));
+    ASSERT_STR_EQ(uri, "https://persistent.example");
 }
 
 /* Scheme allow-list refuses dangerous URIs and accepts safe ones. */
@@ -532,16 +633,16 @@ static void test_hyperlink_hover_state(void)
         ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
     };
 
-    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
-    terminal_set_hovered_hyperlink(&t, 7);
-    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 7u);
+    ASSERT_EQ(terminal_hovered_hyperlink(&t), UINT64_C(0));
+    terminal_set_hovered_hyperlink(&t, UINT64_C(0x123456789abcdef0));
+    ASSERT_EQ(terminal_hovered_hyperlink(&t), UINT64_C(0x123456789abcdef0));
 
     feed(&t, "x"); /* PTY output clears hover */
-    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
+    ASSERT_EQ(terminal_hovered_hyperlink(&t), UINT64_C(0));
 
     terminal_set_hovered_hyperlink(&t, 9);
     terminal_resize(&t, 30, 4);
-    ASSERT_EQ((unsigned)terminal_hovered_hyperlink(&t), 0u);
+    ASSERT_EQ(terminal_hovered_hyperlink(&t), UINT64_C(0));
 
     terminal_destroy(&t);
 }
@@ -569,7 +670,7 @@ static void test_cfr_new_independent(void)
     TerminalCell c;
     ASSERT_TRUE(terminal_get_cell(t, 0, 0, &c) >= 0);
     ASSERT_EQ((unsigned)c.cp, (unsigned)'Z');
-    ASSERT_TRUE(c.hyperlink_id != 0);
+    ASSERT_TRUE(c.hyperlink_key != 0);
 
     char uri[64];
     size_t n = terminal_cell_get_hyperlink(t, 0, 0, uri, sizeof(uri));
@@ -1047,7 +1148,7 @@ static void test_scrollback_cell_accessors(void)
     ASSERT_EQ(cell.cp, (uint32_t)0x1F468);
     ASSERT_EQ(cell.attrs.bold, 1u);
     ASSERT_EQ(cell.fg.r, 0xffu);
-    ASSERT_TRUE(cell.hyperlink_id != 0);
+    ASSERT_TRUE(cell.hyperlink_key != 0);
 
     uint32_t cps[16];
     ASSERT_EQ(terminal_cell_get_grapheme(&t, row, 0, cps, 16), (size_t)7);
@@ -1217,6 +1318,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_selection_keeps_interior_spaces_on_full_row);
     RUN_TEST(test_selection_skips_wide_continuation);
     RUN_TEST(test_hyperlink_basic);
+    RUN_TEST(test_hyperlink_keys_are_content_based_across_pages);
+    RUN_TEST(test_hyperlink_key_survives_grid_rebuild);
     RUN_TEST(test_hyperlink_safety);
     RUN_TEST(test_hyperlink_hover_state);
     RUN_TEST(test_cfr_new_independent);

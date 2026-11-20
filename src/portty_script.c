@@ -12,6 +12,7 @@
 #include "portty_script.h"
 
 #include <ctype.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -367,13 +368,15 @@ static bool exec_ext(void *ud, const char *name, const char *args,
             *fatal = true;
             return false;
         }
-        uint16_t hid = terminal_hovered_hyperlink(ext->term);
-        bool hovered = hid != 0;
+        uint64_t key = terminal_hovered_hyperlink(ext->term);
+        bool hovered = key != 0;
         if (hovered == want_hover) {
-            fprintf(stderr, "[%d] %s: PASS (hid=%u)\n", line, name, hid);
+            fprintf(stderr, "[%d] %s: PASS (key=%" PRIu64 ")\n",
+                    line, name, key);
             return true;
         }
-        fprintf(stderr, "[%d] %s: FAIL (hid=%u)\n", line, name, hid);
+        fprintf(stderr, "[%d] %s: FAIL (key=%" PRIu64 ")\n",
+                line, name, key);
         *fatal = true;
         return false;
     }

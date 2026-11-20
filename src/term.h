@@ -117,10 +117,11 @@ typedef struct
     TerminalColor fg;
     TerminalColor bg;
     TerminalColor ul_color; // per-cell underline color (is_default=true → use theme default)
-    // OSC-8 hyperlink id (page-scoped in coffer). 0 = no link. The value
-    // distinguishes linked from unlinked cells, but is not a cross-row
-    // identity. Fetch the URI with terminal_cell_get_hyperlink(row, col).
-    uint16_t hyperlink_id;
+    // OSC-8 hyperlink key derived from the URI. 0 = no link. Equal URIs
+    // share a key across rows, pages and screens; different URIs have
+    // different keys with probability 1 - 2^-64. Fetch the URI with
+    // terminal_cell_get_hyperlink(row, col).
+    uint64_t hyperlink_key;
 } TerminalCell;
 
 // Backend interface definition
@@ -155,10 +156,10 @@ struct TerminalBackend
     // to native Windows paths via path_compat_msys_to_win.
     const char *exe_path;
 
-    // Active OSC-8 hyperlink under the mouse (0 = none). Set by main.c on
-    // mouse motion; consumed by the renderer to draw the run sharing this
-    // id with a hover treatment. Cleared on PTY output / resize.
-    uint16_t hovered_hyperlink_id;
+    // Active OSC-8 hyperlink under the mouse (0 = none). The URI-derived
+    // key is stable across rows, pages and screens. Cleared on PTY output
+    // and resize.
+    uint64_t hovered_hyperlink_key;
 
     // Backend function pointers
     bool (*init)(TerminalBackend *term, const CfrConfig *cfg);
@@ -331,7 +332,7 @@ size_t terminal_cell_get_grapheme(TerminalBackend *term, int unified_row, int co
 
 /* OSC-8 hyperlink retrieval for the cell at (unified_row, col). Returns
  * the byte count of the URI (clamped to `cap`); 0 if no link. Output is
- * NUL-terminated when cap > 0. Use with TerminalCell.hyperlink_id != 0. */
+ * NUL-terminated when cap > 0. Use with TerminalCell.hyperlink_key != 0. */
 size_t terminal_cell_get_hyperlink(TerminalBackend *term, int unified_row, int col,
                                    char *out, size_t cap);
 
@@ -340,11 +341,11 @@ size_t terminal_cell_get_hyperlink(TerminalBackend *term, int unified_row, int c
  * data:, vbscript:, etc. NUL-terminated input. */
 bool terminal_hyperlink_is_safe(const char *uri);
 
-/* Hover state for the OSC-8 link currently under the mouse. Setting to
- * the same id is a no-op; setting to a different id schedules a redraw
- * via the existing damage path so the renderer picks up the change. */
-void terminal_set_hovered_hyperlink(TerminalBackend *term, uint16_t id);
-uint16_t terminal_hovered_hyperlink(const TerminalBackend *term);
+/* Hover state for the OSC-8 link currently under the mouse. Keys are
+ * URI-derived and stable across rows, pages and screens. Setting the same
+ * key is a no-op. */
+void terminal_set_hovered_hyperlink(TerminalBackend *term, uint64_t key);
+uint64_t terminal_hovered_hyperlink(const TerminalBackend *term);
 
 // Alternate screen and mouse mode support
 bool terminal_is_altscreen(TerminalBackend *term);

@@ -33,7 +33,7 @@ emit LINE_20\r\n
 
 wait 0.5
 
-# Check row 0 has the link with hyperlink_id
+# Check row 0 has the link with a non-zero hyperlink key
 render cells 0 0 9
 
 # Position mouse over row 0, column 5 (middle of LINK_TEXT)
@@ -42,7 +42,7 @@ mousemove 60 13
 
 wait 0.3
 
-# Verify hover IS active (should show PASS with hid != 0)
+# Verify hover IS active (should show PASS with key != 0)
 assert-hover
 
 # Now emit more lines to cause scroll - this should push row 0 into scrollback
@@ -62,7 +62,7 @@ wait 0.3
 # Row 0 should now be a different line (was LINE_01, now LINE_11)
 render cells 0 0 9
 
-# Verify hover IS cleared (should show PASS with hid == 0)
+# Verify hover IS cleared (should show PASS with key == 0)
 assert-no-hover
 
 quit

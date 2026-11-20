@@ -32,7 +32,7 @@ void terminal_resize(TerminalBackend *term, int width, int height)
 {
     if (!term || !term->resize)
         return;
-    term->hovered_hyperlink_id = 0;
+    term->hovered_hyperlink_key = 0;
     term->resize(term, width, height);
 }
 
@@ -49,7 +49,7 @@ int terminal_process_input(TerminalBackend *term, const char *input, size_t len)
         return -1;
     /* PTY output may rewrite the cell under the mouse. The next motion
      * event will re-resolve. */
-    term->hovered_hyperlink_id = 0;
+    term->hovered_hyperlink_key = 0;
     return term->process_input(term, input, len);
 }
 
@@ -249,18 +249,18 @@ bool terminal_hyperlink_is_safe(const char *uri)
     return false;
 }
 
-void terminal_set_hovered_hyperlink(TerminalBackend *term, uint16_t id)
+void terminal_set_hovered_hyperlink(TerminalBackend *term, uint64_t key)
 {
     if (!term)
         return;
-    if (term->hovered_hyperlink_id == id)
+    if (term->hovered_hyperlink_key == key)
         return;
-    term->hovered_hyperlink_id = id;
+    term->hovered_hyperlink_key = key;
 }
 
-uint16_t terminal_hovered_hyperlink(const TerminalBackend *term)
+uint64_t terminal_hovered_hyperlink(const TerminalBackend *term)
 {
-    return term ? term->hovered_hyperlink_id : 0;
+    return term ? term->hovered_hyperlink_key : 0;
 }
 
 bool terminal_is_altscreen(TerminalBackend *term)

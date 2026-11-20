@@ -198,8 +198,8 @@ typedef struct
     int n, cap;
 } LinkTable;
 
-/* Engine hyperlink ids are page-scoped. Give each distinct URI a dump-local
- * id so cells and the link table share an unambiguous identity. */
+/* Give each distinct URI a compact dump-local id. Exact URI comparison keeps
+ * the dump's identity unambiguous independently of engine storage. */
 static unsigned int link_add(LinkTable *t, const char *uri)
 {
     for (int i = 0; i < t->n; i++)
@@ -334,7 +334,7 @@ static void emit_cell(FILE *out, TerminalBackend *term, int unified_row, int col
     }
 
     unsigned int link_id = 0;
-    if (cell.hyperlink_id != 0) {
+    if (cell.hyperlink_key != 0) {
         char uri[1024];
         if (terminal_cell_get_hyperlink(term, unified_row, col, uri, sizeof(uri)) > 0)
             link_id = link_add(links, uri);

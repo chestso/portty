@@ -591,7 +591,12 @@ static void convert_cell(CfrBackendData *d, int row, int col,
      * the renderer boundary. */
     dst->cp = src->cp;
     dst->grapheme_id = src->grapheme_id;
-    dst->hyperlink_id = src->hyperlink_id;
+    /* Coffer's storage ids are page-scoped. Expose the URI-derived identity
+     * instead; the zero test is storage-independent and avoids a second row
+     * lookup for the overwhelmingly common unlinked cell. */
+    dst->hyperlink_key = src->hyperlink_id != 0
+                             ? cfr_cell_hyperlink_key(vt, row, col)
+                             : 0;
 
     /* Style. */
     const CfrStyle *st = cfr_cell_style(vt, row, col);
@@ -1210,7 +1215,7 @@ TerminalBackend *term_cfr_new(const CfrConfig *cfg)
     t->selection_change_data = NULL;
     t->clipboard_set_cb = NULL;
     t->clipboard_set_data = NULL;
-    t->hovered_hyperlink_id = 0;
+    t->hovered_hyperlink_key = 0;
     if (!terminal_init(t, cfg)) {
         free(t);
         return NULL;
