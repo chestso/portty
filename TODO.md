@@ -240,11 +240,6 @@ OSC 10/11/12 set/query/reset and DECSCUSR cursor style — used to live here;
 they are implemented now, see the README's config keys `foreground`,
 `background`, `cursor`, `cursor_blink`, `cursor_color`.)
 
-### OSC 4 / OSC 104 (palette set / reset)
-
-Not implemented; coffer logs a one-time warning for each (`CFR_LOGGED_OSC4`,
-`CFR_LOGGED_OSC104`). The 256-color palette is compile-time in coffer.
-
 ### DECSCA (Select Character Protection, CSI " q)
 
 Not in terminfo, not implemented. Used for protected characters that survive

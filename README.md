@@ -26,6 +26,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - OSC-8 hyperlinks — parsing and tracking
 - OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
 - OSC 10/11 color queries — responds to foreground/background color queries with the terminal's default colors
+- OSC 4/104 palette overrides — set, query and reset the 256 indexed colors; indexed SGR colors resolve through the live palette, so an override repaints existing text and scrollback
 - XTWINOPS (CSI `t`) — reports text-area size in cells (mode 18), pixels (mode 14), and cell size (mode 16)
 - XTVERSION (CSI `> q`) — reports `portty` as the terminal name, for TUIs that feature-detect by querying it
 - Kitty keyboard protocol — push/pop/set/query plus Disambiguate and Report-all flags
@@ -639,7 +640,7 @@ Thomas Christensen
 
 ## Acknowledgments
 
-The default 16-color ANSI palette is [Dracula](https://draculatheme.com) (per the [official spec](https://draculatheme.com/spec)), provided by coffer. The default terminal background is pitch-black (`#000000`), separate from the palette's AnsiBlack.
+The default 16-color ANSI palette is [Dracula](https://draculatheme.com) (per the [official spec](https://draculatheme.com/spec)), provided by coffer. The default terminal background is pitch-black (`#000000`), separate from the palette's AnsiBlack. An application can override any indexed entry at run time with OSC 4 (and restore it with OSC 104); the built-in values are what coffer's `cfr_default_palette_rgb()` reports.
 
 Single-header third-party libraries, fetched automatically at configure time:
 
