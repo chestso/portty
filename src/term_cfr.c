@@ -123,6 +123,24 @@ static TerminalColor unpack_rgb(uint32_t rgb, bool is_default,
     return out;
 }
 
+/* Resolve one requested style color to what the renderer draws. DEFAULT
+ * keeps is_default for the renderer's default treatment; INDEXED resolves
+ * through the live palette so OSC 4 recolors already-written text; RGB is
+ * explicit. An unknown kind falls back to DEFAULT instead of black. */
+static TerminalColor style_color(const CfrTerm *vt, const CfrStyleColor *c,
+                                 uint32_t fallback)
+{
+    switch (c->kind) {
+    case CFR_COLOR_KIND_INDEXED:
+        return unpack_rgb(cfr_palette_rgb(vt, c->index), false, 0);
+    case CFR_COLOR_KIND_RGB:
+        return unpack_rgb(c->rgb, false, 0);
+    case CFR_COLOR_KIND_DEFAULT:
+    default:
+        return unpack_rgb(0, true, fallback);
+    }
+}
+
 /* ------------------------------------------------------------------ */
 /* Damage                                                              */
 /* ------------------------------------------------------------------ */
@@ -622,15 +640,9 @@ static void convert_cell(CfrBackendData *d, int row, int col,
     dst->attrs.font = st->font & 0xF;
     dst->attrs.underline = st->underline & 0x7;
 
-    dst->fg = unpack_rgb(st->fg_rgb,
-                         (st->color_flags & CFR_COLOR_DEFAULT_FG) != 0,
-                         d->default_fg);
-    dst->bg = unpack_rgb(st->bg_rgb,
-                         (st->color_flags & CFR_COLOR_DEFAULT_BG) != 0,
-                         d->default_bg);
-    dst->ul_color = unpack_rgb(st->ul_rgb,
-                               (st->color_flags & CFR_COLOR_DEFAULT_UL) != 0,
-                               d->default_fg);
+    dst->fg = style_color(vt, &st->fg, d->default_fg);
+    dst->bg = style_color(vt, &st->bg, d->default_bg);
+    dst->ul_color = style_color(vt, &st->ul, d->default_fg);
 
     /* Match libvterm backend: pre-swap fg/bg for reverse video so the
      * renderer sees visual colors. */
@@ -784,6 +796,11 @@ static void cfr_back_get_default_colors(TerminalBackend *term, uint32_t *out_fg,
         *out_fg = d->default_fg;
     if (out_bg)
         *out_bg = d->default_bg;
+}
+static uint32_t cfr_back_get_palette_color(TerminalBackend *term, uint8_t index)
+{
+    CfrBackendData *d = term->backend_data;
+    return cfr_palette_rgb(d ? d->vt : NULL, index);
 }
 static const char *cfr_back_get_title(TerminalBackend *term)
 {
@@ -1161,6 +1178,7 @@ TerminalBackend terminal_backend_cfr = {
     .get_cursor_shape = cfr_back_get_cursor_shape,
     .get_cursor_color = cfr_back_get_cursor_color,
     .get_default_colors = cfr_back_get_default_colors,
+    .get_palette_color = cfr_back_get_palette_color,
     .get_title = cfr_back_get_title,
     .needs_redraw = cfr_back_needs_redraw,
     .clear_redraw = cfr_back_clear_redraw,

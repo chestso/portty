@@ -1117,6 +1117,86 @@ static void test_dynamic_colors_follow_osc(void)
     terminal_destroy(&t);
 }
 
+/* OSC 4 palette overrides: an indexed SGR records the index, so a palette
+ * change must recolor already-written text. The bridge resolves indexed
+ * styles through the live palette on every read. */
+static void test_osc4_palette_override(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 10;
+        cfg.rows = 2;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 20;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+
+    feed(&t, "\x1b[31mR\x1b[38;5;123mK\x1b[38;2;1;2;3mT\x1b[0mU");
+    uint32_t red = cfr_default_palette_rgb(1);
+    uint32_t cube = cfr_default_palette_rgb(123);
+
+    TerminalCell r, k, tc, u;
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &r), 0);
+    ASSERT_FALSE(r.fg.is_default);
+    ASSERT_EQ(r.fg.r, (red >> 16) & 0xffu);
+    ASSERT_EQ(r.fg.g, (red >> 8) & 0xffu);
+    ASSERT_EQ(r.fg.b, red & 0xffu);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 1, &k), 0);
+    ASSERT_FALSE(k.fg.is_default);
+    ASSERT_EQ(k.fg.r, (cube >> 16) & 0xffu);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 2, &tc), 0);
+    ASSERT_EQ(tc.fg.r, 1);
+    ASSERT_EQ(tc.fg.g, 2);
+    ASSERT_EQ(tc.fg.b, 3);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 3, &u), 0);
+    ASSERT_TRUE(u.fg.is_default);
+    ASSERT_TRUE(u.bg.is_default);
+    ASSERT_TRUE(u.ul_color.is_default);
+
+    /* Override entry 1: the SGR 31 cell recolors, the cube and RGB cells
+     * do not. */
+    terminal_clear_redraw(&t);
+    feed(&t, "\x1b]4;1;rgb:11/22/33\x1b\\");
+    terminal_flush_damage(&t);
+    ASSERT_TRUE(terminal_needs_redraw(&t));
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &r), 0);
+    ASSERT_FALSE(r.fg.is_default);
+    ASSERT_EQ(r.fg.r, 0x11);
+    ASSERT_EQ(r.fg.g, 0x22);
+    ASSERT_EQ(r.fg.b, 0x33);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 1, &k), 0);
+    ASSERT_EQ(k.fg.r, (cube >> 16) & 0xffu);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 2, &tc), 0);
+    ASSERT_EQ(tc.fg.r, 1);
+
+    /* Setting the same value again damages nothing. */
+    terminal_clear_redraw(&t);
+    feed(&t, "\x1b]4;1;rgb:11/22/33\x1b\\");
+    terminal_flush_damage(&t);
+    ASSERT_FALSE(terminal_needs_redraw(&t));
+
+    /* OSC 104 restores the built-in entry. */
+    feed(&t, "\x1b]104;1\x1b\\");
+    terminal_flush_damage(&t);
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &r), 0);
+    ASSERT_EQ(r.fg.r, (red >> 16) & 0xffu);
+    ASSERT_EQ(r.fg.g, (red >> 8) & 0xffu);
+    ASSERT_EQ(r.fg.b, red & 0xffu);
+
+    /* RIS restores it too (and clears the screen, so repaint the cell). */
+    feed(&t, "\x1b]4;1;rgb:aa/bb/cc\x1b\\");
+    feed(&t, "\x1b"
+             "c");
+    feed(&t, "\x1b[31mR");
+    ASSERT_EQ(terminal_get_cell(&t, 0, 0, &r), 0);
+    ASSERT_EQ(r.fg.r, (red >> 16) & 0xffu);
+    ASSERT_EQ(r.fg.g, (red >> 8) & 0xffu);
+    ASSERT_EQ(r.fg.b, red & 0xffu);
+
+    terminal_destroy(&t);
+}
+
 /* Unified row accessors resolve a scrollback cell against the page that
  * owns its style, grapheme and hyperlink ids. */
 static void test_scrollback_cell_accessors(void)
@@ -1331,6 +1411,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_cursor_style_defaults);
     RUN_TEST(test_style_and_color_seeds);
     RUN_TEST(test_dynamic_colors_follow_osc);
+    RUN_TEST(test_osc4_palette_override);
     RUN_TEST(test_scrollback_cell_accessors);
     RUN_TEST(test_row_width_and_text_capacity);
     RUN_TEST(test_push_count_tracks_output_only);

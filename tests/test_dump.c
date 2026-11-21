@@ -113,6 +113,24 @@ static void test_cell_codepoint_width_attrs_colors(void)
     terminal_destroy(&t);
 }
 
+/* OSC 4 palette overrides show up in both the cell colors and the palette
+ * block: `dumpstate` reports what the screen draws, not the built-ins. */
+static void test_palette_override_in_dump(void)
+{
+    TerminalBackend t;
+    make_term(&t, 8, 1);
+    feed(&t, "\x1b[31mX");
+    feed(&t, "\x1b]4;1;rgb:01/02/03\x1b\\");
+    char *j = dump_to_string(&t, NULL);
+    ASSERT_NOT_NULL(j);
+    /* Cell fg is the overridden indexed color, not the built-in red. */
+    ASSERT_TRUE(strstr(j, "[88,0,1,\"\",\"#010203\",\"default\",\"default\",0]") != NULL);
+    /* The palette block carries the override too. */
+    ASSERT_TRUE(strstr(j, "\"#010203\"") != NULL);
+    free(j);
+    terminal_destroy(&t);
+}
+
 /* SGR 53 and SGR 21 reach the dump as canonical tokens, in the fixed
  * order, and the legend documents the overline flag. */
 static void test_overline_and_double_underline_tokens(void)
@@ -281,6 +299,7 @@ int main(int argc, char *argv[])
     printf("Running dump tests:\n");
     RUN_TEST(test_header_and_geometry);
     RUN_TEST(test_cell_codepoint_width_attrs_colors);
+    RUN_TEST(test_palette_override_in_dump);
     RUN_TEST(test_overline_and_double_underline_tokens);
     RUN_TEST(test_wide_cell);
     RUN_TEST(test_mode_flags);

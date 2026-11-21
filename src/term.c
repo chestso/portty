@@ -117,6 +117,13 @@ void terminal_get_default_colors(TerminalBackend *term, uint32_t *out_fg,
     term->get_default_colors(term, out_fg, out_bg);
 }
 
+uint32_t terminal_get_palette_color(TerminalBackend *term, uint8_t index)
+{
+    if (!term || !term->get_palette_color)
+        return cfr_default_palette_rgb(index);
+    return term->get_palette_color(term, index);
+}
+
 const char *terminal_cursor_shape_name(TerminalCursorShape shape)
 {
     switch (shape) {

@@ -183,6 +183,10 @@ struct TerminalBackend
      * defaults) as 0x00RRGGBB. Either out pointer may be NULL. */
     void (*get_default_colors)(TerminalBackend *term, uint32_t *out_fg,
                                uint32_t *out_bg);
+    /* One entry of the live 256-color palette (OSC 4 overrides included)
+     * as 0x00RRGGBB. NULL means no live palette: the wrapper then reports
+     * the engine's built-in value. */
+    uint32_t (*get_palette_color)(TerminalBackend *term, uint8_t index);
     const char *(*get_title)(TerminalBackend *term);
     bool (*needs_redraw)(TerminalBackend *term);
     void (*clear_redraw)(TerminalBackend *term);
@@ -307,6 +311,9 @@ bool terminal_get_cursor_color(TerminalBackend *term, uint32_t *out_rgb);
 /* Effective default foreground/background as 0x00RRGGBB. */
 void terminal_get_default_colors(TerminalBackend *term, uint32_t *out_fg,
                                  uint32_t *out_bg);
+/* Live palette entry (OSC 4 overrides included), 0x00RRGGBB. Falls back to
+ * the engine's built-in palette when the backend exposes none. */
+uint32_t terminal_get_palette_color(TerminalBackend *term, uint8_t index);
 const char *terminal_get_title(TerminalBackend *term);
 bool terminal_needs_redraw(TerminalBackend *term);
 void terminal_clear_redraw(TerminalBackend *term);

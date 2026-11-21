@@ -561,7 +561,8 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
                 fputc(',', out);
             if (i % 16 == 0)
                 fputs("\n      ", out);
-            fprintf(out, "\"#%06x\"", cfr_default_palette_rgb((uint8_t)i) & 0xFFFFFFu);
+            fprintf(out, "\"#%06x\"",
+                    terminal_get_palette_color(term, (uint8_t)i) & 0xFFFFFFu);
         }
         fputs("\n    ]\n  },\n", out);
     }
