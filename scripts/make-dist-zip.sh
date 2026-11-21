@@ -422,6 +422,32 @@ else
 			"$STAGE_DIR/share/emacs/site-lisp/portty.el"
 	fi
 
+	# --- ConPTY bundle ---------------------------------------------------------
+	# conpty.dll is loaded at runtime (LoadLibraryEx, not an import), so the
+	# ldd walk below cannot see it: stage the pinned bundle by hand, next to
+	# the executables, matching what `make install` puts in bindir on Windows.
+	# `make fetch-conpty` refreshes the tracked pair.
+	CONPTY_DIR="$SRC_DIR/data/conpty"
+	CONPTY_ARCH="$(sed -n 's/^arch=//p' "$CONPTY_DIR/VERSION" 2>/dev/null || true)"
+	case "$ARCH:$CONPTY_ARCH" in
+	x86_64:x64 | aarch64:arm64) SHIP_CONPTY=1 ;;
+	*) SHIP_CONPTY=0 ;;
+	esac
+	if [ "$SHIP_CONPTY" -eq 1 ]; then
+		for file in conpty.dll OpenConsole.exe VERSION; do
+			if [ ! -f "$CONPTY_DIR/$file" ]; then
+				echo "ERROR: missing ConPTY bundle file: $CONPTY_DIR/$file" >&2
+				echo "  refresh the bundle with scripts/fetch-conpty.sh" >&2
+				exit 1
+			fi
+		done
+		echo "==> Bundling ConPTY host $(sed -n 's/^version=//p' "$CONPTY_DIR/VERSION") ($CONPTY_ARCH)"
+		cp "$CONPTY_DIR/conpty.dll" "$CONPTY_DIR/OpenConsole.exe" \
+			"$CONPTY_DIR/VERSION" "$STAGE_DIR/"
+	else
+		echo "==> No ConPTY bundle for $ARCH (tracked bundle: ${CONPTY_ARCH:-none}); the package uses the system host"
+	fi
+
 	# --- Docs ------------------------------------------------------------------
 	echo "==> Copying documentation"
 	for doc in README.md COPYING; do
@@ -538,6 +564,12 @@ you are:
 portty.cmd additionally sets up TERMINFO_DIRS so that MSYS2/ncurses
 programs (find, vim, etc.) find portty's terminfo definitions. If you run
 porttyw.exe directly, terminfo may not be found by child programs.
+
+The ZIP carries the pinned Microsoft Windows Console ConPTY host
+(conpty.dll and OpenConsole.exe; VERSION records the package). portty
+loads this pair from its own folder instead of the system host, which is
+what lets DCS, APC and unknown OSC reach the emulator. Keep the three
+files together with the executables.
 
 To create a Start Menu shortcut:
   Right-click portty.cmd > Create shortcut

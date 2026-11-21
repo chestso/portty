@@ -132,6 +132,19 @@ jobs:
           done
           test -n "$(find "$stage" -maxdepth 1 -iname 'SDL3.dll' -print -quit)"
 
+          # The bundled ConPTY host is loaded at runtime, so the DLL walk above
+          # cannot infer it: assert the pinned pair and its VERSION stamp made
+          # it into the ZIP, next to portty.exe.
+          for file in "${stage}conpty.dll" "${stage}OpenConsole.exe" "${stage}VERSION"; do
+            test -f "$file"
+          done
+          packaged_conpty=$(sed -n 's/^version=//p' "${stage}VERSION")
+          pinned_conpty=$(sed -n 's/^CONPTY_VERSION=//p' data/conpty/conpty.lock)
+          if [ -z "$packaged_conpty" ] || [ "$packaged_conpty" != "$pinned_conpty" ]; then
+            echo "ERROR: packaged ConPTY $packaged_conpty does not match the pin $pinned_conpty" >&2
+            exit 1
+          fi
+
           # The two-binary split is a PE-subsystem decision: portty.exe must be
           # CUI (cmd waits for it, reports its status, keeps pipe/redirect
           # handles intact) and porttyw.exe GUI (no console window for the
