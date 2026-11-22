@@ -4,15 +4,12 @@
 
 A terminal emulator with pluggable backends for terminal emulation, rendering, platform windowing, and fonts.
 
-Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: ConPTY, native font resolver, DWM styling) and macOS (Core Text font resolver).
+Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfBuzz (fonts). Builds natively on Windows (MSYS2/UCRT64: bundled pinned OpenConsole ConPTY, native GDI/DirectWrite font resolver, DWM styling) and macOS (Core Text font resolver).
 
 ## Documentation
 
-- [<img src="https://img.shields.io/badge/Ask%20DeepWiki-blueviolet" alt="Ask DeepWiki" height="20" align="absmiddle">](https://deepwiki.com/chestso/portty) — AI-generated wiki and searchable code index for this repository
 - [ARCHITECTURE.md](ARCHITECTURE.md) — how portty is put together: threads and the event loop, event-driven timers, the render pipeline, and animation frame pacing
 - [inline-image-architecture.md](docs/inline-image-architecture.md) — how sixel, iTerm2 inline, and kitty graphics are decoded and composited
-- [embedded-terminals-linear-light.md](docs/embedded-terminals-linear-light.md) — gamma-correct linear-light rendering for embedded terminals
-- [windows-stdio-proposal.md](docs/windows-stdio-proposal.md) — the Windows split-binary design that makes portty pipeable
 
 ## Features
 
@@ -20,19 +17,22 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 
 - UAX #11 + UAX #29 grapheme-cluster width, arbitrary-length clusters per cell, working reflow, page-based scrollback ring
 - Sixel graphics — DCS sixel decoding, grid anchoring, RLE/RGB/HLS color, transparency, raster attributes; capability advertising (DA1 reports `4`, DECSET 80/1070/8452, XTSMGRAPHICS); animated in-place updates (DECSDM mode 80) with frame swapping via image id + version
-- iTerm2 inline images — OSC 1337 (`File=`/multipart) parsing, PNG/JPEG/BMP/GIF/TGA decode, full 8-bit alpha, cursor-anchored placement
-- Kitty graphics — APC `G` protocol (transmit/display/delete/query/frame/transparency), chunked transfer (`m=1/0`), zlib (`o=z`) payloads, virtual and relative placements, z-index layering. On Windows, ConPTY strips APC, so commands ride OSC 5555 and responses leave via OSC 5556
-- Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization. On Windows, ConPTY strips APC, so commands ride OSC 5555 and responses leave via OSC 5556
+- iTerm2 inline images — OSC 1337 (`File=`/`MultipartFile=`) parsing, PNG/JPEG/BMP/GIF/TGA decode plus an uncompressed-TIFF fallback for chafa's output, full 8-bit alpha, cursor-anchored placement; `Capabilities` and `ReportCellSize` queries answered
+- Kitty graphics — APC `G` protocol (transmit/display/delete/query/frame/transparency), chunked transfer (`m=1/0`), zlib (`o=z`) payloads, virtual and relative placements, z-index layering
+- Lottie animations — APC sequence parsing (`ESC _ … ST`) with eight commands (load, load-chunk, place, play, pause, stop, seek, delete); placement tracking with opacity and layer; ThorVG rasterization
+- Windows ConPTY — the pinned OpenConsole bundle passes APC and DCS through, so kitty graphics, Lottie and sixel work natively. When the system conhost is used instead (it strips APC), coffer accepts the same payloads wrapped in OSC 5555 and sends responses via OSC 5556
 - OSC-8 hyperlinks — parsing and tracking
 - OSC 52 clipboard set — sequence parsing (read queries silently refused for security)
-- OSC 10/11 color queries — responds to foreground/background color queries with the terminal's default colors
+- Dynamic colors (OSC 10/11/12) — set, query and reset the default foreground, background and cursor color (OSC 110/111/112); the configured colors are the seeds, so a reset returns to them
+- Cursor style (DECSCUSR) — block, underline or bar, with blink, per xterm's `CSI Ps SP q`; the configured style is what `CSI 7 SP q` and RIS restore
 - OSC 4/104 palette overrides — set, query and reset the 256 indexed colors; indexed SGR colors resolve through the live palette, so an override repaints existing text and scrollback
 - XTWINOPS (CSI `t`) — reports text-area size in cells (mode 18), pixels (mode 14), and cell size (mode 16)
 - XTVERSION (CSI `> q`) — reports `portty` as the terminal name, for TUIs that feature-detect by querying it
 - Kitty keyboard protocol — push/pop/set/query plus Disambiguate and Report-all flags
 - Working-directory tracking — OSC 7 (`file://` URI) and OSC 9;9 (ConEmu protocol)
-- Window title — OSC 2 parsing
+- Window title — OSC 0/2 parsing
 - Damage accumulation — flushed once per frame into a single dirty signal
+- Synchronized output (DECSET 2026) — a frame the application brackets is held as one damage union, so the screen never presents a half-drawn state
 
 **Rendering: portty** (SDL3 GPU backend)
 
@@ -43,11 +43,11 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Custom COLR v1 paint graph traversal (gradients, transforms, compositing)
 - Bold, italic, and bold-italic font styles (variable font axes, platform-native resolution, synthetic fallback)
 - Variable-font support (MM_Var) and axis control
-- Dynamic font fallback (up to 24 runtime fallback fonts; multi-codepoint clusters resolve through one memoised route and fall back per cluster, with bold/italic honoured on fallback faces; Fontconfig on Linux, Core Text on macOS, FreeType scan on Windows)
+- Dynamic font fallback (up to 24 runtime fallback fonts; multi-codepoint clusters resolve through one memoised route and fall back per cluster, with bold/italic honoured on fallback faces; Fontconfig on Linux, Core Text on macOS, GDI/DirectWrite + FreeType coverage scan on Windows)
 - Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
-- Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering
-- Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_present()`), foreground/background layer compositing
+- Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering. Image dimensions are logical: the content scale is applied once on the way out, so a 128 px PNG keeps its intended size on a 2× display
+- Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_present()`), foreground/background layer compositing; frames are sampled by presentation time and paced to the display refresh (see [ARCHITECTURE.md](ARCHITECTURE.md#animation-pacing))
 - Procedural box drawing and block element rendering (U+2500–U+257F), with float stroke thickness and proportional margins for seamless diagonal tiling
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
@@ -59,16 +59,17 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Reverse video attribute rendering
 - Blinking text (SGR 5) is parsed but deliberately not rendered — widely considered an accessibility hazard and visual distraction in modern terminals
 - Nerd Fonts v2 to v3 codepoint translation, with icons rendered inline alongside text
-- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click), dismissible via close button
+- Notification panel — a top strip for transient messages (e.g. disallowed-URL-scheme warnings on Ctrl+click) that hides on its own timer; script-created panels can carry a close button
 - Visual bell — BEL shows a transient status panel (`Bell` plus the window title) for two seconds; there is no audible bell, and `bell` selects `always` (default), `unfocused`, or `none`
 - Resize geometry overlay — while the window is resized, a centered panel reports the grid geometry (cols x rows) and cell size in pixels, then hides itself once resizing settles
 - Scrollback navigation with mouse wheel and Ctrl+Shift+PageUp/Down (page) / Ctrl+Shift+Up/Down (line)
 - Selection drag autoscroll — extending a selection drag past the viewport edge scrolls the view and grows the selection at ~30 Hz
 - HiDPI support (pixel density scaling for underlines and UI elements) — moving the window to a display with another scale factor re-rasterizes the fonts for the new DPI and re-derives the grid from the new cell size
-- Window title — sets platform window title from coffer-parsed OSC 2
+- Window title — sets platform window title from coffer-parsed OSC 0/2
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
 - Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
 - Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. The capabilities line lists all three inline image protocols (sixel, iTerm2, kitty graphics) alongside OSC 8, grapheme clusters, and reflow. On Windows it also reports the ConPTY host and pinned package version. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
+- Built-in script harness (`-S FILE`) — drives input, waits for buffer text, asserts, and captures PNG/QOI frames from a plain-text script; the engine lives in coffer and portty adds the UI commands (see [Scripting](#scripting))
 - Terminal reset (`Ctrl+Delete`, `Ctrl+Shift+F8`) — recovers a shell that a program left unable to read a line, and clears the keyboard protocol flags on its own when the program that pushed them is gone
 - Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs, including automatic `xterm-mouse-mode` so the mouse works in `emacs -nw`
 - Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
@@ -97,13 +98,15 @@ build/src/portty -- htop
 build/src/portty --demo "Hello, world!"
 ```
 
+On Windows the distribution ships two binaries: `portty.exe` is the console-subsystem application (so `portty -V | grep` and pipelines behave), and `porttyw.exe` is a GUI-subsystem launcher that starts it without a console window. Explorer, the Start Menu shortcut and the ZIP's `portty.cmd` point at `porttyw.exe`; shells and scripts call `portty.exe` directly.
+
 ### CLI Flags
 
 | Flag                        | Description                                                     |
 | --------------------------- | --------------------------------------------------------------- |
 | `-h`                        | Show help message                                               |
 | `-v`                        | Verbose output (font resolution, COLR, atlas events)            |
-| `-f PATTERN`                | Font via fontconfig pattern (e.g. `-f "Cascadia Code-14"`)      |
+| `-f PATTERN`                | Font family and size (e.g. `-f "Cascadia Code-14"`)             |
 | `-g COLSxROWS`              | Initial terminal size (default: 80x24)                          |
 | `--dpi-scale SCALE`         | Multiply detected DPI scale (default: 1.0)                      |
 | `-L` / `--list-fonts`       | List available monospace fonts and exit                         |
@@ -145,7 +148,7 @@ portty also pops the kitty keyboard flags on its own when the program that pushe
 
 ### Status Panels
 
-Short-lived messages appear as a transient panel at the top of the grid and disappear on their own: the destination of a `Ctrl+Shift+F7` state dump (or the reason it failed), and failures to open an OSC-8 link. The panel is coloured by severity — blue for information, red for errors.
+Short-lived messages appear as a transient panel at the top of the grid and disappear on their own: the destination of a `Ctrl+Shift+F7` state dump (or the reason it failed), failures to open an OSC-8 link, the keyboard-protocol reset notice, and the visual bell. The panel's accent stripe is coloured by severity — blue for information, yellow for warnings, red for errors.
 
 ### Diagnostics Report
 
@@ -166,7 +169,9 @@ While the pager is open:
 
 ## Scripting
 
-portty includes a built-in scripting system for automated debugging and regression testing. Scripts are plain-text files loaded via the `-S` / `--script` CLI flag. Each command executes one per frame inside the render loop, so you can drive the terminal, inspect its state, and capture screenshots at precise points.
+portty includes a built-in scripting harness for automated debugging and regression testing. Scripts are plain-text files loaded via the `-S` / `--script` CLI flag. The runner executes one command per event-loop pass, so you can drive the terminal, inspect its state, and capture screenshots at precise points; a `wait`, `wait-for` or `await-exit` arms an event timer instead of polling, so the loop keeps servicing output while the script waits.
+
+The script engine and its core vocabulary live in coffer (`include/coffer/script.h`, also used by the `coffer` CLI; design notes in [script-engine-design.md](https://github.com/chestso/coffer/blob/master/docs/script-engine-design.md)). portty registers the UI commands listed below.
 
 ```bash
 portty --script debug.txt -- my-shell
@@ -174,43 +179,56 @@ portty --script debug.txt -- my-shell
 
 ### Script File Format
 
-One command per line. Lines starting with `#` and blank lines are ignored. The `send`/`emit` commands support `\n`, `\r`, `\t`, `\e` (ESC), `\xNN`, and `\\\` escape sequences; surrounding double quotes are stripped.
+One command per line. Lines starting with `#` and blank lines are ignored. The `send`, `sendln`, `emit` and `wait-for` commands expand `\n`, `\r`, `\t`, `\e` (ESC), `\xNN`, and `\\`; `\033` is deliberately left alone so it reaches a `printf` argument intact. `assert-contains`/`assert-not-contains` take their text literally. Surrounding quotes — double or single — are stripped.
 
 ### Commands
 
-| Command                                                               | Description                                                                                                                                                               |
-| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `wait <seconds>`                                                      | Pause script execution for N seconds (monotonic clock)                                                                                                                    |
-| `wait-for <text> [timeout-seconds] [line-end]`                        | Suspend execution until `<text>` appears in the visible terminal grid (default timeout 600s; prints TIMEOUT on expiry; `line-end` matches only rows ending with the text) |
-| `dumpgrid`                                                            | Print the visible grid as text, one line per row (trailing blanks trimmed)                                                                                                |
-| `send <text>`                                                         | Write text to the PTY input (child's stdin). Supports `\n \r \t \e \xNN \\\` escapes.                                                                                     |
-| `sendln <text>`                                                       | Same as `send`, but appends `\r\n` (as if the user pressed Return)                                                                                                        |
-| `emit <text>`                                                         | Emit text directly to the terminal emulator (not the child). Supports `\e`/`\xNN`.                                                                                        |
-| `raw <hex bytes>`                                                     | Write raw binary bytes to the PTY input (e.g. `raw 1b 5b 6d` = `ESC [ m`)                                                                                                 |
-| `emit-raw <hex bytes>`                                                | Write raw binary bytes directly to the terminal emulator                                                                                                                  |
-| `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)                                                                                                  |
-| `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                                                                                                             |
-| `await-exit [timeout-seconds]`                                        | Drain until the child exits (default 10 s; a timeout fails the run) and record its status                                                                                 |
-| `assert-exit <status>`                                                | Assert `await-exit` recorded the given child exit status                                                                                                                  |
-| `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)                                                                                                |
-| `renderdump <path>`                                                   | Render the terminal scene offscreen to a PNG file: fresh render pass, trimmed to content bounds, no panels/cursor; while the pager is open, dumps the pager's content     |
-| `dumprow <row>`                                                       | Print all cells in a terminal row                                                                                                                                         |
-| `dumpcells <row> <col_start> <col_end>`                               | Print cells in the given range with codepoint, width, attributes, and fg/bg colors                                                                                        |
-| `dumpstate [path]`                                                    | Write the full terminal state as JSON (default location, or `path`; `-` = stdout)                                                                                         |
-| `dump-sixel`                                                          | Print the current sixel image state (count and per-image info)                                                                                                            |
-| `mousemove <x> <y>`                                                   | Simulate a mouse move to physical pixel coordinates                                                                                                                       |
-| `mousedown <x> <y> [button] [clicks]`                                 | Simulate a mouse button press (default left button, 1 click). Pair with `mousemove` to drag                                                                               |
-| `mouseup <x> <y> [button] [clicks]`                                   | Simulate a mouse button release                                                                                                                                           |
-| `resize <cols> <rows>`                                                | Resize terminal grid to given columns/rows (pops the same geometry overlay as an interactive resize)                                                                      |
-| `winsize <width> <height>`                                            | Set window pixel size                                                                                                                                                     |
-| `display-scale <scale>`                                               | Simulate the window moving to a display with another scale factor: the fonts are re-rasterized for the new DPI and the grid is derived from the new cell size             |
-| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at grid position with title and body                                                                                                                         |
-| `panel_hide <id>`                                                     | Hide panel by ID                                                                                                                                                          |
-| `assert-hover`                                                        | Assert an OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |
-| `assert-no-hover`                                                     | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |
-| `record-start <dir> [fps]`                                            | Start frame recording to directory at target FPS (default 30), QOI format                                                                                                 |
-| `record-stop`                                                         | Stop frame recording and close manifest                                                                                                                                   |
-| `quit`                                                                | Request application quit; the run succeeds                                                                                                                                |
+#### Core commands (shared with coffer)
+
+| Command                                | Description                                                                                                                                                                 |
+| -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `wait <seconds>`                       | Drain for N seconds (decimals accepted)                                                                                                                                     |
+| `wait-for <text> [timeout] [line-end]` | Wait until `<text>` appears in the unified buffer (scrollback + visible rows); `line-end` matches only rows that end with the text; a timeout (default 600 s) fails the run |
+| `send <text>`                          | Write text to the child's stdin (no newline appended)                                                                                                                       |
+| `sendln <text>`                        | `send` plus CR LF, as if Return was pressed                                                                                                                                 |
+| `emit <text>`                          | Feed text straight into the VT parser, bypassing the child                                                                                                                  |
+| `raw <hex...>`                         | Write raw bytes to the child's stdin (e.g. `raw 1b 5b 6d` = `ESC [ m`)                                                                                                      |
+| `emit-raw <hex...>`                    | Feed raw bytes straight into the VT parser                                                                                                                                  |
+| `assert-contains <text>`               | Fail unless the unified buffer contains `<text>`                                                                                                                            |
+| `assert-not-contains <text>`           | Fail if the unified buffer contains `<text>`                                                                                                                                |
+| `await-exit [timeout]`                 | Drain until the child exits (default 10 s; a timeout fails the run) and record its status                                                                                   |
+| `assert-exit <status>`                 | Fail unless `await-exit` recorded `<status>`                                                                                                                                |
+| `resize <cols> <rows>`                 | Resize the PTY and the grid (shows the resize overlay)                                                                                                                      |
+| `render [visible\|scrollback\|all]`    | Print the grid as text, one `ROW\|TEXT` line per row (default: visible; scrollback rows are negative)                                                                       |
+| `render cells <row> [c0 c1]`           | Per-cell dump: codepoint, width, attributes, fg/bg/underline color, hyperlink key                                                                                           |
+| `render styles <row>`                  | Dump the cells that carry anything beyond the default style                                                                                                                 |
+| `cursor`                               | Print cursor state (row, col, visible, blink, shape)                                                                                                                        |
+| `dump-sixel`                           | Print live images and placements                                                                                                                                            |
+| `dump-kbd`                             | Print the kitty keyboard-protocol flags and stack depth                                                                                                                     |
+| `quit`                                 | End the run early; the app quits and the run succeeds                                                                                                                       |
+
+#### portty UI commands
+
+| Command                                                               | Description                                                                                                                                      |
+| --------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `screendump <path>`                                                   | Save the presented framebuffer as PNG (reads the backbuffer after the frame is presented)                                                        |
+| `renderdump <path>`                                                   | Render the terminal scene offscreen to PNG: fresh render pass, trimmed to content bounds, no panels/cursor; while the pager is open, its content |
+| `dumpstate [path]`                                                    | Write the full terminal state as JSON (default location, or `path`; `-` = stdout)                                                                |
+| `present-held`                                                        | Re-present the cached scene with one blit; fails when no scene is cached                                                                         |
+| `diag`                                                                | Open the diagnostics report in the internal pager                                                                                                |
+| `record-start <dir> [fps]`                                            | Start frame recording to directory at the target FPS (default 30), QOI format                                                                    |
+| `record-stop`                                                         | Stop frame recording and close the manifest                                                                                                      |
+| `panel <id> <col> <row> <cols> <rows> "title" "body" [level] [flags]` | Show a panel at a grid position (level: 0 info / 1 warning / 2 error; flags: 1 = no accent, 2 = no close button)                                 |
+| `panel_hide <id>`                                                     | Hide the panel with that ID                                                                                                                      |
+| `mousemove <x> <y>`                                                   | Move the synthetic pointer to physical pixel coordinates                                                                                         |
+| `mousedown <x> <y> [button] [clicks]`                                 | Press a mouse button (default left, 1 click). Pair with `mousemove` to drag                                                                      |
+| `mouseup <x> <y> [button] [clicks]`                                   | Release a mouse button                                                                                                                           |
+| `winsize <width> <height>`                                            | Set the window pixel size (goes through the compositor resize path)                                                                              |
+| `display-scale <scale>`                                               | Simulate a display migration: fonts are re-rasterized for the new DPI and the grid is re-derived from the new cell size                          |
+| `assert-hover`                                                        | Fail unless an OSC-8 hyperlink is hovered                                                                                                        |
+| `assert-no-hover`                                                     | Fail if an OSC-8 hyperlink is hovered                                                                                                            |
+
+Dumps (`render`, `cursor`, `dump-sixel`, `dump-kbd`) go to stdout; the command log — including `FAIL` and `TIMEOUT` lines — goes to stderr, so `portty -S s.txt > out.txt` captures the dumps alone.
 
 ### Exit status
 
@@ -306,7 +324,7 @@ quit
 
 ### Waiting for output
 
-`wait-for <text> [timeout-seconds]` suspends script execution until the given text appears in the visible terminal grid — checked once per frame, case-sensitive substring, same matching as `assert-contains`. It's the tool for driving long-running interactive sessions (LLM agent loops, test suites, build pipelines) where you want to react the moment an application announces completion instead of hard-coding a duration. If the text never appears, the command fails the run after the timeout (default 600s):
+`wait-for <text> [timeout-seconds]` suspends script execution until the given text appears in the unified buffer — scrollback plus the visible grid — checked on each event-loop pass as a case-sensitive substring, with the same matching as `assert-contains`. It's the tool for driving long-running interactive sessions (LLM agent loops, test suites, build pipelines) where you want to react the moment an application announces completion instead of hard-coding a duration. If the text never appears, the command fails the run after the timeout (default 600s):
 
 ```
 # Run with: portty -S waitfor_demo.script
@@ -317,7 +335,7 @@ record-stop
 quit
 ```
 
-Use quotes around text containing spaces: `wait-for "END OF DEMO" 900`. The success message reports the row where the text matched (`found at row 12 after 87.3s`).
+Use quotes around text containing spaces: `wait-for "END OF DEMO" 900`. The success message reports the row where the text matched (`found at row 12 after 87.3s`; a match in history reads `found at scrollback row -3 ...`).
 
 Add the `line-end` anchor to match only rows that _end_ with the text (after trailing-space trim). This is the tool for completion markers in LLM/agent sessions: instructions and reasoning streams can mention the marker mid-line, but the real completion line ends with it:
 
@@ -325,12 +343,14 @@ Add the `line-end` anchor to match only rows that _end_ with the text (after tra
 wait-for "DEMO-COMPLETE-OVER" 900 line-end
 ```
 
-Follow a `wait-for` with `dumpgrid` to see exactly what the application printed when the wait completed:
+Follow a `wait-for` with `render` to see exactly what the application printed when the wait completed:
 
 ```
 wait-for "Build finished" 300
-dumpgrid
+render
 ```
+
+`render` prints every row padded to its width and prefixed with its unified row number (scrollback rows are negative); `render scrollback` and `render all` include history.
 
 ### Mouse and hover commands
 
@@ -388,7 +408,7 @@ quit
 
 ### Frame Recording
 
-`record-start` captures the framebuffer after each render at a target frame rate (default 30 FPS). Frames are written as QOI files (`frame_000001.qoi`, `frame_000002.qoi`, ...) — QOI encodes 15-33x faster than PNG with only ~20-40% larger files, enabling real-time capture at full frame rate on both backends.
+`record-start` captures the framebuffer after each render at a target frame rate (default 30 FPS). Frames are written as QOI files (`frame_000001.qoi`, `frame_000002.qoi`, ...) — QOI encodes 15-33x faster than PNG with only ~20-40% larger files, enabling real-time capture at full frame rate.
 
 A `frames.csv` manifest is written alongside the images with per-frame timestamps:
 
@@ -461,7 +481,7 @@ RIS return to the configured values.
 
 | Key                         | Values                                                | Default                        | Description                                                                                                                                          |
 | --------------------------- | ----------------------------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `font`                      | Fontconfig pattern                                    | `monospace`                    | Font family and size (e.g. `monospace-16`)                                                                                                           |
+| `font`                      | Font family and size                                  | system default (`monospace`)   | Font family and size (e.g. `monospace-16`; a Fontconfig pattern on Linux). Windows uses the console's configured face when it is not set             |
 | `geometry`                  | `COLSxROWS`                                           | `80x24`                        | Initial terminal dimensions                                                                                                                          |
 | `hinting`                   | `none`, `light`, `normal`, `mono`                     | `light`                        | FreeType hinting mode                                                                                                                                |
 | `verbose`                   | `true`/`false`                                        | `false`                        | Debug output                                                                                                                                         |
@@ -473,7 +493,7 @@ RIS return to the configured values.
 | `bell`                      | `always`, `unfocused`, `none`                         | `always`                       | When BEL shows the visual bell: on every beep, only while the window lacks focus, or never                                                           |
 | `ambiguous_wide`            | `true`/`false`                                        | `false`                        | Render East Asian Ambiguous-width characters as 2 cells (opt-in; matches xterm `cjk` locale behavior)                                                |
 | `borderless`                | `true`/`false`                                        | `false`                        | Disable window decorations (title bar and borders) at startup (equivalent to `--borderless`)                                                         |
-| `dump_dir`                  | Directory path                                        | `$XDG_STATE_HOME/portty/dumps` | Directory for `Ctrl+Shift+F7` terminal-state dumps (also `$PORTTY_DUMP_DIR`)                                                                         |
+| `dump_dir`                  | Directory path                                        | `$XDG_STATE_HOME/portty/dumps` | Directory for `Ctrl+Shift+F7` terminal-state dumps (Windows: `%LOCALAPPDATA%\portty\dumps`; also `$PORTTY_DUMP_DIR`)                                 |
 | `foreground`                | Color                                                 | `#f8f8f2`                      | Default foreground color — what `SGR 39` text and `OSC 10;?` resolve to                                                                              |
 | `background`                | Color                                                 | `#000000`                      | Default background color — the window clear color, `SGR 49` text, `OSC 11;?`                                                                         |
 | `cursor`                    | `block`, `underline`, `bar` (aliases `hbar`, `vbar`)  | `block`                        | Cursor shape; also what DECSCUSR `CSI 7 SP q` and RIS restore to                                                                                     |
@@ -491,7 +511,7 @@ portty uses [coffer](https://github.com/chestso/coffer) for terminal emulation a
 
 portty's renderer deliberately breaks the Unicode rule that VS15 (text presentation selector) forces text-only rendering. The guiding principle is **beauty over spec**: if the color emoji font has a glyph for a codepoint, portty prefers it — even when VS15 is present. VS15 only narrows the cell width to 1 column; it does not block access to the color emoji font. This is the same treatment already given to ambiguous-width symbols: they route to the color emoji font (if it carries the glyph) at 1-cell width. VS15 is just the explicit form of that.
 
-**Coverage-aware emoji selection.** A codepoint routes to the color emoji font whenever the emoji font carries the glyph, regardless of VS15. Regional indicators are always emoji. When VS15 (U+FE0E) is present, the cell width is 1 column whenever UTS #51 defines a text glyph for the base (coffer's `TEXT_PRES` table — ⚡ U+26A1 narrows, a CJK ideograph or 😀 U+1F600 does not, having no narrow form), and routing to the color emoji font still happens if the glyph is available. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
+**Coverage-aware emoji selection.** A codepoint routes to the color emoji font whenever the emoji font carries the glyph, regardless of VS15. Regional indicators are always emoji. When VS15 (U+FE0E) is present, the cell width is 1 column whenever UTS #51 defines a text glyph for the base (coffer's `CFR_TEXT_PRES` table — ⚡ U+26A1 narrows, a CJK ideograph or 😀 U+1F600 does not, having no narrow form), and routing to the color emoji font still happens if the glyph is available. Plain text-default emoji codepoints (Dingbats, Misc Symbols) without VS16 stay on the text font when the emoji font lacks the glyph — they are not silently downgraded to a missing-emoji glyph or routed through the emoji path only to fall back after shaping fails.
 
 **Symbol-class glyphs preserve font design.** Dingbats, Misc Symbols, Misc Technical, Geometric Shapes, Supplemental Arrows-B, and Misc Symbols & Arrows rendered through a text font keep their natural design width and are centered horizontally in the cell (FreeType's left bearing is intentionally discarded because mono fonts often calibrate it to an oversized advance — e.g. Noto Sans Mono ✶ has advance 1.2×em with the ink centered in that wider advance). They sit on the typographic baseline vertically. No downscale is applied: portty never resamples non-emoji glyphs, which would visibly destroy crispness. Horizontal overhang into neighbor cells is allowed and handled cleanly by the two-pass row draw (backgrounds first, then glyphs).
 
@@ -499,7 +519,7 @@ portty's renderer deliberately breaks the Unicode rule that VS15 (text presentat
 
 **Nerd Fonts render inline as icon-class text glyphs.** NF codepoints live in the BMP Private Use Area and Supplementary PUA (U+E000–U+F8FF, U+F0000–U+FFFFD, U+100000–U+10FFFD). NF glyphs are sized like text — the font's outline data renders them at native cap-height, the same as a letter `A`. They take the plain text rendering path: no downscale, no min-fit clamp, FreeType's `bitmap_left` honored on the typographic baseline, horizontal overhang into neighbor cells absorbed by the two-pass row draw. Nerd Fonts v2 codepoints in U+F900–U+FAFF are translated to their v3 SPUA equivalents before shaping. Note the cell-width difference: coffer classifies the v2 range U+F900–U+FAFF as double-width (CJK Compatibility Ideographs), so a v2 codepoint occupies 2 cells in the grid, while the v3 SPUA range is ambiguous-width and occupies 1 cell by default (2 only with `ambiguous_wide`). The translation happens in the renderer after coffer has already assigned the cell width, so a v2 codepoint keeps its 2-cell slot even though the translated v3 glyph renders at 1-cell metrics. The icons are color-modulated by the foreground SGR color (NF glyphs are plain outlines, not COLR color emoji), unlike pre-modulated emoji.
 
-**Renderer policy lives in `rend_common`.** The three decisions above (emoji coverage routing, downscale gating, NF v2→v3, symbol-class horizontal centering) are factored into shared helpers — `rend_resolve_cell_style`, `rend_plan_glyph`, `rend_apply_glyph_layout`, `rend_layout_shaped_run`, plus `rend_downscale_bitmap`. The renderer (`rend_sdl3.c`) uses these and diverges from them only in atlas insertion and final placement. The invariant these helpers enforce: only the color-emoji pipeline ever resamples; everything else renders at FreeType's native metrics so crispness is preserved.
+**Renderer policy lives in `rend_common`.** The decisions above (emoji coverage routing, downscale gating, NF v2→v3, symbol-class horizontal centering) are factored into shared helpers — `rend_resolve_cell_style`, `rend_plan_glyph`, `rend_apply_glyph_layout`, `rend_layout_shaped_run`, plus `rend_downscale_bitmap`. The renderer (`rend_sdl3.c`) uses these and diverges from them only in atlas insertion and final placement. The invariant these helpers enforce: only the color-emoji pipeline ever resamples; everything else renders at FreeType's native metrics so crispness is preserved.
 
 ## Terminfo
 
@@ -511,7 +531,7 @@ The capability definitions live in coffer (`data/coffer.ti`, installed as `coffe
 
 The `RGB` flag is deliberately **not** advertised: its ncurses contract is "feed packed 24-bit ints to `setaf` and it'll DTRT," which would require a custom `setaf` outside the vty-unix parser subset. Truecolor consumers are expected to use `Tc` or `COLORTERM`.
 
-On Linux, the entry is compiled and installed automatically by `make install` via `tic`. On macOS, run `sh install-terminfo.sh` to compile and install the entry natively. The child shell's `TERMINFO_DIRS` includes both `~/.local/share/terminfo` and `~/.terminfo` so user-installed entries are found without system-wide installation.
+On Linux and macOS, the entry is compiled and installed automatically by `make install` via `tic` (the Windows install does the same, warning instead of failing when ncurses is missing), so there is no separate install step. The child shell's `TERMINFO_DIRS` includes `$(datadir)/terminfo` (for the default prefix, `~/.local/share/terminfo`) and `~/.terminfo`, so user-installed entries are found without system-wide installation.
 
 If you SSH to a remote host that lacks the entry, the remote shell will fall back to a generic terminal type. You can copy the compiled entry to the remote host:
 
@@ -521,7 +541,7 @@ infocmp portty-vty-256color | ssh remote-host 'tic -x -'
 
 ## GNU Emacs
 
-portty ships `data/portty.el`, installed by `make install` to `$(datadir)/emacs/site-lisp/term/portty.el` (typically `~/.local/share/emacs/site-lisp/term/portty.el`). This directory is in Emacs's default `load-path`. Between the gamma-correct rendering, working mouse, and the fixes below, `emacs -nw` in portty can look better than GUI Emacs 😜
+portty ships `data/portty.el`, installed by `make install` to `$(datadir)/emacs/site-lisp/term/portty.el` (typically `~/.local/share/emacs/site-lisp/term/portty.el`). For the default prefix that directory is on Emacs's default `load-path`, and on POSIX portty also prepends `$(datadir)/emacs/site-lisp` to the child's `EMACSLOADPATH`, so `portty.el` loads without configuration. Between the gamma-correct rendering, working mouse, and the fixes below, `emacs -nw` in portty can look better than GUI Emacs 😜
 
 ### Automatic loading
 
@@ -595,6 +615,7 @@ All platforms:
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
 - libpng
+- ThorVG (optional, via coffer — Lottie animations rasterize only when coffer is built with it; without it the APC commands are accepted but frames stay blank)
 
 The SDL3 backend uses SDL's GPU renderer for gamma-correct linear-light blending, so a working GPU backend is required **at runtime**: Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS.
 
@@ -646,8 +667,10 @@ portty -- plotty animation.json
 | `L`     | Toggle loop         |
 | `b`     | Toggle bg/fg layer  |
 | `[`/`]` | Opacity -/+ 10%     |
+| `g`     | Toggle soft bg      |
 | `?`     | Toggle help panel   |
 | `q`     | Quit                |
+| `Esc`   | Quit                |
 
 ## Author
 

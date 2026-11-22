@@ -10,12 +10,12 @@ Four image/animation systems in coffer now share one storage, memory, and
 grid-maintenance layer (`image_store.c`). Each keeps only its own transport
 and decoding logic.
 
-| System | Transport      | Alpha            | Placements    | ConPTY            | Status |
-| ------ | -------------- | ---------------- | ------------- | ----------------- | ------ |
-| Sixel  | DCS            | Binary (0/255)   | 1:1           | Needs bundled DLL | Done   |
-| Lottie | APC (OSC 5555) | Full 8-bit       | 1:N           | OSC carrier       | Done   |
-| iTerm2 | OSC 1337       | Full 8-bit (PNG) | 1:1           | Yes (OSC)         | Done   |
-| Kitty  | APC (OSC 5555) | Full 8-bit       | 1:N + z-index | OSC carrier       | Done   |
+| System | Transport               | Alpha            | Placements    | ConPTY                                 | Status |
+| ------ | ----------------------- | ---------------- | ------------- | -------------------------------------- | ------ |
+| Sixel  | DCS                     | Binary (0/255)   | 1:1           | Bundled OpenConsole (DCS)              | Done   |
+| Lottie | APC (OSC 5555 fallback) | Full 8-bit       | 1:N           | Bundled OpenConsole; OSC 5555 fallback | Done   |
+| iTerm2 | OSC 1337                | Full 8-bit (PNG) | 1:1           | Yes (OSC)                              | Done   |
+| Kitty  | APC (OSC 5555 fallback) | Full 8-bit       | 1:N + z-index | Bundled OpenConsole; OSC 5555 fallback | Done   |
 
 ## What shipped
 
@@ -78,7 +78,7 @@ PNG via stb_image, then `cfr_img_add(..., IMG_SRC_ITERM)`.
 handles `a=t/T`, `a=p`, `a=q`, `a=d`, `a=f`, `a=a`, `a=c`, chunked transfer
 (`m=1/0`), zlib (`o=z` via `cfr_zlib_decompress`), cursor advance (`c=/r=`),
 virtual placements (`U=1`), and relative placements (`P=/Q=` with `x=/y=`
-offsets). Responses leave via OSC 5556 on Windows (ConPTY strips APC).
+offsets). Responses leave via OSC 5556 on Windows (the system conhost strips APC; the bundled OpenConsole passes it).
 
 ### Decoding
 
