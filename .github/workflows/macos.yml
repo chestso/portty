@@ -194,11 +194,27 @@ jobs:
             rc=0
             echo "PAUSE RUN $i START" >&2
             "$PORTTY_PACKAGED_EXE" -g 80x24 -v -S /tmp/pause.script \
-              >/tmp/portty-await-pause.log 2>&1 || rc=$?
+              >/tmp/portty-await-pause.log 2>&1 &
+            app=$!
+            # While the app is awaiting the child, show what the child is
+            # doing: a shell that never exits is either blocked on its own
+            # write or stopped by the tty (T), and the two need different
+            # fixes.
+            sleep 3
+            child=$(sed -n 's/.*child_pid=\([0-9][0-9]*\).*/\1/p' /tmp/portty-await-pause.log | head -1)
+            if [ -n "$child" ]; then
+              ps -o pid,ppid,pgid,tpgid,stat,wchan,command -p "$child" ||
+                echo "child $child has already gone" >&2
+            else
+              echo "no child pid in the log yet" >&2
+            fi
+            wait "$app" || rc=$?
             echo "PAUSE RUN $i END rc=$rc" >&2
             if [ "$rc" -ne 0 ]; then
               echo "ERROR: portty exited $rc while paused (run $i)" >&2
               cat /tmp/portty-await-pause.log >&2
+              echo "---- last unpaused run (loop 1, iteration 10):" >&2
+              tail -25 /tmp/portty-await-exit.log >&2
               exit 1
             fi
             grep -q "OK: child exit status 7" /tmp/portty-await-pause.log ||
