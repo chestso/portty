@@ -177,17 +177,24 @@ jobs:
               { echo "ERROR: the script stopped before the dump (run $i)" >&2; exit 1; }
           done
 
-          # The same, with a selection pause holding the PTY reader: the
-          # SIGCHLD pipe is still watched, so await-exit must resolve.
+          # The same, with a selection pause holding the PTY reader. A paused
+          # reader stops draining the terminal, and a macOS shell that reaches
+          # exit in that window sits in ps state E ("trying to exit") until the
+          # terminal drains — it never becomes a zombie, so no SIGCHLD can
+          # arrive and await-exit could only time out. Release the pause first:
+          # what the SIGCHLD path has to guarantee is that the exit is observed
+          # after the reader resumes, including the quit it defers while the
+          # script is still running.
           cat > /tmp/pause.script <<'EOF'
           wait 1.0
           mousemove 20 40
           mousedown 20 40
           sendln exit 7
           mousemove 200 60
+          wait 3.0
+          mouseup 200 60
           await-exit 5
           assert-exit 7
-          mouseup 200 60
           quit
           EOF
           for i in $(seq 1 5); do
