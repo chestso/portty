@@ -205,10 +205,14 @@ jobs:
             if [ -n "$child" ]; then
               ps -o pid,ppid,pgid,tpgid,stat,wchan,command -p "$child" ||
                 echo "child $child has already gone" >&2
-              if command -v sample >/dev/null 2>&1; then
-                sample "$child" 1 2 -file /tmp/portty-child-sample.txt >/dev/null 2>&1 || true
-                sed -n '1,80p' /tmp/portty-child-sample.txt 2>/dev/null || true
-              fi
+              echo "---- threads" >&2
+              ps -M -p "$child" 2>&1 | head -20 || true
+              echo "---- fds" >&2
+              lsof -p "$child" 2>&1 | head -20 || true
+              echo "---- sample" >&2
+              sample "$child" 1 -file /tmp/portty-child-sample.txt 2>&1 | tail -5 || true
+              sed -n '1,60p' /tmp/portty-child-sample.txt 2>/dev/null ||
+                echo "no sample file" >&2
             else
               echo "no child pid in the log yet" >&2
             fi
