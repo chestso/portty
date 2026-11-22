@@ -3007,6 +3007,23 @@ static int sdl3_run(PorttyBackend *self)
             }
         }
 
+        // === Flood guard: guarantee the held reader its next pass ===
+        // A pass that ends on the parse budget leaves the reader paused, and
+        // it may also have emptied the event queue: a paused reader cannot
+        // post more PTY data, so nothing is left to wake the loop. It then
+        // blocks in SDL_WaitEvent with the child blocked on a full PTY
+        // buffer — the backlog never drains and a script waiting on the child
+        // never sees it leave. Arm the hold timer so the next pass resumes the
+        // reader, whether or not a frame was pending.
+        if (d->flood_paused && !timer_active(d->timers, d->flood_hold_timer)) {
+            Uint64 since = SDL_GetTicksNS() - d->last_present_ns;
+            Uint64 wait_ns = since < FLOOD_RENDER_MIN_NS
+                                 ? FLOOD_RENDER_MIN_NS - since + 100000ULL
+                                 : 100000ULL;
+            d->flood_hold_timer = timer_add_once_ns(d->timers, wait_ns,
+                                                    TCODE_FLOOD_HOLD, NULL);
+        }
+
         // === Debug script: post-render screendump ===
         if (d->pending_screendump) {
             d->pending_screendump = false;
