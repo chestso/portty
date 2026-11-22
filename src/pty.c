@@ -377,6 +377,14 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     ctx->child_pid = pid;
     vlog("PTY created: master_fd=%d, child_pid=%d, size=%dx%d\n",
          ctx->master_fd, ctx->child_pid, cols, rows);
+    /* What the child runs is otherwise invisible from outside the PTY: say it
+     * in the host's log so a script that hangs on a shell can be diagnosed
+     * without guessing which shell $SHELL named. */
+    if (argv && argv[0])
+        vlog("PTY command: %s\n", argv[0]);
+    else
+        vlog("PTY shell: $SHELL=%s\n",
+             getenv("SHELL") ? getenv("SHELL") : "(unset)");
 
     return ctx;
 }
@@ -435,12 +443,15 @@ ssize_t pty_write(PtyContext *ctx, const char *data, size_t len)
         if (n < 0) {
             if (errno == EINTR)
                 continue;
+            vlog("PTY write: %zu/%zu bytes, then %s\n", total, len,
+                 strerror(errno));
             return total > 0 ? (ssize_t)total : -1;
         }
         if (n == 0)
             break;
         total += (size_t)n;
     }
+    vlog("PTY write: %zu/%zu bytes\n", total, len);
     return (ssize_t)total;
 }
 
