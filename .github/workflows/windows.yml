@@ -387,6 +387,12 @@ jobs:
 
       - name: Script observes the child exit
         run: |
+          # `-e` turns a nonzero portty exit into a silent step abort, and a
+          # step that dies without a word says nothing about why. Trace the
+          # script's commands, print a boundary around each app run, and dump
+          # the app's log when anything fails.
+          set -x
+          trap 'rc=$?; echo "STEP END rc=$rc" >&2' EXIT
           cat > build/smoke/await.script <<'EOF'
           wait 1.0
           sendln exit 7
@@ -401,8 +407,10 @@ jobs:
           for i in $(seq 1 10); do
             rm -f build/smoke/await-exit.json
             rc=0
-            "$PORTTY_PACKAGED_EXE" -g 80x24 -S build/smoke/await.script \
+            echo "RUN $i START" >&2
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -v -S build/smoke/await.script \
               >build/smoke/await-exit.log 2>&1 || rc=$?
+            echo "RUN $i END rc=$rc" >&2
             if [ "$rc" -ne 0 ]; then
               echo "ERROR: portty exited $rc (run $i)" >&2
               cat build/smoke/await-exit.log >&2
