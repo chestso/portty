@@ -191,8 +191,16 @@ jobs:
           quit
           EOF
           for i in $(seq 1 5); do
-            "$PORTTY_PACKAGED_EXE" -g 80x24 -S /tmp/pause.script \
-              >/tmp/portty-await-pause.log 2>&1
+            rc=0
+            echo "PAUSE RUN $i START" >&2
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -v -S /tmp/pause.script \
+              >/tmp/portty-await-pause.log 2>&1 || rc=$?
+            echo "PAUSE RUN $i END rc=$rc" >&2
+            if [ "$rc" -ne 0 ]; then
+              echo "ERROR: portty exited $rc while paused (run $i)" >&2
+              cat /tmp/portty-await-pause.log >&2
+              exit 1
+            fi
             grep -q "OK: child exit status 7" /tmp/portty-await-pause.log ||
               { echo "ERROR: await-exit did not run while paused (run $i)" >&2; cat /tmp/portty-await-pause.log >&2; exit 1; }
           done

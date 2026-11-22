@@ -367,13 +367,14 @@ jobs:
           assert-contains "definitely-not-there"
           EOF
           work="$PWD/build/smoke"
+          exe_win=$(cygpath -w "$PORTTY_PACKAGED_EXE")
           {
             printf '@echo off\r\n'
-            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$PORTTY_PACKAGED_EXE" "$(cygpath -w "$work/pass.script")"
+            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$exe_win" "$(cygpath -w "$work/pass.script")"
             printf 'echo PASS_EXIT:%%errorlevel%%\r\n'
-            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$PORTTY_PACKAGED_EXE" "$(cygpath -w "$work/fail.script")"
+            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$exe_win" "$(cygpath -w "$work/fail.script")"
             printf 'echo FAIL_EXIT:%%errorlevel%%\r\n'
-            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$PORTTY_PACKAGED_EXE" "$(cygpath -w "$work/no-such.script")"
+            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$exe_win" "$(cygpath -w "$work/no-such.script")"
             printf 'echo LOAD_EXIT:%%errorlevel%%\r\n'
           } >"$work/status.bat"
           cmd_out=$(cmd //c "$(cygpath -w "$work/status.bat")")
@@ -438,8 +439,16 @@ jobs:
           quit
           EOF
           for i in $(seq 1 5); do
-            "$PORTTY_PACKAGED_EXE" -g 80x24 -S build/smoke/pause.script \
-              >build/smoke/await-pause.log 2>&1
+            rc=0
+            echo "PAUSE RUN $i START" >&2
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -v -S build/smoke/pause.script \
+              >build/smoke/await-pause.log 2>&1 || rc=$?
+            echo "PAUSE RUN $i END rc=$rc" >&2
+            if [ "$rc" -ne 0 ]; then
+              echo "ERROR: portty exited $rc while paused (run $i)" >&2
+              cat build/smoke/await-pause.log >&2
+              exit 1
+            fi
             grep -q "OK: child exit status 7" build/smoke/await-pause.log ||
               { echo "ERROR: await-exit did not run while paused (run $i)" >&2; cat build/smoke/await-pause.log >&2; exit 1; }
           done
