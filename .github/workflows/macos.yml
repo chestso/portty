@@ -205,6 +205,10 @@ jobs:
             if [ -n "$child" ]; then
               ps -o pid,ppid,pgid,tpgid,stat,wchan,command -p "$child" ||
                 echo "child $child has already gone" >&2
+              if command -v sample >/dev/null 2>&1; then
+                sample "$child" 1 2 -file /tmp/portty-child-sample.txt >/dev/null 2>&1 || true
+                sed -n '1,80p' /tmp/portty-child-sample.txt 2>/dev/null || true
+              fi
             else
               echo "no child pid in the log yet" >&2
             fi
