@@ -112,7 +112,6 @@ jobs:
       - name: Run tests
         run: make -C build check
 
-      - name: Build portable ZIP
       - name: Verify the ConPTY bundle
         run: |
           export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
