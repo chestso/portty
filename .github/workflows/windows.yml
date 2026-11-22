@@ -396,10 +396,19 @@ jobs:
           dumpstate build/smoke/await-exit.json
           quit
           EOF
+          # `-e` would abort the step on portty's nonzero exit before the log
+          # is printed, which is exactly the failure worth reading: capture the
+          # status and dump the log instead.
           for i in $(seq 1 10); do
             rm -f build/smoke/await-exit.json
+            rc=0
             "$PORTTY_PACKAGED_EXE" -g 80x24 -S build/smoke/await.script \
-              >build/smoke/await-exit.log 2>&1
+              >build/smoke/await-exit.log 2>&1 || rc=$?
+            if [ "$rc" -ne 0 ]; then
+              echo "ERROR: portty exited $rc (run $i)" >&2
+              cat build/smoke/await-exit.log >&2
+              exit 1
+            fi
             grep -q "await-exit: child exited with 7" build/smoke/await-exit.log ||
               { echo "ERROR: await-exit did not see the child exit (run $i)" >&2; cat build/smoke/await-exit.log >&2; exit 1; }
             grep -q "OK: child exit status 7" build/smoke/await-exit.log ||
