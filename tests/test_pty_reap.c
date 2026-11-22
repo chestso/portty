@@ -101,6 +101,39 @@ static void test_pty_child_status_survives_drain(void)
     pty_destroy(ctx);
 }
 
+/* The event loop's reader keeps watching the process after the output
+ * stream closes, so a script that runs await-exit after EOF must still see
+ * the exit status. Read to EOF first, then reap. */
+static void test_pty_status_after_eof(void)
+{
+    char *argv[] = { "/bin/sh", "-c", "printf x; exit 9", NULL };
+
+    flush_signal_pipe();
+    PtyContext *ctx = pty_create(24, 80, 0, 0, argv);
+    ASSERT_NOT_NULL(ctx);
+
+    char buf[64];
+    ssize_t total = 0;
+    for (;;) {
+        ssize_t n = pty_read(ctx, buf, sizeof(buf));
+        if (n > 0) {
+            total += n;
+            continue;
+        }
+        break;
+    }
+    ASSERT_TRUE(total > 0);
+
+    ASSERT_TRUE(wait_signal_pipe(5000));
+    pty_signal_drain(ctx);
+
+    int status = -1;
+    ASSERT_EQ(pty_poll_exit(ctx, &status), 1);
+    ASSERT_EQ(status, 9);
+
+    pty_destroy(ctx);
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -113,6 +146,7 @@ int main(int argc, char *argv[])
     printf("test_pty_reap\n");
     RUN_TEST(test_helper_child_is_reaped);
     RUN_TEST(test_pty_child_status_survives_drain);
+    RUN_TEST(test_pty_status_after_eof);
 
     pty_signal_cleanup();
     TEST_SUMMARY();

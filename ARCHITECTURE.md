@@ -101,8 +101,18 @@ fonts.
 **PTY reader thread.** Blocks in `poll()` on the PTY master, a signal fd and a
 wakeup pipe. It reads a chunk and posts `EVENT_PTY_DATA` (carrying the bytes)
 to the main thread. Closing and child exit arrive as `EVENT_PTY_CLOSED` and
-`EVENT_PTY_CHILD_EXIT`. The reader can be paused (`pause_pty`) by the flood
-guard and by an active selection, each holding its own reference.
+`EVENT_PTY_CHILD_EXIT`, each posted once. The reader outlives the output
+stream: after EOF or POLLHUP it stops watching the PTY fd but keeps draining
+the SIGCHLD pipe, so the exit status is recorded and reported even when the
+child closed its output first. The reader can be paused (`pause_pty`) by the
+flood guard and by an active selection, each holding its own reference.
+
+**Child exit vs. scripts.** Without `-S`, either PTY event quits the app. While
+a debug script is running, the event only records `child_gone` and wakes the
+loop: the script's `await-exit`/`assert-exit` must observe the exit before the
+app goes away. Once the script finishes, the deferred quit is honored.
+`PtyContext`'s exit state is guarded by a lock because the reader and the
+script's `pty_poll_exit` can both reap the child.
 
 **Main thread.** The loop in `sdl3_run()` is event-driven: it blocks in
 `SDL_WaitEvent()` and does nothing while idle. One pass:
@@ -119,14 +129,15 @@ guard and by an active selection, each holding its own reference.
 
 Events that matter:
 
-| Event                                         | Source             | What the loop does                                      |
-| --------------------------------------------- | ------------------ | ------------------------------------------------------- |
-| `EVENT_PTY_DATA`                              | reader thread      | feed coffer; may scroll, set the title, trigger replies |
-| `EVENT_TIMER_FIRE` (slot, epoch)              | SDL's timer thread | `timer_dispatch()` → `sdl3_handle_timer()`              |
-| `EVENT_WAKE`                                  | any thread         | nothing; ends the blocking wait so the loop re-checks   |
-| `SDL_EVENT_KEY_*`, mouse, text input          | SDL                | `PorttyApp` decides; bytes go to the PTY                |
-| window resize, display scale, focus, exposure | SDL                | re-derive the grid, reload fonts, mark dirty            |
-| `OCCLUDED`, `MINIMIZED`, `HIDDEN`, `SHOWN`    | SDL                | track visibility (pacing stops while not visible)       |
+| Event                                         | Source             | What the loop does                                         |
+| --------------------------------------------- | ------------------ | ---------------------------------------------------------- |
+| `EVENT_PTY_DATA`                              | reader thread      | feed coffer; may scroll, set the title, trigger replies    |
+| `EVENT_PTY_CLOSED` / `EVENT_PTY_CHILD_EXIT`   | reader thread      | quit, or defer while `-S` runs so the script sees the exit |
+| `EVENT_TIMER_FIRE` (slot, epoch)              | SDL's timer thread | `timer_dispatch()` → `sdl3_handle_timer()`                 |
+| `EVENT_WAKE`                                  | any thread         | nothing; ends the blocking wait so the loop re-checks      |
+| `SDL_EVENT_KEY_*`, mouse, text input          | SDL                | `PorttyApp` decides; bytes go to the PTY                   |
+| window resize, display scale, focus, exposure | SDL                | re-derive the grid, reload fonts, mark dirty               |
+| `OCCLUDED`, `MINIMIZED`, `HIDDEN`, `SHOWN`    | SDL                | track visibility (pacing stops while not visible)          |
 
 **Output flood guard.** A program that writes faster than the loop can parse
 would otherwise starve input and timers. One pass may spend at most 25 ms

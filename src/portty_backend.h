@@ -68,6 +68,9 @@ typedef struct
     // How animation frames are paced: "idle", "vsync-locked 60.000 Hz, 2 misses",
     // "free-running 60.000 Hz" (a backend without a pacer leaves it NULL).
     const char *lottie_pacing;
+
+    // Windows: pinned Microsoft.Windows.Console.ConPTY version, or "system".
+    const char *conpty_version;
 } PorttyDiag;
 
 struct PorttyBackend;
@@ -81,7 +84,7 @@ struct PorttyBackend
     // ── Lifecycle ──────────────────────────────────────────────
     bool (*init)(PorttyBackend *self, struct PorttyApp *app,
                  const char *title, int width, int height);
-    void (*run)(PorttyBackend *self); // enters event loop; blocks
+    int (*run)(PorttyBackend *self); // enters event loop; blocks; returns process status
     void (*destroy)(PorttyBackend *self);
 
     // Called by shared code to exit the event loop

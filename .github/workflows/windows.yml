@@ -54,6 +54,7 @@ jobs:
             zip
             unzip
             p7zip
+            curl
 
       - name: Resolve the coffer install prefix
         id: coffer-prefix
@@ -112,6 +113,12 @@ jobs:
         run: make -C build check
 
       - name: Build portable ZIP
+      - name: Verify the ConPTY bundle
+        run: |
+          export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
+          make -C build verify-conpty
+
+      - name: Build the portable ZIP
         run: |
           export PKG_CONFIG_PATH="$HOME/.local/lib/pkgconfig:$PKG_CONFIG_PATH"
           make -C build dist-portable
@@ -135,13 +142,23 @@ jobs:
           # The bundled ConPTY host is loaded at runtime, so the DLL walk above
           # cannot infer it: assert the pinned pair and its VERSION stamp made
           # it into the ZIP, next to portty.exe.
-          for file in "${stage}conpty.dll" "${stage}OpenConsole.exe" "${stage}VERSION"; do
+          for file in "${stage}conpty.dll" "${stage}OpenConsole.exe" "${stage}VERSION" "${stage}LICENSE" "${stage}NOTICE.md"; do
             test -f "$file"
           done
           packaged_conpty=$(sed -n 's/^version=//p' "${stage}VERSION")
           pinned_conpty=$(sed -n 's/^CONPTY_VERSION=//p' data/conpty/conpty.lock)
           if [ -z "$packaged_conpty" ] || [ "$packaged_conpty" != "$pinned_conpty" ]; then
             echo "ERROR: packaged ConPTY $packaged_conpty does not match the pin $pinned_conpty" >&2
+            exit 1
+          fi
+          packaged_arch=$(sed -n 's/^arch=//p' "${stage}VERSION")
+          case "$(uname -m)" in
+          x86_64 | amd64) want_arch=x64 ;;
+          aarch64 | arm64) want_arch=arm64 ;;
+          *) want_arch=unknown ;;
+          esac
+          if [ "$packaged_arch" != "$want_arch" ]; then
+            echo "ERROR: packaged ConPTY arch $packaged_arch does not match $want_arch" >&2
             exit 1
           fi
 
@@ -339,6 +356,77 @@ jobs:
           grep -q SMOKE_MARKER_OK build/smoke/child_ran.txt
           test -s build/smoke/selection.json
           grep -q '"selection": {' build/smoke/selection.json
+
+      - name: Script exit status
+        run: |
+          mkdir -p build/smoke
+          cat > build/smoke/pass.script <<'EOF'
+          assert-contains "Hello Windows"
+          quit
+          EOF
+          cat > build/smoke/fail.script <<'EOF'
+          assert-contains "definitely-not-there"
+          EOF
+          work="$PWD/build/smoke"
+          {
+            printf '@echo off\r\n'
+            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$PORTTY_PACKAGED_EXE" "$(cygpath -w "$work/pass.script")"
+            printf 'echo PASS_EXIT:%%errorlevel%%\r\n'
+            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$PORTTY_PACKAGED_EXE" "$(cygpath -w "$work/fail.script")"
+            printf 'echo FAIL_EXIT:%%errorlevel%%\r\n'
+            printf '"%s" -d "Hello Windows" -S "%s" >nul 2>nul\r\n' "$PORTTY_PACKAGED_EXE" "$(cygpath -w "$work/no-such.script")"
+            printf 'echo LOAD_EXIT:%%errorlevel%%\r\n'
+          } >"$work/status.bat"
+          cmd_out=$(cmd //c "$(cygpath -w "$work/status.bat")")
+          printf '%s\n' "$cmd_out"
+          printf '%s\n' "$cmd_out" | grep -q '^PASS_EXIT:0' ||
+            { echo "ERROR: a passing script exited nonzero" >&2; exit 1; }
+          printf '%s\n' "$cmd_out" | grep -q '^FAIL_EXIT:1' ||
+            { echo "ERROR: a failed script did not exit 1" >&2; exit 1; }
+          printf '%s\n' "$cmd_out" | grep -q '^LOAD_EXIT:1' ||
+            { echo "ERROR: a missing script did not exit 1" >&2; exit 1; }
+
+      - name: Script observes the child exit
+        run: |
+          cat > build/smoke/await.script <<'EOF'
+          wait 1.0
+          sendln exit 7
+          await-exit 5
+          assert-exit 7
+          dumpstate build/smoke/await-exit.json
+          quit
+          EOF
+          for i in $(seq 1 10); do
+            rm -f build/smoke/await-exit.json
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -S build/smoke/await.script \
+              >build/smoke/await-exit.log 2>&1
+            grep -q "await-exit: child exited with 7" build/smoke/await-exit.log ||
+              { echo "ERROR: await-exit did not see the child exit (run $i)" >&2; cat build/smoke/await-exit.log >&2; exit 1; }
+            grep -q "OK: child exit status 7" build/smoke/await-exit.log ||
+              { echo "ERROR: assert-exit did not run (run $i)" >&2; cat build/smoke/await-exit.log >&2; exit 1; }
+            test -s build/smoke/await-exit.json ||
+              { echo "ERROR: the script stopped before the dump (run $i)" >&2; exit 1; }
+          done
+
+          # The same, with a selection pause holding the PTY reader: the
+          # SIGCHLD pipe is still watched, so await-exit must resolve.
+          cat > build/smoke/pause.script <<'EOF'
+          wait 1.0
+          mousemove 20 40
+          mousedown 20 40
+          sendln exit 7
+          mousemove 200 60
+          await-exit 5
+          assert-exit 7
+          mouseup 200 60
+          quit
+          EOF
+          for i in $(seq 1 5); do
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -S build/smoke/pause.script \
+              >build/smoke/await-pause.log 2>&1
+            grep -q "OK: child exit status 7" build/smoke/await-pause.log ||
+              { echo "ERROR: await-exit did not run while paused (run $i)" >&2; cat build/smoke/await-pause.log >&2; exit 1; }
+          done
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7

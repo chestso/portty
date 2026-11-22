@@ -15,6 +15,7 @@
 #else
 #include <pty.h>
 #endif
+#include <pthread.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -34,6 +35,7 @@ struct PtyContext
     int win_h_px;
     int exit_status;              /* valid once exited is true */
     bool exited;                  /* sticky: child reaped (by anyone) */
+    pthread_mutex_t exit_lock;    /* guards exit_status/exited/child_pid */
     struct termios saved_termios; /* line discipline as portty set it up */
     bool have_saved_termios;
 };
@@ -140,7 +142,12 @@ void pty_signal_drain(PtyContext *ctx)
      * await-exit/assert-exit), so record it on the context. The short-lived
      * helpers os_compat forks for open_url/spawn_process are nobody's to
      * wait for — without this they stay zombies for the life of the process,
-     * one per link opened or new window spawned. */
+     * one per link opened or new window spawned.
+     *
+     * The exit lock serialises the reaping with pty_poll_exit/pty_is_running
+     * on the event-loop thread: waitpid is not safe to race on one pid, and
+     * the loser would see ECHILD instead of the sticky status. */
+    pthread_mutex_lock(&ctx->exit_lock);
     for (;;) {
         int status = 0;
         pid_t pid = waitpid(-1, &status, WNOHANG);
@@ -155,6 +162,7 @@ void pty_signal_drain(PtyContext *ctx)
         ctx->exited = true;
         ctx->child_pid = -1;
     }
+    pthread_mutex_unlock(&ctx->exit_lock);
 }
 
 /* winsize pixel fields are unsigned short. */
@@ -199,6 +207,11 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     ctx->win_h_px = grid_h_px > 0 ? grid_h_px : 0;
     ctx->master_fd = -1;
     ctx->child_pid = -1;
+    if (pthread_mutex_init(&ctx->exit_lock, NULL) != 0) {
+        fprintf(stderr, "ERROR: Failed to initialize PTY exit lock\n");
+        free(ctx);
+        return NULL;
+    }
 
     // Set up initial window size — the child sees the grid's pixel
     // extent from its first TIOCGWINSZ, so an image viewer started as
@@ -214,6 +227,7 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     pid_t pid = forkpty(&ctx->master_fd, NULL, NULL, &ws);
     if (pid < 0) {
         fprintf(stderr, "ERROR: forkpty failed: %s\n", strerror(errno));
+        pthread_mutex_destroy(&ctx->exit_lock);
         free(ctx);
         return NULL;
     }
@@ -381,6 +395,7 @@ void pty_destroy(PtyContext *ctx)
     }
 
     // Wait for child to exit (with timeout via SIGKILL)
+    pthread_mutex_lock(&ctx->exit_lock);
     if (ctx->child_pid > 0) {
         int status;
         pid_t result = waitpid(ctx->child_pid, &status, WNOHANG);
@@ -398,6 +413,8 @@ void pty_destroy(PtyContext *ctx)
         }
         ctx->child_pid = -1;
     }
+    pthread_mutex_unlock(&ctx->exit_lock);
+    pthread_mutex_destroy(&ctx->exit_lock);
 
     free(ctx);
 }
@@ -460,53 +477,62 @@ int pty_resize(PtyContext *ctx, int rows, int cols, int width_px,
 
 bool pty_is_running(PtyContext *ctx)
 {
-    if (!ctx || ctx->child_pid <= 0)
+    if (!ctx)
         return false;
 
-    int status;
-    pid_t result = waitpid(ctx->child_pid, &status, WNOHANG);
+    bool running = false;
+    pthread_mutex_lock(&ctx->exit_lock);
+    if (ctx->child_pid > 0 && !ctx->exited) {
+        int status;
+        pid_t result = waitpid(ctx->child_pid, &status, WNOHANG);
 
-    if (result == 0) {
-        // Child still running
-        return true;
-    } else if (result == ctx->child_pid) {
-        // Child has exited
-        vlog("PTY child exited: pid=%d, status=%d\n", ctx->child_pid, status);
-        ctx->exit_status =
-            WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-        ctx->exited = true;
-        ctx->child_pid = -1;
-        return false;
-    } else {
-        // Error or no such child
-        return false;
+        if (result == 0) {
+            // Child still running
+            running = true;
+        } else if (result == ctx->child_pid) {
+            // Child has exited
+            vlog("PTY child exited: pid=%d, status=%d\n", ctx->child_pid, status);
+            ctx->exit_status =
+                WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
+            ctx->exited = true;
+            ctx->child_pid = -1;
+        }
+        // Error or no such child: not running, no status to record.
     }
+    pthread_mutex_unlock(&ctx->exit_lock);
+    return running;
 }
 
 int pty_poll_exit(PtyContext *ctx, int *out_status)
 {
     if (!ctx)
         return -1;
-    if (ctx->exited)
-        goto out;
-    if (ctx->child_pid <= 0)
-        return -1;
 
-    int status;
-    pid_t result = waitpid(ctx->child_pid, &status, WNOHANG);
-    if (result == 0)
-        return 0;
-    if (result < 0)
-        return -1;
-    ctx->exit_status =
-        WIFEXITED(status) ? WEXITSTATUS(status) : 128 + WTERMSIG(status);
-    ctx->exited = true;
-    ctx->child_pid = -1;
-
-out:
-    if (out_status)
+    int result;
+    pthread_mutex_lock(&ctx->exit_lock);
+    if (ctx->exited) {
+        result = 1;
+    } else if (ctx->child_pid <= 0) {
+        result = -1;
+    } else {
+        int status;
+        pid_t pid = waitpid(ctx->child_pid, &status, WNOHANG);
+        if (pid == 0) {
+            result = 0;
+        } else if (pid < 0) {
+            result = -1;
+        } else {
+            ctx->exit_status = WIFEXITED(status) ? WEXITSTATUS(status)
+                                                 : 128 + WTERMSIG(status);
+            ctx->exited = true;
+            ctx->child_pid = -1;
+            result = 1;
+        }
+    }
+    if (result == 1 && out_status)
         *out_status = ctx->exit_status;
-    return 1;
+    pthread_mutex_unlock(&ctx->exit_lock);
+    return result;
 }
 
 int pty_get_master_fd(PtyContext *ctx)

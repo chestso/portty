@@ -450,3 +450,10 @@ bool portty_script_quit_requested(const PorttyScript *s)
 {
     return s && cfr_script_run_quit_requested(s->run);
 }
+
+int portty_script_exit_status(CfrScriptStatus st, bool load_failed)
+{
+    if (load_failed || st == CFR_SCRIPT_FAILED)
+        return 1;
+    return 0;
+}

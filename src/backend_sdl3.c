@@ -260,6 +260,9 @@ struct Sdl3BackendData
     PorttyScript *script;
     ScriptUIExt script_ext;
     bool script_done;
+    bool child_gone;               // PTY EOF/child exit seen; quit deferred while -S runs
+    CfrScriptStatus script_status; // last status; 0 (RUNNING) before the first step
+    bool script_load_failed;       // -S path did not parse/load
     bool pending_screendump;
     char screendump_path[512];
     bool pending_renderdump;
@@ -418,6 +421,17 @@ static void clipboard_deferred_free_advance(void)
 
 // ── PTY reader thread ────────────────────────────────────────────────────
 
+/* Queue a PTY lifecycle event. Both readers post each event at most once:
+ * PTY_CLOSED when the output stream ends, PTY_CHILD_EXIT when the process is
+ * known to be gone. */
+static void pty_reader_post(int code)
+{
+    SDL_Event event = { 0 };
+    event.type = SDL_EVENT_USER;
+    event.user.code = code;
+    SDL_PushEvent(&event);
+}
+
 #ifdef _WIN32
 static int pty_reader_thread_func(void *data)
 {
@@ -441,6 +455,8 @@ static int pty_reader_thread_func(void *data)
 
     /* Track whether we have a pending overlapped read. */
     bool read_pending = false;
+    bool stream_closed = false;
+    bool child_exit_posted = false;
 
     while (SDL_GetAtomicInt(&d->running)) {
         if (SDL_GetAtomicInt(&d->pty_paused)) {
@@ -461,10 +477,8 @@ static int pty_reader_thread_func(void *data)
             }
             if (wr == WAIT_OBJECT_0 + 1) {
                 vlog("PTY reader thread: child process exited\n");
-                SDL_Event ev = { 0 };
-                ev.type = SDL_EVENT_USER;
-                ev.user.code = EVENT_PTY_CHILD_EXIT;
-                SDL_PushEvent(&ev);
+                pty_reader_post(EVENT_PTY_CHILD_EXIT);
+                child_exit_posted = true;
                 break;
             }
             break;
@@ -501,10 +515,27 @@ static int pty_reader_thread_func(void *data)
                 DWORD err = GetLastError();
                 if (err == ERROR_OPERATION_ABORTED)
                     continue;
-                if (err == ERROR_BROKEN_PIPE)
+                if (err == ERROR_BROKEN_PIPE) {
                     vlog("PTY reader thread: pipe closed\n");
-                else
+                    if (!stream_closed) {
+                        stream_closed = true;
+                        pty_reader_post(EVENT_PTY_CLOSED);
+                    }
+                    /* The stream is gone but the process may briefly
+                     * outlive it; wait for the exit so a -S script's
+                     * await-exit is woken instead of sitting on its timer. */
+                    HANDLE wait_h[2] = { hProcess, d->wakeup_event };
+                    DWORD wr2 = WaitForMultipleObjects(2, wait_h, FALSE,
+                                                       INFINITE);
+                    ResetEvent(d->wakeup_event);
+                    if (wr2 == WAIT_OBJECT_0) {
+                        vlog("PTY reader thread: child process exited\n");
+                        pty_reader_post(EVENT_PTY_CHILD_EXIT);
+                        child_exit_posted = true;
+                    }
+                } else {
                     vlog("PTY reader thread: read error: %lu\n", err);
+                }
                 break;
             }
         }
@@ -535,20 +566,33 @@ static int pty_reader_thread_func(void *data)
             } else if (n <= 0) {
                 /* Check for error. */
                 DWORD err = GetLastError();
-                if (err == ERROR_BROKEN_PIPE || err == ERROR_OPERATION_ABORTED) {
-                    if (err == ERROR_OPERATION_ABORTED)
-                        continue; /* cancelled by pause */
+                if (err == ERROR_OPERATION_ABORTED)
+                    continue; /* cancelled by pause */
+                if (err == ERROR_BROKEN_PIPE) {
                     vlog("PTY reader thread: pipe closed\n");
+                    if (!stream_closed) {
+                        stream_closed = true;
+                        pty_reader_post(EVENT_PTY_CLOSED);
+                    }
+                    HANDLE wait_h[2] = { hProcess, d->wakeup_event };
+                    DWORD wr2 = WaitForMultipleObjects(2, wait_h, FALSE,
+                                                       INFINITE);
+                    ResetEvent(d->wakeup_event);
+                    if (wr2 == WAIT_OBJECT_0) {
+                        vlog("PTY reader thread: child process exited\n");
+                        pty_reader_post(EVENT_PTY_CHILD_EXIT);
+                        child_exit_posted = true;
+                    }
                     break;
                 }
+                vlog("PTY reader thread: read error: %lu\n", err);
+                break;
             }
 
-            if (!pty_is_running(d->pty)) {
+            if (!child_exit_posted && !pty_is_running(d->pty)) {
                 vlog("PTY reader thread: child exited after read\n");
-                SDL_Event ev = { 0 };
-                ev.type = SDL_EVENT_USER;
-                ev.user.code = EVENT_PTY_CHILD_EXIT;
-                SDL_PushEvent(&ev);
+                pty_reader_post(EVENT_PTY_CHILD_EXIT);
+                child_exit_posted = true;
                 break;
             }
         } else if (wr == WAIT_OBJECT_0 + 1) {
@@ -566,10 +610,8 @@ static int pty_reader_thread_func(void *data)
         CloseHandle(read_event);
 
 done:
-    SDL_Event event = { 0 };
-    event.type = SDL_EVENT_USER;
-    event.user.code = EVENT_PTY_CLOSED;
-    SDL_PushEvent(&event);
+    if (!stream_closed)
+        pty_reader_post(EVENT_PTY_CLOSED);
 
     vlog("PTY reader thread exiting\n");
     return 0;
@@ -613,6 +655,14 @@ static int pty_reader_thread_func(void *data)
     int pty_fd = pty_get_master_fd(d->pty);
     int signal_fd = pty_signal_get_fd();
     int wakeup_fd = d->wakeup_pipe[0];
+    bool stream_closed = false;
+    bool child_exit_posted = false;
+
+    if (pty_fd < 0) {
+        vlog("PTY reader thread: no PTY fd\n");
+        stream_closed = true;
+        pty_reader_post(EVENT_PTY_CLOSED);
+    }
 
     while (SDL_GetAtomicInt(&d->running)) {
         bool paused = SDL_GetAtomicInt(&d->pty_paused) != 0;
@@ -623,7 +673,7 @@ static int pty_reader_thread_func(void *data)
         int signal_idx = -1;
         int wakeup_idx = -1;
 
-        if (!paused) {
+        if (!paused && !stream_closed) {
             pty_idx = nfds;
             pfds[nfds].fd = pty_fd;
             pfds[nfds].events = POLLIN;
@@ -645,6 +695,12 @@ static int pty_reader_thread_func(void *data)
             pfds[nfds].events = POLLIN;
             pfds[nfds].revents = 0;
             nfds++;
+        }
+
+        if (nfds == 0) {
+            /* Nothing to wait on (no SIGCHLD pipe, no wakeup pipe). */
+            SDL_Delay(10);
+            continue;
         }
 
         int poll_ret = poll(pfds, nfds, -1);
@@ -671,20 +727,15 @@ static int pty_reader_thread_func(void *data)
             pty_signal_drain(d->pty);
             vlog("PTY reader thread: SIGCHLD received\n");
 
-            if (!pty_is_running(d->pty)) {
+            if (!child_exit_posted && !pty_is_running(d->pty)) {
                 vlog("PTY reader thread: child process has exited\n");
-                SDL_Event event = { 0 };
-                event.type = SDL_EVENT_USER;
-                event.user.code = EVENT_PTY_CHILD_EXIT;
-                SDL_PushEvent(&event);
-                break;
+                pty_reader_post(EVENT_PTY_CHILD_EXIT);
+                child_exit_posted = true;
             }
-            vlog("PTY reader thread: SIGCHLD was not for our child, continuing\n");
-        }
-
-        if (pty_idx >= 0 && (pfds[pty_idx].revents & (POLLERR | POLLHUP | POLLNVAL))) {
-            vlog("PTY reader thread: poll error condition (revents=0x%x)\n", pfds[pty_idx].revents);
-            break;
+            /* Keep the thread alive after the child exits: the exit status
+             * is sticky on the context, and the event loop may still be
+             * running a -S script that has not observed it yet. Helper
+             * children are reaped here too. */
         }
 
         if (pty_idx >= 0 && (pfds[pty_idx].revents & POLLIN)) {
@@ -692,10 +743,10 @@ static int pty_reader_thread_func(void *data)
             if (n > 0) {
                 pty_journal_write(buf, n);
                 SDL_AddAtomicInt(&d->pty_bytes_read, (int)n);
-                PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + n);
+                PtyDataPayload *payload = malloc(sizeof(PtyDataPayload) + (size_t)n);
                 if (payload) {
                     payload->len = n;
-                    memcpy(payload->data, buf, n);
+                    memcpy(payload->data, buf, (size_t)n);
                     SDL_Event event = { 0 };
                     event.type = SDL_EVENT_USER;
                     event.user.code = EVENT_PTY_DATA;
@@ -707,18 +758,32 @@ static int pty_reader_thread_func(void *data)
                 }
             } else if (n == 0) {
                 vlog("PTY reader thread: EOF from PTY\n");
-                break;
+                if (!stream_closed) {
+                    stream_closed = true;
+                    pty_reader_post(EVENT_PTY_CLOSED);
+                }
             } else if (errno != EAGAIN && errno != EINTR) {
                 vlog("PTY reader thread: read error: %s\n", strerror(errno));
-                break;
+                if (!stream_closed) {
+                    stream_closed = true;
+                    pty_reader_post(EVENT_PTY_CLOSED);
+                }
             }
+        } else if (pty_idx >= 0 &&
+                   (pfds[pty_idx].revents & (POLLERR | POLLHUP | POLLNVAL))) {
+            vlog("PTY reader thread: poll error condition (revents=0x%x)\n",
+                 pfds[pty_idx].revents);
+            if (!stream_closed) {
+                stream_closed = true;
+                pty_reader_post(EVENT_PTY_CLOSED);
+            }
+            /* The stream is gone, but the process may outlive it: keep
+             * polling the signal pipe for the exit and for helper reaping. */
         }
     }
 
-    SDL_Event event = { 0 };
-    event.type = SDL_EVENT_USER;
-    event.user.code = EVENT_PTY_CLOSED;
-    SDL_PushEvent(&event);
+    if (!stream_closed)
+        pty_reader_post(EVENT_PTY_CLOSED);
 
     if (s_pty_journal) {
         fclose(s_pty_journal);
@@ -2344,11 +2409,24 @@ static void sdl3_handle_timer(PorttyBackend *self, Sdl3BackendData *d,
     }
 }
 
-static void sdl3_run(PorttyBackend *self)
+/* A PTY EOF or child exit. While a -S script is still running this is an
+ * event for the script (await-exit/assert-exit), not a quit: defer the quit
+ * until the script finishes. With no script, quit as before. */
+static void sdl3_pty_gone(Sdl3BackendData *d)
+{
+    if (d->script && !d->script_done) {
+        d->child_gone = true;
+        sdl3_post_wake();
+        return;
+    }
+    SDL_SetAtomicInt(&d->quit_requested, 1);
+}
+
+static int sdl3_run(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
     if (!d)
-        return;
+        return 1;
 
     TerminalBackend *term = d->term;
     RendererSdl3Data *rend = &d->rend;
@@ -2366,7 +2444,7 @@ static void sdl3_run(PorttyBackend *self)
         d->pty_reader_thread = SDL_CreateThread(pty_reader_thread_func, "pty_reader", d);
         if (!d->pty_reader_thread) {
             fprintf(stderr, "ERROR: Failed to create PTY reader thread: %s\n", SDL_GetError());
-            return;
+            return 1;
         }
     }
 
@@ -2423,6 +2501,7 @@ static void sdl3_run(PorttyBackend *self)
                                        &d->script_ext, err, sizeof(err));
         if (!d->script) {
             fprintf(stderr, "ERROR: %s: %s\n", d->app->script_path, err);
+            d->script_load_failed = true;
             SDL_SetAtomicInt(&d->quit_requested, 1);
         }
     }
@@ -2445,6 +2524,7 @@ static void sdl3_run(PorttyBackend *self)
             CfrScriptStatus st = portty_script_step(d->script);
             if (st != CFR_SCRIPT_RUNNING) {
                 d->script_done = true;
+                d->script_status = st;
                 if (st == CFR_SCRIPT_FAILED)
                     fprintf(stderr, "script FAILED — quitting\n");
                 if (st == CFR_SCRIPT_FAILED ||
@@ -2462,6 +2542,11 @@ static void sdl3_run(PorttyBackend *self)
             if (!d->script_done && (wait_ms == UINT32_MAX || wait_ms == 0))
                 sdl3_post_wake();
         }
+        // A child exit seen while the script was still running was deferred
+        // so await-exit/assert-exit could observe it. Now that the script is
+        // over, it becomes the quit it would have been without a script.
+        if (d->script && d->script_done && d->child_gone)
+            self->request_quit(self);
 
         bool pty_processed = false;
         bool pty_scrolled = false;
@@ -2529,12 +2614,12 @@ static void sdl3_run(PorttyBackend *self)
                 }
                 case EVENT_PTY_CLOSED:
                     vlog("PTY closed event received\n");
-                    SDL_SetAtomicInt(&d->quit_requested, 1);
+                    sdl3_pty_gone(d);
                     break;
 
                 case EVENT_PTY_CHILD_EXIT:
                     vlog("PTY child exit event received\n");
-                    SDL_SetAtomicInt(&d->quit_requested, 1);
+                    sdl3_pty_gone(d);
                     break;
 
                 case EVENT_NOTIFY_SHOW:
@@ -2999,6 +3084,8 @@ static void sdl3_run(PorttyBackend *self)
         SDL_WaitThread(d->pty_reader_thread, NULL);
         d->pty_reader_thread = NULL;
     }
+
+    return portty_script_exit_status(d->script_status, d->script_load_failed);
 }
 
 // ── Backend definition ───────────────────────────────────────────────────

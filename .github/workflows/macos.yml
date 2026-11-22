@@ -119,6 +119,67 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Script exit status
+        run: |
+          cat > /tmp/pass.script <<'EOF'
+          assert-contains "Hello macOS"
+          quit
+          EOF
+          cat > /tmp/fail.script <<'EOF'
+          assert-contains "definitely-not-there"
+          EOF
+          "$PORTTY_PACKAGED_EXE" -g 80x24 -d "Hello macOS" -S /tmp/pass.script
+          if "$PORTTY_PACKAGED_EXE" -g 80x24 -d "Hello macOS" -S /tmp/fail.script; then
+            echo "ERROR: a failed script exited 0" >&2
+            exit 1
+          fi
+          if "$PORTTY_PACKAGED_EXE" -g 80x24 -d "Hello macOS" -S /tmp/no-such.script; then
+            echo "ERROR: a missing script exited 0" >&2
+            exit 1
+          fi
+
+      - name: Script observes the child exit
+        run: |
+          cat > /tmp/await.script <<'EOF'
+          wait 1.0
+          sendln exit 7
+          await-exit 5
+          assert-exit 7
+          dumpstate /tmp/portty-await-exit.json
+          quit
+          EOF
+          for i in $(seq 1 10); do
+            rm -f /tmp/portty-await-exit.json
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -S /tmp/await.script \
+              >/tmp/portty-await-exit.log 2>&1
+            grep -q "await-exit: child exited with 7" /tmp/portty-await-exit.log ||
+              { echo "ERROR: await-exit did not see the child exit (run $i)" >&2; cat /tmp/portty-await-exit.log >&2; exit 1; }
+            grep -q "OK: child exit status 7" /tmp/portty-await-exit.log ||
+              { echo "ERROR: assert-exit did not run (run $i)" >&2; cat /tmp/portty-await-exit.log >&2; exit 1; }
+            test -s /tmp/portty-await-exit.json ||
+              { echo "ERROR: the script stopped before the dump (run $i)" >&2; exit 1; }
+          done
+
+          # The same, with a selection pause holding the PTY reader: the
+          # SIGCHLD pipe is still watched, so await-exit must resolve.
+          cat > /tmp/pause.script <<'EOF'
+          wait 1.0
+          mousemove 20 40
+          mousedown 20 40
+          sendln exit 7
+          mousemove 200 60
+          await-exit 5
+          assert-exit 7
+          mouseup 200 60
+          quit
+          EOF
+          for i in $(seq 1 5); do
+            "$PORTTY_PACKAGED_EXE" -g 80x24 -S /tmp/pause.script \
+              >/tmp/portty-await-pause.log 2>&1
+            grep -q "OK: child exit status 7" /tmp/portty-await-pause.log ||
+              { echo "ERROR: await-exit did not run while paused (run $i)" >&2; cat /tmp/portty-await-pause.log >&2; exit 1; }
+          done
+
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:

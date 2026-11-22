@@ -402,6 +402,17 @@ static void test_quit_sets_flag(void)
     cleanup_tmp(path);
 }
 
+/* -S exit status: only a failed run or a failed load is nonzero; the
+ * child's status is not portty's status. */
+static void test_exit_status_mapping(void)
+{
+    ASSERT_EQ(portty_script_exit_status(CFR_SCRIPT_RUNNING, false), 0);
+    ASSERT_EQ(portty_script_exit_status(CFR_SCRIPT_DONE, false), 0);
+    ASSERT_EQ(portty_script_exit_status(CFR_SCRIPT_FAILED, false), 1);
+    ASSERT_EQ(portty_script_exit_status(CFR_SCRIPT_DONE, true), 1);
+    ASSERT_EQ(portty_script_exit_status(CFR_SCRIPT_RUNNING, true), 1);
+}
+
 /* ── Extension commands ── */
 
 static void test_screendump_defers(void)
@@ -662,6 +673,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_emit_reaches_emit_fn);
     RUN_TEST(test_resize_reaches_resize_fn);
     RUN_TEST(test_quit_sets_flag);
+    RUN_TEST(test_exit_status_mapping);
 
     RUN_TEST(test_screendump_defers);
     RUN_TEST(test_screendump_quoted);

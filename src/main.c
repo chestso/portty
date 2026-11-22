@@ -573,7 +573,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
 
     app.pager = pager_create(&backend, &app);
 
-    backend.run(&backend);
+    int run_status = backend.run(&backend);
 
     pager_destroy(app.pager);
     if (pty)
@@ -582,7 +582,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     backend.destroy(&backend);
     terminal_destroy(term);
 
-    return 0;
+    return run_status;
 }
 #endif
 

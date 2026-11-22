@@ -68,7 +68,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Window title — sets platform window title from coffer-parsed OSC 2
 - Custom terminfo entry (`TERM=portty-vty-256color`) with truecolor, cursor style, and bracketed paste
 - Working-directory spawning — `Ctrl+Shift+N` spawns a new terminal in the shell's CWD (from OSC 7/OSC 9;9). On Windows, portty injects a `PROMPT_COMMAND` into bash/zsh to emit OSC 7 automatically (ConPTY children can't be inspected via `ReadProcessMemory`)
-- Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. The capabilities line lists all three inline image protocols (sixel, iTerm2, kitty graphics) alongside OSC 8, grapheme clusters, and reflow. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
+- Built-in diagnostics report (`Ctrl+Shift+F6`) — version/build, renderer, GPU + driver (permissively-licensed open-source drivers flagged green), font resolution, effective config, and session state, shown in an internal scrollable pager. The capabilities line lists all three inline image protocols (sixel, iTerm2, kitty graphics) alongside OSC 8, grapheme clusters, and reflow. On Windows it also reports the ConPTY host and pinned package version. It renders in-process (no external `$PAGER`), so its clickable OSC-8 "report issues" link works regardless of which pager you use
 - Terminal reset (`Ctrl+Delete`, `Ctrl+Shift+F8`) — recovers a shell that a program left unable to read a line, and clears the keyboard protocol flags on its own when the program that pushed them is gone
 - Emacs integration — `data/portty.el` (installed to `$(datadir)/emacs/site-lisp/term`) sets up terminal initialization for Emacs, including automatic `xterm-mouse-mode` so the mouse works in `emacs -nw`
 - Desktop integration — freedesktop.org `.desktop` entry, hicolor scalable + symbolic icons, and a Windows Start Menu shortcut (installed/uninstalled automatically by `make install`/`make uninstall`)
@@ -190,6 +190,8 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `emit-raw <hex bytes>`                                                | Write raw binary bytes directly to the terminal emulator                                                                                                                  |
 | `assert-contains <text>`                                              | Assert the terminal grid contains the given substring (prints PASS/FAIL)                                                                                                  |
 | `assert-not-contains <text>`                                          | Assert the terminal grid does NOT contain the given substring                                                                                                             |
+| `await-exit [timeout-seconds]`                                        | Drain until the child exits (default 10 s; a timeout fails the run) and record its status                                                                                 |
+| `assert-exit <status>`                                                | Assert `await-exit` recorded the given child exit status                                                                                                                  |
 | `screendump <path>`                                                   | Save the framebuffer to a PNG file (captured after render, before present)                                                                                                |
 | `renderdump <path>`                                                   | Render the terminal scene offscreen to a PNG file: fresh render pass, trimmed to content bounds, no panels/cursor; while the pager is open, dumps the pager's content     |
 | `dumprow <row>`                                                       | Print all cells in a terminal row                                                                                                                                         |
@@ -208,7 +210,20 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `assert-no-hover`                                                     | Assert no OSC-8 hyperlink is currently hovered (prints PASS/FAIL)                                                                                                         |
 | `record-start <dir> [fps]`                                            | Start frame recording to directory at target FPS (default 30), QOI format                                                                                                 |
 | `record-stop`                                                         | Stop frame recording and close manifest                                                                                                                                   |
-| `quit`                                                                | Request application quit                                                                                                                                                  |
+| `quit`                                                                | Request application quit; the run succeeds                                                                                                                                |
+
+### Exit status
+
+`portty -S FILE` exits 1 when the script fails to load or a command fails the
+run (`assert-*`, a `wait-for`/`await-exit` timeout, or an extension command
+error). It exits 0 on `quit` or normal end of file. The child's own exit
+status is not propagated — assert it with `await-exit` + `assert-exit`. With
+no `-S` flag, portty's exit status is unaffected.
+
+While a script is running, the child exiting does not end the session: the
+PTY close/exit is delivered to the script, so `await-exit`/`assert-exit` and
+any later commands run. Once the script finishes, the app quits as it would
+have without one.
 
 ### `send` vs `emit`
 
@@ -291,7 +306,7 @@ quit
 
 ### Waiting for output
 
-`wait-for <text> [timeout-seconds]` suspends script execution until the given text appears in the visible terminal grid — checked once per frame, case-sensitive substring, same matching as `assert-contains`. It's the tool for driving long-running interactive sessions (LLM agent loops, test suites, build pipelines) where you want to react the moment an application announces completion instead of hard-coding a duration. If the text never appears, the command gives up after the timeout (default 600s) and prints a notice, letting the rest of the script continue:
+`wait-for <text> [timeout-seconds]` suspends script execution until the given text appears in the visible terminal grid — checked once per frame, case-sensitive substring, same matching as `assert-contains`. It's the tool for driving long-running interactive sessions (LLM agent loops, test suites, build pipelines) where you want to react the moment an application announces completion instead of hard-coding a duration. If the text never appears, the command fails the run after the timeout (default 600s):
 
 ```
 # Run with: portty -S waitfor_demo.script

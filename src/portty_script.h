@@ -120,6 +120,11 @@ uint32_t portty_script_wait_ms(PorttyScript *s);
  * failure, so nothing will advance anymore.) */
 bool portty_script_quit_requested(const PorttyScript *s);
 
+/* Process exit status for a finished -S run: 1 when the script failed to
+ * load or the engine reported CFR_SCRIPT_FAILED, 0 otherwise. The child's
+ * own status is not propagated — scripts assert it with assert-exit. */
+int portty_script_exit_status(CfrScriptStatus st, bool load_failed);
+
 #ifdef __cplusplus
 }
 #endif

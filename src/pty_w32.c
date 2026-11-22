@@ -7,6 +7,10 @@
 
 #ifdef _WIN32
 
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
 #include "common.h"
 #include "portty_pty.h"
 #include <stdio.h>
@@ -25,10 +29,11 @@ struct PtyContext
     HANDLE waiter_thread;
     int rows;
     int cols;
-    bool use_bundled_conpty;   /* true if hpc was created via conpty.dll */
-    int exit_status;           /* valid once exited is true */
-    bool exited;               /* sticky: child exit observed */
-    CRITICAL_SECTION hpc_lock; /* one-shot close of hpc */
+    bool use_bundled_conpty;    /* true if hpc was created via conpty.dll */
+    int exit_status;            /* valid once exited is true */
+    bool exited;                /* sticky: child exit observed */
+    CRITICAL_SECTION hpc_lock;  /* one-shot close of hpc */
+    CRITICAL_SECTION exit_lock; /* guards exit_status/exited */
 };
 
 /* ── conpty.dll sideloading ───────────────────────────────────────────
@@ -216,6 +221,7 @@ PtyContext *pty_create(int rows, int cols, int grid_w_px, int grid_h_px,
     ctx->process = INVALID_HANDLE_VALUE;
     ctx->thread = INVALID_HANDLE_VALUE;
     InitializeCriticalSection(&ctx->hpc_lock);
+    InitializeCriticalSection(&ctx->exit_lock);
 
     /* Create pipes for ConPTY I/O */
     HANDLE input_read = INVALID_HANDLE_VALUE;
@@ -526,6 +532,7 @@ fail:
         CloseHandle(ctx->output_read);
     pty_close_hpc(ctx);
     DeleteCriticalSection(&ctx->hpc_lock);
+    DeleteCriticalSection(&ctx->exit_lock);
     free(ctx);
     return NULL;
 }
@@ -562,6 +569,7 @@ void pty_destroy(PtyContext *ctx)
         CloseHandle(ctx->output_read);
 
     DeleteCriticalSection(&ctx->hpc_lock);
+    DeleteCriticalSection(&ctx->exit_lock);
     free(ctx);
 }
 
@@ -679,38 +687,49 @@ int pty_resize(PtyContext *ctx, int rows, int cols, int width_px,
 
 bool pty_is_running(PtyContext *ctx)
 {
-    if (!ctx || ctx->process == INVALID_HANDLE_VALUE)
+    if (!ctx)
         return false;
 
-    DWORD result = WaitForSingleObject(ctx->process, 0);
-    if (result == WAIT_OBJECT_0) {
+    bool running = true;
+    EnterCriticalSection(&ctx->exit_lock);
+    if (ctx->exited || ctx->process == INVALID_HANDLE_VALUE) {
+        running = false;
+    } else if (WaitForSingleObject(ctx->process, 0) == WAIT_OBJECT_0) {
         vlog("PTY child exited\n");
         DWORD code = 0;
         if (GetExitCodeProcess(ctx->process, &code))
             ctx->exit_status = (int)code;
         ctx->exited = true;
-        return false;
+        running = false;
     }
-    return true;
+    LeaveCriticalSection(&ctx->exit_lock);
+    return running;
 }
 
 int pty_poll_exit(PtyContext *ctx, int *out_status)
 {
     if (!ctx)
         return -1;
-    if (!ctx->exited) {
-        if (ctx->process == INVALID_HANDLE_VALUE)
-            return -1;
-        if (WaitForSingleObject(ctx->process, 0) != WAIT_OBJECT_0)
-            return 0;
+
+    int result;
+    EnterCriticalSection(&ctx->exit_lock);
+    if (ctx->exited) {
+        result = 1;
+    } else if (ctx->process == INVALID_HANDLE_VALUE) {
+        result = -1;
+    } else if (WaitForSingleObject(ctx->process, 0) != WAIT_OBJECT_0) {
+        result = 0;
+    } else {
         DWORD code = 0;
         if (GetExitCodeProcess(ctx->process, &code))
             ctx->exit_status = (int)code;
         ctx->exited = true;
+        result = 1;
     }
-    if (out_status)
+    if (result == 1 && out_status)
         *out_status = ctx->exit_status;
-    return 1;
+    LeaveCriticalSection(&ctx->exit_lock);
+    return result;
 }
 
 int pty_get_master_fd(PtyContext *ctx)
@@ -775,6 +794,19 @@ const char *pty_conpty_host_name(void)
     return has_bundled_conpty()
                ? "conpty.dll + OpenConsole.exe"
                : "system conhost.exe";
+}
+
+/* The pinned package version when the bundled pair is active, "system" when
+ * the OS conhost is in use. Compiled in from data/conpty/conpty.lock. */
+const char *pty_conpty_version(void)
+{
+    if (!has_bundled_conpty())
+        return "system";
+#ifdef PORTTY_CONPTY_VERSION
+    return PORTTY_CONPTY_VERSION;
+#else
+    return "unknown";
+#endif
 }
 
 #endif /* _WIN32 */
