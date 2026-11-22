@@ -15,11 +15,16 @@ EXTRA_DIST = portty.ti portty.el \
     icons/hicolor/symbolic/apps/portty-symbolic.svg \
     icons/portty.ico \
     applications/portty.desktop \
-    conpty/OpenConsole.exe conpty/conpty.dll conpty/VERSION conpty/conpty.lock
+    conpty/conpty.lock conpty/LICENSE conpty/NOTICE.md conpty/README.md
 
 if HOST_WINDOWS
 conptydir = $(bindir)
-conpty_DATA = conpty/OpenConsole.exe conpty/conpty.dll conpty/VERSION
+conpty_DATA = conpty/$(CONPTY_ARCH)/conpty.dll \
+              conpty/$(CONPTY_ARCH)/OpenConsole.exe \
+              conpty/VERSION
+
+docconptydir = $(docdir)/conpty
+docconpty_DATA = conpty/LICENSE conpty/NOTICE.md conpty/README.md
 endif
 
 if !HOST_WINDOWS

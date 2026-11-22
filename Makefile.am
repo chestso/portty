@@ -25,6 +25,22 @@ EXTRA_DIST = \
     contrib/demo-lottie.json \
     third_party/qoi/qoi.h
 
+# The ConPTY bundle is fetched, not committed. Release tarballs carry all
+# three architectures so a downstream Windows build needs no network; the
+# verifier checks the PE machine types and the checksums before packaging.
+dist-hook:
+	"$(top_srcdir)/scripts/fetch_conpty.sh" --arch all
+	mkdir -p "$(distdir)/data/conpty"
+	for a in x64 arm64 x86; do \
+	    mkdir -p "$(distdir)/data/conpty/$$a"; \
+	    cp "$(top_srcdir)/data/conpty/$$a/conpty.dll" \
+	       "$(top_srcdir)/data/conpty/$$a/OpenConsole.exe" \
+	       "$(top_srcdir)/data/conpty/$$a/SHA256SUMS" \
+	       "$(distdir)/data/conpty/$$a/"; \
+	done
+	cp "$(top_srcdir)/data/conpty/VERSION" "$(distdir)/data/conpty/"
+	"$(top_srcdir)/scripts/verify_conpty_bundle.py" --arch all
+
 # Format target — runs clang-format on C/C++, shfmt on shell, black on Python, dprint on Markdown.
 .PHONY: format
 format:
@@ -60,16 +76,34 @@ format:
 	    echo "dprint not found - skipping Markdown formatting." >&2; \
 	fi
 
-# Refresh the tracked ConPTY binaries from the pinned NuGet package.
-.PHONY: fetch-conpty
+# ConPTY bundle: refresh from the pinned NuGet package, bump the pin, or
+# verify the fetched binaries. See data/conpty/README.md.
+.PHONY: fetch-conpty fetch-conpty-all update-conpty check-conpty-update verify-conpty
 fetch-conpty:
-	"$(top_srcdir)/scripts/fetch-conpty.sh"
+	@if test -n "$(CONPTY_ARCH)"; then \
+	    "$(top_srcdir)/scripts/fetch_conpty.sh" --arch "$(CONPTY_ARCH)"; \
+	fi
+
+fetch-conpty-all:
+	"$(top_srcdir)/scripts/fetch_conpty.sh" --arch all
+
+update-conpty:
+	"$(top_srcdir)/scripts/update_conpty.py"
+
+check-conpty-update:
+	"$(top_srcdir)/scripts/update_conpty.py" --check
+
+verify-conpty:
+	@if test -n "$(CONPTY_ARCH)"; then \
+	    "$(top_srcdir)/scripts/verify_conpty_bundle.py" --arch "$(CONPTY_ARCH)"; \
+	fi
 
 # Portable ZIP target — on Windows, stages exe + DLLs + terminfo + launcher .cmd
 # into a self-contained ZIP. On macOS, stages a .app bundle with bundled dylibs,
-# terminfo, resources, and Info.plist into a ZIP.
+# terminfo, resources, and Info.plist into a ZIP. The ConPTY prerequisites are
+# no-ops on a non-Windows host (CONPTY_ARCH is empty there).
 .PHONY: dist-portable
-dist-portable:
+dist-portable: fetch-conpty verify-conpty
 	@sh "$(top_srcdir)/scripts/make-dist-zip.sh" "$(abs_builddir)" "$(top_srcdir)" "$(portty_backend)"
 
 # Bear target — produce compile_commands.json for clangd by intercepting

@@ -426,26 +426,29 @@ else
 	# conpty.dll is loaded at runtime (LoadLibraryEx, not an import), so the
 	# ldd walk below cannot see it: stage the pinned bundle by hand, next to
 	# the executables, matching what `make install` puts in bindir on Windows.
-	# `make fetch-conpty` refreshes the tracked pair.
-	CONPTY_DIR="$SRC_DIR/data/conpty"
-	CONPTY_ARCH="$(sed -n 's/^arch=//p' "$CONPTY_DIR/VERSION" 2>/dev/null || true)"
-	case "$ARCH:$CONPTY_ARCH" in
-	x86_64:x64 | aarch64:arm64) SHIP_CONPTY=1 ;;
-	*) SHIP_CONPTY=0 ;;
+	# The per-arch bundle is fetched by scripts/fetch_conpty.sh; `make
+	# fetch-conpty` prepares the host one.
+	case "$ARCH" in
+	x86_64) CONPTY_ARCH=x64 ;;
+	aarch64) CONPTY_ARCH=arm64 ;;
+	*) CONPTY_ARCH="" ;;
 	esac
-	if [ "$SHIP_CONPTY" -eq 1 ]; then
-		for file in conpty.dll OpenConsole.exe VERSION; do
-			if [ ! -f "$CONPTY_DIR/$file" ]; then
-				echo "ERROR: missing ConPTY bundle file: $CONPTY_DIR/$file" >&2
-				echo "  refresh the bundle with scripts/fetch-conpty.sh" >&2
-				exit 1
-			fi
-		done
-		echo "==> Bundling ConPTY host $(sed -n 's/^version=//p' "$CONPTY_DIR/VERSION") ($CONPTY_ARCH)"
-		cp "$CONPTY_DIR/conpty.dll" "$CONPTY_DIR/OpenConsole.exe" \
-			"$CONPTY_DIR/VERSION" "$STAGE_DIR/"
+	CONPTY_DIR="$SRC_DIR/data/conpty/$CONPTY_ARCH"
+	if [ -n "$CONPTY_ARCH" ] && { [ ! -f "$CONPTY_DIR/conpty.dll" ] || [ ! -f "$CONPTY_DIR/OpenConsole.exe" ]; }; then
+		echo "==> Fetching ConPTY bundle for $CONPTY_ARCH"
+		"$SRC_DIR/scripts/fetch_conpty.sh" --arch "$CONPTY_ARCH" || exit 1
+	fi
+	if [ -n "$CONPTY_ARCH" ]; then
+		echo "==> Bundling ConPTY host $(sed -n 's/^version=//p' "$SRC_DIR/data/conpty/VERSION") ($CONPTY_ARCH)"
+		cp "$CONPTY_DIR/conpty.dll" "$CONPTY_DIR/OpenConsole.exe" "$STAGE_DIR/"
+		cp "$SRC_DIR/data/conpty/LICENSE" "$SRC_DIR/data/conpty/NOTICE.md" \
+			"$STAGE_DIR/"
+		{
+			cat "$SRC_DIR/data/conpty/VERSION"
+			printf 'arch=%s\n' "$CONPTY_ARCH"
+		} >"$STAGE_DIR/VERSION"
 	else
-		echo "==> No ConPTY bundle for $ARCH (tracked bundle: ${CONPTY_ARCH:-none}); the package uses the system host"
+		echo "==> No ConPTY bundle for $ARCH; the package uses the system host"
 	fi
 
 	# --- Docs ------------------------------------------------------------------
@@ -566,7 +569,8 @@ programs (find, vim, etc.) find portty's terminfo definitions. If you run
 porttyw.exe directly, terminfo may not be found by child programs.
 
 The ZIP carries the pinned Microsoft Windows Console ConPTY host
-(conpty.dll and OpenConsole.exe; VERSION records the package). portty
+(conpty.dll and OpenConsole.exe; VERSION records the package and arch,
+LICENSE/NOTICE.md the terms). portty
 loads this pair from its own folder instead of the system host, which is
 what lets DCS, APC and unknown OSC reach the emulator. Keep the three
 files together with the executables.

@@ -48,6 +48,41 @@ esac
 AM_CONDITIONAL([HOST_WINDOWS], [test "x$host_windows" = "xyes"])
 AM_CONDITIONAL([HOST_MACOS], [test "x$host_macos" = "xyes"])
 
+# ConPTY bundle. The pinned Microsoft.Windows.Console.ConPTY package is the
+# source of truth in data/conpty/conpty.lock, shared with coffer; the
+# per-architecture binaries are fetched, never committed. A Windows build
+# fetches its own architecture at configure time, while release tarballs carry
+# all of them (see the dist-hook in Makefile.am) so they build offline.
+CONPTY_ARCH=
+CONPTY_VERSION=
+if test "x$host_windows" = "xyes"; then
+  case "$host_cpu" in
+    x86_64|amd64)  CONPTY_ARCH=x64 ;;
+    aarch64|arm64) CONPTY_ARCH=arm64 ;;
+    i?86)          CONPTY_ARCH=x86 ;;
+    *) AC_MSG_ERROR([unsupported Windows host CPU for ConPTY: $host_cpu]) ;;
+  esac
+
+  if test -f "$srcdir/data/conpty/conpty.lock"; then
+    . "$srcdir/data/conpty/conpty.lock"
+  fi
+
+  if test ! -f "$srcdir/data/conpty/$CONPTY_ARCH/conpty.dll" || \
+     test ! -f "$srcdir/data/conpty/$CONPTY_ARCH/OpenConsole.exe"; then
+    AC_MSG_NOTICE([ConPTY bundle missing for $CONPTY_ARCH; running scripts/fetch_conpty.sh])
+    if ! sh "$srcdir/scripts/fetch_conpty.sh" --arch "$CONPTY_ARCH"; then
+      AC_MSG_ERROR([failed to fetch the ConPTY bundle; install unzip/bsdtar/7z/python or run scripts/fetch_conpty.sh manually])
+    fi
+  fi
+
+  if test "n$CONPTY_VERSION" != "n"; then
+    AC_DEFINE_UNQUOTED([PORTTY_CONPTY_VERSION], ["$CONPTY_VERSION"],
+      [Pinned Microsoft.Windows.Console.ConPTY version])
+  fi
+fi
+AC_SUBST([CONPTY_ARCH])
+AC_SUBST([CONPTY_VERSION])
+
 # Windows resource compiler (windres) for embedding the app icon in the .exe.
 # Automake recognizes the RC variable and auto-generates .rc → .o build rules.
 AC_CHECK_TOOL([RC], [windres], [])

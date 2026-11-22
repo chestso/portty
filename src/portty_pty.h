@@ -273,6 +273,14 @@ bool pty_conpty_dcs_passthrough(void);
  * or "system conhost.exe" if using the OS-level host.
  */
 const char *pty_conpty_host_name(void);
+
+/*
+ * Get the pinned Microsoft.Windows.Console.ConPTY package version in use.
+ *
+ * Returns the compiled-in pin when the bundled DLL is active, "system" when
+ * the OS host is used.
+ */
+const char *pty_conpty_version(void);
 #endif
 
 #endif /* PTY_H */

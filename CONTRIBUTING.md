@@ -133,13 +133,21 @@ Install [MSYS2](https://www.msys2.org/), then in a UCRT64 shell (`msys2_shell.cm
 ```bash
 pacman -S mingw-w64-ucrt-x86_64-gcc mingw-w64-ucrt-x86_64-sdl3 \
       mingw-w64-ucrt-x86_64-freetype mingw-w64-ucrt-x86_64-harfbuzz \
-      mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-autotools
+      mingw-w64-ucrt-x86_64-libpng mingw-w64-ucrt-x86_64-autotools \
+      curl unzip
 
 # Optional: only needed to regenerate the Windows .ico (see below)
 pacman -S mingw-w64-ucrt-x86_64-imagemagick mingw-w64-ucrt-x86_64-librsvg
 ```
 
 coffer is not in the official pacman repo — build and install it separately (`make install` in the coffer repo, or ensure `PKG_CONFIG_PATH` points at its build output).
+
+`configure` fetches the pinned Microsoft.Windows.Console.ConPTY bundle for the
+host architecture when `data/conpty/<arch>/` is missing (`curl`/`wget` plus
+`unzip`, `bsdtar`, `7z` or Python). `make fetch-conpty` prefetches it,
+`make fetch-conpty-all` fetches all three architectures, and `make
+verify-conpty` checks the PE machine type and checksums. Release tarballs
+carry all three, so builds from a tarball need no network.
 
 #### Building
 

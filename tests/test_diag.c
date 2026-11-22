@@ -63,6 +63,7 @@ static DiagSources sample(void)
 #ifdef _WIN32
         .conpty_dcs_ok = true,
         .conpty_host = "conpty.dll + OpenConsole.exe",
+        .conpty_version = "1.25.261109001",
 #endif
         .display_session = "wayland",
         .display_xwayland = "yes",
@@ -282,6 +283,8 @@ static void test_vt_features_section(void)
     ASSERT_TRUE(strstr(r, "hardened heap") != NULL);
 #ifdef _WIN32
     ASSERT_TRUE(strstr(r, "conpty host") != NULL);
+    ASSERT_TRUE(strstr(r, "conpty version") != NULL);
+    ASSERT_TRUE(strstr(r, "1.25.261109001") != NULL);
     ASSERT_TRUE(strstr(r, "conpty DCS") != NULL);
 #endif
     free(r);

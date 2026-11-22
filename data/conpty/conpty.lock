@@ -1,7 +1,8 @@
 # Pinned Microsoft.Windows.Console.ConPTY bundle.
 #
-# Keep this in sync with coffer's data/conpty/conpty.lock.  Refresh the
-# tracked binaries with scripts/fetch-conpty.sh when bumping the version.
+# This file is the single source of truth for the ConPTY version used by
+# coffer and portty. Update it with scripts/update_conpty.py; do not edit
+# the version by hand without updating the hash.
 CONPTY_PACKAGE=Microsoft.Windows.Console.ConPTY
 CONPTY_VERSION=1.25.261109001
 CONPTY_NUPKG_SHA256=3d77f535df848e44225c2a8912ac844fecb23f3057732b639f3034b587496f09

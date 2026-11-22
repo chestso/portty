@@ -419,6 +419,10 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
             jk_str(out, &first, "gpu", d->gpu_device);
         if (d->gpu_driver)
             jk_str(out, &first, "driver", d->gpu_driver);
+#ifdef _WIN32
+        if (d->conpty_version)
+            jk_str(out, &first, "conpty_version", d->conpty_version);
+#endif
         char osbuf[256];
         if (dump_os_string(osbuf, sizeof(osbuf)))
             jk_str(out, &first, "os", osbuf);

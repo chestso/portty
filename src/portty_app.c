@@ -1144,6 +1144,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
 #ifdef _WIN32
         .conpty_dcs_ok = pty_conpty_dcs_passthrough(),
         .conpty_host = pty_conpty_host_name(),
+        .conpty_version = pty_conpty_version(),
 #endif
 #ifdef PORTTY_HARDEN_HEAP
         .hardened_heap = true,
@@ -1175,6 +1176,9 @@ bool portty_app_dump_state(PorttyApp *app, const char *path,
     PorttyDiag pd = { 0 };
     if (app->backend && app->backend->get_diag)
         app->backend->get_diag(app->backend, &pd);
+#ifdef _WIN32
+    pd.conpty_version = pty_conpty_version();
+#endif
 
     TerminalDumpMeta meta = {
         .diag = &pd,

@@ -58,10 +58,12 @@ compile_commands.json
 bloom-terminal
 src/bloom-terminal
 
-# Bundled ConPTY binaries (pre-built from Microsoft.Windows.Console.ConPTY NuGet)
-!data/conpty/OpenConsole.exe
-!data/conpty/conpty.dll
-!data/conpty/VERSION
+# Fetched ConPTY bundles (scripts/fetch_conpty.sh). The lock, notices and
+# README are tracked; the binaries are not.
+/data/conpty/VERSION
+/data/conpty/*/conpty.dll
+/data/conpty/*/OpenConsole.exe
+/data/conpty/*/SHA256SUMS
 
 # Test binaries
 tests/*.log
