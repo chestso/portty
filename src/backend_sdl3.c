@@ -162,15 +162,20 @@ static const struct
 
 // One armed SDL timer: what its callback needs, and nothing the main thread
 // changes after SDL_AddTimerNS returns (except next_ns, which only the
-// callback touches).
+// callback touches). `alive` marks the record as in use by a running SDL
+// timer; a retired record is only reused after a grace period, because the
+// callback may still be executing on SDL's timer thread after RemoveTimer.
 typedef struct Sdl3BackendData Sdl3BackendData;
 typedef struct
 {
     Sdl3BackendData *d;
     Uint64 period_ns; // 0 = one-shot
     Uint64 next_ns;   // SDL ticks (ns) of the deadline now pending
+    Uint64 dead_ns;   // SDL ticks (ns) the record was retired (0 = never armed)
+    SDL_TimerID id;
     Uint32 slot;
     Uint32 epoch;
+    SDL_AtomicInt alive;
 } SdlTimerArm;
 
 struct Sdl3BackendData
@@ -208,11 +213,12 @@ struct Sdl3BackendData
 
     TimerManager *timers;
     // Arm records for SDL timers. A callback may still be running on SDL's
-    // timer thread when its timer is cancelled, so records are handed out
-    // round-robin and never reused within that window. timer_pending[slot]
-    // holds the epoch of the event queued for the slot (0 = none).
+    // timer thread when its timer is cancelled, so a record is only reused
+    // once its timer has retired and a grace period has passed. A long-lived
+    // timer (the record tick, cursor blink) therefore keeps its record for
+    // its whole life. timer_pending[slot] holds the epoch of the event queued
+    // for the slot (0 = none).
     SdlTimerArm timer_arms[TIMER_MAX * 4];
-    unsigned timer_arm_next;
     SDL_AtomicInt timer_pending[TIMER_MAX];
     TimerId cursor_blink_timer;
     TimerId autoscroll_timer;
@@ -864,6 +870,10 @@ static Uint64 sdl3_timer_cb(void *userdata, SDL_TimerID id, Uint64 interval_ns)
     SdlTimerArm *a = (SdlTimerArm *)userdata;
     Sdl3BackendData *d = a->d;
 
+    // A record retired before this callback started: its timer is gone.
+    if (!SDL_GetAtomicInt(&a->alive))
+        return 0;
+
     if (SDL_GetAtomicInt(&d->timer_pending[a->slot]) != (int)a->epoch) {
         SDL_SetAtomicInt(&d->timer_pending[a->slot], (int)a->epoch);
         SDL_Event ev;
@@ -876,30 +886,75 @@ static Uint64 sdl3_timer_cb(void *userdata, SDL_TimerID id, Uint64 interval_ns)
             SDL_SetAtomicInt(&d->timer_pending[a->slot], 0);
     }
 
-    if (a->period_ns == 0)
+    if (a->period_ns == 0) {
+        a->dead_ns = SDL_GetTicksNS();
+        SDL_SetAtomicInt(&a->alive, 0);
         return 0;
+    }
     Uint64 now = SDL_GetTicksNS();
     a->next_ns = timer_next_deadline(a->next_ns, a->period_ns, now);
     return a->next_ns - now;
+}
+
+// How long a retired arm record waits before it may carry a new timer: long
+// enough for a callback that was already running when its timer was removed.
+#define TIMER_ARM_GRACE_NS 100000000ULL /* 100 ms */
+
+static SdlTimerArm *sdl3_timer_arm_take(Sdl3BackendData *d, Uint64 now)
+{
+    SdlTimerArm *oldest = NULL;
+    for (int i = 0; i < TIMER_MAX * 4; i++) {
+        SdlTimerArm *c = &d->timer_arms[i];
+        if (SDL_GetAtomicInt(&c->alive))
+            continue;
+        if (c->dead_ns == 0 || now - c->dead_ns >= TIMER_ARM_GRACE_NS)
+            return c;
+        if (!oldest || c->dead_ns < oldest->dead_ns)
+            oldest = c;
+    }
+    // Everything is live or freshly retired. TIMER_MAX live timers can never
+    // fill the table, so this only happens right after a burst of removals;
+    // the oldest record is the one whose callback has had the longest to
+    // finish.
+    return oldest;
 }
 
 static uintptr_t sdl3_timer_arm(void *ctx, uint64_t delay_ns, uint64_t period_ns,
                                 uint32_t slot, uint32_t epoch)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)ctx;
-    SdlTimerArm *a = &d->timer_arms[d->timer_arm_next++ % (TIMER_MAX * 4)];
+    Uint64 now = SDL_GetTicksNS();
+    SdlTimerArm *a = sdl3_timer_arm_take(d, now);
+    if (!a)
+        return 0;
     a->d = d;
     a->period_ns = period_ns;
-    a->next_ns = SDL_GetTicksNS() + delay_ns;
+    a->next_ns = now + delay_ns;
+    a->dead_ns = 0;
     a->slot = slot;
     a->epoch = epoch;
-    return (uintptr_t)SDL_AddTimerNS(delay_ns, sdl3_timer_cb, a);
+    SDL_SetAtomicInt(&a->alive, 1);
+    // A very short delay can run the callback before AddTimerNS returns; all
+    // the fields it reads are already in place.
+    SDL_TimerID id = SDL_AddTimerNS(delay_ns, sdl3_timer_cb, a);
+    if (!id) {
+        a->dead_ns = SDL_GetTicksNS();
+        SDL_SetAtomicInt(&a->alive, 0);
+        return 0;
+    }
+    a->id = id;
+    return (uintptr_t)a;
 }
 
 static void sdl3_timer_cancel(void *ctx, uintptr_t handle)
 {
     (void)ctx;
-    SDL_RemoveTimer((SDL_TimerID)handle);
+    SdlTimerArm *a = (SdlTimerArm *)handle;
+    if (!a)
+        return;
+    SDL_RemoveTimer(a->id);
+    a->dead_ns = SDL_GetTicksNS();
+    SDL_SetAtomicInt(&a->alive, 0);
 }
 
 // Start (or restart with a new delay) the one-shot timer held in *id.
