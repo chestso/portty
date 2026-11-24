@@ -157,6 +157,13 @@ void rend_sdl3_panel_hide(RendererSdl3Data *data, int id);
 int rend_sdl3_panel_hit_test(RendererSdl3Data *data, int px, int py, bool *close_btn);
 void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered);
 int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term, const char *output_path);
+// Render the terminal scene into an offscreen RGBA32 surface of w×h pixels
+// (the caller frees it with SDL_DestroySurface). scroll_offset selects the
+// viewport with the same semantics as the window's scroll offset. NULL on
+// failure. The window size plays no part: the render target is bound for the
+// pass, so the linear-light path follows the canvas size, not the window.
+SDL_Surface *rend_sdl3_render_offscreen(RendererSdl3Data *data, TerminalBackend *term,
+                                        int w, int h, int scroll_offset);
 void rend_sdl3_set_content_scale(RendererSdl3Data *data, float scale);
 // Publish the window's compositor scale. The fonts are rasterized for it,
 // so a change means the fonts have to be redone.

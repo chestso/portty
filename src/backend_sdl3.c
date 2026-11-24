@@ -1976,15 +1976,33 @@ static void sdl3_debug_screendump(Sdl3BackendData *d, const char *path)
 
 static void sdl3_record_frame(Sdl3BackendData *d, const char *path)
 {
-    SDL_Surface *surface = SDL_RenderReadPixels(d->sdl_renderer, NULL);
-    if (!surface)
-        return;
-    SDL_Surface *rgba = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_Surface *rgba = NULL;
+
+    if (d->app && d->app->record_offscreen) {
+        // Render the scene offscreen at the full grid resolution. The
+        // window stays hidden, so the windowing system never clamps the
+        // frame size — the recording is sized by cells, not the screen.
+        // Linear-light compositing is preserved: the render pass binds its
+        // own target texture and the float target follows that size.
+        int term_rows, term_cols;
+        terminal_get_dimensions(d->term, &term_rows, &term_cols);
+        int img_w = term_cols * d->rend.cell_width;
+        int img_h = term_rows * d->rend.cell_height;
+        rgba = rend_sdl3_render_offscreen(&d->rend, d->term, img_w, img_h,
+                                          rend_sdl3_get_scroll_offset(&d->rend));
+    } else {
+        // Legacy path: read back the presented window backbuffer.
+        SDL_Surface *surface = SDL_RenderReadPixels(d->sdl_renderer, NULL);
+        if (surface) {
+            rgba = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+            SDL_DestroySurface(surface);
+        }
+    }
+
     if (rgba) {
         qoi_write_rgba(path, rgba->pixels, rgba->w, rgba->h);
         SDL_DestroySurface(rgba);
     }
-    SDL_DestroySurface(surface);
 }
 
 // ── Resize geometry overlay ──────────────────────────────────────────────

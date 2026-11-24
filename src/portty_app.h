@@ -71,6 +71,13 @@ typedef struct PorttyApp
     // while the selection stays up, and a duplicate `true` must not take a
     // second pause that no `false` will ever release.
     bool selection_paused;
+
+    // --record-offscreen: the window stays hidden and each recorded frame is
+    // rendered into an offscreen texture at the full grid resolution instead
+    // of being read back from the window backbuffer. Decouples the recording
+    // size from the windowing system (which clamps window sizes to the
+    // screen).
+    bool record_offscreen;
 } PorttyApp;
 
 // Terminal output callbacks (registered with coffer).

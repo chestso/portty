@@ -148,6 +148,7 @@ static void print_usage(const char *progname)
     printf("  --dpi-scale SCALE     Multiply detected DPI scale (default: 1.0)\n");
     printf("  -W, --ambiguous-wide   Render ambiguous-width chars as 2 cells\n");
     printf("  -B, --borderless       Disable window decorations (title bar and borders)\n");
+    printf("  --record-offscreen     Record frames offscreen at full grid resolution (window stays hidden)\n");
 }
 
 static void print_version(void)
@@ -174,6 +175,7 @@ typedef struct
     float dpi_scale;
     int ambiguous_wide;
     int borderless;
+    int record_offscreen;
 } PorttyArgs;
 
 static void portty_args_init(PorttyArgs *args)
@@ -187,6 +189,7 @@ static void portty_args_init(PorttyArgs *args)
     args->dpi_scale = 1.0f;
     args->ambiguous_wide = -1;
     args->borderless = -1;
+    args->record_offscreen = 0;
 }
 
 /* Helper for --dpi-scale parsing (shared with tests) */
@@ -215,10 +218,11 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
         { "dpi-scale", required_argument, NULL, 'D' },
         { "ambiguous-wide", no_argument, NULL, 'W' },
         { "borderless", no_argument, NULL, 'B' },
+        { "record-offscreen", no_argument, NULL, 'O' },
         { NULL, 0, NULL, 0 }
     };
 
-    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:WB", long_options, NULL)) != -1) {
+    while ((args->opt = getopt_long(argc, argv, "hvVf:g:Ld:H:s:S:D:WBO", long_options, NULL)) != -1) {
         switch (args->opt) {
         case 'h':
             print_usage(argv[0]);
@@ -234,6 +238,9 @@ static int parse_args(PorttyArgs *args, int argc, char *argv[])
             break;
         case 'B':
             args->borderless = 1;
+            break;
+        case 'O':
+            args->record_offscreen = 1;
             break;
         case 'd':
             args->demo_text = optarg;
@@ -452,6 +459,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         .script_path = args->script_path,
         .dpi_scale = args->dpi_scale,
         .borderless = args->borderless > 0,
+        .record_offscreen = args->record_offscreen > 0,
     };
     backend.data = &app;
 
@@ -508,7 +516,7 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
         vlog("Derived window size from font: %dx%d\n", win_w, win_h);
 
         int disp_w, disp_h;
-        if (backend.get_display_size(&backend, &disp_w, &disp_h)) {
+        if (!args->record_offscreen && backend.get_display_size(&backend, &disp_w, &disp_h)) {
             if (win_w > disp_w || win_h > disp_h) {
                 if (win_w > disp_w)
                     win_w = disp_w;
@@ -526,11 +534,19 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
             }
         }
     }
-    backend.set_window_size(&backend, win_w, win_h);
-    // Note: SDL3 backend's set_window_size now handles resize internally
-    // by querying SDL_GetWindowSizeInPixels for proper high-DPI support
-    if (backend.show_window)
-        backend.show_window(&backend);
+    if (!args->record_offscreen) {
+        backend.set_window_size(&backend, win_w, win_h);
+        // Note: SDL3 backend's set_window_size now handles resize internally
+        // by querying SDL_GetWindowSizeInPixels for proper high-DPI support
+        if (backend.show_window)
+            backend.show_window(&backend);
+    } else {
+        // --record-offscreen: the window stays hidden at its placeholder
+        // size; recorded frames render offscreen at full grid resolution,
+        // so the windowing system never clamps the recording size.
+        vlog("record-offscreen: window stays hidden; frames render at %dx%d\n",
+             win_w, win_h);
+    }
 
     PtyContext *pty = NULL;
     if (args->demo_text) {

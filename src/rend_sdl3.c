@@ -2570,6 +2570,102 @@ void rend_sdl3_panel_set_hover(RendererSdl3Data *data, int id, bool hovered)
     panel_mgr_set_hover(&data->panels, id, hovered);
 }
 
+SDL_Surface *rend_sdl3_render_offscreen(RendererSdl3Data *data, TerminalBackend *term,
+                                        int img_w, int img_h, int scroll_offset)
+{
+    if (!data || !term || img_w <= 0 || img_h <= 0)
+        return NULL;
+
+    if (!font_has_style(data->font, FONT_STYLE_NORMAL)) {
+        fprintf(stderr, "ERROR: No font loaded for offscreen render\n");
+        return NULL;
+    }
+
+    if (verbose && !data->linear_selfcheck_done) {
+        data->linear_selfcheck_done = true;
+        if (data->linear_ok)
+            linear_blend_selfcheck(data);
+    }
+
+    // Get terminal dimensions
+    int term_rows, term_cols;
+    terminal_get_dimensions(term, &term_rows, &term_cols);
+
+    vlog("Offscreen render: %d cols x %d rows = %dx%d pixels (scroll %d)\n",
+         term_cols, term_rows, img_w, img_h, scroll_offset);
+
+    // render_images() culls against data->width/height (the hidden 1x1
+    // window). Point them at the render canvas for this pass. Scroll is
+    // save/restored too: lottie/sixel placement reads data->scroll directly,
+    // not the render_scene parameter.
+    int saved_w = data->width, saved_h = data->height;
+    int saved_scroll = data->scroll.scroll_offset;
+    data->width = img_w;
+    data->height = img_h;
+    data->scroll.scroll_offset = scroll_offset;
+
+    // Create offscreen render target texture
+    SDL_Texture *target = SDL_CreateTexture(data->renderer,
+                                            SDL_PIXELFORMAT_RGBA32,
+                                            SDL_TEXTUREACCESS_TARGET,
+                                            img_w, img_h);
+    if (!target) {
+        fprintf(stderr, "ERROR: Failed to create offscreen texture: %s\n", SDL_GetError());
+        data->width = saved_w;
+        data->height = saved_h;
+        data->scroll.scroll_offset = saved_scroll;
+        return NULL;
+    }
+
+    // Redirect rendering to offscreen texture
+    if (!SDL_SetRenderTarget(data->renderer, target)) {
+        fprintf(stderr, "ERROR: Failed to set render target: %s\n", SDL_GetError());
+        SDL_DestroyTexture(target);
+        data->width = saved_w;
+        data->height = saved_h;
+        data->scroll.scroll_offset = saved_scroll;
+        return NULL;
+    }
+
+    rend_sdl3_atlas_begin_frame(&data->atlas);
+    populate_atlas(data, term, term_rows, term_cols, false, scroll_offset);
+
+    // Draw the scene gamma-correct (linear-light) into `target`
+    // so the capture matches on-screen output, including sixel images.
+    // Panels are window chrome and are not part of an offscreen render.
+    SDL_Color bg = { data->colors.bg_r, data->colors.bg_g, data->colors.bg_b, data->colors.bg_a };
+    render_scene(data, term, term_rows, term_cols, false, true, scroll_offset, false, bg, NULL);
+
+    data->width = saved_w;
+    data->height = saved_h;
+    data->scroll.scroll_offset = saved_scroll;
+
+    // Read pixels back from the render target
+    SDL_Surface *surface = SDL_RenderReadPixels(data->renderer, NULL);
+
+    // Restore default render target
+    SDL_SetRenderTarget(data->renderer, NULL);
+
+    if (!surface) {
+        fprintf(stderr, "ERROR: Failed to read pixels: %s\n", SDL_GetError());
+        SDL_DestroyTexture(target);
+        return NULL;
+    }
+
+    // Convert surface to RGBA32 if needed
+    SDL_Surface *rgba_surface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
+    SDL_DestroySurface(surface);
+
+    if (!rgba_surface) {
+        fprintf(stderr, "ERROR: Failed to convert surface to RGBA: %s\n", SDL_GetError());
+        SDL_DestroyTexture(target);
+        return NULL;
+    }
+
+    SDL_DestroyTexture(target);
+    return rgba_surface;
+}
+
 int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
                             const char *output_path)
 {
@@ -2579,12 +2675,6 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     if (!font_has_style(data->font, FONT_STYLE_NORMAL)) {
         fprintf(stderr, "ERROR: No font loaded for PNG render\n");
         return -1;
-    }
-
-    if (verbose && !data->linear_selfcheck_done) {
-        data->linear_selfcheck_done = true;
-        if (data->linear_ok)
-            linear_blend_selfcheck(data);
     }
 
     // Get terminal dimensions
@@ -2643,72 +2733,18 @@ int rend_sdl3_render_to_png(RendererSdl3Data *data, TerminalBackend *term,
     vlog("PNG render: %d cols x %d rows = %dx%d pixels\n",
          render_cols, render_rows, img_w, img_h);
 
-    // render_images() culls against data->width/height (the 1x1 hidden
-    // window in PNG mode). Point them at the render canvas for the snapshot.
-    int saved_w = data->width, saved_h = data->height;
-    int saved_scroll = data->scroll.scroll_offset;
-    data->width = img_w;
-    data->height = img_h;
-    data->scroll.scroll_offset = 0;
-
-    // Create offscreen render target texture
-    SDL_Texture *target = SDL_CreateTexture(data->renderer,
-                                            SDL_PIXELFORMAT_RGBA32,
-                                            SDL_TEXTUREACCESS_TARGET,
-                                            img_w, img_h);
-    if (!target) {
-        fprintf(stderr, "ERROR: Failed to create offscreen texture: %s\n", SDL_GetError());
+    // The PNG snapshot starts at the top of the scrollback, not the live
+    // viewport.
+    SDL_Surface *rgba_surface =
+        rend_sdl3_render_offscreen(data, term, img_w, img_h, 0);
+    if (!rgba_surface)
         return -1;
-    }
-
-    // Redirect rendering to offscreen texture
-    if (!SDL_SetRenderTarget(data->renderer, target)) {
-        fprintf(stderr, "ERROR: Failed to set render target: %s\n", SDL_GetError());
-        SDL_DestroyTexture(target);
-        return -1;
-    }
-
-    rend_sdl3_atlas_begin_frame(&data->atlas);
-    populate_atlas(data, term, render_rows, render_cols, false, data->scroll.scroll_offset);
-
-    // Draw the scene gamma-correct (linear-light) into `target`
-    // so the PNG matches on-screen output, including sixel images. Panels
-    // are window chrome and are not part of a PNG export.
-    SDL_Color bg = { data->colors.bg_r, data->colors.bg_g, data->colors.bg_b, data->colors.bg_a };
-    render_scene(data, term, render_rows, render_cols, false, true, 0, false, bg, NULL);
-
-    data->width = saved_w;
-    data->height = saved_h;
-    data->scroll.scroll_offset = saved_scroll;
-
-    // Read pixels back from the render target
-    SDL_Surface *surface = SDL_RenderReadPixels(data->renderer, NULL);
-
-    // Restore default render target
-    SDL_SetRenderTarget(data->renderer, NULL);
-
-    if (!surface) {
-        fprintf(stderr, "ERROR: Failed to read pixels: %s\n", SDL_GetError());
-        SDL_DestroyTexture(target);
-        return -1;
-    }
-
-    // Convert surface to RGBA32 if needed
-    SDL_Surface *rgba_surface = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_RGBA32);
-    SDL_DestroySurface(surface);
-
-    if (!rgba_surface) {
-        fprintf(stderr, "ERROR: Failed to convert surface to RGBA: %s\n", SDL_GetError());
-        SDL_DestroyTexture(target);
-        return -1;
-    }
 
     // Write PNG
     int rc = png_write_rgba(output_path, (const uint8_t *)rgba_surface->pixels,
                             rgba_surface->w, rgba_surface->h);
 
     SDL_DestroySurface(rgba_surface);
-    SDL_DestroyTexture(target);
 
     if (rc == 0) {
         vlog("STATUS: png_output=%s (%dx%d)\n", output_path, img_w, img_h);

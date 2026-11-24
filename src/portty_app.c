@@ -759,6 +759,13 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
     terminal_selection_clear(app->term);
     app->backend->resize(app->backend, pixel_w, pixel_h);
 
+    // --record-offscreen keeps the grid fixed at the -g geometry: the
+    // hidden placeholder window's size must not re-derive the terminal
+    // size. Recorded frames are rendered offscreen at the full grid
+    // resolution, so the window size plays no part.
+    if (app->record_offscreen)
+        return;
+
     int cell_w, cell_h;
     if (app_get_cell_size(app, &cell_w, &cell_h)) {
         terminal_set_cell_px(app->term, cell_w, cell_h);
