@@ -410,6 +410,8 @@ quit
 
 `record-start` captures the framebuffer after each render at a target frame rate (default 30 FPS). Frames are written as QOI files (`frame_000001.qoi`, `frame_000002.qoi`, ...) — QOI encodes 15-33x faster than PNG with only ~20-40% larger files, enabling real-time capture at full frame rate.
 
+A recording owns its directory: `record-start` requires a directory that does not exist or is empty, and always numbers frames from 1. Starting into a directory that already holds files fails with an error and leaves it untouched — use a fresh directory per recording (one per segment when recording several), and empty a directory before re-using it. The manifest is created exclusively and never deleted, so two portty instances cannot record into one directory at once: the second fails immediately.
+
 A `frames.csv` manifest is written alongside the images with per-frame timestamps:
 
 ```csv

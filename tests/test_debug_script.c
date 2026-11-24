@@ -597,6 +597,45 @@ static void test_winsize(void)
     ASSERT_EQ(f.win_h, 768);
 }
 
+/* ── Frame recorder ── */
+
+/* Unique empty directory for recorder tests (caller cleans up). */
+static bool rec_test_dir(char *buf, size_t n)
+{
+#ifdef _WIN32
+    char tmp[MAX_PATH];
+    if (n < MAX_PATH || GetTempPathA(MAX_PATH, tmp) == 0)
+        return false;
+    if (GetTempFileNameA(tmp, "rec", 0, buf) == 0)
+        return false;
+    remove(buf); /* GetTempFileNameA created a file; we want a directory */
+    return CreateDirectoryA(buf, NULL) != 0;
+#else
+    char tmpl[] = "/tmp/portty_rec_XXXXXX";
+    if (!mkdtemp(tmpl))
+        return false;
+    snprintf(buf, n, "%s", tmpl);
+    return true;
+#endif
+}
+
+/* Remove the artifacts a recorder test created, then the directory. */
+static void rec_test_cleanup(const char *dir, int frames)
+{
+    char path[1200];
+    for (int i = 1; i <= frames; i++) {
+        snprintf(path, sizeof(path), "%s/frame_%06d.qoi", dir, i);
+        remove(path);
+    }
+    snprintf(path, sizeof(path), "%s/frames.csv", dir);
+    remove(path);
+#ifdef _WIN32
+    RemoveDirectoryA(dir);
+#else
+    rmdir(dir);
+#endif
+}
+
 static void test_record_start_stop(void)
 {
     FakeExt f;
@@ -629,6 +668,154 @@ static void test_record_start_stop(void)
     remove(manifest);
     rmdir(dir);
 #endif
+}
+
+/* A recording owns its directory: a second start (while recording, or
+ * after a stop) must fail and leave the manifest untouched — never
+ * truncate it while frame files accumulate. */
+static void test_record_start_refuses_used_dir(void)
+{
+#ifdef _WIN32
+    char dir[MAX_PATH];
+#else
+    char dir[128];
+#endif
+    ASSERT_TRUE(rec_test_dir(dir, sizeof(dir)));
+    FrameRecorder *rec = frame_recorder_new();
+    ASSERT_NOT_NULL(rec);
+
+    ASSERT_TRUE(frame_recorder_start(rec, dir, 12));
+    ASSERT_FALSE(frame_recorder_start(rec, dir, 12)); /* already recording */
+    char path[1200];
+    for (int i = 0; i < 3; i++) {
+        frame_recorder_build_path(rec, path, sizeof(path));
+        FILE *fp = fopen(path, "wb"); /* stand-in for the QOI write */
+        ASSERT_NOT_NULL(fp);
+        fputc('x', fp);
+        fclose(fp);
+        frame_recorder_advance(rec);
+    }
+    frame_recorder_stop(rec);
+
+    ASSERT_FALSE(frame_recorder_start(rec, dir, 12)); /* used directory */
+    ASSERT_FALSE(rec->recording);
+
+    /* The first segment's rows survived the refused restart. */
+    char manifest[1200];
+    snprintf(manifest, sizeof(manifest), "%s/frames.csv", dir);
+    FILE *fp = fopen(manifest, "r");
+    ASSERT_NOT_NULL(fp);
+    char line[256];
+    int rows = 0;
+    while (fgets(line, sizeof(line), fp))
+        rows++;
+    fclose(fp);
+    ASSERT_EQ(rows, 4); /* header + 3 frames */
+
+    frame_recorder_free(rec);
+    rec_test_cleanup(dir, 3);
+}
+
+/* Frames without a manifest (a crashed or foreign recording) still mark
+ * the directory used: start must refuse, not overwrite from index 1. */
+static void test_record_start_refuses_stray_frames(void)
+{
+#ifdef _WIN32
+    char dir[MAX_PATH];
+#else
+    char dir[128];
+#endif
+    ASSERT_TRUE(rec_test_dir(dir, sizeof(dir)));
+    char path[1200];
+    snprintf(path, sizeof(path), "%s/frame_000001.qoi", dir);
+    FILE *fp = fopen(path, "wb");
+    ASSERT_NOT_NULL(fp);
+    fputc('x', fp);
+    fclose(fp);
+
+    FrameRecorder *rec = frame_recorder_new();
+    ASSERT_NOT_NULL(rec);
+    ASSERT_FALSE(frame_recorder_start(rec, dir, 12));
+    ASSERT_FALSE(rec->recording);
+    frame_recorder_free(rec);
+    rec_test_cleanup(dir, 1);
+}
+
+/* The manifest lists every frame, numbered from 1 with one row each —
+ * the invariant the truncation bug broke. */
+static void test_record_manifest_lists_every_frame(void)
+{
+#ifdef _WIN32
+    char dir[MAX_PATH];
+#else
+    char dir[128];
+#endif
+    ASSERT_TRUE(rec_test_dir(dir, sizeof(dir)));
+    FrameRecorder *rec = frame_recorder_new();
+    ASSERT_NOT_NULL(rec);
+    ASSERT_TRUE(frame_recorder_start(rec, dir, 30));
+
+    char path[1200];
+    for (int i = 1; i <= 5; i++) {
+        frame_recorder_build_path(rec, path, sizeof(path));
+        FILE *fp = fopen(path, "wb");
+        ASSERT_NOT_NULL(fp);
+        fputc('x', fp);
+        fclose(fp);
+        frame_recorder_advance(rec);
+    }
+    frame_recorder_stop(rec);
+    ASSERT_EQ(rec->frames_written, 5);
+
+    char manifest[1200];
+    snprintf(manifest, sizeof(manifest), "%s/frames.csv", dir);
+    FILE *fp = fopen(manifest, "r");
+    ASSERT_NOT_NULL(fp);
+    char line[256];
+    ASSERT_NOT_NULL(fgets(line, sizeof(line), fp));
+    ASSERT_STR_EQ(line, "index,timestamp,filename\n");
+    for (int i = 1; i <= 5; i++) {
+        ASSERT_NOT_NULL(fgets(line, sizeof(line), fp));
+        int idx = 0;
+        double ts = 0;
+        char fname[64] = { 0 };
+        ASSERT_EQ(sscanf(line, "%d,%lf,%63s", &idx, &ts, fname), 3);
+        ASSERT_EQ(idx, i);
+        char expect[64];
+        snprintf(expect, sizeof(expect), "frame_%06d.qoi", i);
+        ASSERT_STR_EQ(fname, expect);
+    }
+    ASSERT_NULL(fgets(line, sizeof(line), fp)); /* no extra rows */
+    fclose(fp);
+
+    frame_recorder_free(rec);
+    rec_test_cleanup(dir, 5);
+}
+
+/* Through the script engine: a refused record-start fails the run. */
+static void test_record_restart_fails_run(void)
+{
+    FakeExt f;
+    fake_ext_init(&f);
+    FrameRecorder *rec = frame_recorder_new();
+    ASSERT_NOT_NULL(rec);
+    f.ext.recorder = rec;
+#ifdef _WIN32
+    char dir[MAX_PATH];
+#else
+    char dir[128];
+#endif
+    ASSERT_TRUE(rec_test_dir(dir, sizeof(dir)));
+
+    char text[1200];
+    snprintf(text, sizeof(text),
+             "record-start %s 12\nrecord-stop\nrecord-start %s 12\n",
+             dir, dir);
+    ASSERT_EQ(run_to_end(&f, text), CFR_SCRIPT_FAILED);
+    ASSERT_FALSE(rec->recording);
+
+    frame_recorder_free(rec);
+    rec_test_cleanup(dir, 0);
 }
 
 static void test_record_without_recorder_warns_but_passes(void)
@@ -694,6 +881,10 @@ int main(int argc, char *argv[])
     RUN_TEST(test_panel_hide);
     RUN_TEST(test_winsize);
     RUN_TEST(test_record_start_stop);
+    RUN_TEST(test_record_start_refuses_used_dir);
+    RUN_TEST(test_record_start_refuses_stray_frames);
+    RUN_TEST(test_record_manifest_lists_every_frame);
+    RUN_TEST(test_record_restart_fails_run);
     RUN_TEST(test_record_without_recorder_warns_but_passes);
     RUN_TEST(test_assert_no_hover_passes);
     RUN_TEST(test_assert_hover_fails_run);

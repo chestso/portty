@@ -3131,10 +3131,14 @@ static int sdl3_run(PorttyBackend *self)
         // === Debug script: post-render frame capture ===
         if (d->pending_record_frame) {
             d->pending_record_frame = false;
-            frame_recorder_build_path(d->frame_recorder, d->screendump_path,
-                                      sizeof(d->screendump_path));
-            sdl3_record_frame(d, d->screendump_path);
-            frame_recorder_advance(d->frame_recorder);
+            // Only capture while recording: a tick that lands after
+            // record-stop must not write a frame the manifest cannot list.
+            if (d->frame_recorder && d->frame_recorder->recording) {
+                frame_recorder_build_path(d->frame_recorder, d->screendump_path,
+                                          sizeof(d->screendump_path));
+                sdl3_record_frame(d, d->screendump_path);
+                frame_recorder_advance(d->frame_recorder);
+            }
         }
     }
 

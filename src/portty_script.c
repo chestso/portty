@@ -263,7 +263,11 @@ static bool exec_ext(void *ud, const char *name, const char *args,
         char *fps_str = strtok(NULL, " \t");
         if (fps_str)
             fps = atoi(fps_str);
-        frame_recorder_start(ext->recorder, dir, fps);
+        if (!frame_recorder_start(ext->recorder, dir, fps)) {
+            fprintf(stderr, "[%d] record-start: failed\n", line);
+            *fatal = true;
+            return false;
+        }
         if (ext->record_start_fn)
             ext->record_start_fn(ext->record_ud,
                                  ext->recorder->target_fps);
