@@ -601,26 +601,26 @@ const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
     return term->get_lottie_placements(term, id, count);
 }
 
-bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us)
+bool terminal_anim_tick(TerminalBackend *term, uint64_t now_us)
 {
-    if (!term || !term->lottie_tick)
+    if (!term || !term->anim_tick)
         return false;
-    return term->lottie_tick(term, now_us);
+    return term->anim_tick(term, now_us);
 }
 
-bool terminal_lottie_present(TerminalBackend *term, uint64_t present_us,
-                             uint64_t hold_us)
+bool terminal_anim_present(TerminalBackend *term, uint64_t present_us,
+                           uint64_t hold_us)
 {
-    if (!term || !term->lottie_present)
+    if (!term || !term->anim_present)
         return false;
-    return term->lottie_present(term, present_us, hold_us);
+    return term->anim_present(term, present_us, hold_us);
 }
 
-int terminal_lottie_playing_count(TerminalBackend *term)
+int terminal_anim_playing_count(TerminalBackend *term)
 {
-    if (!term || !term->lottie_playing_count)
+    if (!term || !term->anim_playing_count)
         return 0;
-    return term->lottie_playing_count(term);
+    return term->anim_playing_count(term);
 }
 
 int terminal_lottie_count(TerminalBackend *term)

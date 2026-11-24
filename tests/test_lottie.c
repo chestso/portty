@@ -371,11 +371,11 @@ static void test_tick_advance(void)
            "\"play\":{\"autostart\":true}}");
 
     /* First tick establishes the baseline timestamp */
-    bool advanced = terminal_lottie_tick(t, 1000000);
+    bool advanced = terminal_anim_tick(t, 1000000);
     ASSERT_FALSE(advanced);
 
     /* Advance 1 second → at 30fps should advance 30 frames */
-    advanced = terminal_lottie_tick(t, 2000000);
+    advanced = terminal_anim_tick(t, 2000000);
     ASSERT_TRUE(advanced);
 
     int n;
@@ -401,7 +401,7 @@ static void test_present_holds_two_refreshes(void)
     const uint64_t period = 16667;
     int prev = -1, run = 0, bad = 0, runs = 0;
     for (int k = 0; k < 120; k++) {
-        terminal_lottie_present(t, 1000000 + (uint64_t)k * period, period);
+        terminal_anim_present(t, 1000000 + (uint64_t)k * period, period);
         int n;
         const CfrLottie *l = terminal_get_lotties(t, &n);
         int f = l[0].current_frame;
@@ -427,7 +427,7 @@ static void test_playing_count(void)
 {
     TerminalBackend *t = make_term(80, 24);
     ASSERT_TRUE(t != NULL);
-    ASSERT_EQ(terminal_lottie_playing_count(t), 0);
+    ASSERT_EQ(terminal_anim_playing_count(t), 0);
 
     apc(t, "{\"cmd\":\"load\",\"id\":1,"
            "\"lottie\":{\"v\":\"5.6.0\",\"fr\":30,\"ip\":0,\"op\":90,"
@@ -437,10 +437,10 @@ static void test_playing_count(void)
            "\"w\":20,\"h\":20,\"layers\":[]},"
            "\"play\":{\"autostart\":false}}");
     ASSERT_EQ(terminal_lottie_count(t), 2);
-    ASSERT_EQ(terminal_lottie_playing_count(t), 1);
+    ASSERT_EQ(terminal_anim_playing_count(t), 1);
 
     apc(t, "{\"cmd\":\"pause\",\"id\":1}");
-    ASSERT_EQ(terminal_lottie_playing_count(t), 0);
+    ASSERT_EQ(terminal_anim_playing_count(t), 0);
 
     destroy_term(t);
 }
@@ -456,8 +456,8 @@ static void test_tick_paused(void)
            "\"w\":20,\"h\":20,\"layers\":[]},"
            "\"play\":{\"autostart\":false}}");
 
-    terminal_lottie_tick(t, 1000000);
-    bool advanced = terminal_lottie_tick(t, 2000000);
+    terminal_anim_tick(t, 1000000);
+    bool advanced = terminal_anim_tick(t, 2000000);
     ASSERT_FALSE(advanced);
 
     int n;

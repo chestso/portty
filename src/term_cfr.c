@@ -15,6 +15,8 @@
  * during the parallel-development window.
  */
 
+#include "config.h"
+
 #include "term_cfr.h"
 #include "base64.h"
 #include "path_compat.h"
@@ -716,36 +718,52 @@ static const CfrLottiePlacement *cfr_back_get_lottie_placements(
     CfrBackendData *d = term->backend_data;
     return cfr_get_lottie_placements(d->vt, id, count);
 }
-static bool cfr_back_lottie_tick(TerminalBackend *term, uint64_t now_us)
+/* The animation clock: drive every animated source (Lottie + kitty
+ * graphics) with one host call. The return value is Lottie's "a frame
+ * changed"; kitty frame switches damage their placement rows through the
+ * engine's damage accumulator instead (cfr_img_replace → cfr_damage_row),
+ * so the caller drains it with terminal_flush_damage(). */
+static bool cfr_back_anim_tick(TerminalBackend *term, uint64_t now_us)
 {
     CfrBackendData *d = term->backend_data;
-    return cfr_lottie_tick(d->vt, now_us);
+    bool changed = cfr_lottie_tick(d->vt, now_us);
+#ifdef HAVE_COFFER_KITTY_PRESENT
+    cfr_kitty_tick(d->vt, now_us);
+#endif
+    return changed;
 }
-static bool cfr_back_lottie_present(TerminalBackend *term, uint64_t present_us,
-                                    uint64_t hold_us)
+static bool cfr_back_anim_present(TerminalBackend *term, uint64_t present_us,
+                                  uint64_t hold_us)
 {
     CfrBackendData *d = term->backend_data;
 #ifdef HAVE_COFFER_LOTTIE_PRESENT
-    return cfr_lottie_present(d->vt, present_us, hold_us);
+    bool changed = cfr_lottie_present(d->vt, present_us, hold_us);
 #else
     (void)hold_us;
-    return cfr_lottie_tick(d->vt, present_us);
+    bool changed = cfr_lottie_tick(d->vt, present_us);
 #endif
+#ifdef HAVE_COFFER_KITTY_PRESENT
+    cfr_kitty_present(d->vt, present_us, hold_us);
+#endif
+    return changed;
 }
 
-static int cfr_back_lottie_playing_count(TerminalBackend *term)
+static int cfr_back_anim_playing_count(TerminalBackend *term)
 {
     CfrBackendData *d = term->backend_data;
+    int playing = 0;
 #ifdef HAVE_COFFER_LOTTIE_PRESENT
-    return cfr_lottie_playing_count(d->vt);
+    playing += cfr_lottie_playing_count(d->vt);
 #else
     int n = 0;
     const CfrLottie *l = cfr_get_lotties(d->vt, &n);
-    int playing = 0;
     for (int i = 0; l && i < n; i++)
         playing += l[i].playing ? 1 : 0;
-    return playing;
 #endif
+#ifdef HAVE_COFFER_KITTY_PRESENT
+    playing += cfr_kitty_playing_count(d->vt);
+#endif
+    return playing;
 }
 
 static int cfr_back_lottie_count(TerminalBackend *term)
@@ -1210,10 +1228,10 @@ TerminalBackend terminal_backend_cfr = {
     .set_content_scale = cfr_back_set_content_scale,
     .get_lotties = cfr_back_get_lotties,
     .get_lottie_placements = cfr_back_get_lottie_placements,
-    .lottie_tick = cfr_back_lottie_tick,
-    .lottie_present = cfr_back_lottie_present,
+    .anim_tick = cfr_back_anim_tick,
+    .anim_present = cfr_back_anim_present,
+    .anim_playing_count = cfr_back_anim_playing_count,
     .lottie_count = cfr_back_lottie_count,
-    .lottie_playing_count = cfr_back_lottie_playing_count,
     .get_mode = cfr_back_get_mode,
     .get_selection = cfr_back_get_selection,
 };

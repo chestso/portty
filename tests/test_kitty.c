@@ -294,6 +294,86 @@ static void test_bridge_retransmit_same_id(void)
     terminal_destroy(&t);
 }
 
+/* The host drives kitty animation playback through the shared animation
+ * clock: terminal_anim_tick() steps a playing image's frames (the first
+ * call starts playback), the frame switch bumps the image's version (the
+ * renderer's texture cache key) and damages the placement rows, and
+ * terminal_anim_playing_count() reports the running clock for frame pacing.
+ *
+ * Gated on the engine that drives kitty graphics animation (the
+ * configure check for cfr_kitty_present detects it). */
+#ifdef HAVE_COFFER_KITTY_PRESENT
+static void test_bridge_animation_clock(void)
+{
+    TerminalBackend t = terminal_backend_cfr;
+    {
+        CfrConfig cfg = CFR_CONFIG_DEFAULTS;
+        cfg.cols = 20;
+        cfg.rows = 10;
+        cfg.cell_w_px = 10;
+        cfg.cell_h_px = 6;
+        ASSERT_TRUE(terminal_init(&t, &cfg) != NULL);
+    };
+    terminal_set_cell_px(&t, 10, 6);
+
+    char seq[256];
+    char b64[64];
+
+    /* Root frame: red. */
+    uint8_t red[4] = { 255, 0, 0, 255 };
+    b64_encode(red, sizeof(red), b64);
+    snprintf(seq, sizeof(seq),
+             "\x1b_Ga=t,f=32,s=1,v=1,i=7;%s\x1b\\", b64);
+    feed(&t, seq);
+    /* Frame 2: green, 50 ms gap. */
+    uint8_t green[4] = { 0, 255, 0, 255 };
+    b64_encode(green, sizeof(green), b64);
+    snprintf(seq, sizeof(seq),
+             "\x1b_Ga=f,f=32,s=1,v=1,z=50,i=7;%s\x1b\\", b64);
+    feed(&t, seq);
+    /* Run: infinite loop. */
+    feed(&t, "\x1b_Ga=a,i=7,s=3,v=1\x1b\\");
+
+    ASSERT_EQ(terminal_anim_playing_count(&t), 1);
+
+    int n = 0;
+    const CfrImage *s = terminal_get_images(&t, &n);
+    ASSERT_NOT_NULL(s);
+    ASSERT_EQ(n, 1);
+    ASSERT_EQ(s[0].rgba[0], 255); /* the root still shows until the tick */
+    uint32_t v0 = s[0].version;
+
+    /* The first tick starts playback: root (gap 0) → frame 2. */
+    terminal_anim_tick(&t, 1000);
+    s = terminal_get_images(&t, &n);
+    ASSERT_EQ(s[0].rgba[1], 255);    /* green shows */
+    ASSERT_TRUE(s[0].version != v0); /* texture cache must re-upload */
+
+    /* Before the gap elapses, nothing moves. */
+    uint32_t v1 = s[0].version;
+    terminal_anim_tick(&t, 1000 + 49 * 1000);
+    s = terminal_get_images(&t, &n);
+    ASSERT_EQ(s[0].rgba[1], 255);
+    ASSERT_EQ(s[0].version, v1);
+
+    /* After it, the clock wraps to the root frame. */
+    terminal_anim_tick(&t, 1000 + 50 * 1000);
+    s = terminal_get_images(&t, &n);
+    ASSERT_EQ(s[0].rgba[0], 255); /* red root shows */
+    ASSERT_EQ(s[0].rgba[1], 0);
+    ASSERT_TRUE(s[0].version != v1);
+
+    /* s=1 stops the clock: nothing plays, nothing moves. */
+    feed(&t, "\x1b_Ga=a,i=7,s=1\x1b\\");
+    ASSERT_EQ(terminal_anim_playing_count(&t), 0);
+    uint32_t v2 = s[0].version;
+    terminal_anim_tick(&t, 1000 + 100 * 1000);
+    s = terminal_get_images(&t, &n);
+    ASSERT_EQ(s[0].version, v2);
+
+    terminal_destroy(&t);
+}
+#endif /* HAVE_COFFER_KITTY_PRESENT */
 /* The host uploads the image's PIXEL BUFFER: buf_w * buf_h * 4 bytes
  * taken from the engine's rgba. The buffer holds the decoded (native)
  * pixels, so buf_w/buf_h are the buffer's real extent — the display
@@ -366,6 +446,9 @@ int main(int argc, char *argv[])
     RUN_TEST(test_bridge_mixed_sources);
     RUN_TEST(test_bridge_chunked_transmit_no_action);
     RUN_TEST(test_bridge_retransmit_same_id);
+#ifdef HAVE_COFFER_KITTY_PRESENT
+    RUN_TEST(test_bridge_animation_clock);
+#endif
 #ifdef HAVE_COFFER_IMAGE_HANDLE
     RUN_TEST(test_texture_upload_at_content_scale);
 #endif

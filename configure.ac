@@ -225,6 +225,28 @@ if test "x$portty_cv_coffer_lottie_present" = "xyes"; then
             [Define if coffer has cfr_lottie_present and cfr_lottie_playing_count.])
 fi
 
+dnl coffer drives kitty graphics animations with a host clock
+dnl (cfr_kitty_present/tick advance playing kitty images, and
+dnl cfr_kitty_playing_count says whether any clock is running so the host can
+dnl decide whether frame pacing should run — the kitty twin of the Lottie
+dnl check above). Older releases have neither; the host then simply does not
+dnl drive kitty animation.
+AC_CACHE_CHECK([whether coffer drives kitty graphics animation],
+               [portty_cv_coffer_kitty_present], [
+  save_CPPFLAGS="$CPPFLAGS"
+  CPPFLAGS="$CPPFLAGS $COFFER_CFLAGS"
+  AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([[#include <coffer/coffer.h>]],
+                     [[(void)cfr_kitty_present; (void)cfr_kitty_playing_count;]])],
+    [portty_cv_coffer_kitty_present=yes],
+    [portty_cv_coffer_kitty_present=no])
+  CPPFLAGS="$save_CPPFLAGS"
+])
+if test "x$portty_cv_coffer_kitty_present" = "xyes"; then
+  AC_DEFINE([HAVE_COFFER_KITTY_PRESENT], [1],
+            [Define if coffer has cfr_kitty_present and cfr_kitty_playing_count.])
+fi
+
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])
 

@@ -2201,14 +2201,17 @@ static void sdl3_record_stop(void *user_data)
 
 // ── Animation pacing ─────────────────────────────────────────────────────
 //
-// An animation's frame is a pure function of the time it reaches the screen
-// (terminal_lottie_present). While one plays in a visible window the loop runs
-// in paced mode: vsync on, one present per display refresh, and each present
-// blocks until the next refresh. A FramePacer turns that into the refresh the
-// next present occupies, which is the time to sample the animation for. A
-// present that does not block (no vsync, a compositor without frame callbacks)
-// leaves the pacer in PACER_FREE: a periodic event timer then stands in for
-// the display clock and the loop goes back to waiting on events.
+// Every animation's clock is driven by one host call per presented frame
+// (terminal_anim_present): Lottie frames are a pure function of the time
+// they reach the screen, kitty frames step when their frame gap has elapsed.
+// While a clock runs in a visible window (terminal_anim_playing_count) the
+// loop runs in paced mode: vsync on, one present per display refresh, and
+// each present blocks until the next refresh. A FramePacer turns that into
+// the refresh the next present occupies, which is the time to sample the
+// animations for. A present that does not block (no vsync, a compositor
+// without frame callbacks) leaves the pacer in PACER_FREE: a periodic event
+// timer then stands in for the display clock and the loop goes back to
+// waiting on events.
 
 // The display's refresh period, from its current mode (59.94 Hz is not 60).
 static Uint64 sdl3_refresh_period_ns(Sdl3BackendData *d)
@@ -2283,7 +2286,7 @@ static void sdl3_pace_stop(Sdl3BackendData *d)
 // loop decides whether to block.
 static void sdl3_pace_update(Sdl3BackendData *d, TerminalBackend *term)
 {
-    bool want = d->window_visible && terminal_lottie_playing_count(term) > 0;
+    bool want = d->window_visible && terminal_anim_playing_count(term) > 0;
     if (!want) {
         sdl3_pace_stop(d);
         return;
@@ -2313,20 +2316,20 @@ static void sdl3_pace_update(Sdl3BackendData *d, TerminalBackend *term)
     }
 }
 
-// PACER_FREE: one frame tick. Samples the animation for the next slot of the
-// synthetic grid and marks the screen dirty when its frame changed; the normal
-// render step presents it.
+// PACER_FREE: one frame tick. Samples the animations for the next slot of
+// the synthetic grid and marks the screen dirty when a frame changed; the
+// normal render step (which drains the damage accumulator) presents it.
 static void sdl3_free_running_frame(Sdl3BackendData *d, TerminalBackend *term)
 {
     if (!d->pacing)
         return;
     Uint64 v = pacer_begin(&d->pacer, SDL_GetTicksNS());
     d->last_sample_ns = v;
-    if (terminal_lottie_present(term, v / 1000, pacer_hold_ns(&d->pacer) / 1000))
+    if (terminal_anim_present(term, v / 1000, pacer_hold_ns(&d->pacer) / 1000))
         terminal_mark_dirty(term);
 }
 
-// Paced mode, PACER_PROBING and PACER_LOCKED: sample the animation for the
+// Paced mode, PACER_PROBING and PACER_LOCKED: sample the animations for the
 // refresh this present will occupy, draw (or re-present the cached scene when
 // nothing changed), and present. The present blocks until the next refresh.
 static void sdl3_render_paced(Sdl3BackendData *d, TerminalBackend *term)
@@ -2335,10 +2338,17 @@ static void sdl3_render_paced(Sdl3BackendData *d, TerminalBackend *term)
     Uint64 start_ns = SDL_GetTicksNS();
     Uint64 v = pacer_begin(&d->pacer, start_ns);
     d->last_sample_ns = v;
-    if (terminal_lottie_present(term, v / 1000, pacer_hold_ns(&d->pacer) / 1000)) {
-        // The engine damaged the animation's placements: take that damage
-        // into this frame, or the next pass would redraw for it again.
-        terminal_flush_damage(term);
+    bool changed =
+        terminal_anim_present(term, v / 1000, pacer_hold_ns(&d->pacer) / 1000);
+    // The clocks damage their placements through the engine's damage
+    // accumulator. Drain it into this frame: kitty frame switches damage
+    // without a "changed" return, so the drain is unconditional (cheap
+    // when empty).
+    terminal_flush_damage(term);
+    if (changed) {
+        // A Lottie frame changed: take the engine's damage into this
+        // frame (or the next pass would redraw for it again) and force
+        // the repaint.
         terminal_mark_dirty(term);
     }
 

@@ -270,16 +270,29 @@ struct TerminalBackend
     void (*set_cell_px)(TerminalBackend *term, int cell_w, int cell_h);
     void (*set_content_scale)(TerminalBackend *term, float scale);
 
-    // Lottie animations (owned by the VT engine). Same ownership model as
-    // sixel: engine owns pixel data, host owns GPU texture cache.
+    // The animation clock. The VT engine owns every animated source —
+    // Lottie records and kitty graphics images with frames — and the host
+    // drives them all with one clock, once per presented frame. Lottie
+    // frames are phase-sampled from the presentation time; kitty frames
+    // are frame-gap driven and step when their gap has elapsed. A frame
+    // switch damages the source's placement rows through the engine's
+    // damage accumulator (drain with terminal_flush_damage()).
+    // anim_present/anim_tick return true when a LOTTIE frame changed;
+    // kitty frame switches report through the damage drain instead.
+    bool (*anim_tick)(TerminalBackend *term, uint64_t now_us);
+    bool (*anim_present)(TerminalBackend *term, uint64_t present_us,
+                         uint64_t hold_us);
+    // Sources with a running clock (Lottie playing + kitty run/loading).
+    // Zero-allocation and side-effect-free: the pacing decision calls it
+    // every loop pass.
+    int (*anim_playing_count)(TerminalBackend *term);
+
+    // Lottie data queries (engine owns pixel data, host owns GPU cache).
     const CfrLottie *(*get_lotties)(TerminalBackend *term, int *count);
     const CfrLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
                                                        uint64_t id, int *count);
-    bool (*lottie_tick)(TerminalBackend *term, uint64_t now_us);
-    bool (*lottie_present)(TerminalBackend *term, uint64_t present_us,
-                           uint64_t hold_us);
+    // Registered Lottie animations (playing or not).
     int (*lottie_count)(TerminalBackend *term);
-    int (*lottie_playing_count)(TerminalBackend *term);
 
     // Query a coffer mode (CfrMode). Returns false if the backend or mode
     // is unavailable.
@@ -521,16 +534,22 @@ void terminal_set_content_scale(TerminalBackend *term, float scale);
 const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count);
 const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
                                                          uint64_t id, int *count);
-bool terminal_lottie_tick(TerminalBackend *term, uint64_t now_us);
-// Advance playing animations to the frame that is on screen from present_us
-// for hold_us (the display refresh period; 0 = point sample). The frame is a
-// pure function of presentation time, so call it once per presented frame.
-// Returns true when a frame changed.
-bool terminal_lottie_present(TerminalBackend *term, uint64_t present_us,
-                             uint64_t hold_us);
-// Registered animations (playing or not) / animations currently playing.
+// The animation clock: drives every animated source (Lottie + kitty
+// graphics) with one call. Point-sample form: anim_present(term, now_us, 0).
+// Returns true when a Lottie frame changed; kitty frame switches damage
+// their placement rows through the engine's damage accumulator, which the
+// host drains with terminal_flush_damage() (cheap when empty).
+bool terminal_anim_tick(TerminalBackend *term, uint64_t now_us);
+// Advance the clocks to the frame that is on screen from present_us for
+// hold_us (the display refresh period; 0 = point sample). Call once per
+// presented frame.
+bool terminal_anim_present(TerminalBackend *term, uint64_t present_us,
+                           uint64_t hold_us);
+// Sources with a running clock (Lottie playing + kitty run/loading).
+// Side-effect-free: safe to call every loop pass for the pacing decision.
+int terminal_anim_playing_count(TerminalBackend *term);
+// Registered Lottie animations (playing or not).
 int terminal_lottie_count(TerminalBackend *term);
-int terminal_lottie_playing_count(TerminalBackend *term);
 
 // Query a coffer mode (CfrMode). Returns false if the backend or mode
 // is unavailable.

@@ -5,6 +5,12 @@ TERM_STUBS  = term_stubs.c
 # in (directly or via term.c) needs the coffer include path.
 TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 
+# The coffer bridge plus the hardened allocator it installs when
+# PORTTY_HARDEN_HEAP is set (sanitizer/debug builds): term_cfr.c pulls
+# heap_harden.c in, and heap_harden.c reports through portty_bug.c.
+TERM_SOURCES = ../src/term.c ../src/term_cfr.c ../src/base64.c \
+    ../src/path_compat.c ../src/heap_harden.c ../src/portty_bug.c
+
 EXTRA_DIST = test_helpers.h font_stubs.c test-pace-report.sh test-thai-clusters.sh
 
 # The Thai-cluster regression test drives the built portty binary.
@@ -43,51 +49,51 @@ test_paste_normalize_CFLAGS = $(TEST_CFLAGS)
 # Regression test for the on_mouse guard: altscreen without mouse_mode
 # must not allow terminal-level selection without Shift.
 test_altscreen_mouse_SOURCES = test_altscreen_mouse.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_altscreen_mouse_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_altscreen_mouse_LDADD = $(COFFER_LIBS)
 
 test_term_cfr_SOURCES = test_term_cfr.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_term_cfr_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_term_cfr_LDADD = $(COFFER_LIBS)
 
 # Terminal state dump (JSON) serializer. Dumps a coffer terminal to a
 # tmpfile and asserts on the JSON. Needs the generated portty_version.h.
 test_dump_SOURCES = test_dump.c $(TEST_COMMON) ../src/dump.c \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c \
+    $(TERM_SOURCES) \
     ../src/portty_conf.c
 test_dump_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
 test_dump_LDADD = $(COFFER_LIBS)
 
 test_osc52_SOURCES = test_osc52.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_osc52_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_osc52_LDADD = $(COFFER_LIBS)
 
 # Sixel end-to-end through the host bridge: feed a DCS sequence via
 # terminal_process_input and read images back via terminal_get_images.
 test_sixel_SOURCES = test_sixel.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_sixel_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_sixel_LDADD = $(COFFER_LIBS)
 
 # iTerm2 inline images (OSC 1337) end-to-end through the host bridge.
 test_osc1337_SOURCES = test_osc1337.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_osc1337_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_osc1337_LDADD = $(COFFER_LIBS)
 
 # kitty graphics (APC G) end-to-end through the host bridge.
 test_kitty_SOURCES = test_kitty.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_kitty_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_kitty_LDADD = $(COFFER_LIBS)
 
 # Lottie end-to-end through the host bridge: feed an APC sequence via
 # terminal_process_input and read animations back via terminal_get_lotties.
 test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_lottie_LDADD = $(COFFER_LIBS)
 
@@ -96,7 +102,7 @@ test_lottie_LDADD = $(COFFER_LIBS)
 if !HOST_WINDOWS
 check_PROGRAMS += test_pty_pause test_pty_winsize test_pty_reap
 test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_pty_pause_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_pty_pause_LDADD = $(COFFER_LIBS)
 
@@ -119,13 +125,13 @@ test_lottie_cache_CFLAGS = $(TEST_CFLAGS)
 # Shift+Click selection extension. Links term.c + term_cfr.c for the
 # coffer-backed selection logic.
 test_selection_extend_SOURCES = test_selection_extend.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_selection_extend_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_selection_extend_LDADD = $(COFFER_LIBS)
 
 # Selection scroll adjustment and damage-aware clearing.
 test_selection_scroll_SOURCES = test_selection_scroll.c $(TEST_COMMON) \
-    ../src/term.c ../src/term_cfr.c ../src/base64.c ../src/path_compat.c
+    $(TERM_SOURCES)
 test_selection_scroll_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_selection_scroll_LDADD = $(COFFER_LIBS)
 
@@ -178,8 +184,8 @@ test_rend_common_LDADD = -lm
 # callback wiring without SDL or a real PTY. It still needs term.c and
 # coffer for the full handler implementations.
 test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
-    ../src/portty_app.c ../src/term.c ../src/term_cfr.c ../src/base64.c \
-    ../src/path_compat.c ../src/pager.c ../src/embedded_term.c ../src/rend_common.c \
+    ../src/portty_app.c $(TERM_SOURCES) \
+    ../src/pager.c ../src/embedded_term.c ../src/rend_common.c \
     ../src/portty_panel.c \
     ../src/portty_conf.c ../src/diag.c ../src/dump.c ../src/font.c font_stubs.c
 if HOST_WINDOWS

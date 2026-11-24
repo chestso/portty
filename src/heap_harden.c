@@ -130,12 +130,14 @@ static void check_chunk(const void *p, const char *op)
                          " expected %016" PRIx64 ")",
                          op, p, h->magic, (uint64_t)HEAP_MAGIC);
     }
-    const uint32_t *canary =
-        (const uint32_t *)((const uint8_t *)p + h->size);
-    if (*canary != HEAP_CANARY) {
+    /* The trailer sits at payload + size, which need not be 4-byte
+     * aligned for odd request sizes — memcpy it out for the compare. */
+    uint32_t canary;
+    memcpy(&canary, (const uint8_t *)p + h->size, sizeof(canary));
+    if (canary != HEAP_CANARY) {
         PORTTY_BUG_ABORT("%s: canary scribbled on chunk %p (size=%zu canary=%08x"
                          " expected %08x)",
-                         op, p, (size_t)h->size, *canary,
+                         op, p, (size_t)h->size, canary,
                          (unsigned)HEAP_CANARY);
     }
 }
