@@ -376,11 +376,11 @@ static void test_bridge_animation_clock(void)
 #endif /* HAVE_COFFER_KITTY_PRESENT */
 /* The host uploads the image's PIXEL BUFFER: buf_w * buf_h * 4 bytes
  * taken from the engine's rgba. The buffer holds the decoded (native)
- * pixels, so buf_w/buf_h are the buffer's real extent — the display
- * scale lives in width_px/height_px. Copying the scaled size out of
- * the native buffer reads past the end of the allocation, so the test
- * copies exactly what the renderer copies: under ASan an overread
- * fails the test.
+ * pixels, and the display dims are those same device pixels — the
+ * raster draws 1:1, with no content-scale multiply. Copying anything
+ * other than the buffer's real extent reads past the end of the
+ * allocation, so the test copies exactly what the renderer copies:
+ * under ASan an overread fails the test.
  *
  * Gated on the engine that reports the buffer's real extent (the
  * configure check for the image handle detects it). */
@@ -414,10 +414,11 @@ static void test_texture_upload_at_content_scale(void)
     ASSERT_NOT_NULL(s);
     ASSERT_EQ(n, 1);
 
-    /* The DISPLAY is scaled: the 2x2 image is drawn 4x4 physical. */
-    ASSERT_EQ(s[0].width_px, 4);
-    ASSERT_EQ(s[0].height_px, 4);
-    /* The BUFFER is not: it holds the 2x2 decoded pixels. */
+    /* The DISPLAY is the raster's device pixels: the 2x2 image draws
+     * 2x2, 1:1, even at content scale 2. */
+    ASSERT_EQ(s[0].width_px, 2);
+    ASSERT_EQ(s[0].height_px, 2);
+    /* The BUFFER matches: it holds the 2x2 decoded pixels. */
     ASSERT_EQ(s[0].buf_w, 2);
     ASSERT_EQ(s[0].buf_h, 2);
 
