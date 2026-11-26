@@ -262,6 +262,12 @@ struct Sdl3BackendData
 
     float wheel_accum_y;
 
+    // File drop batch: SDL delivers one DROP_FILE event per path between
+    // DROP_BEGIN and DROP_COMPLETE; the whole batch pastes as one payload.
+    char **drop_paths;
+    size_t drop_count;
+    size_t drop_cap;
+
     // Debug script infrastructure
     PorttyScript *script;
     ScriptUIExt script_ext;
@@ -1282,6 +1288,8 @@ fail_wakeup:
     return false;
 }
 
+static void sdl3_drop_batch_clear(Sdl3BackendData *d);
+
 static void sdl3_destroy(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
@@ -1329,6 +1337,9 @@ static void sdl3_destroy(PorttyBackend *self)
     }
 
     free(d->last_title);
+
+    sdl3_drop_batch_clear(d);
+    free(d->drop_paths);
 
     // Flush any remaining deferred clipboard frees
     while (clipboard_deferred_head) {
@@ -2496,6 +2507,57 @@ static void sdl3_pty_gone(Sdl3BackendData *d)
     SDL_SetAtomicInt(&d->quit_requested, 1);
 }
 
+/* View-side effects of input reaching the terminal: snap back from
+ * scrollback, restart the cursor blink, redraw. */
+static void sdl3_input_side_effects(Sdl3BackendData *d, RendererSdl3Data *rend,
+                                    TerminalBackend *term)
+{
+    if (rend_sdl3_get_scroll_offset(rend) != 0) {
+        rend_sdl3_reset_scroll(rend);
+        terminal_mark_dirty(term);
+    }
+    d->cursor_blink_visible = true;
+    timer_reset(d->timers, d->cursor_blink_timer);
+    terminal_mark_dirty(term);
+}
+
+static void sdl3_drop_batch_clear(Sdl3BackendData *d)
+{
+    for (size_t i = 0; i < d->drop_count; i++)
+        free(d->drop_paths[i]);
+    d->drop_count = 0;
+}
+
+static void sdl3_drop_batch_add(Sdl3BackendData *d, const char *path)
+{
+    if (!path)
+        return;
+    if (d->drop_count == d->drop_cap) {
+        size_t cap = d->drop_cap ? d->drop_cap * 2 : 8;
+        char **paths = realloc(d->drop_paths, cap * sizeof(*paths));
+        if (!paths)
+            return;
+        d->drop_paths = paths;
+        d->drop_cap = cap;
+    }
+    char *copy = strdup(path);
+    if (!copy)
+        return;
+    d->drop_paths[d->drop_count++] = copy;
+}
+
+/* The drop is complete: paste the batch as one payload. */
+static void sdl3_drop_flush(Sdl3BackendData *d, RendererSdl3Data *rend,
+                            TerminalBackend *term)
+{
+    if (d->drop_count == 0)
+        return;
+    portty_app_handle_drop(d->app, (const char *const *)d->drop_paths,
+                           d->drop_count);
+    sdl3_drop_batch_clear(d);
+    sdl3_input_side_effects(d, rend, term);
+}
+
 static int sdl3_run(PorttyBackend *self)
 {
     Sdl3BackendData *d = sdl3_data(self);
@@ -2758,13 +2820,7 @@ static int sdl3_run(PorttyBackend *self)
                 } else if (result.force_redraw) {
                     terminal_mark_dirty(term);
                 } else if (result.handled || (result.len > 0)) {
-                    if (rend_sdl3_get_scroll_offset(rend) != 0) {
-                        rend_sdl3_reset_scroll(rend);
-                        terminal_mark_dirty(term);
-                    }
-                    d->cursor_blink_visible = true;
-                    timer_reset(d->timers, d->cursor_blink_timer);
-                    terminal_mark_dirty(term);
+                    sdl3_input_side_effects(d, rend, term);
                     if (result.len > 0 && !result.handled && d->pty) {
                         ssize_t written = pty_write(d->pty, result.data, result.len);
                         if (written < 0)
@@ -2780,17 +2836,28 @@ static int sdl3_run(PorttyBackend *self)
                         d->app, event.text.text);
 
                     if (result.handled || result.force_redraw || result.len > 0) {
-                        if (rend_sdl3_get_scroll_offset(rend) != 0) {
-                            rend_sdl3_reset_scroll(rend);
-                            terminal_mark_dirty(term);
-                        }
-                        d->cursor_blink_visible = true;
-                        timer_reset(d->timers, d->cursor_blink_timer);
-                        terminal_mark_dirty(term);
+                        sdl3_input_side_effects(d, rend, term);
                         if (result.len > 0 && !result.handled && d->pty)
                             pty_write(d->pty, result.data, result.len);
                     }
                 }
+                break;
+
+            case SDL_EVENT_DROP_BEGIN:
+                sdl3_drop_batch_clear(d);
+                break;
+
+            case SDL_EVENT_DROP_FILE:
+                sdl3_drop_batch_add(d, event.drop.data);
+                break;
+
+            case SDL_EVENT_DROP_TEXT:
+                portty_app_handle_drop_text(d->app, event.drop.data);
+                sdl3_input_side_effects(d, rend, term);
+                break;
+
+            case SDL_EVENT_DROP_COMPLETE:
+                sdl3_drop_flush(d, rend, term);
                 break;
 
             case SDL_EVENT_WINDOW_RESIZED:
