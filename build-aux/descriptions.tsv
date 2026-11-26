@@ -120,3 +120,6 @@ tests/test_kitty.c	Kitty graphics (APC G) end-to-end tests through the host brid
 tests/test_mouse_scale.c	Mouse coordinate scaling regression tests
 tests/test_osc1337.c	iTerm2 inline image (OSC 1337) end-to-end tests through the host bridge
 tests/test_version.c	Generated version header contract tests
+src/shell_quote.c	Shell quoting of dropped file paths
+src/shell_quote.h	Shell quoting of dropped file paths interface
+tests/test_shell_quote.c	Shell quoting of dropped file paths tests

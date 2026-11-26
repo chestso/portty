@@ -79,6 +79,7 @@ PORTTY_COMMON_SRC = \
     colr.c base64.c \
     png_writer.c png_reader.c qoi_writer.c \
     portty_conf.c diag.c dump.c pager.c timer.c path_compat.c os_compat.c display_info.c \
+    shell_quote.c \
     term_colors.c term_colors.h \
     embedded_term.c embedded_term.h \
     portty_bug.c heap_harden.c \
@@ -132,6 +133,7 @@ EXTRA_DIST = shaders/glyph_coverage.frag.glsl shaders/glyph_coverage_frag_spv.h 
     portty_appmodel.h portty_backend.h \
     portty_bug.h portty_conf.h portty_script.h portty_frame_rec.h portty_pace_trace.h frame_pacer.h portty_pty.h \
     rend_common.h rend_sdl3_atlas.h rend_sdl3.h rend_sdl3_shader.h \
+    shell_quote.h \
     term_cfr.h term.h term_colors.h timer.h \
     portty_panel.h
 
