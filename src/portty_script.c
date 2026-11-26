@@ -259,7 +259,12 @@ static bool exec_ext(void *ud, const char *name, const char *args,
             return true;
         }
         strip_quotes(buf);
-        snprintf(ext->screendump_path_buf, 512, "%s", buf);
+        if (snprintf(ext->screendump_path_buf, 512, "%s", buf) >= 512) {
+            fprintf(stderr, "[%d] screendump: path too long (max 511 bytes)\n",
+                    line);
+            *fatal = true;
+            return false;
+        }
         *ext->pending_screendump = true;
         return true;
     }
@@ -270,7 +275,12 @@ static bool exec_ext(void *ud, const char *name, const char *args,
             return true;
         }
         strip_quotes(buf);
-        snprintf(ext->renderdump_path_buf, 512, "%s", buf);
+        if (snprintf(ext->renderdump_path_buf, 512, "%s", buf) >= 512) {
+            fprintf(stderr, "[%d] renderdump: path too long (max 511 bytes)\n",
+                    line);
+            *fatal = true;
+            return false;
+        }
         *ext->pending_renderdump = true;
         return true;
     }

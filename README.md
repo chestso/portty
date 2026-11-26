@@ -51,6 +51,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Procedural box drawing and block element rendering (U+2500–U+257F), with float stroke thickness and proportional margins for seamless diagonal tiling
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
+- Drag and drop — dropping files on the window pastes their paths as shell-quoted words (space-joined, no trailing newline — Enter confirms); dropped text pastes like clipboard text. Both honor bracketed paste, so a TUI's attach/file prompt receives the paths as one paste
 - Soft-wrap aware word selection and copy
 - Underline styles (single, double, curly, dotted, dashed) with SGR 58/59 color support; SGR 21 selects the double underline
 - Overline (SGR 53/55) — a rule along the top of the cell, drawn in the cell's foreground color
@@ -120,21 +121,22 @@ On Windows the distribution ships two binaries: `portty.exe` is the console-subs
 
 ### Keyboard Shortcuts
 
-| Shortcut                 | Action                                                                       |
-| ------------------------ | ---------------------------------------------------------------------------- |
-| `Ctrl+C`                 | Copy selection to clipboard (sends SIGINT otherwise)                         |
-| `Ctrl+Shift+C`           | Copy selection to clipboard                                                  |
-| `Ctrl+Shift+V`           | Paste from clipboard                                                         |
-| `Ctrl+Shift+PageUp/Down` | Scroll through scrollback buffer (one page)                                  |
-| `Ctrl+Shift+Up/Down`     | Scroll one line through scrollback buffer                                    |
-| `Shift+drag`             | Override: select text when app owns the pointer (mouse mode) or in altscreen |
-| Right-click              | Copy selection if active, otherwise paste (works in altscreen too)           |
-| `Ctrl+click` on link     | Open OSC-8 URL via the system handler                                        |
-| `Ctrl+Shift+F6`          | Open the diagnostics report (built-in pager)                                 |
-| `Ctrl+Shift+F7`          | Dump the full terminal state to a JSON file (path shown in a status panel)   |
-| `Ctrl+Shift+N`           | Spawn a new terminal window in the shell's CWD                               |
-| `Ctrl+Delete`            | Reset the terminal's input protocol (see below)                              |
-| `Ctrl+Shift+F8`          | Full terminal reset — clears the screen and the scrollback (see below)       |
+| Shortcut                 | Action                                                                            |
+| ------------------------ | --------------------------------------------------------------------------------- |
+| `Ctrl+C`                 | Copy selection to clipboard (sends SIGINT otherwise)                              |
+| `Ctrl+Shift+C`           | Copy selection to clipboard                                                       |
+| `Ctrl+Shift+V`           | Paste from clipboard                                                              |
+| `Ctrl+Shift+PageUp/Down` | Scroll through scrollback buffer (one page)                                       |
+| `Ctrl+Shift+Up/Down`     | Scroll one line through scrollback buffer                                         |
+| `Shift+drag`             | Override: select text when app owns the pointer (mouse mode) or in altscreen      |
+| Right-click              | Copy selection if active, otherwise paste (works in altscreen too)                |
+| File drop                | Paste the dropped files' paths as shell-quoted words; dropped text pastes as text |
+| `Ctrl+click` on link     | Open OSC-8 URL via the system handler                                             |
+| `Ctrl+Shift+F6`          | Open the diagnostics report (built-in pager)                                      |
+| `Ctrl+Shift+F7`          | Dump the full terminal state to a JSON file (path shown in a status panel)        |
+| `Ctrl+Shift+N`           | Spawn a new terminal window in the shell's CWD                                    |
+| `Ctrl+Delete`            | Reset the terminal's input protocol (see below)                                   |
+| `Ctrl+Shift+F8`          | Full terminal reset — clears the screen and the scrollback (see below)            |
 
 ### Terminal Reset
 
@@ -223,6 +225,8 @@ One command per line. Lines starting with `#` and blank lines are ignored. The `
 | `mousemove <x> <y>`                                                   | Move the synthetic pointer to physical pixel coordinates                                                                                         |
 | `mousedown <x> <y> [button] [clicks]`                                 | Press a mouse button (default left, 1 click). Pair with `mousemove` to drag                                                                      |
 | `mouseup <x> <y> [button] [clicks]`                                   | Release a mouse button                                                                                                                           |
+| `drop <path> [path...]`                                               | Simulate a file drop: the paths paste as shell-quoted words; double-quote paths containing spaces                                                |
+| `drop-text <text>`                                                    | Simulate a text drop: pastes like clipboard text                                                                                                 |
 | `winsize <width> <height>`                                            | Set the window pixel size (goes through the compositor resize path)                                                                              |
 | `display-scale <scale>`                                               | Simulate a display migration: fonts are re-rasterized for the new DPI and the grid is re-derived from the new cell size                          |
 | `assert-hover`                                                        | Fail unless an OSC-8 hyperlink is hovered                                                                                                        |
