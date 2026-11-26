@@ -8,9 +8,9 @@
 /* The PTY reports the character grid's size in pixels through TIOCGWINSZ
  * (ws_xpixel/ws_ypixel), and a child that sizes images — chafa, img2sixel,
  * a file previewer — reads the cell's worth in pixels from there. Those
- * figures are LOGICAL pixels: everything a client sends back is scaled by
- * the content scale once, so a physical figure makes the client pack twice
- * the pixels per cell and the picture renders at twice its size. A zero
+ * figures are DEVICE pixels: the cell-size queries (CSI 16t) report the
+ * same unit and a client's raster draws 1:1, so a canvas sized from the
+ * winsize lands sharp on a scaled display instead of upscaled. A zero
  * figure is worse: the client falls back to guessing the cell aspect.
  *
  * The child never has to be asked anything — TIOCGWINSZ on the master fd
@@ -46,17 +46,18 @@ static PtyContext *spawn_child(int rows, int cols, int w_px, int h_px)
     return pty_create(rows, cols, w_px, h_px, argv);
 }
 
+/* A 24x80 grid on a 20x12 device-pixel cell reports 1600x288. */
 static void test_create_reports_grid_pixels(void)
 {
-    PtyContext *ctx = spawn_child(24, 80, 800, 480);
+    PtyContext *ctx = spawn_child(24, 80, 1600, 288);
     ASSERT_NOT_NULL(ctx);
 
     struct winsize ws = { 0 };
     ASSERT_TRUE(read_winsize(ctx, &ws));
     ASSERT_EQ(ws.ws_row, 24);
     ASSERT_EQ(ws.ws_col, 80);
-    ASSERT_EQ(ws.ws_xpixel, 800);
-    ASSERT_EQ(ws.ws_ypixel, 480);
+    ASSERT_EQ(ws.ws_xpixel, 1600);
+    ASSERT_EQ(ws.ws_ypixel, 288);
 
     pty_destroy(ctx);
 }
@@ -75,20 +76,21 @@ static void test_create_without_pixels_reports_zero(void)
     pty_destroy(ctx);
 }
 
-/* A resize pushes the grid and its pixel extent as one winsize. */
+/* A resize pushes the grid and its pixel extent as one winsize: a 30x100
+ * grid on a 20x12 device-pixel cell reports 2000x360. */
 static void test_resize_sets_grid_and_pixels(void)
 {
-    PtyContext *ctx = spawn_child(24, 80, 800, 480);
+    PtyContext *ctx = spawn_child(24, 80, 1600, 288);
     ASSERT_NOT_NULL(ctx);
 
-    ASSERT_EQ(pty_resize(ctx, 30, 100, 640, 384), 0);
+    ASSERT_EQ(pty_resize(ctx, 30, 100, 2000, 360), 0);
 
     struct winsize ws = { 0 };
     ASSERT_TRUE(read_winsize(ctx, &ws));
     ASSERT_EQ(ws.ws_row, 30);
     ASSERT_EQ(ws.ws_col, 100);
-    ASSERT_EQ(ws.ws_xpixel, 640);
-    ASSERT_EQ(ws.ws_ypixel, 384);
+    ASSERT_EQ(ws.ws_xpixel, 2000);
+    ASSERT_EQ(ws.ws_ypixel, 360);
 
     pty_destroy(ctx);
 }
@@ -96,7 +98,7 @@ static void test_resize_sets_grid_and_pixels(void)
 /* 0 means "unreported": a resize with no pixels clears the fields. */
 static void test_resize_without_pixels_reports_zero(void)
 {
-    PtyContext *ctx = spawn_child(24, 80, 800, 480);
+    PtyContext *ctx = spawn_child(24, 80, 1600, 288);
     ASSERT_NOT_NULL(ctx);
 
     ASSERT_EQ(pty_resize(ctx, 24, 80, 0, 0), 0);

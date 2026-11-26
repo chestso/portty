@@ -830,11 +830,10 @@ void portty_app_handle_resize(PorttyApp *app, int pixel_w, int pixel_h)
         if (cols > 0 && rows > 0) {
             terminal_resize(app->term, cols, rows);
             if (app->pty) {
-                // The child measures the cell in logical pixels; the
-                // winsize report and the engine's scaling then agree.
-                int lcw = cfr_px_logical(cell_w, content_scale);
-                int lch = cfr_px_logical(cell_h, content_scale);
-                pty_resize(app->pty, rows, cols, cols * lcw, rows * lch);
+                // The child measures the cell in device pixels, the same
+                // unit the cell-size queries report and images draw in.
+                pty_resize(app->pty, rows, cols, cols * cell_w,
+                           rows * cell_h);
             }
             if (pager_active(app->pager))
                 pager_resize(app->pager, cols, rows);

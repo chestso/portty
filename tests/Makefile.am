@@ -111,7 +111,7 @@ test_pty_pause_SOURCES = test_pty_pause.c $(TEST_COMMON) \
 test_pty_pause_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_pty_pause_LDADD = $(COFFER_LIBS)
 
-# The PTY's winsize pixel report (logical pixels) — needs a real PTY.
+# The PTY's winsize pixel report (device pixels) — needs a real PTY.
 test_pty_winsize_SOURCES = test_pty_winsize.c $(TEST_COMMON) ../src/pty.c
 test_pty_winsize_CFLAGS = $(TEST_CFLAGS)
 

@@ -31,7 +31,7 @@ struct PtyContext
     pid_t child_pid;
     int rows;
     int cols;
-    int win_w_px; /* grid size in LOGICAL pixels (0 = unreported) */
+    int win_w_px; /* grid size in DEVICE pixels (0 = unreported) */
     int win_h_px;
     int exit_status;              /* valid once exited is true */
     bool exited;                  /* sticky: child reaped (by anyone) */

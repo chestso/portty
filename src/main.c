@@ -552,14 +552,12 @@ static int portty_run_sdl3(PorttyArgs *args, PorttyConf *conf)
     if (args->demo_text) {
         terminal_process_input(term, args->demo_text, strlen(args->demo_text));
     } else {
-        // The grid's extent in the unit the child measures in: the winsize
-        // pixel fields and the cell-size queries carry logical pixels.
+        // The grid's extent in device pixels, the unit the child measures:
+        // the winsize pixel fields and the cell-size queries agree on it.
         int grid_w_px = 0, grid_h_px = 0;
         if (have_cell) {
-            grid_w_px =
-                args->init_cols * cfr_px_logical(cell_w, display_scale);
-            grid_h_px =
-                args->init_rows * cfr_px_logical(cell_h, display_scale);
+            grid_w_px = args->init_cols * cell_w;
+            grid_h_px = args->init_rows * cell_h;
         }
         pty = pty_create(args->init_rows, args->init_cols, grid_w_px,
                          grid_h_px, args->exec_argv);
