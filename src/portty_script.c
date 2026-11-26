@@ -29,7 +29,8 @@ static const char *const EXT_NAMES[] = {
     "screendump", "renderdump", "dumpstate", "record-start",
     "record-stop", "panel", "panel_hide", "mousemove",
     "mousedown", "mouseup", "winsize", "display-scale",
-    "assert-hover", "assert-no-hover", "diag", "present-held", NULL
+    "assert-hover", "assert-no-hover", "diag", "present-held",
+    "drop", "drop-text", NULL
 };
 
 /* ── Engine host hooks (adapt ScriptUIExt to CfrScriptHost) ── */
@@ -172,6 +173,71 @@ static bool exec_panel(ScriptUIExt *ext, char *args, int line)
                   body_x ? body_x : body, level, flags);
     free(title_x);
     free(body_x);
+    return true;
+}
+
+/* drop PATH [PATH...] — a synthetic file drop. Paths are literal (no
+ * escape expansion: a Windows path's backslashes must survive); a path
+ * containing spaces goes in double quotes, where \" is a literal quote.
+ * Tokens are carved out of the writable arg buffer in place. */
+static bool exec_drop(ScriptUIExt *ext, char *args, int line, bool *fatal)
+{
+    if (!ext->drop_fn) {
+        fprintf(stderr, "[%d] drop: not supported\n", line);
+        return true;
+    }
+    const char *paths[64];
+    size_t n = 0;
+    char *p = args;
+    while (*p) {
+        while (*p && isspace((unsigned char)*p))
+            p++;
+        if (!*p)
+            break;
+        bool quoted = (*p == '"');
+        if (quoted)
+            p++;
+        char *start = p;
+        char *end = p;
+        while (*end) {
+            if (quoted && *end == '"')
+                break;
+            if (quoted && *end == '\\' && end[1] == '"') {
+                end += 2;
+                continue;
+            }
+            if (!quoted && isspace((unsigned char)*end))
+                break;
+            end++;
+        }
+        if (quoted && *end != '"') {
+            fprintf(stderr, "[%d] drop: unterminated quoted path\n", line);
+            *fatal = true;
+            return false;
+        }
+        if (n == sizeof(paths) / sizeof(paths[0])) {
+            fprintf(stderr, "[%d] drop: too many paths (max %zu)\n",
+                    line, sizeof(paths) / sizeof(paths[0]));
+            *fatal = true;
+            return false;
+        }
+        char *next = end + (*end ? 1 : 0);
+        char *w = start;
+        for (char *r = start; r < end; r++) {
+            if (quoted && *r == '\\' && r + 1 < end && r[1] == '"')
+                r++;
+            *w++ = *r;
+        }
+        *w = '\0';
+        paths[n++] = start;
+        p = next;
+    }
+    if (n == 0) {
+        fprintf(stderr, "[%d] drop: requires at least one path\n", line);
+        *fatal = true;
+        return false;
+    }
+    ext->drop_fn(ext->drop_ud, paths, n);
     return true;
 }
 
@@ -361,6 +427,21 @@ static bool exec_ext(void *ud, const char *name, const char *args,
             return true;
         }
         ext->display_scale_fn(ext->display_scale_ud, scale);
+        return true;
+    }
+
+    if (strcmp(name, "drop") == 0)
+        return exec_drop(ext, buf, line, fatal);
+
+    if (strcmp(name, "drop-text") == 0) {
+        if (!ext->drop_text_fn) {
+            fprintf(stderr, "[%d] drop-text: not supported\n", line);
+            return true;
+        }
+        strip_quotes(buf);
+        char *text = cfr_script_expand_escapes(buf);
+        ext->drop_text_fn(ext->drop_text_ud, text ? text : buf);
+        free(text);
         return true;
     }
 

@@ -13,7 +13,8 @@
  *
  *   screendump, renderdump, dumpstate, record-start, record-stop,
  *   panel, panel_hide, mousemove, mousedown, mouseup, winsize,
- *   display-scale, assert-hover, assert-no-hover, diag, present-held
+ *   display-scale, assert-hover, assert-no-hover, diag, present-held,
+ *   drop, drop-text
  */
 
 #ifndef PORTTY_SCRIPT_H
@@ -57,6 +58,12 @@ typedef struct
     void (*mouse_button_fn)(void *ud, int x, int y, int button,
                             bool pressed, int clicks);
     void *mouse_button_ud;
+
+    /* Synthetic drag-and-drop (NULL = unsupported). */
+    void (*drop_fn)(void *ud, const char *const *paths, size_t n);
+    void *drop_ud;
+    void (*drop_text_fn)(void *ud, const char *text);
+    void *drop_text_ud;
 
     /* Notification panels (NULL = unsupported). */
     void (*panel_fn)(void *ud, int id, int col, int row, int cols,

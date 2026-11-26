@@ -1289,6 +1289,8 @@ fail_wakeup:
 }
 
 static void sdl3_drop_batch_clear(Sdl3BackendData *d);
+static void sdl3_input_side_effects(Sdl3BackendData *d, RendererSdl3Data *rend,
+                                    TerminalBackend *term);
 
 static void sdl3_destroy(PorttyBackend *self)
 {
@@ -2219,6 +2221,26 @@ static void sdl3_script_mouse_button(void *user_data, int x, int y, int button,
     }
 }
 
+/* Script `drop` / `drop-text`: the same app handlers the SDL drop events
+ * use, with the same view-side effects. */
+static void sdl3_script_drop(void *user_data, const char *const *paths, size_t n)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return;
+    portty_app_handle_drop(d->app, paths, n);
+    sdl3_input_side_effects(d, &d->rend, d->term);
+}
+
+static void sdl3_script_drop_text(void *user_data, const char *text)
+{
+    Sdl3BackendData *d = (Sdl3BackendData *)user_data;
+    if (!d || !d->app)
+        return;
+    portty_app_handle_drop_text(d->app, text);
+    sdl3_input_side_effects(d, &d->rend, d->term);
+}
+
 static bool sdl3_script_dumpstate(void *user_data, const char *path)
 {
     Sdl3BackendData *d = (Sdl3BackendData *)user_data;
@@ -2610,6 +2632,10 @@ static int sdl3_run(PorttyBackend *self)
             .mousemove_ud = d,
             .mouse_button_fn = sdl3_script_mouse_button,
             .mouse_button_ud = d,
+            .drop_fn = sdl3_script_drop,
+            .drop_ud = d,
+            .drop_text_fn = sdl3_script_drop_text,
+            .drop_text_ud = d,
             .panel_fn = sdl3_script_panel,
             .panel_ud = self,
             .panel_hide_fn = sdl3_script_panel_hide,
