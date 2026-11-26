@@ -36,10 +36,9 @@ typedef struct
     bool glyph_shader; // luminance-aware GPU glyph-coverage shader active
     float content_scale;
     int pixel_width, pixel_height;
-    int cell_width, cell_height;
-    int logical_cell_width, logical_cell_height; // the cell a child measures:
-                                                 // TIOCGWINSZ ws_xpixel/ws_ypixel
-                                                 // and the cell-size queries
+    int cell_width, cell_height; // device pixels: the renderer's cell, and
+                                 // the cell a child measures (TIOCGWINSZ
+                                 // ws_xpixel/ws_ypixel, CSI 16t)
     int cols, rows;
 
     // Configuration (effective)

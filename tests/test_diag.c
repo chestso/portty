@@ -32,8 +32,6 @@ static DiagSources sample(void)
         .pixel_height = 720,
         .cell_width = 10,
         .cell_height = 22,
-        .logical_cell_width = 5,
-        .logical_cell_height = 11,
         .cols = 128,
         .rows = 32,
         .config_path = "/tmp/test/portty.conf",
@@ -107,10 +105,15 @@ static void test_contains_values(void)
     ASSERT_TRUE(strstr(r, "/usr/share/fonts/test.ttf") != NULL);
     ASSERT_TRUE(strstr(r, "128 cols x 32 rows") != NULL);
     ASSERT_TRUE(strstr(r, "portty-vty-256color") != NULL);
-    // The cell and grid a child measures.
-    ASSERT_TRUE(strstr(r, "child cell") != NULL);
-    ASSERT_TRUE(strstr(r, "5 x 11 px") != NULL);
-    ASSERT_TRUE(strstr(r, "child grid") != NULL);
+    // The cell and grid a child measures: device pixels — the same cell
+    // the renderer uses, and the grid extent the winsize reports. The
+    // value follows the key's reset escape on the same row.
+    const char *cc = strstr(r, "child cell");
+    ASSERT_TRUE(cc != NULL);
+    ASSERT_TRUE(strstr(cc, "\x1b[0m10 x 22 px") != NULL);
+    const char *cg = strstr(r, "child grid");
+    ASSERT_TRUE(cg != NULL);
+    ASSERT_TRUE(strstr(cg, "\x1b[0m1280 x 704 px") != NULL);
     free(r);
 }
 
