@@ -24,9 +24,12 @@ if [ -z "$bin" ]; then
 fi
 [ -x "$bin" ] || exit 77
 
-tmp=${TMPDIR:-/tmp}/portty-drop.$$
+# Scratch lives directly under /tmp, not TMPDIR: wait-for matches within
+# one grid row, and macOS TMPDIR alone is ~65 characters — the joined
+# payload would wrap at 80 columns and never match.
+tmp=/tmp/portty-drop.$$
 trap 'rm -rf "$tmp"' EXIT
-mkdir -p "$tmp" || exit 77
+mkdir "$tmp" || exit 77
 
 # The binary must start in dummy video mode at all.
 printf 'quit\n' >"$tmp/quit.sh"
