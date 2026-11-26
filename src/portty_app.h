@@ -95,6 +95,11 @@ KeyboardResult portty_app_handle_text(PorttyApp *app, const char *text);
 // Paste the clipboard into the PTY, bracketed when the child enabled
 // bracketed paste. Ignored while the pager overlay is up.
 void portty_app_paste_clipboard(PorttyApp *app);
+// A file drop: paste the paths as quoted shell words, space-joined,
+// with no trailing newline. Ignored while the pager overlay is up.
+void portty_app_handle_drop(PorttyApp *app, const char *const *paths, size_t n);
+// Dropped text pastes like clipboard text (line endings normalized).
+void portty_app_handle_drop_text(PorttyApp *app, const char *text);
 bool portty_app_handle_mouse(PorttyApp *app, int px, int py,
                              int button, bool pressed, int clicks, int mod);
 void portty_app_handle_scroll(PorttyApp *app, int delta);

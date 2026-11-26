@@ -7,6 +7,8 @@
 
 #include "shell_quote.h"
 
+#include <stdbool.h>
+#include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,4 +78,39 @@ char *shell_quote(const char *s)
 #else
     return shell_quote_posix(s);
 #endif
+}
+
+char *shell_quote_join(const char *const *paths, size_t n)
+{
+    if (!paths || n == 0)
+        return NULL;
+    char **quoted = calloc(n, sizeof(*quoted));
+    if (!quoted)
+        return NULL;
+    size_t total = 0;
+    bool ok = true;
+    for (size_t i = 0; i < n; i++) {
+        quoted[i] = shell_quote(paths[i]);
+        if (!quoted[i]) {
+            ok = false;
+            break;
+        }
+        total += strlen(quoted[i]) + (i ? 1 : 0);
+    }
+    char *out = ok ? malloc(total + 1) : NULL;
+    if (out) {
+        size_t j = 0;
+        for (size_t i = 0; i < n; i++) {
+            if (i)
+                out[j++] = ' ';
+            size_t len = strlen(quoted[i]);
+            memcpy(out + j, quoted[i], len);
+            j += len;
+        }
+        out[j] = '\0';
+    }
+    for (size_t i = 0; i < n; i++)
+        free(quoted[i]);
+    free(quoted);
+    return out;
 }

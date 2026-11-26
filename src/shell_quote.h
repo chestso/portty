@@ -8,6 +8,8 @@
 #ifndef PORTTY_SHELL_QUOTE_H
 #define PORTTY_SHELL_QUOTE_H
 
+#include <stddef.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -32,6 +34,12 @@ extern "C" {
 char *shell_quote_posix(const char *s);
 char *shell_quote_win(const char *s);
 char *shell_quote(const char *s);
+
+/* Quote each path with shell_quote() and join the words with single
+ * spaces — the paste payload for a (multi-)file drop. malloc'd and
+ * NUL-terminated; NULL when n == 0, a path is NULL, or allocation
+ * fails. */
+char *shell_quote_join(const char *const *paths, size_t n);
 
 #ifdef __cplusplus
 }

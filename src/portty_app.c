@@ -18,6 +18,7 @@
 #include "portty_panel.h"
 #include "portty_pty.h"
 #include "rend_common.h"
+#include "shell_quote.h"
 #include "term.h"
 #include <coffer/coffer.h>
 #include <math.h>
@@ -107,6 +108,36 @@ void portty_app_paste_clipboard(PorttyApp *app)
         }
     }
     app->backend->clipboard_free(app->backend, clipboard);
+}
+
+/* A file drop arrives as a paste of the quoted paths: one literal shell
+ * word per file, space-joined, no trailing newline — the user confirms
+ * with Enter. Quoting is the security boundary: at a bare prompt
+ * bracketed paste is off, so the bytes land as raw shell input. */
+void portty_app_handle_drop(PorttyApp *app, const char *const *paths, size_t n)
+{
+    if (!app || !paths || n == 0 || pager_active(app->pager))
+        return;
+    vlog("Drop: %zu path(s)\n", n);
+    char *payload = shell_quote_join(paths, n);
+    if (payload) {
+        app_send_paste(app, payload, strlen(payload));
+        free(payload);
+    }
+}
+
+/* Dropped text (a selection dragged from another window) pastes like
+ * clipboard text: line endings normalized, bracketed when asked. */
+void portty_app_handle_drop_text(PorttyApp *app, const char *text)
+{
+    if (!app || !text || pager_active(app->pager))
+        return;
+    size_t len = 0;
+    char *norm = terminal_paste_normalize(text, strlen(text), &len);
+    if (norm) {
+        app_send_paste(app, norm, len);
+        free(norm);
+    }
 }
 
 void portty_app_clipboard_set(const char *text, size_t len, void *user_data)

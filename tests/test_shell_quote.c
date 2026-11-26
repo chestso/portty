@@ -107,6 +107,39 @@ static void test_platform_dispatch(void)
     free(q);
 }
 
+/* A multi-file drop is one paste: quoted words joined by single spaces. */
+static void test_join(void)
+{
+    const char *one[] = { "/tmp/a" };
+    char *q = shell_quote_join(one, 1);
+    ASSERT_NOT_NULL(q);
+#ifdef _WIN32
+    ASSERT_STR_EQ(q, "\"/tmp/a\"");
+#else
+    ASSERT_STR_EQ(q, "'/tmp/a'");
+#endif
+    free(q);
+
+    const char *many[] = { "/tmp/a b", "/tmp/c", "x;echo PWNED" };
+    q = shell_quote_join(many, 3);
+    ASSERT_NOT_NULL(q);
+#ifdef _WIN32
+    ASSERT_STR_EQ(q, "\"/tmp/a b\" \"/tmp/c\" \"x;echo PWNED\"");
+#else
+    ASSERT_STR_EQ(q, "'/tmp/a b' '/tmp/c' 'x;echo PWNED'");
+#endif
+    free(q);
+}
+
+static void test_join_degenerate(void)
+{
+    ASSERT_NULL(shell_quote_join(NULL, 3));
+    const char *paths[] = { "/tmp/a" };
+    ASSERT_NULL(shell_quote_join(paths, 0));
+    const char *with_null[] = { "/tmp/a", NULL };
+    ASSERT_NULL(shell_quote_join(with_null, 2));
+}
+
 int main(int argc, char *argv[])
 {
     test_parse_args(argc, argv);
@@ -120,6 +153,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_win_style);
     RUN_TEST(test_null_input);
     RUN_TEST(test_platform_dispatch);
+    RUN_TEST(test_join);
+    RUN_TEST(test_join_degenerate);
 
     TEST_SUMMARY();
 }
