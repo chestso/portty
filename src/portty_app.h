@@ -92,6 +92,9 @@ void portty_app_bell(void *user_data);
 KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
                                      int mod, uint32_t codepoint);
 KeyboardResult portty_app_handle_text(PorttyApp *app, const char *text);
+// Paste the clipboard into the PTY, bracketed when the child enabled
+// bracketed paste. Ignored while the pager overlay is up.
+void portty_app_paste_clipboard(PorttyApp *app);
 bool portty_app_handle_mouse(PorttyApp *app, int px, int py,
                              int button, bool pressed, int clicks, int mod);
 void portty_app_handle_scroll(PorttyApp *app, int delta);

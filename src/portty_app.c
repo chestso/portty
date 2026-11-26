@@ -73,6 +73,42 @@ static void app_release_selection_pause(PorttyApp *app)
     app->backend->resume_pty(app->backend);
 }
 
+/* Canonical paste writer: every paste source (shortcut, middle click,
+ * file drop) goes through here, so the selection's PTY pause is always
+ * released and the payload is bracketed exactly when the child asked
+ * for bracketed paste. The bytes are sent as-is — newline normalization
+ * belongs to the clipboard callers, not here: a quoted file path may
+ * legitimately contain a literal newline. */
+static void app_send_paste(PorttyApp *app, const char *data, size_t len)
+{
+    if (!app->pty || !data || len == 0)
+        return;
+    if (terminal_selection_active(app->term))
+        app_release_selection_pause(app);
+    terminal_start_paste(app->term);
+    pty_write(app->pty, data, len);
+    terminal_end_paste(app->term);
+}
+
+/* Paste the clipboard (Ctrl+Shift+V, middle click). Ignored while the
+ * pager overlay is up: the pager is modal, and clipboard text must not
+ * reach the shell behind it. */
+void portty_app_paste_clipboard(PorttyApp *app)
+{
+    if (!app || !app->backend || pager_active(app->pager))
+        return;
+    char *clipboard = app->backend->clipboard_get(app->backend);
+    if (clipboard && clipboard[0] != '\0') {
+        size_t plen = 0;
+        char *paste = terminal_paste_normalize(clipboard, strlen(clipboard), &plen);
+        if (paste) {
+            app_send_paste(app, paste, plen);
+            free(paste);
+        }
+    }
+    app->backend->clipboard_free(app->backend, clipboard);
+}
+
 void portty_app_clipboard_set(const char *text, size_t len, void *user_data)
 {
     PorttyApp *app = (PorttyApp *)user_data;
@@ -630,21 +666,7 @@ KeyboardResult portty_app_handle_key(PorttyApp *app, int term_key,
 
     // Ctrl+Shift+V → paste
     if (term_key == TERM_KEY_NONE && codepoint == 'V' && (mod & TERM_MOD_CTRL) && (mod & TERM_MOD_SHIFT)) {
-        // Paste synchronously
-        if (!app->backend->clipboard_paste_async(app->backend, app->term, app->pty)) {
-            char *clipboard = app->backend->clipboard_get(app->backend);
-            if (clipboard && clipboard[0] != '\0') {
-                size_t plen = 0;
-                char *paste = terminal_paste_normalize(clipboard, strlen(clipboard), &plen);
-                if (paste) {
-                    terminal_start_paste(app->term);
-                    pty_write(app->pty, paste, plen);
-                    terminal_end_paste(app->term);
-                    free(paste);
-                }
-            }
-            app->backend->clipboard_free(app->backend, clipboard);
-        }
+        portty_app_paste_clipboard(app);
         result.handled = true;
         return result;
     }
@@ -1037,15 +1059,7 @@ bool portty_app_handle_mouse(PorttyApp *app, int pixel_x, int pixel_y,
             }
             terminal_selection_clear(app->term);
         } else {
-            if (!app->backend->clipboard_paste_async(app->backend, app->term, app->pty)) {
-                char *clipboard = app->backend->clipboard_get(app->backend);
-                if (clipboard && clipboard[0] != '\0') {
-                    terminal_start_paste(app->term);
-                    pty_write(app->pty, clipboard, strlen(clipboard));
-                    terminal_end_paste(app->term);
-                }
-                app->backend->clipboard_free(app->backend, clipboard);
-            }
+            portty_app_paste_clipboard(app);
         }
         return true;
     }

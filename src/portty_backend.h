@@ -95,13 +95,6 @@ struct PorttyBackend
     bool (*clipboard_set)(PorttyBackend *self, const char *text);
     void (*clipboard_free)(PorttyBackend *self, char *text);
 
-    // Async clipboard paste — write clipboard content to PTY with
-    // bracketed paste. Returns true if handled asynchronously.
-    // If NULL or returns false, caller falls back to synchronous
-    // clipboard_get + paste_text path.
-    bool (*clipboard_paste_async)(PorttyBackend *self,
-                                  TerminalBackend *term, PtyContext *pty);
-
     // ── PTY thread ─────────────────────────────────────────────
     bool (*register_pty)(PorttyBackend *self, PtyContext *pty);
     void (*pause_pty)(PorttyBackend *self);

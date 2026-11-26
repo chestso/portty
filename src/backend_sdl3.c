@@ -1491,15 +1491,6 @@ static void sdl3_clipboard_free(PorttyBackend *self, char *text)
     SDL_free(text);
 }
 
-static bool sdl3_clipboard_paste_async(PorttyBackend *self,
-                                       TerminalBackend *term, PtyContext *pty)
-{
-    (void)self;
-    (void)term;
-    (void)pty;
-    return false;
-}
-
 // ── PTY ──────────────────────────────────────────────────────────────────
 
 static bool sdl3_register_pty(PorttyBackend *self, PtyContext *pty)
@@ -3205,7 +3196,6 @@ PorttyBackend backend_sdl3 = {
     .clipboard_get = sdl3_clipboard_get,
     .clipboard_set = sdl3_clipboard_set,
     .clipboard_free = sdl3_clipboard_free,
-    .clipboard_paste_async = sdl3_clipboard_paste_async,
 
     .register_pty = sdl3_register_pty,
     .pause_pty = sdl3_pause_pty,
