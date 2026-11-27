@@ -2687,8 +2687,20 @@ static int sdl3_run(PorttyBackend *self)
             if (st != CFR_SCRIPT_RUNNING) {
                 d->script_done = true;
                 d->script_status = st;
-                if (st == CFR_SCRIPT_FAILED)
+                if (st == CFR_SCRIPT_FAILED) {
+                    // The failure line names the assertion or the wait that
+                    // timed out; the grid it was looking at is what says why
+                    // (a wrapped line, a shell that never printed its
+                    // prompt). In CI that screen is otherwise lost.
                     fprintf(stderr, "script FAILED — quitting\n");
+                    CfrTerm *vt = term_cfr_get_cfr_term(term);
+                    if (vt) {
+                        fprintf(stderr, "--- visible screen ---\n");
+                        cfr_script_dump(vt, stderr, CFR_SCRIPT_DUMP_VISIBLE,
+                                        0, 0, -1);
+                        fprintf(stderr, "--- end screen ---\n");
+                    }
+                }
                 if (st == CFR_SCRIPT_FAILED ||
                     portty_script_quit_requested(d->script))
                     self->request_quit(self);
