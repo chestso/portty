@@ -38,10 +38,22 @@ SDL_VIDEODRIVER=dummy "$bin" -S "$tmp/quit.sh" >/dev/null 2>&1 || exit 77
 fail=0
 touch "$tmp/a b.txt" "$tmp/c.txt"
 
+# The shell under test is a pinned, rc-free bash, not $SHELL. The prompt
+# is the child's, and wait-for matches inside a single grid row: a long
+# prompt plus the joined payload exceeds 80 columns, the line wraps, and
+# the assertion times out even though the drop arrived intact. A CI
+# runner's PROMPT_COMMAND/rc files can put that long prompt back after
+# the script exports PS1, so the fix is to start a shell nothing resets —
+# `bash --norc --noprofile` keeps the default `bash-5.2$ ` prompt (the
+# script still shortens it to `> `).
+if ! command -v bash >/dev/null 2>&1; then
+	exit 77
+fi
+shell_bin=$(command -v bash)
+
 # Delivery at an interactive shell prompt: a single path, a multi-file
 # batch with spaces, and dropped text. Ctrl+C (raw 03) clears the line
-# between drops so pastes never concatenate. A short prompt keeps the
-# joined payload inside one grid row.
+# between drops so pastes never concatenate.
 cat >"$tmp/paste.sh" <<EOF
 sendln export PS1='> '
 wait 0.3
@@ -58,7 +70,8 @@ drop-text hello dropped text
 wait-for "hello dropped text" 10
 quit
 EOF
-SDL_VIDEODRIVER=dummy "$bin" -S "$tmp/paste.sh" >"$tmp/paste.log" 2>&1 || {
+SDL_VIDEODRIVER=dummy "$bin" -S "$tmp/paste.sh" -- "$shell_bin" --norc --noprofile \
+	>"$tmp/paste.log" 2>&1 || {
 	echo "FAIL: paste delivery run failed" >&2
 	cat "$tmp/paste.log" >&2
 	fail=1
@@ -80,7 +93,8 @@ raw 0d
 wait 0.5
 quit
 EOF
-SDL_VIDEODRIVER=dummy "$bin" -S "$tmp/evil.sh" >"$tmp/evil.log" 2>&1 || {
+SDL_VIDEODRIVER=dummy "$bin" -S "$tmp/evil.sh" -- "$shell_bin" --norc --noprofile \
+	>"$tmp/evil.log" 2>&1 || {
 	echo "FAIL: hostile-name run failed" >&2
 	cat "$tmp/evil.log" >&2
 	fail=1
