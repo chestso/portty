@@ -591,16 +591,6 @@ const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count)
     return term->get_lotties(term, count);
 }
 
-const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
-                                                         uint64_t id, int *count)
-{
-    if (count)
-        *count = 0;
-    if (!term || !term->get_lottie_placements)
-        return NULL;
-    return term->get_lottie_placements(term, id, count);
-}
-
 bool terminal_anim_tick(TerminalBackend *term, uint64_t now_us)
 {
     if (!term || !term->anim_tick)

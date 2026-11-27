@@ -34,9 +34,10 @@ workflow see [CONTRIBUTING.md](CONTRIBUTING.md); for a feature list see
 ```
 
 portty is a C99 terminal emulator. It owns the window, input, rendering, fonts
-and the PTY, and delegates all terminal emulation (parsing, grid, scrollback,
-reflow, graphics decoding, Lottie rasterization) to **coffer**, an external
-library consumed through pkg-config. SDL3 provides the window, input, timers
+and the PTY, and delegates terminal emulation (parsing, grid, scrollback,
+reflow, graphics decoding, Lottie placement and playback) to **coffer**, an
+external library consumed through pkg-config. Portty rasterizes Lottie with
+ThorVG's CPU canvas. SDL3 provides the window, input, timers
 and a GPU renderer; FreeType and HarfBuzz rasterize and shape text; Fontconfig
 (Linux), Core Text (macOS) or GDI (Windows) find fonts.
 
@@ -56,6 +57,7 @@ but post events to the main thread.
 | Terminal bridge    | `term.c`, `term_cfr.c` (the `TerminalBackend` interface and its coffer binding)   |
 | Embedded terminals | `embedded_term.c` (a PTY-less coffer terminal: pager overlay, panel content)      |
 | Rendering          | `rend_sdl3.c`, `rend_sdl3_atlas.c`, `rend_common.c`, `rend_boxdraw.c`, `shaders/` |
+| Lottie raster      | `lottie_raster.c` (ThorVG SW scenes and current-frame buffers, no SDL)            |
 | Fonts              | `font.c`, `font_ft.c`, `colr.c`, `font_resolve*.c`                                |
 | PTY                | `pty.c` (POSIX), `pty_w32.c` (ConPTY)                                             |
 | Debug scripts      | `portty_script.c` (UI extension commands; the engine lives in coffer)             |
@@ -381,17 +383,14 @@ in portty.
 
 - Cell widths are computed by coffer at insertion time. The renderer treats a
   width-0 cell as a continuation.
-- Images (sixel, iTerm2, kitty, Lottie) are owned by the engine and fetched per
-  frame (`terminal_get_images`, `terminal_get_lotties`).
-  The host owns only a texture cache keyed by the engine's stable id and
-  version.
-- **Client pixels are logical.** Every pixel size a client hands the engine is
-  logical, and the engine multiplies by the content scale once on the way out.
-  Everything the terminal measures back to the client (`TIOCGWINSZ` pixel
-  fields, `CSI 14/16 t`, XTSMGRAPHICS, `OSC 1337;ReportCellSize`) is logical
-  too. This is the iTerm2 convention; kitty, foot and wezterm report device
-  pixels, and nothing in the protocol can tell a client which one it is
-  talking to except the 1337 reply, which carries the scale.
+- Raster images (sixel, iTerm2, kitty) are owned by the engine and fetched per
+  frame (`terminal_get_images`). Lottie definitions, placements and frame
+  selection are engine-owned too, but portty's `lottie_raster.c` owns their
+  vector scenes and pixels. Lottie textures key on `(handle, raster_rev)`.
+- **Client pixels are device pixels.** Raster sizes and cell measurements use
+  physical pixels and draw 1:1. The one exception is iTerm2's
+  `OSC 1337;ReportCellSize`, whose protocol-defined report is in points and
+  carries the scale separately.
 - The engine's cell-width contract is declared to child processes as
   `PORTTY_WIDTH=uts51` (and `PORTTY=1`).
 - A heap allocator (`heap_harden.c`) wraps coffer's allocator with a magic
@@ -443,6 +442,8 @@ on purpose:
 | `portty_pace_trace.c`    | `test_pace_trace`                  | trace format and file round trip                   |
 | `scripts/pace-report.sh` | `test-pace-report.sh`              | the hold histogram on hand-built traces            |
 | Lottie bridge            | `test_lottie`, `test_lottie_cache` | APC to placements; sampling by presentation time   |
+| `lottie_raster.c`        | `test_lottie_raster`               | CPU frames, seek, resize, invalid JSON, teardown   |
+| Lottie scene             | `test-lottie-render.sh`            | exact raster extent and color, display migration   |
 | script parser            | `test_debug_script`                | extension commands against a fake host             |
 
 Run the suite with `make check` from a build directory. Anything that depends

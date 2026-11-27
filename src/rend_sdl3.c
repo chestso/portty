@@ -366,6 +366,9 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle,
     data->ft_hint_target = FT_LOAD_TARGET_LIGHT;
     memset(&data->panels, 0, sizeof(data->panels));
     memset(data->panel_renders, 0, sizeof(data->panel_renders));
+    data->lottie_raster = NULL;
+    data->lottie_staging = NULL;
+    data->lottie_staging_cap = 0;
     data->linear_target = NULL;
     data->linear_w = 0;
     data->linear_h = 0;
@@ -420,6 +423,7 @@ bool rend_sdl3_init(RendererSdl3Data *data, SDL_Window *window_handle,
         return false;
     }
 
+    data->lottie_raster = lottie_raster_create();
     return true;
 }
 
@@ -431,8 +435,13 @@ void rend_sdl3_destroy(RendererSdl3Data *data)
     // Destroy sixel texture cache
     image_cache_clear(data);
 
-    // Destroy lottie texture cache
+    // Destroy lottie texture cache and host-side vector scenes
     lottie_cache_clear(data);
+    lottie_raster_destroy(data->lottie_raster);
+    data->lottie_raster = NULL;
+    free(data->lottie_staging);
+    data->lottie_staging = NULL;
+    data->lottie_staging_cap = 0;
 
     // Destroy linear-light render target
     if (data->linear_target) {
@@ -1283,15 +1292,10 @@ static void render_visible_cells(RendererSdl3Data *data, TerminalBackend *term,
 // numbers, and the engine lets a kitty image and an iTerm2 image with
 // the same id coexist. The handle is the engine's own identity for an
 // image — unique across the protocols, never reused — so the cache
-// keys on it. An engine without the handle leaves the id as the
-// identity.
+// keys on it.
 static inline uint64_t image_identity(const CfrImage *img)
 {
-#ifdef HAVE_COFFER_IMAGE_HANDLE
     return img->handle;
-#else
-    return img->id;
-#endif
 }
 
 // Does this placement belong to this image? Same reasoning as
@@ -1299,11 +1303,7 @@ static inline uint64_t image_identity(const CfrImage *img)
 static inline bool placement_belongs_to(const CfrImagePlacement *pl,
                                         const CfrImage *img)
 {
-#ifdef HAVE_COFFER_IMAGE_HANDLE
     return pl->image_handle == img->handle;
-#else
-    return pl->image_id == img->id;
-#endif
 }
 
 // Destroy all cached sixel textures
@@ -1682,7 +1682,7 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
 }
 
 // ---------------------------------------------------------------------------
-// Lottie animation cache and rendering
+// Lottie animation rasterization and rendering
 // ---------------------------------------------------------------------------
 
 static void lottie_cache_clear(RendererSdl3Data *data)
@@ -1699,8 +1699,8 @@ static void lottie_cache_reconcile(RendererSdl3Data *data,
 {
     for (int i = 0; i < data->lottie_cache_count;) {
         bool live = false;
-        for (int j = 0; j < count; j++) {
-            if (anims[j].id == data->lottie_cache[i].id) {
+        for (int j = 0; anims && j < count; j++) {
+            if (anims[j].handle == data->lottie_cache[i].handle) {
                 live = true;
                 break;
             }
@@ -1716,69 +1716,83 @@ static void lottie_cache_reconcile(RendererSdl3Data *data,
     }
 }
 
-static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
-                                       const CfrLottie *anim)
+// Convert the raster's straight-alpha sRGB pixels to the active compositing
+// space. The staging allocation is reused; unchanged frames never reach here.
+static const uint8_t *lottie_upload_pixels(RendererSdl3Data *data,
+                                           const LottieFrame *frame)
 {
-    uint8_t *linear = linearize_for_upload(data, anim->rgba, anim->canvas_w, anim->canvas_h);
-    const uint8_t *pixels = linear ? linear : anim->rgba;
-
-    for (int i = 0; i < data->lottie_cache_count; i++) {
-        if (data->lottie_cache[i].id != anim->id)
-            continue;
-        if (data->lottie_cache[i].w != anim->canvas_w ||
-            data->lottie_cache[i].h != anim->canvas_h) {
-            if (data->lottie_cache[i].texture)
-                SDL_DestroyTexture(data->lottie_cache[i].texture);
-            data->lottie_cache[i].texture = NULL;
-        } else if (data->lottie_cache[i].version != anim->version) {
-            SDL_UpdateTexture(data->lottie_cache[i].texture, NULL, pixels,
-                              anim->canvas_w * 4);
-            data->lottie_cache[i].version = anim->version;
-            free(linear);
-            return data->lottie_cache[i].texture;
-        } else {
-            free(linear);
-            return data->lottie_cache[i].texture;
-        }
-        SDL_Texture *t = SDL_CreateTexture(
-            data->renderer, SDL_PIXELFORMAT_RGBA32,
-            SDL_TEXTUREACCESS_STATIC, anim->canvas_w, anim->canvas_h);
-        if (!t) {
-            free(linear);
+    if (!data->linear_ok)
+        return frame->rgba;
+    size_t need = (size_t)frame->w * (size_t)frame->h * 4u;
+    if (data->lottie_staging_cap < need) {
+        uint8_t *staging = realloc(data->lottie_staging, need);
+        if (!staging)
             return NULL;
+        data->lottie_staging = staging;
+        data->lottie_staging_cap = need;
+    }
+    memcpy(data->lottie_staging, frame->rgba, need);
+    rend_linearize_rgba_in_place(data->lottie_staging, frame->w, frame->h);
+    return data->lottie_staging;
+}
+
+static SDL_Texture *lottie_get_texture(RendererSdl3Data *data,
+                                       const LottieFrame *frame)
+{
+    int slot = -1;
+    for (int i = 0; i < data->lottie_cache_count; i++) {
+        if (data->lottie_cache[i].handle == frame->handle) {
+            slot = i;
+            break;
         }
-        SDL_UpdateTexture(t, NULL, pixels, anim->canvas_w * 4);
-        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
-        data->lottie_cache[i].texture = t;
-        data->lottie_cache[i].version = anim->version;
-        data->lottie_cache[i].w = anim->canvas_w;
-        data->lottie_cache[i].h = anim->canvas_h;
-        free(linear);
-        return t;
+    }
+    if (slot < 0) {
+        if (data->lottie_cache_count >= LOTTIE_CACHE_MAX)
+            return NULL;
+        slot = data->lottie_cache_count++;
+        memset(&data->lottie_cache[slot], 0, sizeof(data->lottie_cache[slot]));
+        data->lottie_cache[slot].handle = frame->handle;
     }
 
-    SDL_Texture *tex = SDL_CreateTexture(
-        data->renderer, SDL_PIXELFORMAT_RGBA32,
-        SDL_TEXTUREACCESS_STATIC, anim->canvas_w, anim->canvas_h);
-    if (!tex) {
-        free(linear);
-        return NULL;
-    }
-    SDL_UpdateTexture(tex, NULL, pixels, anim->canvas_w * 4);
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    free(linear);
+    LottieCacheEntry *entry = &data->lottie_cache[slot];
+    if (entry->texture &&
+        entry->raster_rev == frame->raster_rev &&
+        entry->w == frame->w && entry->h == frame->h)
+        return entry->texture;
 
-    if (data->lottie_cache_count >= LOTTIE_CACHE_MAX) {
-        SDL_DestroyTexture(tex);
+    const uint8_t *pixels = lottie_upload_pixels(data, frame);
+    if (!pixels)
+        return NULL;
+
+    if (entry->texture && (entry->w != frame->w || entry->h != frame->h)) {
+        SDL_DestroyTexture(entry->texture);
+        entry->texture = NULL;
+    }
+    if (!entry->texture) {
+        entry->texture = SDL_CreateTexture(
+            data->renderer, SDL_PIXELFORMAT_RGBA32,
+            SDL_TEXTUREACCESS_STATIC, frame->w, frame->h);
+        if (!entry->texture)
+            return NULL;
+        SDL_SetTextureBlendMode(entry->texture, SDL_BLENDMODE_BLEND);
+    }
+    if (!SDL_UpdateTexture(entry->texture, NULL, pixels, frame->w * 4)) {
+        SDL_DestroyTexture(entry->texture);
+        entry->texture = NULL;
         return NULL;
     }
-    int n = data->lottie_cache_count++;
-    data->lottie_cache[n].texture = tex;
-    data->lottie_cache[n].id = anim->id;
-    data->lottie_cache[n].version = anim->version;
-    data->lottie_cache[n].w = anim->canvas_w;
-    data->lottie_cache[n].h = anim->canvas_h;
-    return tex;
+    entry->raster_rev = frame->raster_rev;
+    entry->w = frame->w;
+    entry->h = frame->h;
+    return entry->texture;
+}
+
+static void lottie_prepare(RendererSdl3Data *data, TerminalBackend *term)
+{
+    int count = 0;
+    const CfrLottie *anims = terminal_get_lotties(term, &count);
+    lottie_raster_sync(data->lottie_raster, anims, count);
+    lottie_cache_reconcile(data, anims, count);
 }
 
 static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
@@ -1786,28 +1800,27 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
 {
     int count = 0;
     const CfrLottie *anims = terminal_get_lotties(term, &count);
-    lottie_cache_reconcile(data, anims, count);
     if (count == 0)
         return;
 
-    float scale = data->content_scale > 0.0f ? data->content_scale : 1.0f;
+    int placement_count = 0;
+    const CfrImagePlacement *placements =
+        terminal_get_image_placements(term, &placement_count);
 
     for (int i = 0; i < count; i++) {
         const CfrLottie *anim = &anims[i];
-        int pl_count = 0;
-        const CfrLottiePlacement *pls =
-            terminal_get_lottie_placements(term, anim->id, &pl_count);
-
-        SDL_Texture *tex = lottie_get_texture(data, anim);
+        LottieFrame frame;
+        if (!lottie_raster_get(data->lottie_raster, anim->handle, &frame))
+            continue;
+        SDL_Texture *tex = lottie_get_texture(data, &frame);
         if (!tex)
             continue;
 
-        int scaled_canvas_w = logical_to_physical(anim->canvas_w, scale);
-        int scaled_canvas_h = logical_to_physical(anim->canvas_h, scale);
-
-        for (int j = 0; j < pl_count; j++) {
-            const CfrLottiePlacement *pl = &pls[j];
-            if (pl->layer != target_layer)
+        for (int j = 0; j < placement_count; j++) {
+            const CfrImagePlacement *pl = &placements[j];
+            if (pl->source != IMG_SRC_LOTTIE ||
+                pl->image_handle != anim->handle ||
+                pl->layer != target_layer)
                 continue;
 
             int screen_row = pl->row + data->scroll.scroll_offset;
@@ -1825,11 +1838,13 @@ static void render_lottie_layer(RendererSdl3Data *data, TerminalBackend *term,
                 SDL_SetTextureAlphaModFloat(tex,
                                             (float)pl->opacity_x256 / 255.0f);
 
-            int off_x = (box_w - scaled_canvas_w) / 2;
-            int off_y = (box_h - scaled_canvas_h) / 2;
+            /* The raster is already in device pixels. Center it in the cell
+             * box without resampling. */
+            int off_x = (box_w - frame.w) / 2;
+            int off_y = (box_h - frame.h) / 2;
             SDL_FRect dst = {
                 (float)(px + off_x), (float)(py + off_y),
-                (float)scaled_canvas_w, (float)scaled_canvas_h
+                (float)frame.w, (float)frame.h
             };
             SDL_RenderTexture(data->renderer, tex, NULL, &dst);
 
@@ -2122,12 +2137,15 @@ static void render_scene(RendererSdl3Data *data, TerminalBackend *term,
     SDL_SetRenderDrawColor(data->renderer, clear_color.r, clear_color.g,
                            clear_color.b, clear_color.a);
     SDL_RenderClear(data->renderer);
-    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, scroll_offset);
-    render_lottie_layer(data, term, 1); /* background lottie */
-    render_lottie_layer(data, term, 0); /* foreground lottie */
     if (with_sixel) {
-        render_images(data, term, true);  /* kitty z<0 behind text */
-        render_images(data, term, false); /* sixel/iTerm2 + kitty z>=0 on top */
+        lottie_prepare(data, term);
+        render_images(data, term, true);    /* kitty z<0 behind text */
+        render_lottie_layer(data, term, 1); /* background lottie */
+    }
+    render_visible_cells(data, term, display_rows, display_cols, cursor_visible, false, scroll_offset);
+    if (with_sixel) {
+        render_lottie_layer(data, term, 0); /* foreground lottie */
+        render_images(data, term, false);   /* sixel/iTerm2 + kitty z>=0 on top */
     }
 
     // Panel chrome layer — composited in the same light space as the scene.

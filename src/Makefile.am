@@ -83,13 +83,14 @@ PORTTY_COMMON_SRC = \
     term_colors.c term_colors.h \
     embedded_term.c embedded_term.h \
     portty_bug.c heap_harden.c \
-    rend_common.c rend_boxdraw.c \
+    rend_common.c rend_boxdraw.c lottie_raster.c lottie_raster.h \
     portty_script.c portty_frame_rec.c portty_pace_trace.c frame_pacer.c
 
 PORTTY_COMMON_CFLAGS = $(FREETYPE_CFLAGS) $(HARFBUZZ_CFLAGS) \
-    $(LIBPNG_CFLAGS) $(COFFER_CFLAGS) -I$(top_srcdir)/third_party/qoi
+    $(LIBPNG_CFLAGS) $(COFFER_CFLAGS) $(THORVG_CFLAGS) \
+    -I$(top_srcdir)/third_party/qoi
 PORTTY_COMMON_LDADD = $(FREETYPE_LIBS) $(HARFBUZZ_LIBS) \
-    $(LIBPNG_LIBS) $(COFFER_LIBS) -lm
+    $(LIBPNG_LIBS) $(COFFER_LIBS) $(THORVG_LIBS) -lm
 
 portty_SOURCES = main.c $(PORTTY_COMMON_SRC) \
     backend_sdl3.c rend_sdl3.c rend_sdl3_atlas.c \

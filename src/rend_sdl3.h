@@ -11,6 +11,7 @@
 #include "diag.h"
 #include "embedded_term.h"
 #include "font.h"
+#include "lottie_raster.h"
 #include "portty_backend.h"
 #include "portty_panel.h"
 #include "rend_common.h"
@@ -56,6 +57,14 @@ typedef struct PanelRender
     SDL_Texture *tex; // linear float target; NULL when unset
     int w, h;         // pixel size of tex (single source of truth)
 } PanelRender;
+
+typedef struct LottieCacheEntry
+{
+    SDL_Texture *texture;
+    uint64_t handle;
+    uint32_t raster_rev;
+    int w, h;
+} LottieCacheEntry;
 
 typedef struct RendererSdl3Data
 {
@@ -123,14 +132,11 @@ typedef struct RendererSdl3Data
     ImageCacheEntry image_cache[IMAGE_CACHE_MAX];
     int image_cache_count;
 
-    struct
-    {
-        SDL_Texture *texture;
-        uint64_t id;
-        uint32_t version;
-        int w, h;
-    } lottie_cache[LOTTIE_CACHE_MAX];
+    LottieCacheEntry lottie_cache[LOTTIE_CACHE_MAX];
     int lottie_cache_count;
+    LottieRaster *lottie_raster;
+    uint8_t *lottie_staging;
+    size_t lottie_staging_cap;
 
     TermColors colors;
 } RendererSdl3Data;

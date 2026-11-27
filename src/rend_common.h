@@ -90,7 +90,7 @@ void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport
 //
 // LOGICAL (from terminal engine/coffer):
 //   - sixel.width_px, sixel.height_px: unscaled pixel dimensions
-//   - lottie.canvas_w, lottie.canvas_h: unscaled pixel dimensions
+//   - LottieFrame.w, LottieFrame.h: exact device-pixel raster dimensions
 //   - Terminal column/row positions: always logical
 //   - Font metrics: unscaled
 //

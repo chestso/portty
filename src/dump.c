@@ -614,28 +614,37 @@ int terminal_dump_json(FILE *out, TerminalBackend *term, const TerminalDumpMeta 
     {
         int count = 0;
         const CfrLottie *los = terminal_get_lotties(term, &count);
+        int placement_count = 0;
+        const CfrImagePlacement *placements =
+            terminal_get_image_placements(term, &placement_count);
         fputs("  \"lotties\": [", out);
         for (int i = 0; los && i < count; i++) {
             fputs(i ? ",\n    " : "\n    ", out);
             fprintf(out,
-                    "{ \"id\": %llu, \"version\": %u, \"canvas_w\": %d, "
-                    "\"canvas_h\": %d, \"current_frame\": %d, \"frame_count\": %d, "
+                    "{ \"handle\": %llu, \"id\": %llu, \"definition_rev\": %u, "
+                    "\"raster_rev\": %u, \"px_w\": %d, \"px_h\": %d, "
+                    "\"current_frame\": %d, \"frame_count\": %d, "
                     "\"playing\": %s, \"speed\": %.3f, \"loop\": %s, \"placements\": [",
-                    (unsigned long long)los[i].id, los[i].version, los[i].canvas_w,
-                    los[i].canvas_h, los[i].current_frame, los[i].frame_count,
+                    (unsigned long long)los[i].handle,
+                    (unsigned long long)los[i].id, los[i].definition_rev,
+                    los[i].raster_rev, los[i].px_w, los[i].px_h,
+                    los[i].current_frame, los[i].frame_count,
                     los[i].playing ? "true" : "false", los[i].speed,
                     los[i].loop ? "true" : "false");
-            int pc = 0;
-            const CfrLottiePlacement *lp =
-                terminal_get_lottie_placements(term, los[i].id, &pc);
-            for (int j = 0; lp && j < pc; j++) {
-                fputs(j ? ", " : "", out);
+            bool first = true;
+            for (int j = 0; placements && j < placement_count; j++) {
+                const CfrImagePlacement *lp = &placements[j];
+                if (lp->source != IMG_SRC_LOTTIE ||
+                    lp->image_handle != los[i].handle)
+                    continue;
+                fputs(first ? "" : ", ", out);
+                first = false;
                 fprintf(out,
-                        "{ \"id\": %llu, \"abs_line\": %ld, \"row\": %d, \"col\": %d, "
+                        "{ \"id\": %llu, \"row\": %d, \"col\": %d, "
                         "\"rows\": %d, \"cols\": %d, \"layer\": %u, \"opacity\": %u }",
-                        (unsigned long long)lp[j].id, lp[j].abs_line, lp[j].row,
-                        lp[j].col, lp[j].rows, lp[j].cols, (unsigned)lp[j].layer,
-                        (unsigned)lp[j].opacity_x256);
+                        (unsigned long long)lp->id, lp->row, lp->col,
+                        lp->rows, lp->cols, (unsigned)lp->layer,
+                        (unsigned)lp->opacity_x256);
             }
             fputs("] }", out);
         }

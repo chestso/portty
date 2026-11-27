@@ -179,73 +179,29 @@ fi
 PKG_CHECK_MODULES([FREETYPE], [freetype2])
 PKG_CHECK_MODULES([HARFBUZZ], [harfbuzz >= 2.0])
 PKG_CHECK_MODULES([LIBPNG], [libpng])
-PKG_CHECK_MODULES([COFFER], [coffer >= 0.19.1])
+PKG_CHECK_MODULES([COFFER], [coffer >= 0.20.0])
 
-dnl coffer exposes the image HANDLE (CfrImage.handle / the placement's
-dnl image_handle) from 0.9 on: the public image id is only unique WITHIN
-dnl one protocol's id space (kitty's client-chosen i= and the engine's own
-dnl counter hand out the same numbers), so the host needs the engine's
-dnl own identity to key its texture cache and to pair a placement with
-dnl its image. Older coffer releases have no handle — the id is all they
-dnl offer, and the code falls back to it.
-AC_CACHE_CHECK([whether coffer exposes the image handle],
-               [portty_cv_coffer_image_handle], [
-  save_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$CPPFLAGS $COFFER_CFLAGS"
-  AC_COMPILE_IFELSE(
-    [AC_LANG_PROGRAM([[#include <coffer/coffer.h>]],
-                     [[CfrImage img; (void)img.handle;]])],
-    [portty_cv_coffer_image_handle=yes],
-    [portty_cv_coffer_image_handle=no])
-  CPPFLAGS="$save_CPPFLAGS"
+dnl Lottie vector rasterization belongs to the host. coffer supplies the
+dnl JSON, frame and placement; portty rasterizes it with ThorVG's CPU canvas.
+AC_ARG_ENABLE([lottie],
+  [AS_HELP_STRING([--disable-lottie],
+    [build without ThorVG Lottie rasterization])],
+  [enable_lottie="$enableval"],
+  [enable_lottie=auto])
+HAVE_THORVG=no
+AS_IF([test "x$enable_lottie" != xno], [
+  PKG_CHECK_MODULES([THORVG], [thorvg-1 >= 1.0], [
+    HAVE_THORVG=yes
+    AC_DEFINE([HAVE_THORVG], [1], [Define when ThorVG software rasterization is available])
+  ], [
+    AS_IF([test "x$enable_lottie" = xyes], [
+      AC_MSG_ERROR([Lottie was explicitly requested but thorvg-1 >= 1.0 was not found])
+    ])
+    AC_MSG_NOTICE([thorvg-1 not found — Lottie rasterization disabled])
+  ])
 ])
-if test "x$portty_cv_coffer_image_handle" = "xyes"; then
-  AC_DEFINE([HAVE_COFFER_IMAGE_HANDLE], [1],
-            [Define if coffer exposes CfrImage.handle (the image identity).])
-fi
-
-dnl coffer samples Lottie animations by presentation time
-dnl (cfr_lottie_present: the frame on screen is a pure function of the time it
-dnl reaches the screen, and cfr_lottie_playing_count says whether any animation
-dnl runs). Older releases only have the point-sample cfr_lottie_tick; the host
-dnl then passes no refresh period and counts playing animations itself.
-AC_CACHE_CHECK([whether coffer samples Lottie by presentation time],
-               [portty_cv_coffer_lottie_present], [
-  save_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$CPPFLAGS $COFFER_CFLAGS"
-  AC_COMPILE_IFELSE(
-    [AC_LANG_PROGRAM([[#include <coffer/coffer.h>]],
-                     [[(void)cfr_lottie_present; (void)cfr_lottie_playing_count;]])],
-    [portty_cv_coffer_lottie_present=yes],
-    [portty_cv_coffer_lottie_present=no])
-  CPPFLAGS="$save_CPPFLAGS"
-])
-if test "x$portty_cv_coffer_lottie_present" = "xyes"; then
-  AC_DEFINE([HAVE_COFFER_LOTTIE_PRESENT], [1],
-            [Define if coffer has cfr_lottie_present and cfr_lottie_playing_count.])
-fi
-
-dnl coffer drives kitty graphics animations with a host clock
-dnl (cfr_kitty_present/tick advance playing kitty images, and
-dnl cfr_kitty_playing_count says whether any clock is running so the host can
-dnl decide whether frame pacing should run — the kitty twin of the Lottie
-dnl check above). Older releases have neither; the host then simply does not
-dnl drive kitty animation.
-AC_CACHE_CHECK([whether coffer drives kitty graphics animation],
-               [portty_cv_coffer_kitty_present], [
-  save_CPPFLAGS="$CPPFLAGS"
-  CPPFLAGS="$CPPFLAGS $COFFER_CFLAGS"
-  AC_COMPILE_IFELSE(
-    [AC_LANG_PROGRAM([[#include <coffer/coffer.h>]],
-                     [[(void)cfr_kitty_present; (void)cfr_kitty_playing_count;]])],
-    [portty_cv_coffer_kitty_present=yes],
-    [portty_cv_coffer_kitty_present=no])
-  CPPFLAGS="$save_CPPFLAGS"
-])
-if test "x$portty_cv_coffer_kitty_present" = "xyes"; then
-  AC_DEFINE([HAVE_COFFER_KITTY_PRESENT], [1],
-            [Define if coffer has cfr_kitty_present and cfr_kitty_playing_count.])
-fi
+AM_CONDITIONAL([HAVE_THORVG], [test "x$HAVE_THORVG" = xyes])
+AC_SUBST([HAVE_THORVG])
 
 DEP_SDL3_VER=$($PKG_CONFIG --modversion sdl3 2>/dev/null || echo "unknown")
 AC_DEFINE_UNQUOTED([DEP_SDL3_VERSION], ["$DEP_SDL3_VER"], [SDL3 version])

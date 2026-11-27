@@ -58,7 +58,10 @@ tests/test_diag.c	Diagnostics report generation tests
 tests/test_dpi_scale.c	DPI scale argument parsing tests
 tests/test_dump.c	Terminal state dump (JSON) tests
 tests/test_link_hint.c	OSC-8 link hint panel geometry tests
+src/lottie_raster.c	Host-side Lottie software rasterizer
+src/lottie_raster.h	Host-side Lottie software rasterizer interface
 tests/test_lottie.c	Lottie animation end-to-end tests through the host bridge
+tests/test_lottie_raster.c	Lottie CPU rasterization tests
 tests/test_lottie_cache.c	Lottie cache logic tests
 tests/test_osc52.c	OSC 52 clipboard sequence tests
 tests/test_panel.c	Panel state management tests

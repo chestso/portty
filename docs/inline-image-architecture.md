@@ -23,9 +23,10 @@ and decoding logic.
 
 The common infrastructure, extracted from sixel and lottie:
 
-- **`CfrImg`** — one stored image: `id`, `version`, `layer`, `source`
-  (`IMG_SRC_*`), `abs_line`, `col`, `w`/`h`, `rows_tall`/`cols_wide`,
-  `rgba`, `cap`.
+- **`CfrImg`** — one stored graphics object: `id`, `handle`, `version`,
+  `layer`, `source` (`IMG_SRC_*`), `abs_line`, `col`, `w`/`h`,
+  `rows_tall`/`cols_wide`, `rgba`, `cap`, and protocol-private
+  `source_state`. Lottie objects have no engine pixel buffer.
 - **`CfrPlacement`** — one placement for the 1:N model (lottie, kitty):
   `id`, `image_id`, `abs_line`, `col`, `rows`/`cols`, `layer`,
   `opacity_x256`, `z_index`, `src_x/y/w/h`, `pix_offset_x/y`,
@@ -37,9 +38,9 @@ The common infrastructure, extracted from sixel and lottie:
 Key operations:
 
 - `cfr_img_add` — 1:1 image at the cursor (sixel, iTerm2).
-- `cfr_img_add_named` — id-keyed image (lottie, kitty transmit).
-- `cfr_img_blank_named` / `cfr_img_mark_dirty` — raster-in-place helpers for
-  lottie (ThorVG writes directly into the store's buffer).
+- `cfr_img_put_named` — id-keyed raster image (kitty transmit).
+- `cfr_img_add_object` — id-keyed vector object with protocol-owned state
+  (Lottie); the host rasterizes its JSON.
 - `cfr_img_add_placement` / `cfr_img_get_placements` /
   `cfr_img_get_placements_for` — 1:N placement management and query.
 - `cfr_img_replace` / `cfr_img_find_at` / `cfr_img_find_by_id` /
@@ -60,16 +61,14 @@ past the image and stays on its last row, kitty's rule.
 registers) and calls `cfr_img_add(..., IMG_SRC_SIXEL)` on finish. No
 placements; the image record _is_ the placement.
 
-**Lottie** — `lottie.c` keeps the JSON parser, ThorVG rasterizer, frame
-timing, and fit/scale logic. Pixel buffers and placements now live in the
-shared store:
-
-- `LtRec` drops `rgba`, `rgba_cap`, `placements`, `placement_count`; it keeps
-  `json`/arena, `tvg_*`, design/px dims, and playback fields.
-- `cfr_img_blank_named`+`cfr_img_mark_dirty` back the raster target;
-  `cfr_img_add_placement` creates placements.
-- `cfr_lottie_note_scroll`/`cfr_lottie_clear_display_rows` now delegate to
-  `cfr_img_*` on the shared store, then reconcile the parallel `LtRec` array.
+**Lottie** — coffer's `lottie.c` keeps transport, JSON metadata, frame timing,
+fit/scale logic and placement lifetime. The store record owns the
+protocol-private `LtRec` through `source_state` and destroys it with the
+object. `cfr_get_lotties()` exposes the JSON, device-pixel target size, current
+frame, stable handle and separate definition/raster revisions. Portty's
+`lottie_raster.c` owns ThorVG scenes and current-frame RGBA buffers; no pixels
+are stored in coffer. Scroll, erase and screen switches need no parallel-record
+reconciliation.
 
 **iTerm2** — `osc_1337.c` parses `File=`/multipart, base64-decodes, decodes the
 PNG via stb_image, then `cfr_img_add(..., IMG_SRC_ITERM)`.
@@ -92,12 +91,14 @@ offsets). Responses leave via OSC 5556 on Windows (the system conhost strips APC
 
 - `sixel_cache` → `image_cache`; `render_sixel_images` → `render_images`.
 - `render_images(data, term, negative_z)` runs in two passes: negative-z
-  placements behind text, non-negative (sixel/iTerm2/lottie default `z=0`)
-  on top.
+  kitty placements behind text, non-negative raster images on top.
 - Kitty placements render via `terminal_get_image_placements` with source
-  rects.
-- Lottie still uses its own texture cache + animation tick
-  (`render_lottie_layer`).
+  rects. Lottie uses the same generic placement array, matched by
+  `image_handle`.
+- `render_lottie_layer` is deliberately separate from bitmap minification:
+  a Lottie size change re-rasterizes the vector scene at the exact device-pixel
+  size instead of resampling a cached frame. Its texture cache keys on
+  `(handle, raster_rev)`, and its linear-light upload staging is reused.
 
 #### Minification filtering
 
@@ -131,9 +132,9 @@ behaviour end to end through an iTerm2 pixel-sized placement.
 Headless TDD throughout:
 
 - coffer: `test_cfr_image_store` (22), `test_cfr_lottie` (34),
-  `test_cfr_graphics` (21), `test_cfr_osc_1337` (9), plus sixel.
-- portty: `test_kitty` (kitty bridge), `test_osc1337` (iTerm2 bridge), and
-  the existing sixel/lottie suites. Full `make check` is green in both repos.
+  `test_cfr_graphics`, `test_cfr_osc_1337`, plus sixel.
+- portty: `test_kitty`, `test_osc1337`, `test_lottie`, `test_lottie_raster`
+  and the sixel suites. The raster test runs without SDL or a GPU. Full `make check` is green in both repos.
 
 ## Follow-ups
 
@@ -156,20 +157,6 @@ now folded into canonical names; the remainder are tagged below as still open.
   thin wrappers removed; `print.c`/`modes.c`/`term.c` now call `cfr_img_*`
   directly.
 
-**Still open:**
-
-- **`CfrLottiePlacement` / `cfr_get_lottie_placements`** remain a parallel to
-  `CfrImagePlacement` / `cfr_get_image_placements_for`. Decide whether lottie
-  should reuse the generic placement query and drop its lottie-specific
-  surface (or make `CfrLottiePlacement` a true prefix of
-  `CfrImagePlacement`).
-- **Lottie's `cfr_lottie_note_scroll`/`cfr_lottie_clear_display_rows`**
-  reconcile the parallel `LtRec` array and still re-invoke `cfr_img_*` from
-  `print.c`; see the reconciliation follow-up below.
-
-Rationale: one canonical name per concept. The `source` field already
-distinguishes protocols; the struct/function name doesn't need to.
-
 ### `CfrPlacement` field cleanup
 
 Several placement fields are kitty-only but live on the shared struct with the
@@ -177,21 +164,6 @@ Several placement fields are kitty-only but live on the shared struct with the
 `parent_*`). Acceptable, but a follow-up could document which fields each
 source actually populates, or move the kitty-only fields into a sidecar
 struct to keep the shared record lean.
-
-### Lottie texture cache unification
-
-Lottie still renders via `render_lottie_layer` with its own texture cache and
-animation tick, separate from the unified `image_cache`. The original design
-notes this is optional. If merged, lottie frames render through
-`render_images` and the `lottie_cache` disappears.
-
-### Scroll/clear reconciliation duplication
-
-`cfr_lottie_note_scroll`/`cfr_lottie_clear_display_rows` reconcile the
-parallel `LtRec` array after `cfr_img_*` culls the shared store. This
-two-collection dance is the last structural artifact of the migration. A
-cleaner model would give the store an owning callback or let lottie rebuild
-its index from the store on demand, eliminating the reconcile pass.
 
 ### Naming audit for `sixel_abs_top`
 

@@ -11,7 +11,7 @@
  * The protocol/state logic is unit-tested in coffer itself.
  * This file checks the portty side: that an APC Lottie sequence
  * fed through terminal_process_input() reaches the engine and comes back
- * out through terminal_get_lotties() / terminal_get_lottie_placements()
+ * out through terminal_get_lotties() / terminal_get_image_placements()
  * with the right metadata, that playback state changes work, and that
  * clear/delete remove animations.
  */
@@ -100,6 +100,23 @@ static void destroy_term(TerminalBackend *t)
     free(t);
 }
 
+static const CfrImagePlacement *get_placements(TerminalBackend *t,
+                                               const CfrLottie *anim,
+                                               int *out_count)
+{
+    static CfrImagePlacement matches[128];
+    int count = 0;
+    const CfrImagePlacement *all = terminal_get_image_placements(t, &count);
+    int n = 0;
+    for (int i = 0; all && i < count && n < 128; i++) {
+        if (all[i].source == IMG_SRC_LOTTIE &&
+            all[i].image_handle == anim->handle)
+            matches[n++] = all[i];
+    }
+    *out_count = n;
+    return n ? matches : NULL;
+}
+
 /* --- Tests --- */
 
 /* A load command creates one animation with correct metadata. */
@@ -119,8 +136,8 @@ static void test_load_basic(void)
     ASSERT_NOT_NULL(l);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].id, 1);
-    ASSERT_EQ(l[0].canvas_w, 40);
-    ASSERT_EQ(l[0].canvas_h, 40);
+    ASSERT_EQ(l[0].px_w, 40);
+    ASSERT_EQ(l[0].px_h, 40);
     ASSERT_EQ(l[0].current_frame, 0);
     ASSERT_EQ(l[0].frame_count, 90);
     ASSERT_TRUE(l[0].playing);
@@ -129,8 +146,8 @@ static void test_load_basic(void)
     ASSERT_EQ(l[0].placement_count, 1);
 
     int pn = -1;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);
     ASSERT_EQ(pl[0].col, 10);
@@ -263,8 +280,8 @@ static void test_background_layer(void)
     ASSERT_EQ(n, 1);
 
     int pn;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);
     ASSERT_EQ(pl[0].layer, 1);
@@ -293,8 +310,8 @@ static void test_place(void)
     ASSERT_EQ(l[0].placement_count, 2);
 
     int pn;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 2);
     ASSERT_EQ(pl[0].layer, 0);
@@ -307,8 +324,8 @@ static void test_place(void)
     destroy_term(t);
 }
 
-/* Version bumps on state changes. */
-static void test_version_bump(void)
+/* Raster revisions change only when the requested pixels change. */
+static void test_raster_revision(void)
 {
     TerminalBackend *t = make_term(80, 24);
     ASSERT_TRUE(t != NULL);
@@ -319,17 +336,20 @@ static void test_version_bump(void)
 
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
-    uint32_t v0 = l[0].version;
-    ASSERT_TRUE(v0 > 0);
+    uint32_t rev = l[0].raster_rev;
+    ASSERT_TRUE(rev > 0);
 
     apc(t, "{\"cmd\":\"pause\",\"id\":1}");
     l = terminal_get_lotties(t, &n);
-    ASSERT_TRUE(l[0].version > v0);
+    ASSERT_EQ(l[0].raster_rev, rev);
 
-    uint32_t v1 = l[0].version;
     apc(t, "{\"cmd\":\"play\",\"id\":1}");
     l = terminal_get_lotties(t, &n);
-    ASSERT_TRUE(l[0].version > v1);
+    ASSERT_EQ(l[0].raster_rev, rev);
+
+    apc(t, "{\"cmd\":\"seek\",\"id\":1,\"frame\":10}");
+    l = terminal_get_lotties(t, &n);
+    ASSERT_TRUE(l[0].raster_rev > rev);
 
     destroy_term(t);
 }
@@ -352,8 +372,8 @@ static void test_load_replace(void)
     const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].id, 1);
-    ASSERT_EQ(l[0].canvas_w, 80);
-    ASSERT_EQ(l[0].canvas_h, 80);
+    ASSERT_EQ(l[0].px_w, 80);
+    ASSERT_EQ(l[0].px_h, 80);
     ASSERT_EQ(l[0].frame_count, 120);
 
     destroy_term(t);
@@ -519,8 +539,8 @@ static void test_load_default_placement(void)
     ASSERT_EQ(n, 1);
 
     int pn;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_NOT_NULL(pl);
     ASSERT_EQ(pn, 1);
     /* Default cursor position is row 0, col 0 */
@@ -550,12 +570,12 @@ static void test_contain_cell_constraints(void)
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
-    ASSERT_EQ(l[0].canvas_w, 100);
-    ASSERT_EQ(l[0].canvas_h, 100);
+    ASSERT_EQ(l[0].px_w, 100);
+    ASSERT_EQ(l[0].px_h, 100);
 
     int pn;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_EQ(pl[0].cols, 10);
     ASSERT_EQ(pl[0].rows, 5);
 
@@ -579,12 +599,12 @@ static void test_contain_pixel_constraints(void)
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
-    ASSERT_EQ(l[0].canvas_w, 60);
-    ASSERT_EQ(l[0].canvas_h, 60);
+    ASSERT_EQ(l[0].px_w, 60);
+    ASSERT_EQ(l[0].px_h, 60);
 
     int pn;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_EQ(pl[0].cols, 6);
     ASSERT_EQ(pl[0].rows, 3);
 
@@ -611,12 +631,12 @@ static void test_region_fit(void)
     int n;
     const CfrLottie *l = terminal_get_lotties(t, &n);
     ASSERT_EQ(n, 1);
-    ASSERT_EQ(l[0].canvas_w, 200);
-    ASSERT_EQ(l[0].canvas_h, 200);
+    ASSERT_EQ(l[0].px_w, 200);
+    ASSERT_EQ(l[0].px_h, 200);
 
     int pn;
-    const CfrLottiePlacement *pl =
-        terminal_get_lottie_placements(t, l[0].id, &pn);
+    const CfrImagePlacement *pl =
+        get_placements(t, &l[0], &pn);
     ASSERT_EQ(pl[0].cols, 20);
     ASSERT_EQ(pl[0].rows, 10);
     ASSERT_EQ(pl[0].row, 0);
@@ -650,8 +670,8 @@ static void test_place_rescale_seamless(void)
            "\"placement\":{\"row\":0,\"col\":0,\"width\":80,\"height\":80}}");
 
     l = terminal_get_lotties(t, &n);
-    ASSERT_EQ(l[0].canvas_w, 80);
-    ASSERT_EQ(l[0].canvas_h, 80);
+    ASSERT_EQ(l[0].px_w, 80);
+    ASSERT_EQ(l[0].px_h, 80);
     /* Frame preserved across rescale */
     ASSERT_EQ(l[0].current_frame, 10);
     ASSERT_FALSE(l[0].playing);
@@ -689,8 +709,8 @@ static void test_load_chunk(void)
     ASSERT_NOT_NULL(l);
     ASSERT_EQ(n, 1);
     ASSERT_EQ(l[0].id, 1);
-    ASSERT_EQ(l[0].canvas_w, 20);
-    ASSERT_EQ(l[0].canvas_h, 20);
+    ASSERT_EQ(l[0].px_w, 20);
+    ASSERT_EQ(l[0].px_h, 20);
     ASSERT_EQ(l[0].frame_count, 30);
     ASSERT_TRUE(l[0].playing);
 
@@ -708,7 +728,7 @@ int main(int argc, char *argv[])
     RUN_TEST(test_delete);
     RUN_TEST(test_background_layer);
     RUN_TEST(test_place);
-    RUN_TEST(test_version_bump);
+    RUN_TEST(test_raster_revision);
     RUN_TEST(test_load_replace);
     RUN_TEST(test_tick_advance);
     RUN_TEST(test_tick_paused);

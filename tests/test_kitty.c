@@ -300,9 +300,7 @@ static void test_bridge_retransmit_same_id(void)
  * renderer's texture cache key) and damages the placement rows, and
  * terminal_anim_playing_count() reports the running clock for frame pacing.
  *
- * Gated on the engine that drives kitty graphics animation (the
- * configure check for cfr_kitty_present detects it). */
-#ifdef HAVE_COFFER_KITTY_PRESENT
+ */
 static void test_bridge_animation_clock(void)
 {
     TerminalBackend t = terminal_backend_cfr;
@@ -373,7 +371,7 @@ static void test_bridge_animation_clock(void)
 
     terminal_destroy(&t);
 }
-#endif /* HAVE_COFFER_KITTY_PRESENT */
+
 /* The host uploads the image's PIXEL BUFFER: buf_w * buf_h * 4 bytes
  * taken from the engine's rgba. The buffer holds the decoded (native)
  * pixels, and the display dims are those same device pixels — the
@@ -382,9 +380,7 @@ static void test_bridge_animation_clock(void)
  * allocation, so the test copies exactly what the renderer copies:
  * under ASan an overread fails the test.
  *
- * Gated on the engine that reports the buffer's real extent (the
- * configure check for the image handle detects it). */
-#ifdef HAVE_COFFER_IMAGE_HANDLE
+ */
 static void test_texture_upload_at_content_scale(void)
 {
     TerminalBackend t = terminal_backend_cfr;
@@ -435,7 +431,6 @@ static void test_texture_upload_at_content_scale(void)
 
     terminal_destroy(&t);
 }
-#endif /* HAVE_COFFER_IMAGE_HANDLE */
 
 int main(int argc, char *argv[])
 {
@@ -447,12 +442,8 @@ int main(int argc, char *argv[])
     RUN_TEST(test_bridge_mixed_sources);
     RUN_TEST(test_bridge_chunked_transmit_no_action);
     RUN_TEST(test_bridge_retransmit_same_id);
-#ifdef HAVE_COFFER_KITTY_PRESENT
     RUN_TEST(test_bridge_animation_clock);
-#endif
-#ifdef HAVE_COFFER_IMAGE_HANDLE
     RUN_TEST(test_texture_upload_at_content_scale);
-#endif
 
     TEST_SUMMARY();
 }

@@ -287,10 +287,9 @@ struct TerminalBackend
     // every loop pass.
     int (*anim_playing_count)(TerminalBackend *term);
 
-    // Lottie data queries (engine owns pixel data, host owns GPU cache).
+    // Lottie scene queries. The engine owns JSON, placement and playback;
+    // the host owns vector rasterization and the texture cache.
     const CfrLottie *(*get_lotties)(TerminalBackend *term, int *count);
-    const CfrLottiePlacement *(*get_lottie_placements)(TerminalBackend *term,
-                                                       uint64_t id, int *count);
     // Registered Lottie animations (playing or not).
     int (*lottie_count)(TerminalBackend *term);
 
@@ -530,10 +529,9 @@ const CfrImagePlacement *terminal_get_image_placements(TerminalBackend *term,
 void terminal_set_cell_px(TerminalBackend *term, int cell_w, int cell_h);
 void terminal_set_content_scale(TerminalBackend *term, float scale);
 
-// Lottie animation API. Same ownership model as sixel.
+// Lottie animation API. The engine supplies vector definitions, target sizes
+// and frame numbers; placements use terminal_get_image_placements().
 const CfrLottie *terminal_get_lotties(TerminalBackend *term, int *count);
-const CfrLottiePlacement *terminal_get_lottie_placements(TerminalBackend *term,
-                                                         uint64_t id, int *count);
 // The animation clock: drives every animated source (Lottie + kitty
 // graphics) with one call. Point-sample form: anim_present(term, now_us, 0).
 // Returns true when a Lottie frame changed; kitty frame switches damage

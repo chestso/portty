@@ -712,12 +712,6 @@ static const CfrLottie *cfr_back_get_lotties(TerminalBackend *term, int *count)
     CfrBackendData *d = term->backend_data;
     return cfr_get_lotties(d->vt, count);
 }
-static const CfrLottiePlacement *cfr_back_get_lottie_placements(
-    TerminalBackend *term, uint64_t id, int *count)
-{
-    CfrBackendData *d = term->backend_data;
-    return cfr_get_lottie_placements(d->vt, id, count);
-}
 /* The animation clock: drive every animated source (Lottie + kitty
  * graphics) with one host call. The return value is Lottie's "a frame
  * changed"; kitty frame switches damage their placement rows through the
@@ -726,44 +720,23 @@ static const CfrLottiePlacement *cfr_back_get_lottie_placements(
 static bool cfr_back_anim_tick(TerminalBackend *term, uint64_t now_us)
 {
     CfrBackendData *d = term->backend_data;
-    bool changed = cfr_lottie_tick(d->vt, now_us);
-#ifdef HAVE_COFFER_KITTY_PRESENT
+    bool changed = cfr_lottie_present(d->vt, now_us, 0);
     cfr_kitty_tick(d->vt, now_us);
-#endif
     return changed;
 }
 static bool cfr_back_anim_present(TerminalBackend *term, uint64_t present_us,
                                   uint64_t hold_us)
 {
     CfrBackendData *d = term->backend_data;
-#ifdef HAVE_COFFER_LOTTIE_PRESENT
     bool changed = cfr_lottie_present(d->vt, present_us, hold_us);
-#else
-    (void)hold_us;
-    bool changed = cfr_lottie_tick(d->vt, present_us);
-#endif
-#ifdef HAVE_COFFER_KITTY_PRESENT
     cfr_kitty_present(d->vt, present_us, hold_us);
-#endif
     return changed;
 }
 
 static int cfr_back_anim_playing_count(TerminalBackend *term)
 {
     CfrBackendData *d = term->backend_data;
-    int playing = 0;
-#ifdef HAVE_COFFER_LOTTIE_PRESENT
-    playing += cfr_lottie_playing_count(d->vt);
-#else
-    int n = 0;
-    const CfrLottie *l = cfr_get_lotties(d->vt, &n);
-    for (int i = 0; l && i < n; i++)
-        playing += l[i].playing ? 1 : 0;
-#endif
-#ifdef HAVE_COFFER_KITTY_PRESENT
-    playing += cfr_kitty_playing_count(d->vt);
-#endif
-    return playing;
+    return cfr_lottie_playing_count(d->vt) + cfr_kitty_playing_count(d->vt);
 }
 
 static int cfr_back_lottie_count(TerminalBackend *term)
@@ -1227,7 +1200,6 @@ TerminalBackend terminal_backend_cfr = {
     .set_cell_px = cfr_back_set_cell_px,
     .set_content_scale = cfr_back_set_content_scale,
     .get_lotties = cfr_back_get_lotties,
-    .get_lottie_placements = cfr_back_get_lottie_placements,
     .anim_tick = cfr_back_anim_tick,
     .anim_present = cfr_back_anim_present,
     .anim_playing_count = cfr_back_anim_playing_count,

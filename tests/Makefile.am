@@ -11,12 +11,12 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 TERM_SOURCES = ../src/term.c ../src/term_cfr.c ../src/base64.c \
     ../src/path_compat.c ../src/heap_harden.c ../src/portty_bug.c
 
-EXTRA_DIST = test_helpers.h font_stubs.c test-pace-report.sh test-thai-clusters.sh test-drop.sh test-image-downscale.sh
+EXTRA_DIST = test_helpers.h font_stubs.c test-pace-report.sh test-thai-clusters.sh test-lottie-render.sh test-drop.sh test-image-downscale.sh
 
 # The Thai-cluster regression test drives the built portty binary.
-AM_TESTS_ENVIRONMENT = PORTTY_BIN='$(abs_top_builddir)/src/portty'
+AM_TESTS_ENVIRONMENT = PORTTY_BIN='$(abs_top_builddir)/src/portty' PORTTY_LOTTIE='$(HAVE_THORVG)'
 
-check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_kitty test_lottie test_lottie_cache test_diag test_dump test_clipboard_deferred test_paste_normalize test_shell_quote test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_selection_scroll test_vs15_routing test_dpi_scale test_content_scale test_mouse_scale test_panel test_link_hint test_version test_pace_trace test_frame_pacer
+check_PROGRAMS = test_conf test_term_cfr test_osc52 test_sixel test_osc1337 test_kitty test_lottie test_lottie_raster test_lottie_cache test_diag test_dump test_clipboard_deferred test_paste_normalize test_shell_quote test_altscreen_mouse test_path_compat test_boxdraw test_cursor_render test_scroll test_timer test_rend_common test_portty_app test_debug_script test_selection_extend test_selection_scroll test_vs15_routing test_dpi_scale test_content_scale test_mouse_scale test_panel test_link_hint test_version test_pace_trace test_frame_pacer
 
 # test_atlas — SDL3 GPU atlas packing. Requires SDL3 backend.
 check_PROGRAMS += test_atlas
@@ -102,6 +102,11 @@ test_lottie_SOURCES = test_lottie.c $(TEST_COMMON) \
 test_lottie_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS)
 test_lottie_LDADD = $(COFFER_LIBS)
 
+# Host-side ThorVG software rasterization: real pixels without SDL or a GPU.
+test_lottie_raster_SOURCES = test_lottie_raster.c $(TEST_COMMON) \
+    $(TERM_SOURCES) ../src/lottie_raster.c
+test_lottie_raster_CFLAGS = $(TEST_CFLAGS) $(THORVG_CFLAGS)
+test_lottie_raster_LDADD = $(COFFER_LIBS) $(THORVG_LIBS)
 
 # test_pty_pause depends on POSIX PTY APIs.
 if !HOST_WINDOWS
@@ -192,14 +197,15 @@ test_portty_app_SOURCES = test_portty_app.c $(TEST_COMMON) \
     ../src/portty_app.c $(TERM_SOURCES) \
     ../src/pager.c ../src/embedded_term.c ../src/rend_common.c \
     ../src/portty_panel.c ../src/shell_quote.c \
-    ../src/portty_conf.c ../src/diag.c ../src/dump.c ../src/font.c font_stubs.c
+    ../src/portty_conf.c ../src/diag.c ../src/dump.c ../src/font.c \
+    ../src/lottie_raster.c font_stubs.c
 if HOST_WINDOWS
 test_portty_app_SOURCES += ../src/pty_w32.c
 else !HOST_WINDOWS
 test_portty_app_SOURCES += ../src/pty.c
 endif
-test_portty_app_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) -I$(top_builddir)/src
-test_portty_app_LDADD = $(COFFER_LIBS)
+test_portty_app_CFLAGS = $(TEST_CFLAGS) $(COFFER_CFLAGS) $(THORVG_CFLAGS) -I$(top_builddir)/src
+test_portty_app_LDADD = $(COFFER_LIBS) $(THORVG_LIBS)
 
 # Script parser. Pure string parsing — no SDL/coffer dependency for
 # the parser itself, but portty_script.h includes term.h which pulls
@@ -249,6 +255,7 @@ TESTS = $(check_PROGRAMS)
 if !HOST_WINDOWS
 TESTS += test-pace-report.sh
 TESTS += test-thai-clusters.sh
+TESTS += test-lottie-render.sh
 TESTS += test-image-downscale.sh
 TESTS += test-drop.sh
 endif

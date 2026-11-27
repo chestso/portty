@@ -10,15 +10,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-// ---- Lottie cache entry (mirrors the GPU-specific structs in both backends) ----
+// ---- Lottie cache entry (mirrors the SDL renderer's texture cache) ----
 
 #define LOTTIE_CACHE_MAX 64
 
 typedef struct
 {
     int texture; // fake texture handle (0 = none, 1+ = "allocated")
-    uint64_t id;
-    uint32_t version;
+    uint64_t handle;
+    uint32_t raster_rev;
     int w, h;
 } TestLottieEntry;
 
@@ -30,34 +30,34 @@ typedef struct
 
 // ---- Cache logic (pure, no GPU calls) ----
 
-// Returns index of entry with matching id, or -1 if not found.
-static int lottie_cache_find(TestLottieCache *cache, uint64_t id)
+// Returns index of entry with matching handle, or -1 if not found.
+static int lottie_cache_find(TestLottieCache *cache, uint64_t handle)
 {
     for (int i = 0; i < cache->count; i++)
-        if (cache->entries[i].id == id)
+        if (cache->entries[i].handle == handle)
             return i;
     return -1;
 }
 
 // Returns:
-//  0 = cache hit (same version, same size)
-//  1 = version changed (texture needs update, same size)
+//  0 = cache hit (same raster_rev, same size)
+//  1 = raster_rev changed (texture needs update, same size)
 //  2 = size changed (texture needs recreate)
 //  3 = not in cache (new entry needed)
-static int lottie_cache_check(TestLottieCache *cache, uint64_t id,
-                              uint32_t version, int w, int h)
+static int lottie_cache_check(TestLottieCache *cache, uint64_t handle,
+                              uint32_t raster_rev, int w, int h)
 {
-    int idx = lottie_cache_find(cache, id);
+    int idx = lottie_cache_find(cache, handle);
     if (idx < 0)
         return 3;
     if (cache->entries[idx].w != w || cache->entries[idx].h != h)
         return 2;
-    if (cache->entries[idx].version != version)
+    if (cache->entries[idx].raster_rev != raster_rev)
         return 1;
     return 0;
 }
 
-// Remove entries whose id is not in the active list.
+// Remove entries whose handle is not in the active list.
 // Calls destroy_fn for each removed entry's texture.
 static void lottie_cache_reconcile(TestLottieCache *cache,
                                    const CfrLottie *anims, int count)
@@ -65,7 +65,7 @@ static void lottie_cache_reconcile(TestLottieCache *cache,
     for (int i = 0; i < cache->count;) {
         bool live = false;
         for (int j = 0; j < count; j++) {
-            if (anims[j].id == cache->entries[i].id) {
+            if (anims[j].handle == cache->entries[i].handle) {
                 live = true;
                 break;
             }
@@ -81,13 +81,13 @@ static void lottie_cache_reconcile(TestLottieCache *cache,
 }
 
 // Insert or update a cache entry. Returns the index, or -1 if cache is full.
-static int lottie_cache_upsert(TestLottieCache *cache, uint64_t id,
-                               uint32_t version, int w, int h, int texture)
+static int lottie_cache_upsert(TestLottieCache *cache, uint64_t handle,
+                               uint32_t raster_rev, int w, int h, int texture)
 {
-    int idx = lottie_cache_find(cache, id);
+    int idx = lottie_cache_find(cache, handle);
     if (idx >= 0) {
         cache->entries[idx].texture = texture;
-        cache->entries[idx].version = version;
+        cache->entries[idx].raster_rev = raster_rev;
         cache->entries[idx].w = w;
         cache->entries[idx].h = h;
         return idx;
@@ -96,8 +96,8 @@ static int lottie_cache_upsert(TestLottieCache *cache, uint64_t id,
         return -1;
     idx = cache->count++;
     cache->entries[idx].texture = texture;
-    cache->entries[idx].id = id;
-    cache->entries[idx].version = version;
+    cache->entries[idx].handle = handle;
+    cache->entries[idx].raster_rev = raster_rev;
     cache->entries[idx].w = w;
     cache->entries[idx].h = h;
     return idx;
@@ -156,12 +156,12 @@ static void test_cache_reconcile_removes_stale(void)
     lottie_cache_upsert(&cache, 20, 1, 200, 200, 2);
     lottie_cache_upsert(&cache, 30, 1, 300, 300, 3);
 
-    // Active animations: only id=20
-    CfrLottie anims[1] = { { .id = 20 } };
+    // Active animations: only handle=20
+    CfrLottie anims[1] = { { .handle = 20 } };
     lottie_cache_reconcile(&cache, anims, 1);
 
     ASSERT_EQ(cache.count, 1);
-    ASSERT_EQ(cache.entries[0].id, 20);
+    ASSERT_EQ(cache.entries[0].handle, 20);
     ASSERT_EQ(cache.entries[0].texture, 2);
 }
 
@@ -182,7 +182,7 @@ static void test_cache_reconcile_all_live(void)
     lottie_cache_upsert(&cache, 10, 1, 100, 100, 1);
     lottie_cache_upsert(&cache, 20, 1, 200, 200, 2);
 
-    CfrLottie anims[2] = { { .id = 10 }, { .id = 20 } };
+    CfrLottie anims[2] = { { .handle = 10 }, { .handle = 20 } };
     lottie_cache_reconcile(&cache, anims, 2);
 
     ASSERT_EQ(cache.count, 2);
@@ -194,8 +194,8 @@ static void test_cache_upsert_new(void)
     int idx = lottie_cache_upsert(&cache, 10, 1, 100, 100, 1);
     ASSERT_EQ(idx, 0);
     ASSERT_EQ(cache.count, 1);
-    ASSERT_EQ(cache.entries[0].id, 10);
-    ASSERT_EQ(cache.entries[0].version, 1);
+    ASSERT_EQ(cache.entries[0].handle, 10);
+    ASSERT_EQ(cache.entries[0].raster_rev, 1);
     ASSERT_EQ(cache.entries[0].w, 100);
     ASSERT_EQ(cache.entries[0].h, 100);
     ASSERT_EQ(cache.entries[0].texture, 1);
@@ -208,7 +208,7 @@ static void test_cache_upsert_update(void)
     int idx = lottie_cache_upsert(&cache, 10, 2, 200, 200, 3);
     ASSERT_EQ(idx, 0);
     ASSERT_EQ(cache.count, 1);
-    ASSERT_EQ(cache.entries[0].version, 2);
+    ASSERT_EQ(cache.entries[0].raster_rev, 2);
     ASSERT_EQ(cache.entries[0].w, 200);
     ASSERT_EQ(cache.entries[0].texture, 3);
 }

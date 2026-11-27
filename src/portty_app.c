@@ -13,6 +13,7 @@
 #include "common.h"
 #include "diag.h"
 #include "dump.h"
+#include "lottie_raster.h"
 #include "pager.h"
 #include "portty_backend.h"
 #include "portty_panel.h"
@@ -1182,7 +1183,7 @@ void portty_app_show_diagnostics(PorttyApp *app)
         .altscreen = terminal_is_altscreen(app->term),
         .mouse_mode = terminal_get_mouse_mode(app->term),
         .vt_backend = app->term->name,
-        .lottie_rasterizer = cfr_have_lottie(),
+        .lottie_rasterizer = lottie_raster_available(),
         .lottie_pacing = pd.lottie_pacing,
         .osc52 = app->term->clipboard_set_cb != NULL,
         .bracketed_paste = terminal_get_mode(app->term, CFR_MODE_BRACKETED_PASTE),

@@ -47,7 +47,7 @@ Currently ships with coffer (terminal), SDL3 (renderer/platform), FreeType/HarfB
 - Unicode and emoji support (COLR v1 color fonts)
 - Emoji rendering with coverage-aware font routing — the color emoji font is used whenever it carries the glyph, regardless of VS15/VS16; VS15 (U+FE0E) does not force the text font. See "Emoji Rendering Paradigm" below.
 - Unified inline image rendering — sixel, iTerm2, and kitty graphics share one image cache and compositing path (`render_images`), drawn in two z-index passes: negative-z kitty placements behind text, non-negative (sixel/iTerm2 + kitty `z>=0`) on top. Kitty placements support source rectangles and z-index layering. Image pixels are **device (physical) pixels**, the kitty/foot/wezterm convention: a 128 px PNG covers 128 device pixels — half the logical extent a points-sized canvas would take on a 2× display — and its pixels map 1:1 onto device pixels (kitty rounds a natural-size placement up to a whole-cell box, or takes `c=`/`r=`; iTerm2 is exact unless given `width=`/`height=` hints). The sizes the terminal reports back (`TIOCGWINSZ` pixel fields, `CSI 14 t`, `CSI 16 t`) are device pixels too, so a client that sizes its raster to the cell grid (chafa) lands sharp and 1:1. Images shown much smaller than their raster are area-filtered on the CPU first (an integer box reduction in linear light), leaving the GPU sampler only a sub-2× residual, so fine detail stays clean instead of aliasing into moiré
-- Lottie rendering — RGBA frame fetch via coffer API (`cfr_get_lotties()`, `cfr_get_lottie_placements()`, `cfr_lottie_present()`), foreground/background layer compositing; frames are sampled by presentation time and paced to the display refresh (see [ARCHITECTURE.md](ARCHITECTURE.md#animation-pacing))
+- Lottie rendering — coffer supplies JSON, frame selection and placements (`cfr_get_lotties()`, `cfr_get_image_placements()`, `cfr_lottie_present()`); portty rasterizes with ThorVG's CPU canvas, caches textures by stable handle and raster revision, and composites foreground/background layers. Frames are sampled by presentation time and paced to the display refresh (see [ARCHITECTURE.md](ARCHITECTURE.md#animation-pacing))
 - Procedural box drawing and block element rendering (U+2500–U+257F), with float stroke thickness and proportional margins for seamless diagonal tiling
 - Text selection with clipboard support (Ctrl+C or Ctrl+Shift+C to copy, right-click copy/paste). In the alternate screen buffer, left-click/drag selection is blocked when no mouse tracking protocol is active — the application owns the display and terminal-level selection can clobber the app's own clipboard operations (OSC 52) and paint visual artifacts over its UI. Hold Shift to override and select anyway. Right-click paste still works in altscreen. When a mouse tracking mode is active (e.g. an app sends `?1002h`), mouse events are forwarded to the application; Shift overrides the grab so you can select text even while the app owns the pointer.
 - OSC 52 clipboard write — applications (tmux `set-clipboard`, neovim `clipboard=osc52`, lazygit, helix, etc.) can copy to system clipboard
@@ -616,12 +616,12 @@ When an application explicitly enables the kitty keyboard protocol (Disambiguate
 
 All platforms:
 
-- coffer (VT engine, consumed via `pkg-config coffer >= 0.18.0`; source at https://github.com/chestso/coffer)
+- coffer (VT engine, consumed via `pkg-config coffer >= 0.20.0`; source at https://github.com/chestso/coffer)
 - SDL3
 - freetype2 (>= 2.13 for COLR v1 APIs)
 - harfbuzz (>= 2.0)
 - libpng
-- ThorVG (optional, via coffer — Lottie animations rasterize only when coffer is built with it; without it the APC commands are accepted but frames stay blank)
+- ThorVG 1.0 or newer (optional, direct portty dependency for CPU Lottie rasterization; `--disable-lottie` builds without it)
 
 The SDL3 backend uses SDL's GPU renderer for gamma-correct linear-light blending, so a working GPU backend is required **at runtime**: Vulkan on Linux, Direct3D 12 on Windows, Metal on macOS.
 
