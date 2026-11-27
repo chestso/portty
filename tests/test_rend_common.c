@@ -35,6 +35,20 @@ static void test_plan_glyph_box_math_operator_keeps_width_fit(void);
 static void test_content_scale_changed(void);
 static void test_content_scale_unchanged(void);
 
+/* Image minification: pick integer box-reduction factors, then average the
+ * crop. The GPU sampler's 2x2 tap aliases on a large shrink; the renderer
+ * reduces first and leaves it a sub-2x residual. */
+static void test_shrink_factors_small_box(void);
+static void test_shrink_factors_near_match(void);
+static void test_shrink_factors_independent_axes(void);
+static void test_shrink_factors_degenerate(void);
+static void test_rgba_downscale_box_average(void);
+static void test_rgba_downscale_identity(void);
+static void test_rgba_downscale_stride_region(void);
+static void test_rgba_downscale_drops_partial_block(void);
+static void test_rgba_downscale_premultiplied_alpha(void);
+static void test_rgba_downscale_linear_light(void);
+
 /* Cursor shape geometry inside the cursor's cell box. */
 static void test_cursor_shape_rect(void);
 
@@ -1306,6 +1320,16 @@ int main(int argc, char *argv[])
     RUN_TEST(test_scroll_clamp_after_scrollback_purge);
     RUN_TEST(test_clamp_pixel_to_viewport);
     RUN_TEST(test_downscale_output_fits_cell_box);
+    RUN_TEST(test_shrink_factors_small_box);
+    RUN_TEST(test_shrink_factors_near_match);
+    RUN_TEST(test_shrink_factors_independent_axes);
+    RUN_TEST(test_shrink_factors_degenerate);
+    RUN_TEST(test_rgba_downscale_box_average);
+    RUN_TEST(test_rgba_downscale_identity);
+    RUN_TEST(test_rgba_downscale_stride_region);
+    RUN_TEST(test_rgba_downscale_drops_partial_block);
+    RUN_TEST(test_rgba_downscale_premultiplied_alpha);
+    RUN_TEST(test_rgba_downscale_linear_light);
     RUN_TEST(test_apply_glyph_layout_passthrough);
     RUN_TEST(test_apply_glyph_layout_center_only);
     RUN_TEST(test_apply_glyph_layout_downscale_centered);
@@ -1362,6 +1386,256 @@ int main(int argc, char *argv[])
 // The +0.5 round can push a stray pixel above the box for awkward source
 // ratios; the clamp in rend_common.c keeps it honest so backend placement
 // math doesn't have to defend against overflow.
+/* -------------------------------------------------------------------------
+ * Image minification
+ *
+ * A GPU sampler minifies with a fixed 2x2 tap, so a large shrink aliases
+ * (fine stripes break into moiré). The renderer reduces the crop by integer
+ * box factors first and leaves the sampler a sub-2x residual. These lock
+ * down the factor choice and the box average itself.
+ * ------------------------------------------------------------------------- */
+
+// A 4x shrink from a 800px source leaves the sampler ~1.1x, well inside the
+// range where its 2x2 tap does not alias.
+static void test_shrink_factors_small_box(void)
+{
+    int kx = 0, ky = 0;
+
+    rend_pick_shrink_factors(800, 800, 180, 176, &kx, &ky);
+    ASSERT_EQ(kx, 4);
+    ASSERT_EQ(ky, 5); // 800/176 = 4.5 -> rounds up
+
+    rend_pick_shrink_factors(1000, 1000, 250, 250, &kx, &ky);
+    ASSERT_EQ(kx, 4);
+    ASSERT_EQ(ky, 4);
+
+    rend_pick_shrink_factors(800, 800, 400, 400, &kx, &ky);
+    ASSERT_EQ(kx, 2);
+    ASSERT_EQ(ky, 2);
+}
+
+// Anything under 2x stays with the sampler — a CPU pass there would only
+// soften the image.
+static void test_shrink_factors_near_match(void)
+{
+    int kx = 0, ky = 0;
+
+    rend_pick_shrink_factors(800, 800, 800, 800, &kx, &ky);
+    ASSERT_EQ(kx, 1);
+    ASSERT_EQ(ky, 1);
+
+    rend_pick_shrink_factors(800, 800, 500, 500, &kx, &ky);
+    ASSERT_EQ(kx, 1);
+    ASSERT_EQ(ky, 1);
+
+    rend_pick_shrink_factors(800, 800, 401, 401, &kx, &ky);
+    ASSERT_EQ(kx, 1);
+    ASSERT_EQ(ky, 1);
+
+    rend_pick_shrink_factors(800, 800, 399, 399, &kx, &ky);
+    ASSERT_EQ(kx, 2);
+    ASSERT_EQ(ky, 2);
+}
+
+// A kitty box may be wide and short; each axis gets its own factor.
+static void test_shrink_factors_independent_axes(void)
+{
+    int kx = 0, ky = 0;
+
+    rend_pick_shrink_factors(800, 100, 700, 40, &kx, &ky);
+    ASSERT_EQ(kx, 1);
+    ASSERT_EQ(ky, 3);
+
+    rend_pick_shrink_factors(100, 800, 40, 700, &kx, &ky);
+    ASSERT_EQ(kx, 3);
+    ASSERT_EQ(ky, 1);
+}
+
+static void test_shrink_factors_degenerate(void)
+{
+    int kx = 0, ky = 0;
+
+    rend_pick_shrink_factors(100, 100, 0, 0, &kx, &ky);
+    ASSERT_EQ(kx, 1);
+    ASSERT_EQ(ky, 1);
+
+    rend_pick_shrink_factors(1, 1, 1, 1, &kx, &ky);
+    ASSERT_EQ(kx, 1);
+    ASSERT_EQ(ky, 1);
+
+    // Missing pointers are allowed.
+    rend_pick_shrink_factors(800, 800, 100, 100, NULL, NULL);
+}
+
+static void test_rgba_downscale_box_average(void)
+{
+    // 4x2: a 2x1 horizontal box average per output pixel.
+    uint8_t src[4 * 2 * 4];
+    static const uint8_t r[8] = { 0, 10, 100, 200, 20, 30, 220, 240 };
+    for (int i = 0; i < 8; i++) {
+        uint8_t *p = src + i * 4;
+        p[0] = r[i];
+        p[1] = 100;
+        p[2] = 200;
+        p[3] = 255;
+    }
+
+    int w = 0, h = 0;
+    uint8_t *out = rend_downscale_rgba(src, 4, 4, 2, 2, 1, false, &w, &h);
+    ASSERT_NOT_NULL(out);
+    ASSERT_EQ(w, 2);
+    ASSERT_EQ(h, 2);
+
+    int i = 0;
+    for (int y = 0; y < 2; y++) {
+        for (int x = 0; x < 2; x++, i++) {
+            ASSERT_EQ(out[i * 4 + 0], (uint8_t)((r[y * 4 + x * 2] +
+                                                 r[y * 4 + x * 2 + 1] + 1) /
+                                                2));
+            ASSERT_EQ(out[i * 4 + 1], 100);
+            ASSERT_EQ(out[i * 4 + 2], 200);
+            ASSERT_EQ(out[i * 4 + 3], 255);
+        }
+    }
+    free(out);
+}
+
+static void test_rgba_downscale_identity(void)
+{
+    uint8_t src[2 * 2 * 4] = { 0 };
+    int w = 123, h = 456;
+
+    ASSERT_NULL(rend_downscale_rgba(src, 2, 2, 2, 1, 1, false, &w, &h));
+    ASSERT_EQ(w, 0); // nothing produced
+    ASSERT_EQ(h, 0);
+}
+
+// The crop need not start at the buffer origin: stride and pointer offset
+// select it, so a kitty sub-rectangle reduces without a copy.
+static void test_rgba_downscale_stride_region(void)
+{
+    // 4x2 buffer; the right-hand 2x2 region is what gets reduced.
+    uint8_t src[4 * 2 * 4];
+    for (int y = 0; y < 2; y++) {
+        for (int x = 0; x < 4; x++) {
+            uint8_t *p = src + (y * 4 + x) * 4;
+            p[0] = (uint8_t)(x < 2 ? 1 : 100 + x * 10 + y);
+            p[1] = p[0];
+            p[2] = p[0];
+            p[3] = 255;
+        }
+    }
+
+    int w = 0, h = 0;
+    uint8_t *out = rend_downscale_rgba(src + 2 * 4, 4, 2, 2, 2, 1, false, &w, &h);
+    ASSERT_NOT_NULL(out);
+    ASSERT_EQ(w, 1);
+    ASSERT_EQ(h, 2);
+    ASSERT_EQ(out[0], (uint8_t)((120 + 130 + 1) / 2)); // x=2,3 of row 0
+    ASSERT_EQ(out[4], (uint8_t)((121 + 131 + 1) / 2)); // x=2,3 of row 1
+    free(out);
+}
+
+// A source that does not divide evenly drops its trailing partial block.
+static void test_rgba_downscale_drops_partial_block(void)
+{
+    uint8_t src[5 * 4];
+    static const uint8_t r[5] = { 10, 20, 30, 40, 250 };
+    for (int i = 0; i < 5; i++) {
+        src[i * 4 + 0] = r[i];
+        src[i * 4 + 1] = 0;
+        src[i * 4 + 2] = 0;
+        src[i * 4 + 3] = 255;
+    }
+
+    int w = 0, h = 0;
+    uint8_t *out = rend_downscale_rgba(src, 5, 5, 1, 2, 1, false, &w, &h);
+    ASSERT_NOT_NULL(out);
+    ASSERT_EQ(w, 2);
+    ASSERT_EQ(h, 1);
+    ASSERT_EQ(out[0], 15);
+    ASSERT_EQ(out[4], 35); // 250 in the dropped fifth column plays no part
+    free(out);
+
+    // A factor wider than the image still yields one pixel.
+    out = rend_downscale_rgba(src, 5, 2, 1, 10, 1, false, &w, &h);
+    ASSERT_NOT_NULL(out);
+    ASSERT_EQ(w, 1);
+    ASSERT_EQ(out[0], 15);
+    free(out);
+}
+
+// A transparent neighbour must not drag the colour toward its own RGB (or
+// toward black): the average is premultiplied and divided by the alpha sum.
+static void test_rgba_downscale_premultiplied_alpha(void)
+{
+    uint8_t src[2 * 2 * 4] = {
+        0,
+        255,
+        0,
+        0, // fully transparent — its green is irrelevant
+        200,
+        100,
+        50,
+        255,
+        200,
+        100,
+        50,
+        255,
+        200,
+        100,
+        50,
+        255,
+    };
+
+    int w = 0, h = 0;
+    uint8_t *out = rend_downscale_rgba(src, 2, 2, 2, 2, 2, false, &w, &h);
+    ASSERT_NOT_NULL(out);
+    ASSERT_EQ(w, 1);
+    ASSERT_EQ(h, 1);
+    ASSERT_EQ(out[0], 200);
+    ASSERT_EQ(out[1], 100);
+    ASSERT_EQ(out[2], 50);
+    ASSERT_EQ(out[3], 191); // (255*3 + 2) / 4
+    free(out);
+
+    // Fully transparent block: no colour can be recovered.
+    uint8_t two[2 * 4] = { 90, 80, 70, 0, 90, 80, 70, 0 };
+    out = rend_downscale_rgba(two, 2, 2, 1, 2, 1, false, &w, &h);
+    ASSERT_NOT_NULL(out);
+    ASSERT_EQ(out[0], 0);
+    ASSERT_EQ(out[1], 0);
+    ASSERT_EQ(out[2], 0);
+    ASSERT_EQ(out[3], 0);
+    free(out);
+}
+
+// On the linear-light path the average is taken after the sRGB decode, then
+// uploaded as linear values (the scene blit re-encodes). Averaging the sRGB
+// bytes instead would darken a downscaled image relative to the GPU path.
+static void test_rgba_downscale_linear_light(void)
+{
+    uint8_t src[2 * 2 * 4];
+    for (int i = 0; i < 4; i++) {
+        src[i * 4 + 0] = 128;
+        src[i * 4 + 1] = 128;
+        src[i * 4 + 2] = 128;
+        src[i * 4 + 3] = 255;
+    }
+
+    int w = 0, h = 0;
+    uint8_t *lin = rend_downscale_rgba(src, 2, 2, 2, 2, 2, true, &w, &h);
+    ASSERT_NOT_NULL(lin);
+    ASSERT_EQ(lin[0], (uint8_t)(rend_srgb_to_linear(128) * 255.0f + 0.5f));
+
+    uint8_t *srgb = rend_downscale_rgba(src, 2, 2, 2, 2, 2, false, &w, &h);
+    ASSERT_NOT_NULL(srgb);
+    ASSERT_EQ(srgb[0], 128);
+
+    free(lin);
+    free(srgb);
+}
+
 static void test_downscale_output_fits_cell_box(void)
 {
     int targets[][2] = {

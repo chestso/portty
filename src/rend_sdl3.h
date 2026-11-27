@@ -23,8 +23,29 @@
 #include <stdint.h>
 #include "term_colors.h"
 
-#define IMAGE_CACHE_MAX  256
-#define LOTTIE_CACHE_MAX 64
+#define IMAGE_CACHE_MAX 256
+// Upper bound on cached minification variants per image (a kitty image may be
+// placed in several cell boxes at once; a resize can change the box of an
+// existing placement). Beyond this the oldest variant of that image is
+// recycled, so repeated resizes cannot grow the cache without bound.
+#define IMAGE_VARIANTS_MAX 4
+#define LOTTIE_CACHE_MAX   64
+
+// One cached image texture. kx == ky == 1 is the native upload of the whole
+// pixel buffer; otherwise the entry is a CPU box-reduced crop of
+// src_w x src_h at src_x/src_y, shrunk by kx/ky — see image_get_texture.
+typedef struct ImageCacheEntry
+{
+    SDL_Texture *texture;
+    uint64_t id;
+    uint64_t handle; /* the engine's image identity (see
+                      * image_identity) — the id alone is not unique
+                      * across the protocols */
+    uint32_t version;
+    int w, h; /* texture size in pixels */
+    int kx, ky;
+    int src_x, src_y, src_w, src_h;
+} ImageCacheEntry;
 
 // Per-slot render state for an active notification panel: the embedded
 // terminal holding its content plus the linear float texture the content
@@ -99,16 +120,7 @@ typedef struct RendererSdl3Data
     PanelManager panels;
     PanelRender panel_renders[PORTTY_PANEL_MAX];
 
-    struct
-    {
-        SDL_Texture *texture;
-        uint64_t id;
-        uint64_t handle; /* the engine's image identity (see
-                          * image_identity) — the id alone is not unique
-                          * across the protocols */
-        uint32_t version;
-        int w, h;
-    } image_cache[IMAGE_CACHE_MAX];
+    ImageCacheEntry image_cache[IMAGE_CACHE_MAX];
     int image_cache_count;
 
     struct

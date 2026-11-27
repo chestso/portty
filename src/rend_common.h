@@ -183,6 +183,38 @@ static inline float mouse_logical_to_px(float logical, float window_scale)
 // needed or on allocation failure.
 GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h);
 
+// Downscale an RGBA8 image region by integer factors (kx, ky) with an exact
+// box (area) average in premultiplied alpha, so transparent edges do not
+// bleed and the result matches what an ideal low-pass would produce.
+//
+// This is the image analogue of rend_downscale_bitmap, and it exists for the
+// same reason: a GPU sampler takes a 2x2 tap, so minifying a detailed image
+// by more than ~2x through the sampler alone aliases badly (fine stripes
+// break into moiré, thin strokes and small text drop out). The renderers
+// reduce the crop by a rounded integer factor first, leaving the GPU a <2x
+// residual, where a 2x2 tap is an acceptable filter.
+//
+// `src` points at the region's first pixel, which need not be the buffer
+// origin: `stride_px` is the row stride in pixels (the source buffer width).
+// With `linear`, RGB is decoded through the sRGB->linear LUT while averaging
+// (alpha is always linear), matching the linear-light compositing path: an
+// image averaged in sRGB space would come out too dark.
+//
+// Returns a malloc'd (sw/kx) x (sh/ky) RGBA8 buffer, or NULL when kx == ky
+// == 1 (nothing to do) or on allocation failure. `*out_w`/`*out_h` receive
+// the reduced size.
+uint8_t *rend_downscale_rgba(const uint8_t *src, int stride_px,
+                             int sw, int sh, int kx, int ky, bool linear,
+                             int *out_w, int *out_h);
+
+// Pick the integer shrink factors for drawing a sw x sh crop into a
+// dst_w x dst_h box. k == 1 means "let the GPU sampler do it" (a shrink
+// below 2x, where its 2x2 tap is an acceptable filter); otherwise the factor
+// takes the bulk of the shrink and leaves the sampler a residual inside
+// [0.8, 1.25], too small to alias visibly.
+void rend_pick_shrink_factors(int sw, int sh, int dst_w, int dst_h,
+                              int *kx, int *ky);
+
 // Check if a codepoint is a symbol/dingbat that may overflow the text cell
 // and needs centered placement (no downscale — symbol glyphs are rasterized
 // at the text font's native metrics, like ASCII, so they stay crisp).

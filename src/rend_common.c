@@ -80,6 +80,21 @@ uint8_t rend_linear_to_srgb(float lin)
     return (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
 }
 
+// 8-bit sRGB -> linear decode table, shared by the glyph atlas (colour
+// glyph upload) and the image resampler. Both average in linear light and
+// need the decode to be cheap: a per-pixel pow() would dominate.
+static uint8_t s_atlas_srgb_to_linear_u8[256];
+static bool s_atlas_srgb_lut_ready = false;
+
+static void build_srgb_lut(void)
+{
+    for (int i = 0; i < 256; i++) {
+        int v = (int)(rend_srgb_to_linear((uint8_t)i) * 255.0f + 0.5f);
+        s_atlas_srgb_to_linear_u8[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
+    }
+    s_atlas_srgb_lut_ready = true;
+}
+
 // =============================================================================
 // Glyph downscaling — GPU-agnostic
 // =============================================================================
@@ -181,6 +196,107 @@ GlyphBitmap *rend_downscale_bitmap(GlyphBitmap *src, int max_w, int max_h)
     result->glyph_id = src->glyph_id;
 
     return result;
+}
+
+// =============================================================================
+// Image downscaling — GPU-agnostic
+// =============================================================================
+//
+// Exact box (area) average for integer shrink factors, in premultiplied
+// alpha. The GPU's sampler minifies with a 2x2 tap whatever the ratio, so
+// the renderers use this to take the bulk of a large shrink on the CPU and
+// leave the sampler a residual below 2x. See the header for the contract.
+uint8_t *rend_downscale_rgba(const uint8_t *src, int stride_px,
+                             int sw, int sh, int kx, int ky, bool linear,
+                             int *out_w, int *out_h)
+{
+    if (out_w)
+        *out_w = 0;
+    if (out_h)
+        *out_h = 0;
+    if (!src || sw <= 0 || sh <= 0 || stride_px < sw || kx < 1 || ky < 1)
+        return NULL;
+    if (kx == 1 && ky == 1)
+        return NULL;
+
+    // Never shrink past a single pixel.
+    if (kx > sw)
+        kx = sw;
+    if (ky > sh)
+        ky = sh;
+
+    int dw = sw / kx;
+    int dh = sh / ky;
+    if (dw < 1 || dh < 1)
+        return NULL;
+
+    if (linear && !s_atlas_srgb_lut_ready)
+        build_srgb_lut();
+
+    uint8_t *dst = malloc((size_t)dw * (size_t)dh * 4u);
+    if (!dst)
+        return NULL;
+
+    // Each destination pixel is the exact average of its kx*ky block. Colour
+    // is accumulated premultiplied (c*a) and divided by the summed alpha, so
+    // a fully transparent neighbour contributes no colour — averaging straight
+    // alpha would drag edges toward black.
+    const size_t stride = (size_t)stride_px * 4u;
+    const unsigned n = (unsigned)kx * (unsigned)ky;
+
+    for (int dy = 0; dy < dh; dy++) {
+        for (int dx = 0; dx < dw; dx++) {
+            uint64_t r = 0, g = 0, b = 0, a = 0;
+            for (int y = 0; y < ky; y++) {
+                const uint8_t *row = src + (size_t)(dy * ky + y) * stride +
+                                     (size_t)(dx * kx) * 4u;
+                for (int x = 0; x < kx; x++) {
+                    const uint8_t *p = row + (size_t)x * 4u;
+                    unsigned av = p[3];
+                    unsigned pr = linear ? s_atlas_srgb_to_linear_u8[p[0]] : p[0];
+                    unsigned pg = linear ? s_atlas_srgb_to_linear_u8[p[1]] : p[1];
+                    unsigned pb = linear ? s_atlas_srgb_to_linear_u8[p[2]] : p[2];
+                    r += (uint64_t)pr * av;
+                    g += (uint64_t)pg * av;
+                    b += (uint64_t)pb * av;
+                    a += av;
+                }
+            }
+
+            uint8_t *q = dst + ((size_t)dy * (size_t)dw + (size_t)dx) * 4u;
+            if (a > 0) {
+                q[0] = (uint8_t)((r + a / 2) / a);
+                q[1] = (uint8_t)((g + a / 2) / a);
+                q[2] = (uint8_t)((b + a / 2) / a);
+            } else {
+                q[0] = q[1] = q[2] = 0;
+            }
+            q[3] = (uint8_t)((a + n / 2) / n);
+        }
+    }
+
+    if (out_w)
+        *out_w = dw;
+    if (out_h)
+        *out_h = dh;
+    return dst;
+}
+
+void rend_pick_shrink_factors(int sw, int sh, int dst_w, int dst_h,
+                              int *kx, int *ky)
+{
+    int x = 1, y = 1;
+    // Only when the box is at least half the crop: below that the sampler's
+    // 2x2 tap is a reasonable filter on its own, and a pointless CPU pass
+    // would only soften the image.
+    if (dst_w > 0 && dst_w <= sw / 2)
+        x = (sw + dst_w / 2) / dst_w;
+    if (dst_h > 0 && dst_h <= sh / 2)
+        y = (sh + dst_h / 2) / dst_h;
+    if (kx)
+        *kx = x < 1 ? 1 : x;
+    if (ky)
+        *ky = y < 1 ? 1 : y;
 }
 
 // Symbol/dingbat codepoints whose horizontal metrics differ from the text-
@@ -987,18 +1103,6 @@ void rend_clamp_pixel_to_viewport(int *px, int *py, int viewport_w, int viewport
 // =============================================================================
 // Glyph atlas packing — GPU-agnostic
 // =============================================================================
-
-static uint8_t s_atlas_srgb_to_linear_u8[256];
-static bool s_atlas_srgb_lut_ready = false;
-
-static void build_srgb_lut(void)
-{
-    for (int i = 0; i < 256; i++) {
-        int v = (int)(rend_srgb_to_linear((uint8_t)i) * 255.0f + 0.5f);
-        s_atlas_srgb_to_linear_u8[i] = (uint8_t)(v < 0 ? 0 : (v > 255 ? 255 : v));
-    }
-    s_atlas_srgb_lut_ready = true;
-}
 
 void rend_linearize_rgba_in_place(uint8_t *pixels, int w, int h)
 {

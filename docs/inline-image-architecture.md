@@ -99,6 +99,33 @@ offsets). Responses leave via OSC 5556 on Windows (the system conhost strips APC
 - Lottie still uses its own texture cache + animation tick
   (`render_lottie_layer`).
 
+#### Minification filtering
+
+The SDL 2D renderer samples with one fixed 2x2 tap, whatever the scale
+ratio, and its texture API exposes no mip levels. Left to the sampler, any
+image shown much smaller than its raster aliases: fine stripes break into
+moiré, thin strokes and small text drop out. That hits every path
+that shrinks an image — a kitty placement (`c=`/`r=`), an iTerm2
+`width=`/`height=` hint, or an image whose box got smaller with the window.
+
+`image_get_texture` therefore takes the bulk of the shrink on the CPU first.
+`rend_pick_shrink_factors` chooses integer factors `kx`/`ky` (rounded
+`source / destination`, and only when the box is at most half the crop);
+`rend_downscale_rgba` does an exact box average in premultiplied,
+linear-light space (transparent pixels contribute no colour; averaging sRGB
+bytes instead would darken the result relative to the GPU's linear
+sampling). The residual the sampler sees is inside [0.8, 1.25], where its
+2x2 tap is an adequate filter. Shrinks below 2x and all magnifications stay
+with the sampler.
+
+A reduced texture holds only its crop, so the draw uses the whole texture
+and ignores the requested source rect; a native texture holds the whole
+buffer, so the draw keeps the crop. Variants are cached per image, keyed on
+the crop and factors (`ImageCacheEntry`), version-refreshed in place for
+animations, and capped per image (`IMAGE_VARIANTS_MAX`) so resizes cannot
+grow the cache without bound. `tests/test-image-downscale.sh` guards the
+behaviour end to end through an iTerm2 pixel-sized placement.
+
 ### Tests
 
 Headless TDD throughout:

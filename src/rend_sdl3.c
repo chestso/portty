@@ -1340,81 +1340,238 @@ static void image_cache_reconcile(RendererSdl3Data *data, const CfrImage *imgs, 
     }
 }
 
-// Find or create an SDL_Texture for a sixel image, keyed by its stable id.
-// On a version change (animation) the texture is re-uploaded in place; a
-// dimension change forces a recreate.
-static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *img)
+// Image texture cache.
+//
+// An entry is either the native upload of an image's whole pixel buffer or a
+// CPU box-reduced crop of it (see rend_downscale_rgba and
+// rend_pick_shrink_factors). Every draw names a crop and a destination box;
+// a version change (animation) re-uploads in place, a size change recreates
+// the texture, and a variant is keyed on its crop and shrink factors.
+static bool image_entry_matches(const ImageCacheEntry *e, uint64_t handle,
+                                int kx, int ky,
+                                int sx, int sy, int sw, int sh)
+{
+    if (e->handle != handle)
+        return false;
+    bool entry_variant = e->kx > 1 || e->ky > 1;
+    bool want_variant = kx > 1 || ky > 1;
+    if (entry_variant != want_variant)
+        return false;
+    if (!want_variant)
+        return true; // one native texture per image, whole buffer
+    return e->kx == kx && e->ky == ky &&
+           e->src_x == sx && e->src_y == sy &&
+           e->src_w == sw && e->src_h == sh;
+}
+
+static void image_cache_remove(RendererSdl3Data *data, int i)
+{
+    if (data->image_cache[i].texture)
+        SDL_DestroyTexture(data->image_cache[i].texture);
+    data->image_cache[i] = data->image_cache[--data->image_cache_count];
+}
+
+// The cached texture for this image and geometry, or NULL when it must be
+// (re)built. A stale version or a changed size is a miss; image_cache_store
+// then refreshes the same entry in place.
+static SDL_Texture *image_cache_lookup(RendererSdl3Data *data, const CfrImage *img,
+                                       int kx, int ky,
+                                       int sx, int sy, int sw, int sh,
+                                       int tw, int th)
+{
+    uint64_t handle = image_identity(img);
+    for (int i = 0; i < data->image_cache_count; i++) {
+        ImageCacheEntry *e = &data->image_cache[i];
+        if (!image_entry_matches(e, handle, kx, ky, sx, sy, sw, sh))
+            continue;
+        if (!e->texture || e->w != tw || e->h != th ||
+            e->version != img->version)
+            return NULL;
+        return e->texture;
+    }
+    return NULL;
+}
+
+// Upload `pixels` (tw x th, `pitch` bytes per row) into the cache entry for
+// this image and geometry, creating or resizing it as needed.
+static SDL_Texture *image_cache_store(RendererSdl3Data *data, const CfrImage *img,
+                                      int kx, int ky,
+                                      int sx, int sy, int sw, int sh,
+                                      int tw, int th,
+                                      const uint8_t *pixels, int pitch)
+{
+    uint64_t handle = image_identity(img);
+    int slot = -1;
+    for (int i = 0; i < data->image_cache_count; i++) {
+        if (image_entry_matches(&data->image_cache[i], handle, kx, ky,
+                                sx, sy, sw, sh)) {
+            slot = i;
+            break;
+        }
+    }
+
+    if (slot < 0) {
+        // Bound the number of variants one image may keep (a resize changes
+        // the box of a live placement, which would otherwise accumulate).
+        int variants = 0, oldest = -1;
+        for (int i = 0; i < data->image_cache_count; i++) {
+            if (data->image_cache[i].handle != handle)
+                continue;
+            if (oldest < 0)
+                oldest = i;
+            variants++;
+        }
+        if (variants >= IMAGE_VARIANTS_MAX && oldest >= 0)
+            image_cache_remove(data, oldest);
+
+        if (data->image_cache_count >= IMAGE_CACHE_MAX) {
+            // Cache full (>256 simultaneous images — effectively never).
+            // Recycle this image's oldest entry, else skip rather than leak
+            // an uncached texture.
+            int victim = -1;
+            for (int i = 0; i < data->image_cache_count; i++) {
+                if (data->image_cache[i].handle == handle) {
+                    victim = i;
+                    break;
+                }
+            }
+            if (victim < 0)
+                return NULL;
+            image_cache_remove(data, victim);
+        }
+        slot = data->image_cache_count++;
+        memset(&data->image_cache[slot], 0, sizeof(data->image_cache[slot]));
+    }
+
+    ImageCacheEntry *e = &data->image_cache[slot];
+    if (e->texture && (e->w != tw || e->h != th)) {
+        SDL_DestroyTexture(e->texture);
+        e->texture = NULL;
+    }
+    if (!e->texture) {
+        e->texture = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
+                                       SDL_TEXTUREACCESS_STATIC, tw, th);
+        if (!e->texture)
+            return NULL;
+        SDL_SetTextureBlendMode(e->texture, SDL_BLENDMODE_BLEND);
+    }
+    if (!SDL_UpdateTexture(e->texture, NULL, pixels, pitch)) {
+        SDL_DestroyTexture(e->texture);
+        e->texture = NULL;
+        return NULL;
+    }
+
+    e->id = img->id;
+    e->handle = handle;
+    e->version = img->version;
+    e->w = tw;
+    e->h = th;
+    e->kx = kx;
+    e->ky = ky;
+    e->src_x = sx;
+    e->src_y = sy;
+    e->src_w = sw;
+    e->src_h = sh;
+    return e->texture;
+}
+
+static SDL_Texture *image_get_texture(RendererSdl3Data *data, const CfrImage *img,
+                                      int sx, int sy, int sw, int sh,
+                                      int dst_w, int dst_h, SDL_FRect *out_src)
 {
     // CfrImage dimensions are physical (coffer pre-converts). Use buf_w/buf_h
     // for the texture (native pixel buffer size) and width_px/height_px for
     // the display (destination rect, handled by the caller).
     int bw = img->buf_w > 0 ? img->buf_w : img->width_px;
     int bh = img->buf_h > 0 ? img->buf_h : img->height_px;
-    uint8_t *linear = linearize_for_upload(data, img->rgba, bw, bh);
-    const uint8_t *pixels = linear ? linear : img->rgba;
+    if (bw < 1)
+        bw = 1;
+    if (bh < 1)
+        bh = 1;
 
-    for (int i = 0; i < data->image_cache_count; i++) {
-        if (image_identity(img) != data->image_cache[i].handle)
-            continue;
-        if (data->image_cache[i].w != bw ||
-            data->image_cache[i].h != bh) {
-            // Dimensions changed — recreate the texture object.
-            if (data->image_cache[i].texture)
-                SDL_DestroyTexture(data->image_cache[i].texture);
-            data->image_cache[i].texture = NULL;
-        } else if (data->image_cache[i].version != img->version) {
-            // Same size, new pixels — re-upload in place (no churn).
-            SDL_UpdateTexture(data->image_cache[i].texture, NULL, pixels,
-                              bw * 4);
-            data->image_cache[i].version = img->version;
-            free(linear);
-            return data->image_cache[i].texture;
-        } else {
-            free(linear);
-            return data->image_cache[i].texture;
-        }
-        // Fall through to recreate into this slot.
-        SDL_Texture *t = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                           SDL_TEXTUREACCESS_STATIC, bw, bh);
-        if (!t) {
-            free(linear);
-            return NULL;
-        }
-        SDL_UpdateTexture(t, NULL, pixels, bw * 4);
-        SDL_SetTextureBlendMode(t, SDL_BLENDMODE_BLEND);
-        data->image_cache[i].texture = t;
-        data->image_cache[i].version = img->version;
-        data->image_cache[i].w = bw;
-        data->image_cache[i].h = bh;
-        data->image_cache[i].handle = image_identity(img);
-        free(linear);
-        return t;
+    // Clients may name a sub-rect that runs past the image; the CPU path
+    // below must not read out of bounds, and a source rect wider than the
+    // texture would be clamped by SDL anyway.
+    if (sx < 0) {
+        sw += sx;
+        sx = 0;
+    }
+    if (sy < 0) {
+        sh += sy;
+        sy = 0;
+    }
+    if (sx >= bw)
+        sx = bw - 1;
+    if (sy >= bh)
+        sy = bh - 1;
+    if (sw > bw - sx)
+        sw = bw - sx;
+    if (sh > bh - sy)
+        sh = bh - sy;
+    if (sw < 1)
+        sw = 1;
+    if (sh < 1)
+        sh = 1;
+
+    int kx, ky;
+    rend_pick_shrink_factors(sw, sh, dst_w, dst_h, &kx, &ky);
+
+    int tw = (kx > 1) ? sw / kx : bw;
+    int th = (ky > 1) ? sh / ky : bh;
+    if (tw < 1)
+        tw = 1;
+    if (th < 1)
+        th = 1;
+
+    SDL_Texture *tex = image_cache_lookup(data, img, kx, ky, sx, sy, sw, sh,
+                                          tw, th);
+    if (tex) {
+        // A reduced texture holds only the crop, so it is drawn whole; a
+        // native one holds the buffer, so the draw keeps the crop.
+        if (out_src)
+            *out_src = (kx > 1 || ky > 1)
+                           ? (SDL_FRect){ 0.0f, 0.0f, (float)tw, (float)th }
+                           : (SDL_FRect){ (float)sx, (float)sy,
+                                          (float)sw, (float)sh };
+        return tex;
     }
 
-    // Not cached — create and insert.
-    SDL_Texture *tex = SDL_CreateTexture(data->renderer, SDL_PIXELFORMAT_RGBA32,
-                                         SDL_TEXTUREACCESS_STATIC, bw, bh);
+    if (kx > 1 || ky > 1) {
+        // Take the bulk of the shrink on the CPU: an exact box average in
+        // premultiplied, linear-light space (the upload path's texture is
+        // linearized, so the average must be too).
+        int rw = 0, rh = 0;
+        uint8_t *reduced = rend_downscale_rgba(
+            img->rgba + ((size_t)sy * (size_t)bw + (size_t)sx) * 4, bw,
+            sw, sh, kx, ky, data->linear_ok, &rw, &rh);
+        if (reduced) {
+            tex = image_cache_store(data, img, kx, ky, sx, sy, sw, sh,
+                                    rw, rh, reduced, rw * 4);
+            free(reduced);
+            if (tex) {
+                if (out_src)
+                    *out_src = (SDL_FRect){ 0.0f, 0.0f, (float)rw, (float)rh };
+                return tex;
+            }
+        }
+        // Reduction unavailable (out of memory) — fall back to the sampler.
+        kx = ky = 1;
+        tw = bw;
+        th = bh;
+        tex = image_cache_lookup(data, img, kx, ky, sx, sy, sw, sh, tw, th);
+    }
     if (!tex) {
+        uint8_t *linear = linearize_for_upload(data, img->rgba, bw, bh);
+        const uint8_t *pixels = linear ? linear : img->rgba;
+        tex = image_cache_store(data, img, kx, ky, sx, sy, sw, sh, tw, th,
+                                pixels, bw * 4);
         free(linear);
-        return NULL;
+        if (!tex)
+            return NULL;
     }
-    SDL_UpdateTexture(tex, NULL, pixels, bw * 4);
-    SDL_SetTextureBlendMode(tex, SDL_BLENDMODE_BLEND);
-    free(linear);
 
-    if (data->image_cache_count >= IMAGE_CACHE_MAX) {
-        // Cache full (>256 simultaneous images — effectively never). Skip
-        // rather than leak an uncached texture.
-        SDL_DestroyTexture(tex);
-        return NULL;
-    }
-    int n = data->image_cache_count++;
-    data->image_cache[n].texture = tex;
-    data->image_cache[n].id = img->id;
-    data->image_cache[n].handle = image_identity(img);
-    data->image_cache[n].version = img->version;
-    data->image_cache[n].w = bw;
-    data->image_cache[n].h = bh;
+    if (out_src)
+        *out_src = (SDL_FRect){ (float)sx, (float)sy, (float)sw, (float)sh };
     return tex;
 }
 
@@ -1470,18 +1627,19 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
                 if (px + box_w <= 0 || px >= data->width)
                     continue;
 
-                SDL_Texture *tex = image_get_texture(data, img);
-                if (!tex)
-                    continue;
-
                 // Source rectangle (kitty crops/sub-rects); default whole.
                 int src_x = pl->src_x;
                 int src_y = pl->src_y;
                 int src_w = pl->src_w > 0 ? pl->src_w : img->width_px;
                 int src_h = pl->src_h > 0 ? pl->src_h : img->height_px;
 
-                SDL_FRect src = { (float)src_x, (float)src_y,
-                                  (float)src_w, (float)src_h };
+                SDL_FRect src;
+                SDL_Texture *tex = image_get_texture(data, img, src_x, src_y,
+                                                     src_w, src_h, box_w, box_h,
+                                                     &src);
+                if (!tex)
+                    continue;
+
                 SDL_FRect dst = {
                     (float)px, (float)py, (float)box_w, (float)box_h
                 };
@@ -1507,13 +1665,19 @@ static void render_images(RendererSdl3Data *data, TerminalBackend *term,
         if (px + scaled_w <= 0 || px >= data->width)
             continue;
 
-        SDL_Texture *tex = image_get_texture(data, img);
+        // Whole image (sixel is 1:1; iTerm2's width/height hints may ask
+        // for a smaller display, which takes the reduced path).
+        int buf_w = img->buf_w > 0 ? img->buf_w : img->width_px;
+        int buf_h = img->buf_h > 0 ? img->buf_h : img->height_px;
+        SDL_FRect src;
+        SDL_Texture *tex = image_get_texture(data, img, 0, 0, buf_w, buf_h,
+                                             scaled_w, scaled_h, &src);
         if (!tex)
             continue;
 
         SDL_FRect dst = { (float)px, (float)py, (float)scaled_w,
                           (float)scaled_h };
-        SDL_RenderTexture(data->renderer, tex, NULL, &dst);
+        SDL_RenderTexture(data->renderer, tex, &src, &dst);
     }
 }
 

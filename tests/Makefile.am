@@ -11,7 +11,7 @@ TEST_CFLAGS = -I$(top_srcdir)/src $(COFFER_CFLAGS) -Wall -Wextra
 TERM_SOURCES = ../src/term.c ../src/term_cfr.c ../src/base64.c \
     ../src/path_compat.c ../src/heap_harden.c ../src/portty_bug.c
 
-EXTRA_DIST = test_helpers.h font_stubs.c test-pace-report.sh test-thai-clusters.sh test-drop.sh
+EXTRA_DIST = test_helpers.h font_stubs.c test-pace-report.sh test-thai-clusters.sh test-drop.sh test-image-downscale.sh
 
 # The Thai-cluster regression test drives the built portty binary.
 AM_TESTS_ENVIRONMENT = PORTTY_BIN='$(abs_top_builddir)/src/portty'
@@ -249,6 +249,7 @@ TESTS = $(check_PROGRAMS)
 if !HOST_WINDOWS
 TESTS += test-pace-report.sh
 TESTS += test-thai-clusters.sh
+TESTS += test-image-downscale.sh
 TESTS += test-drop.sh
 endif
 
