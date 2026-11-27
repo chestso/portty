@@ -67,6 +67,29 @@ jobs:
       - name: Run tests
         run: make -C build check
 
+      # The automake harness keeps the failing test's output in its own log
+      # file, so a red "make check" says nothing about what went wrong — a
+      # shell test that timed out reads as a bare "FAIL: test-drop.sh" with
+      # no clue which wait-for the run died on.
+      - name: Show test logs
+        if: failure()
+        run: |
+          cat build/tests/test-suite.log || true
+          for f in build/tests/test_*.log; do
+            echo "=== $f"
+            cat "$f"
+          done
+
+      # Keep the same logs as an artifact too: a long test log can push the
+      # step output past what the live log view retains.
+      - name: Upload test logs
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: portty-test-logs-linux
+          path: build/tests/*.log
+          if-no-files-found: ignore
+
       - name: Create distribution tarball
         run: make -C build dist
 
